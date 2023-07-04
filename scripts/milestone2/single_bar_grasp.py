@@ -121,14 +121,17 @@ def main():
     streaming_client.rigid_body_listener = receive_rigid_body_frame
 
     pp.connect(use_gui=True, shadows=True, color=[0.9, 0.9, 1.0])
-    # pp.create_plane(color=[0.9, 0.9, 1.0])
-    pp.draw_pose(pp.unit_pose(), 1.0)
+    p.configureDebugVisualizer(p.COV_ENABLE_GUI, 1, physicsClientId=pp.CLIENT)
+    # p.configureDebugVisualizer(p.COV_ENABLE_SEGMENTATION_MARK_PREVIEW, False, physicsClientId=pp.CLIENT)
+    # p.configureDebugVisualizer(p.COV_ENABLE_DEPTH_BUFFER_PREVIEW, False, physicsClientId=pp.CLIENT)
+    # p.configureDebugVisualizer(p.COV_ENABLE_RGB_BUFFER_PREVIEW, False, physicsClientId=pp.CLIENT)
 
-    # * create a box for the rigid body
-    # mocap_id = 1003
-    # rb = pp.create_box(0.1, 0.1, 0.1)
+    pp.draw_pose(pp.unit_pose(), 1.0)
+    gravId = p.addUserDebugParameter("trajectory time", 0.0, 1.0, 0.0)
+
     with pp.LockRenderer():
         p.loadMJCF(os.path.join(HERE, "plane.xml"))
+        # pp.create_plane(color=[0.9, 0.9, 1.0])
         bar = pp.create_cylinder(radius=0.01, height=1.0)
         with pp.HideOutput():
             robot, ee_attachment = load_robot()

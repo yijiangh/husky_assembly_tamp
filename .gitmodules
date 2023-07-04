@@ -1,0 +1,3 @@
+[submodule "data/husky_urdf"]
+	path = data/husky_urdf
+	url = git@gitlab.inf.ethz.ch:crl/husky_urdf.git

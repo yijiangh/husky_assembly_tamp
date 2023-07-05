@@ -1,6 +1,8 @@
 import sys, os
 import time
 import random
+import socket, json
+from threading import Thread
 
 import numpy as np
 import pybullet_planning as pp
@@ -11,6 +13,7 @@ import husky_assembly.optitrack.DataDescriptions as DataDescriptions
 import husky_assembly.optitrack.MoCapData as MoCapData
 from husky_assembly.optitrack.Utils import print_configuration
 from husky_assembly import DATA_DIRECTORY
+from husky_assembly.husky_client import HuskyClient
 
 HERE = os.path.dirname(__file__)
 
@@ -23,12 +26,13 @@ zup_from_yup = pp.pose_from_tform(yup_tform)
 yup_from_zup = pp.invert(zup_from_yup)
 
 name_from_mocap_id = {
-    1004 : 'husky0804',
+    1028 : 'husky0804',
     1011 : 'bar',
 }
 
 # goal registar for optitrack to overwrite
 rigid_body_poses = {}
+arm_joint_state = {}
 
 # This is a callback function that gets connected to the NatNet client. It is called once per rigid body per frame
 def receive_rigid_body_frame( new_id, position, rotation ):
@@ -36,6 +40,19 @@ def receive_rigid_body_frame( new_id, position, rotation ):
     rigid_body_poses[new_id] = (position, rotation)
     # print( "Received frame for rigid body", new_id )
     # print( "Received frame for rigid body", new_id," ",position," ",rotation )
+
+def receive_joint_state(socket_server):
+    # receive the message from socket and translate them into ROS messages
+    global arm_joint_state
+    data, CLIENT_IP = socket_server.recvfrom(65507)
+    arm_joint_state = json.loads(data.decode("utf-8"))
+
+def socket_recv_thread(socket_server):
+    while True:
+        try:
+            receive_joint_state(socket_server)
+        except socket.timeout:
+            pass
 
 ########################
 
@@ -92,8 +109,8 @@ def load_robot():
     tool0_pose = pp.get_link_pose(robot, pp.link_from_name(robot, 'ur_arm_tool0'))
     pp.draw_pose(tool0_pose)
 
-    ee = pp.create_obj(gripper_obj)
-    pp.set_pose(ee, tool0_pose)
+    ee = pp.create_obj(gripper_obj) 
+    pp.set_pose(ee, pp.multiply(tool0_pose, pp.Pose(euler=pp.Euler(yaw=-np.pi/2))))
     ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, 'ur_arm_tool0'), ee)
 
     # tool0_from_ee = pp.Pose(euler=pp.Euler(yaw=-np.pi/2), point=[0,0,0.138])
@@ -104,43 +121,50 @@ def load_robot():
     return robot, ee_attachment
 
 def main():
-    # create a new NatNet client
+    # * create a new NatNet client
     optionsDict = {}
     optionsDict["serverAddress"] = "192.168.0.117" # optitrack server address
     optionsDict["clientAddress"] = "192.168.0.180" # this machine's address
     optionsDict["use_multicast"] = True
-
     streaming_client = NatNetClient()
     streaming_client.set_client_address(optionsDict["clientAddress"])
     streaming_client.set_server_address(optionsDict["serverAddress"])
     streaming_client.set_use_multicast(optionsDict["use_multicast"])
     streaming_client.print_level = 0
-
     # Configure the streaming client to call our rigid body handler on the emulator to send data out.
-    # streaming_client.new_frame_listener = receive_new_frame
     streaming_client.rigid_body_listener = receive_rigid_body_frame
 
+    # * create a new Husky client
+    # HOST = '192.168.0.113'  # Standard loopback interface address (localhost)
+    PORT = 65432  # Port to listen on (non-privileged ports are > 1023)
+    CLIENT_IP = '192.168.0.180' # Set to your own IP
+    stream_server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    stream_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    # on the husky side, we set it to always send to the same port to the host
+    stream_server.bind((CLIENT_IP, PORT))
+    stream_server.settimeout(0.001)
+    stream_thread = Thread(target=socket_recv_thread, args=(stream_server,))
+    stream_thread.daemon = True
+    stream_thread.start()
+
+    # * start pybullet simulator
     pp.connect(use_gui=True, shadows=True, color=[0.9, 0.9, 1.0])
     p.configureDebugVisualizer(p.COV_ENABLE_GUI, 1, physicsClientId=pp.CLIENT)
-    # p.configureDebugVisualizer(p.COV_ENABLE_SEGMENTATION_MARK_PREVIEW, False, physicsClientId=pp.CLIENT)
-    # p.configureDebugVisualizer(p.COV_ENABLE_DEPTH_BUFFER_PREVIEW, False, physicsClientId=pp.CLIENT)
-    # p.configureDebugVisualizer(p.COV_ENABLE_RGB_BUFFER_PREVIEW, False, physicsClientId=pp.CLIENT)
-
+    traj_param = p.addUserDebugParameter("trajectory playback", 0.0, 1.0, 0.0)
+    plan = p.addUserDebugParameter("plan", 1, 0, 0)
+    execute = p.addUserDebugParameter("execute", 1, 0, 1)
     pp.draw_pose(pp.unit_pose(), 1.0)
-    gravId = p.addUserDebugParameter("trajectory time", 0.0, 1.0, 0.0)
-
     with pp.LockRenderer():
         p.loadMJCF(os.path.join(HERE, "plane.xml"))
         # pp.create_plane(color=[0.9, 0.9, 1.0])
         bar = pp.create_cylinder(radius=0.01, height=1.0)
         with pp.HideOutput():
             robot, ee_attachment = load_robot()
-
     rb_from_name = {
         'bar': bar,
         'husky0804': robot,
     }
-
+    # print(pp.get_joint_positions(robot, pp.get_movable_joints(robot)))
     # pp.wait_if_gui()
     # sys.exit(0)
 
@@ -170,12 +194,15 @@ def main():
             finally:
                 print("exiting")
 
+        # joint_state_data = socketRecvMessage(socket_server)
+
         prev_handle = []
         while is_looping:
             if prev_handle:
                 pp.remove_handles(prev_handle)
                 prev_handle = []
 
+            # * mocap position update
             for mocap_id, name in name_from_mocap_id.items():
                 if mocap_id in rigid_body_poses:
                     yup_from_rb = rigid_body_poses[mocap_id]
@@ -196,26 +223,35 @@ def main():
 
                     prev_handle.extend(pp.draw_pose(zup_from_rb))
 
-    # bar_length = 0.5
-    # bar_body = pp.create_cylinder(0.01, bar_length, mass=pp.STATIC_MASS)
-    # grasp_gen = get_bar_grasp_gen_fn(bar_length)
-
-    # for _ in range(10):
-    #     gripper_from_object = next(grasp_gen())
-    #     world_from_object = pp.multiply(tcp_pose, gripper_from_object)
-    #     pp.set_pose(bar_body, world_from_object)
-    #     pp.wait_if_gui() 
-
-    # pp.wait_if_gui()
+            # * joint state update
+            # arm_joint_state = socketRecvMessage(socket_server)
+            if arm_joint_state:
+                joints = pp.joints_from_names(robot, arm_joint_state['name'])
+                pp.set_joint_positions(robot, joints, arm_joint_state['position'])
 
             time.sleep(0.01)
+
+            # bar_length = 0.5
+            # bar_body = pp.create_cylinder(0.01, bar_length, mass=pp.STATIC_MASS)
+            # grasp_gen = get_bar_grasp_gen_fn(bar_length)
+
+            # for _ in range(10):
+            #     gripper_from_object = next(grasp_gen())
+            #     world_from_object = pp.multiply(tcp_pose, gripper_from_object)
+            #     pp.set_pose(bar_body, world_from_object)
+            #     pp.wait_if_gui() 
+
+            # pp.wait_if_gui()
 
     except KeyboardInterrupt:
         print('\n! Received keyboard interrupt, quitting threads.\n')
 
     finally:
         streaming_client.shutdown()
-        # pp.disconnect()
+        stream_server.close()
+        # attempt to join the threads back.
+        stream_thread.join()
+        pp.disconnect()
 
         sys.exit()
 

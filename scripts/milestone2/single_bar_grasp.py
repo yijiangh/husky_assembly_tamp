@@ -47,12 +47,14 @@ def receive_joint_state(socket_server):
     data, CLIENT_IP = socket_server.recvfrom(65507)
     arm_joint_state = json.loads(data.decode("utf-8"))
 
-def socket_recv_thread(socket_server):
-    while True:
+def socket_recv_thread(socket_server, stop):
+    while not stop():
         try:
             receive_joint_state(socket_server)
-        except socket.timeout:
-            pass
+        except socket.error as msg:
+            if stop():
+                # print("ERROR: command socket access error occurred:\n  %s" %msg)
+                print("shutting down joint data receiving thread")
 
 ########################
 
@@ -143,7 +145,9 @@ def main():
     # on the husky side, we set it to always send to the same port to the host
     stream_server.bind((CLIENT_IP, PORT))
     stream_server.settimeout(0.001)
-    stream_thread = Thread(target=socket_recv_thread, args=(stream_server,))
+
+    stop_thread = False
+    stream_thread = Thread(target=socket_recv_thread, args=(stream_server, lambda : stop_thread))
     stream_thread.daemon = True
     stream_thread.start()
 
@@ -247,11 +251,14 @@ def main():
         print('\n! Received keyboard interrupt, quitting threads.\n')
 
     finally:
-        streaming_client.shutdown()
+        stop_thread = True
+
         stream_server.close()
-        # attempt to join the threads back.
         stream_thread.join()
-        pp.disconnect()
+        streaming_client.shutdown()
+
+        if pp.is_connected():
+            pp.disconnect()
 
         sys.exit()
 

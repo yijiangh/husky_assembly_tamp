@@ -26,7 +26,7 @@ exec(read('src', 'husky_assembly', '__version__.py'), about)
 
 # requirements = read('requirements.txt').split('\n')
 requirements = [
-    'termcolor'
+    'pybullet_planning>=0.6.0',
     # 'scipy>=1.2.3',
     # 'matplotlib',
 ]

@@ -187,50 +187,48 @@ def plan_pickup_motion(robot, current_conf, bar_body, bar_pose, attachments, obs
     path = []
     start_conf = current_conf
     end_conf = PICKUP_APPROACH_CONF
+
     # TODO sample grasp and IK
 
-            # bar_length = 0.5
-            # bar_body = pp.create_cylinder(0.01, bar_length, mass=pp.STATIC_MASS)
-            # grasp_gen = get_bar_grasp_gen_fn(bar_length)
+    # grasp_gen = get_bar_grasp_gen_fn(bar_length)
 
-            # for _ in range(10):
-            #     gripper_from_object = next(grasp_gen())
-            #     world_from_object = pp.multiply(tcp_pose, gripper_from_object)
-            #     pp.set_pose(bar_body, world_from_object)
-            #     pp.wait_if_gui() 
+    # for _ in range(10):
+    #     gripper_from_object = next(grasp_gen())
+    #     world_from_object = pp.multiply(tcp_pose, gripper_from_object)
+    #     pp.set_pose(bar_body, world_from_object)
+    #     pp.wait_if_gui() 
 
+    # with pp.LockRenderer():
+    #     if pp.check_initial_end(start_conf, end_conf, collision_fn, diagnosis=debug):
+    #         transit_path = pp.birrt(start_conf, end_conf, distance_fn, sample_fn, extend_fn, collision_fn,
+    #                      restarts=50, iterations=100, smooth=True, max_time=10)
+    #     assert transit_path
+    #     path.append(transit_path)
 
-    with pp.LockRenderer():
-        if pp.check_initial_end(start_conf, end_conf, collision_fn, diagnosis=debug):
-            transit_path = pp.birrt(start_conf, end_conf, distance_fn, sample_fn, extend_fn, collision_fn,
-                         restarts=50, iterations=100, smooth=True, max_time=10)
-        assert transit_path
-        path.append(transit_path)
+    #     pp.set_joint_positions(robot, joints, PICKUP_CONF)
+    #     pickup_pose = pp.get_link_pose(robot, tool_attach_link)
 
-        pp.set_joint_positions(robot, joints, PICKUP_CONF)
-        pickup_pose = pp.get_link_pose(robot, tool_attach_link)
+    #     pp.set_joint_positions(robot, joints, PICKUP_APPROACH_CONF)
+    #     offset_pose = pp.get_link_pose(robot, tool_attach_link)
 
-        pp.set_joint_positions(robot, joints, PICKUP_APPROACH_CONF)
-        offset_pose = pp.get_link_pose(robot, tool_attach_link)
+    #     approach_path = None
+    #     pickup_poses = list(pp.interpolate_poses(offset_pose, pickup_pose, pos_step_size=POS_STEP_SIZE, ori_step_size=ORI_STEP_SIZE))
+    #     approach_path = []
+    #     for fpose in pickup_poses:
+    #         pp.draw_pose(fpose)
+    #         pb_q = pp.inverse_kinematics(robot, tool_attach_link, fpose)
+    #         if pb_q is None:
+    #             print('pb ik can\'t find an ik solution')
+    #             pp.wait_for_user('Check pose, IK failed.')
+    #         else:
+    #             approach_path.append(pb_q)
 
-        approach_path = None
-        pickup_poses = list(pp.interpolate_poses(offset_pose, pickup_pose, pos_step_size=POS_STEP_SIZE, ori_step_size=ORI_STEP_SIZE))
-        approach_path = []
-        for fpose in pickup_poses:
-            pp.draw_pose(fpose)
-            pb_q = pp.inverse_kinematics(robot, tool_attach_link, fpose)
-            if pb_q is None:
-                print('pb ik can\'t find an ik solution')
-                pp.wait_for_user('Check pose, IK failed.')
-            else:
-                approach_path.append(pb_q)
-
-        if not check_path(joints, approach_path, collision_fn=collision_fn, jump_threshold=None, diagnosis=args.debug):
-            approach_path = None
-        assert approach_path is not None
-        path.append(approach_path)
-        path.append(approach_path[::-1])
-        path.append(transit_path[::-1])
+    #     if not check_path(joints, approach_path, collision_fn=collision_fn, jump_threshold=None, diagnosis=args.debug):
+    #         approach_path = None
+    #     assert approach_path is not None
+    #     path.append(approach_path)
+    #     path.append(approach_path[::-1])
+    #     path.append(transit_path[::-1])
 
 def main():
     # * create a new NatNet client

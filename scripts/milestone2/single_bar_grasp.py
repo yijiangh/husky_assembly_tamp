@@ -43,7 +43,7 @@ arm_joint_state = {}
 def receive_rigid_body_frame( new_id, position, rotation ):
     global rigid_body_poses
     rigid_body_poses[new_id] = (position, rotation)
-    print( "Received frame for rigid body", new_id )
+    # print( "Received frame for rigid body", new_id )
     # print( "Received frame for rigid body", new_id," ",position," ",rotation )
 
 def receive_joint_state(socket_server):
@@ -237,7 +237,7 @@ def main():
     streaming_client = NatNetClient()
     streaming_client.set_client_address(CLIENT_IP)
     streaming_client.set_server_address(MOCAP_IP)
-    streaming_client.set_use_multicast(True)
+    streaming_client.set_use_multicast(False)
     streaming_client.print_level = 0
     # Configure the streaming client to call our rigid body handler on the emulator to send data out.
     streaming_client.rigid_body_listener = receive_rigid_body_frame
@@ -256,6 +256,11 @@ def main():
     # stream_thread = Thread(target=socket_recv_thread, args=(stream_server, lambda : stop_thread))
     # stream_thread.daemon = True
     # stream_thread.start()
+
+# husky0804 (array([ 0.1854293 ,  1.16446769, -0.00768745]), array([-3.60649819e-03,  9.68992695e-04, -2.08078113e-01,  9.78105083e-01]))
+# bar ((-1.062444806098938, 0.19626910984516144, 0.6585784554481506), (0.8137449622154236, -0.1838780641555786, 0.5276390910148621, -0.1600152850151062))
+# husky0804 (array([ 0.18541652,  1.16444933, -0.00769591]), array([-3.62287471e-03,  9.76011181e-04, -2.08073338e-01,  9.78106031e-01]))
+# bar ((-1.0624510049819946, 0.19626599550247192, 0.6585925817489624), (0.813710629940033, -0.18402758240699768, 0.5276156067848206, -0.16009564697742462))
 
     # * start pybullet simulator
     pp.connect(use_gui=True, shadows=True, color=[0.9, 0.9, 1.0])
@@ -337,6 +342,7 @@ def main():
                         zup_from_rb = pp.pose_from_tform(zup_tform)
                         husky_pose = zup_from_rb
 
+                    print(name, zup_from_rb)
                     rb = rb_from_name[name]
                     pp.set_pose(rb, zup_from_rb)
                     prev_handle.extend(pp.draw_pose(zup_from_rb))

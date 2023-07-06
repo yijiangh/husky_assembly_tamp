@@ -7,3 +7,6 @@
 [submodule "ext/pybullet_planning"]
 	path = ext/pybullet_planning
 	url = git@github.com:yijiangh/pybullet_planning.git
+[submodule "ext/tracikpy"]
+	path = ext/tracikpy
+	url = https://github.com/mjd3/tracikpy.git

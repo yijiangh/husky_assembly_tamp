@@ -13,7 +13,6 @@ import husky_assembly.optitrack.DataDescriptions as DataDescriptions
 import husky_assembly.optitrack.MoCapData as MoCapData
 from husky_assembly.optitrack.Utils import print_configuration
 from husky_assembly import DATA_DIRECTORY
-from husky_assembly.husky_client import HuskyClient
 
 # from compas.robots import RobotModel
 # from compas_fab.robots import RobotSemantics
@@ -44,7 +43,7 @@ arm_joint_state = {}
 def receive_rigid_body_frame( new_id, position, rotation ):
     global rigid_body_poses
     rigid_body_poses[new_id] = (position, rotation)
-    # print( "Received frame for rigid body", new_id )
+    print( "Received frame for rigid body", new_id )
     # print( "Received frame for rigid body", new_id," ",position," ",rotation )
 
 def receive_joint_state(socket_server):
@@ -232,33 +231,31 @@ def plan_pickup_motion(robot, current_conf, bar_body, bar_pose, attachments, obs
 
 def main():
     # * create a new NatNet client
-    optionsDict = {}
-    optionsDict["serverAddress"] = "192.168.0.117" # optitrack server address
-    optionsDict["clientAddress"] = "192.168.0.180" # this machine's address
-    optionsDict["use_multicast"] = True
+    CLIENT_IP = '192.168.0.7' # Set to your own IP
+    MOCAP_IP = '192.168.0.117'
+    HUSKY_IP = '192.168.131.9'
     streaming_client = NatNetClient()
-    streaming_client.set_client_address(optionsDict["clientAddress"])
-    streaming_client.set_server_address(optionsDict["serverAddress"])
-    streaming_client.set_use_multicast(optionsDict["use_multicast"])
+    streaming_client.set_client_address(CLIENT_IP)
+    streaming_client.set_server_address(MOCAP_IP)
+    streaming_client.set_use_multicast(True)
     streaming_client.print_level = 0
     # Configure the streaming client to call our rigid body handler on the emulator to send data out.
     streaming_client.rigid_body_listener = receive_rigid_body_frame
 
-    # * create a new Husky client
-    # HOST = '192.168.0.113'  # Standard loopback interface address (localhost)
-    PORT = 65432  # Port to listen on (non-privileged ports are > 1023)
-    CLIENT_IP = '192.168.0.180' # Set to your own IP
-    stream_server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    stream_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    # on the husky side, we set it to always send to the same port to the host
-    stream_server.bind((CLIENT_IP, PORT))
-    stream_server.settimeout(0.001)
+    # # * create a new Husky client
+    # # HOST = '192.168.0.113'  # Standard loopback interface address (localhost)
+    # PORT = 65432  # Port to listen on (non-privileged ports are > 1023)
+    # stream_server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    # stream_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    # # on the husky side, we set it to always send to the same port to the host
+    # stream_server.bind((CLIENT_IP, PORT))
+    # stream_server.settimeout(0.001)
 
-    # * a thread to receive data from the husky
-    stop_thread = False
-    stream_thread = Thread(target=socket_recv_thread, args=(stream_server, lambda : stop_thread))
-    stream_thread.daemon = True
-    stream_thread.start()
+    # # * a thread to receive data from the husky
+    # stop_thread = False
+    # stream_thread = Thread(target=socket_recv_thread, args=(stream_server, lambda : stop_thread))
+    # stream_thread.daemon = True
+    # stream_thread.start()
 
     # * start pybullet simulator
     pp.connect(use_gui=True, shadows=True, color=[0.9, 0.9, 1.0])
@@ -378,8 +375,8 @@ def main():
     finally:
         stop_thread = True
 
-        stream_server.close()
-        stream_thread.join()
+        # stream_server.close()
+        # stream_thread.join()
         streaming_client.shutdown()
 
         if pp.is_connected():

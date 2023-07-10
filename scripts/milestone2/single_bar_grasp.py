@@ -1,3 +1,4 @@
+from re import T
 import sys, os, argparse
 import time
 import random
@@ -71,7 +72,7 @@ def socket_recv_thread(socket_server, stop):
 
 ########################
 
-def load_robot():
+def load_robot(ik_from_arm_base=True):
     robot_urdf = os.path.join(DATA_DIRECTORY,'husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf')
     gripper_obj = os.path.join(DATA_DIRECTORY,'husky_urdf/robotiq_85/meshes/static/robotiq_85_close_20mm.obj')
     # robot_urdf = os.path.join(HERE,'robotiq_85/urdf/robotiq_85_gripper_simple.urdf')
@@ -83,8 +84,10 @@ def load_robot():
     robot = pp.load_pybullet(robot_urdf, fixed_base=False, cylinder=True)
 
     # TODO get tool def from SRDF
-    # ik_solver = TracIKSolver(robot_urdf, "world_link", "ur_arm_tool0")
-    ik_solver = TracIKSolver(robot_urdf, "ur_arm_base_link", "ur_arm_tool0")
+    if not ik_from_arm_base:
+        ik_solver = TracIKSolver(robot_urdf, "world_link", "ur_arm_tool0")
+    else:
+        ik_solver = TracIKSolver(robot_urdf, "ur_arm_base_link", "ur_arm_tool0")
     # pp.camera_focus_on_body(robot)
 
     # TODO get disabled collision pairs from SRDF
@@ -153,7 +156,7 @@ def check_path(joints, path, collision_fn=None, jump_threshold=None, diagnosis=F
                 return False
     return True
 
-def plan_pickup_motion(robot, ik_solver, current_conf, bar_body, attachments, obstacles, debug=False):
+def plan_pickup_motion(robot, ik_solver, current_conf, bar_body, attachments, obstacles, debug=False, ik_from_arm_base=True):
     # plan a transit motion from init conf to pick_approach conf  
     custom_limits = get_custom_limits(robot, {})
     resolutions = np.array([0.01, 0.01, 0.01, 0.01, 0.01, 0.01])
@@ -181,39 +184,49 @@ def plan_pickup_motion(robot, ik_solver, current_conf, bar_body, attachments, ob
     # grasp_gen = get_bar_grasp_gen_fn(bar_length)
     grasp_gen = pp.get_side_cylinder_grasps(bar_body)
 
-    world_from_base = pp.pose_from_pose2d(pp.get_joint_positions(robot, base_joints))
+    current_base_conf = pp.get_joint_positions(robot, base_joints)
+    if ik_from_arm_base:
+        world_from_base = pp.pose_from_pose2d(current_base_conf)
+        base_from_arm_base = pp.get_link_pose(robot, pp.link_from_name(robot, "ur_arm_base_link"))
+        world_from_arm_base = pp.multiply(world_from_base, base_from_arm_base)
+        # pp.set_color(robot, [0.5,0.5,0.5, 0.1])
+    else:
+        world_from_arm_base = pp.unit_pose()
+    pp.draw_pose(world_from_arm_base)
+
     world_from_object = pp.get_pose(bar_body)
     # tool0_from_ee = pp.Pose(euler=pp.Euler(yaw=-np.pi/2), point=[0,0,0.138])
     tool0_from_ee = pp.Pose(point=[0,0,0.138])
 
     # * sample grasp and IK
-    for _ in range(1):
+    for _ in range(50):
         gripper_from_object = next(grasp_gen)
         # world_from_object = pp.multiply(tcp_pose, gripper_from_object)
         world_from_tcp_pose = pp.multiply(world_from_object, pp.invert(gripper_from_object))
-        base_from_tcp_pose = pp.multiply(pp.invert(world_from_base), world_from_tcp_pose)
-        pp.draw_pose(pp.multiply(world_from_base, base_from_tcp_pose))
+
+        arm_base_from_tcp_pose = pp.multiply(pp.invert(world_from_arm_base), world_from_tcp_pose)
+        pp.draw_pose(pp.multiply(world_from_arm_base, arm_base_from_tcp_pose))
 
         # qinit = [2.79508900e+00, -2.93108928e-01, 8.54168287e-01, -4.45593685e+00, 4.51131219e+00,5.08370770e+00]
         # pp.set_joint_positions(robot, arm_joints, qinit)
         # new_tool0_pose = pp.get_link_pose(robot, pp.link_from_name(robot, 'ur_arm_tool0'))
         # pp.draw_pose(pp.multiply(new_tool0_pose, tool0_from_ee))
 
-        base_from_tool0 = pp.multiply(base_from_tcp_pose, pp.invert(tool0_from_ee))
+        arm_base_from_tool0 = pp.multiply(arm_base_from_tcp_pose, pp.invert(tool0_from_ee))
         # world_from_tool0 = pp.multiply(world_from_tcp_pose, pp.invert(tool0_from_ee))
         # pp.wait_if_gui()
 
-        conf = ik_solver.ik(pp.tform_from_pose(base_from_tool0))
+        conf = ik_solver.ik(pp.tform_from_pose(arm_base_from_tool0))
         if conf:
+            print("solved conf: ", conf)
             pp.set_joint_positions(robot, arm_joints, conf)
             for attachment in attachments:
                 attachment.assign()
-
-            print("base conf: ", conf)
             base_pose = pp.pose_from_pose2d(conf[:3])
             print("converted base conf: ", pp.pose2d_from_pose(base_pose))
-        else:
-            print("no ik solution")
+            break
+    else:
+        print("no ik solution")
 
         # pp.wait_if_gui()
 
@@ -302,6 +315,8 @@ def main():
     joint_sliders.append(p.addUserDebugParameter(HUSKYU_JOINT_NAMES[1], -3, 3, 0))
     joint_sliders.append(p.addUserDebugParameter(HUSKYU_JOINT_NAMES[2], 0, np.pi*2, 0))
 
+    ik_from_arm_base = 0
+
     # * load all robots and objects
     pp.draw_pose(pp.unit_pose(), 1.0)
     with pp.LockRenderer():
@@ -309,7 +324,7 @@ def main():
         # pp.create_plane(color=[0.9, 0.9, 1.0])
         bar = pp.create_cylinder(radius=0.01, height=1.0)
         with pp.HideOutput():
-            robot, ee_attachment, ik_solver = load_robot()
+            robot, ee_attachment, ik_solver = load_robot(ik_from_arm_base)
 
             # ! a shadow robot for displaying the trajectory
             # shadow_robot, shadow_ee_attachment, _ = load_robot()
@@ -324,10 +339,10 @@ def main():
         'husky0804': robot,
     }
 
-    # if args.disable_mocap_tracking:
-    #     # a recorded pose for debuggging purpose
-    #     temp_bar_pose = ((-1.062444806098938, 0.19626910984516144, 0.6585784554481506), (0.8137449622154236, -0.1838780641555786, 0.5276390910148621, -0.1600152850151062))
-    #     pp.set_pose(bar, temp_bar_pose)
+    if args.disable_mocap_tracking:
+        # a recorded pose for debuggging purpose
+        temp_bar_pose = ((-1.062444806098938, 0.19626910984516144, 0.6585784554481506), (0.8137449622154236, -0.1838780641555786, 0.5276390910148621, -0.1600152850151062))
+        pp.set_pose(bar, temp_bar_pose)
     #     base_conf = [-1.4235535195927922, -0.7633840253240234, 0.2961870562652696]
     #     pp.set_joint_positions(robot, pp.joints_from_names(robot, HUSKYU_JOINT_NAMES[:3]), base_conf)
 
@@ -411,7 +426,8 @@ def main():
 
             current_plan_button_reading = p.readUserDebugParameter(plan_button)
             if current_plan_button_reading > prev_plan_button_value:
-                plan_pickup_motion(robot, ik_solver, None, bar, [ee_attachment], obstacles)
+                plan_pickup_motion(robot, ik_solver, None, bar, [ee_attachment], obstacles, 
+                                   ik_from_arm_base=ik_from_arm_base)
                 prev_plan_button_value = current_plan_button_reading
 
             if planned_trajectory:

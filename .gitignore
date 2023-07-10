@@ -104,7 +104,7 @@ ENV/
 .mypy_cache/
 
 # Visual Studio Code
-.vscode/
+# .vscode/
 
 # rhino
 *.rhl

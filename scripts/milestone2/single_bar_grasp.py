@@ -91,7 +91,6 @@ def load_robot(ik_from_arm_base=True):
     # pp.camera_focus_on_body(robot)
 
     # TODO get disabled collision pairs from SRDF
-
     # pp.dump_body(robot)
     # base_bb = pp.create_box(0.9864, 0.6851, 0.3767)
     # pp.set_pose(base_bb, pp.Pose(point=[0,0,0.18835]))
@@ -186,9 +185,9 @@ def plan_pickup_motion(robot, ik_solver, current_conf, bar_body, attachments, ob
 
     current_base_conf = pp.get_joint_positions(robot, base_joints)
     if ik_from_arm_base:
-        world_from_base = pp.pose_from_pose2d(current_base_conf)
-        base_from_arm_base = pp.get_link_pose(robot, pp.link_from_name(robot, "ur_arm_base_link"))
-        world_from_arm_base = pp.multiply(world_from_base, base_from_arm_base)
+        # world_from_base = pp.pose_from_pose2d(current_base_conf)
+        # world_from_arm_base = pp.multiply(world_from_base, base_from_arm_base)
+        world_from_arm_base = pp.get_link_pose(robot, pp.link_from_name(robot, "ur_arm_base_link"))
         # pp.set_color(robot, [0.5,0.5,0.5, 0.1])
     else:
         world_from_arm_base = pp.unit_pose()
@@ -199,34 +198,35 @@ def plan_pickup_motion(robot, ik_solver, current_conf, bar_body, attachments, ob
     tool0_from_ee = pp.Pose(point=[0,0,0.138])
 
     # * sample grasp and IK
+    conf = None
     for _ in range(50):
         gripper_from_object = next(grasp_gen)
+        # gripper_from_object = ((0.0, 0.4418979585170746, 0.0), (-0.6446115374565125, 0.2906475067138672, 0.2906475067138672, 0.6446115374565125))
         # world_from_object = pp.multiply(tcp_pose, gripper_from_object)
         world_from_tcp_pose = pp.multiply(world_from_object, pp.invert(gripper_from_object))
 
         arm_base_from_tcp_pose = pp.multiply(pp.invert(world_from_arm_base), world_from_tcp_pose)
-        pp.draw_pose(pp.multiply(world_from_arm_base, arm_base_from_tcp_pose))
-
-        # qinit = [2.79508900e+00, -2.93108928e-01, 8.54168287e-01, -4.45593685e+00, 4.51131219e+00,5.08370770e+00]
-        # pp.set_joint_positions(robot, arm_joints, qinit)
-        # new_tool0_pose = pp.get_link_pose(robot, pp.link_from_name(robot, 'ur_arm_tool0'))
-        # pp.draw_pose(pp.multiply(new_tool0_pose, tool0_from_ee))
-
+        # pp.draw_pose(pp.multiply(world_from_arm_base, arm_base_from_tcp_pose))
         arm_base_from_tool0 = pp.multiply(arm_base_from_tcp_pose, pp.invert(tool0_from_ee))
-        # world_from_tool0 = pp.multiply(world_from_tcp_pose, pp.invert(tool0_from_ee))
-        # pp.wait_if_gui()
 
         conf = ik_solver.ik(pp.tform_from_pose(arm_base_from_tool0))
-        if conf:
-            print("solved conf: ", conf)
-            pp.set_joint_positions(robot, arm_joints, conf)
-            for attachment in attachments:
-                attachment.assign()
-            base_pose = pp.pose_from_pose2d(conf[:3])
-            print("converted base conf: ", pp.pose2d_from_pose(base_pose))
+        if conf is not None:
+            # print("solved conf: ", conf)
+            # print("grasp: ", gripper_from_object)
             break
     else:
         print("no ik solution")
+        return
+
+    # * update robot state in sim
+    if ik_from_arm_base:
+        pp.set_joint_positions(robot, arm_joints, conf)
+    else:
+        pp.set_joint_positions(robot, base_joints + arm_joints, conf)
+    for attachment in attachments:
+        attachment.assign()
+    # base_pose = pp.pose_from_pose2d(conf[:3])
+    # print("converted base conf: ", pp.pose2d_from_pose(base_pose))
 
         # pp.wait_if_gui()
 
@@ -315,7 +315,7 @@ def main():
     joint_sliders.append(p.addUserDebugParameter(HUSKYU_JOINT_NAMES[1], -3, 3, 0))
     joint_sliders.append(p.addUserDebugParameter(HUSKYU_JOINT_NAMES[2], 0, np.pi*2, 0))
 
-    ik_from_arm_base = 0
+    ik_from_arm_base = 1
 
     # * load all robots and objects
     pp.draw_pose(pp.unit_pose(), 1.0)
@@ -343,17 +343,22 @@ def main():
         # a recorded pose for debuggging purpose
         temp_bar_pose = ((-1.062444806098938, 0.19626910984516144, 0.6585784554481506), (0.8137449622154236, -0.1838780641555786, 0.5276390910148621, -0.1600152850151062))
         pp.set_pose(bar, temp_bar_pose)
-    #     base_conf = [-1.4235535195927922, -0.7633840253240234, 0.2961870562652696]
-    #     pp.set_joint_positions(robot, pp.joints_from_names(robot, HUSKYU_JOINT_NAMES[:3]), base_conf)
+        # base_conf = (-1.8195197415944886, -0.00027021797075961755, -1.2547157015094492)
+        # pp.set_joint_positions(robot, pp.joints_from_names(robot, HUSKYU_JOINT_NAMES[:3]), base_conf)
 
-    # husky0804 (array([ 0.18541652,  1.16444933, -0.00769591]), array([-3.62287471e-03,  9.76011181e-04, -2.08073338e-01,  9.78106031e-01]))
-    # bar ((-1.0624510049819946, 0.19626599550247192, 0.6585925817489624), (0.813710629940033, -0.18402758240699768, 0.5276156067848206, -0.16009564697742462))
+# solved conf:  [-1.81951974e+00 -2.70217971e-04 -5.86842433e+37 -5.42704427e+00
+#  -1.67372424e+00 -1.34852926e+00  2.65833299e+00  4.13893596e+00
+#   1.78973138e+00]
+# grasp:  ((0.0, 0.4418979585170746, 0.0), (-0.6446115374565125, 0.2906475067138672, 0.2906475067138672, 0.6446115374565125))
+# converted base conf:  (-1.8195197415944886, -0.00027021797075961755, -1.2547157015094492)
+# 
 
     # print(pp.get_joint_positions(robot, pp.get_movable_joints(robot)))
     # pp.wait_if_gui()
     # sys.exit(0)
 
-    try:
+    # try:
+    if True:
         # Start up the streaming client now that the callbacks are set up.
         # This will run perpetually, and operate on a separate thread.
         is_looping = False
@@ -405,14 +410,15 @@ def main():
                             zup_tform[:3,1] = yup_tform[:3,0]
                             zup_tform[:3,2] = yup_tform[:3,1]
                             zup_from_rb = pp.pose_from_tform(zup_tform)
-                            husky_pose = zup_from_rb
 
                         rb = rb_from_name[name]
                         pp.set_pose(rb, zup_from_rb)
                         prev_handle.extend(pp.draw_pose(zup_from_rb))
             else:
-                base_values = [p.readUserDebugParameter(bj) for bj in joint_sliders]
-                pp.set_joint_positions(robot, base_joints, base_values)
+                # * set the husky base joint positions to the slider value
+                if ik_from_arm_base:
+                    base_values = [p.readUserDebugParameter(bj) for bj in joint_sliders]
+                    pp.set_joint_positions(robot, base_joints, base_values)
 
             # * joint state update
             if not args.disable_joint_tracking:
@@ -449,23 +455,22 @@ def main():
 
             # pp.wait_if_gui()
 
-    except KeyboardInterrupt:
-        print('\n! Received keyboard interrupt, quitting threads.\n')
+    # except KeyboardInterrupt:
+    #     print('\n! Received keyboard interrupt, quitting threads.\n')
 
-    finally:
-        stop_thread = True
+    # finally:
+    #     stop_thread = True
 
-        if not args.disable_joint_tracking:
-            joint_state_server.close()
-            joint_state_stream_thread.join()
+    #     if not args.disable_joint_tracking:
+    #         joint_state_server.close()
+    #         joint_state_stream_thread.join()
 
-        if not args.disable_joint_tracking:
-            mocap_client.shutdown()
+    #     if not args.disable_joint_tracking:
+    #         mocap_client.shutdown()
 
-        if pp.is_connected():
-            pp.disconnect()
-
-        sys.exit()
+    #     if pp.is_connected():
+    #         pp.disconnect()
+    #     sys.exit()
 
 
 if __name__ == "__main__":

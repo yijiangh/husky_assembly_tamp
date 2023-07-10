@@ -1,4 +1,3 @@
-from re import T
 import sys, os, argparse
 import time
 import random
@@ -10,8 +9,6 @@ import pybullet_planning as pp
 import pybullet as p
 
 from husky_assembly.optitrack.NatNetClient import NatNetClient
-import husky_assembly.optitrack.DataDescriptions as DataDescriptions
-import husky_assembly.optitrack.MoCapData as MoCapData
 from husky_assembly.optitrack.Utils import print_configuration
 from husky_assembly import DATA_DIRECTORY
 from tracikpy import TracIKSolver
@@ -160,33 +157,33 @@ def plan_pickup_motion(robot, ik_solver, current_conf, bar_body, attachments, ob
     custom_limits = get_custom_limits(robot, {})
     resolutions = np.array([0.01, 0.01, 0.01, 0.01, 0.01, 0.01])
     disabled_collisions = {}
-    extra_disabled_collisions = {}
-    # extra_disabled_collisions =[
-    #     ((robot, pp.link_from_name(robot, 'wrist_3_link')), 
-    #      (ee_body, pp.BASE_LINK)), # pp.link_from_name(ee_body, 'robotiq_85_base_link'))),
-    #     ]
+    # extra_disabled_collisions = {}
+    extra_disabled_collisions =[
+        ((robot, pp.link_from_name(robot, 'ur_arm_wrist_3_link')), 
+         (attachments[0].child, pp.BASE_LINK)), 
+         # pp.link_from_name(ee_body, 'robotiq_85_base_link'))),
+        ]
 
     # joints = pp.get_movable_joints(robot)
-    arm_joints = pp.joints_from_names(robot, HUSKYU_JOINT_NAMES[3:])
-    base_joints = pp.joints_from_names(robot, HUSKYU_JOINT_NAMES[:3])
+    first_joint_id = 3 if ik_from_arm_base else 0
+    movable_joints = pp.joints_from_names(robot, HUSKYU_JOINT_NAMES[first_joint_id:])
 
-    # sample_fn = pp.get_sample_fn(robot, joints, custom_limits=custom_limits)
-    # distance_fn = pp.get_distance_fn(robot, joints) #, weights=weights)
-    # extend_fn = pp.get_extend_fn(robot, joints, resolutions=resolutions)
-    # collision_fn = pp.get_collision_fn(robot, joints, obstacles=obstacles, attachments=attachments, 
-    #                                 self_collisions=True,
-    #                                 disabled_collisions=disabled_collisions, extra_disabled_collisions=extra_disabled_collisions,
-    #                                 custom_limits=custom_limits, max_distance=0)
-    # path = []
-    # start_conf = current_conf
-    # end_conf = PICKUP_APPROACH_CONF
-    # grasp_gen = get_bar_grasp_gen_fn(bar_length)
+    sample_fn = pp.get_sample_fn(robot, movable_joints, custom_limits=custom_limits)
+    distance_fn = pp.get_distance_fn(robot, movable_joints) #, weights=weights)
+    extend_fn = pp.get_extend_fn(robot, movable_joints, resolutions=resolutions)
+    collision_fn = pp.get_collision_fn(robot, movable_joints, obstacles=obstacles,
+                                       attachments=attachments, 
+                                       self_collisions=True,
+                                       disabled_collisions=disabled_collisions, extra_disabled_collisions=extra_disabled_collisions,
+                                       custom_limits=custom_limits, 
+                                       max_distance=0)
     grasp_gen = pp.get_side_cylinder_grasps(bar_body)
 
-    current_base_conf = pp.get_joint_positions(robot, base_joints)
     if ik_from_arm_base:
         # world_from_base = pp.pose_from_pose2d(current_base_conf)
         # world_from_arm_base = pp.multiply(world_from_base, base_from_arm_base)
+        # * because the base position is controlled by the joystick and updated outside this function
+        # we can directly get the arm base link here
         world_from_arm_base = pp.get_link_pose(robot, pp.link_from_name(robot, "ur_arm_base_link"))
         # pp.set_color(robot, [0.5,0.5,0.5, 0.1])
     else:
@@ -199,32 +196,30 @@ def plan_pickup_motion(robot, ik_solver, current_conf, bar_body, attachments, ob
 
     # * sample grasp and IK
     conf = None
-    for _ in range(50):
-        gripper_from_object = next(grasp_gen)
-        # gripper_from_object = ((0.0, 0.4418979585170746, 0.0), (-0.6446115374565125, 0.2906475067138672, 0.2906475067138672, 0.6446115374565125))
-        # world_from_object = pp.multiply(tcp_pose, gripper_from_object)
-        world_from_tcp_pose = pp.multiply(world_from_object, pp.invert(gripper_from_object))
+    with pp.WorldSaver():
+        for _ in range(50):
+            gripper_from_object = next(grasp_gen)
+            world_from_tcp_pose = pp.multiply(world_from_object, pp.invert(gripper_from_object))
 
-        arm_base_from_tcp_pose = pp.multiply(pp.invert(world_from_arm_base), world_from_tcp_pose)
-        # pp.draw_pose(pp.multiply(world_from_arm_base, arm_base_from_tcp_pose))
-        arm_base_from_tool0 = pp.multiply(arm_base_from_tcp_pose, pp.invert(tool0_from_ee))
+            arm_base_from_tcp_pose = pp.multiply(pp.invert(world_from_arm_base), world_from_tcp_pose)
+            arm_base_from_tool0 = pp.multiply(arm_base_from_tcp_pose, pp.invert(tool0_from_ee))
+            # pp.draw_pose(pp.multiply(world_from_arm_base, arm_base_from_tcp_pose))
 
-        conf = ik_solver.ik(pp.tform_from_pose(arm_base_from_tool0))
-        if conf is not None:
-            # print("solved conf: ", conf)
-            # print("grasp: ", gripper_from_object)
-            break
-    else:
-        print("no ik solution")
-        return
+            conf = ik_solver.ik(pp.tform_from_pose(arm_base_from_tool0))
+            if conf is not None and not collision_fn(conf, diagnosis=debug):
+                # print("solved conf: ", conf)
+                # print("grasp: ", gripper_from_object)
+                break
+        else:
+            print("no ik solution")
+            return
 
     # * update robot state in sim
-    if ik_from_arm_base:
-        pp.set_joint_positions(robot, arm_joints, conf)
-    else:
-        pp.set_joint_positions(robot, base_joints + arm_joints, conf)
+    pp.set_joint_positions(robot, movable_joints, conf)
     for attachment in attachments:
         attachment.assign()
+
+    # path = []
     # base_pose = pp.pose_from_pose2d(conf[:3])
     # print("converted base conf: ", pp.pose2d_from_pose(base_pose))
 
@@ -268,6 +263,8 @@ def main():
                         help='Disable mocap connection.')
     parser.add_argument('--disable_joint_tracking', action='store_true',
                         help='Disable mocap connection.')
+    parser.add_argument('--debug', action='store_true',
+                        help='')
     args = parser.parse_args()
 
     # * create a new NatNet client
@@ -432,8 +429,9 @@ def main():
 
             current_plan_button_reading = p.readUserDebugParameter(plan_button)
             if current_plan_button_reading > prev_plan_button_value:
+                # * plan the grasp, IK, and pick-up motion
                 plan_pickup_motion(robot, ik_solver, None, bar, [ee_attachment], obstacles, 
-                                   ik_from_arm_base=ik_from_arm_base)
+                                   ik_from_arm_base=ik_from_arm_base, debug=args.debug)
                 prev_plan_button_value = current_plan_button_reading
 
             if planned_trajectory:

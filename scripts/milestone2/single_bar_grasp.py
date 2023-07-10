@@ -27,6 +27,13 @@ yup_tform[:3,1] = [0, 0, 1]
 yup_tform[:3,2] = [1, 0, 0]
 zup_from_yup = pp.pose_from_tform(yup_tform)
 
+HUSKYU_JOINT_NAMES = ['x', 'y', 'theta', 
+                      "ur_arm_shoulder_pan_joint", 
+                      "ur_arm_shoulder_lift_joint",
+                      "ur_arm_elbow_joint", 
+                      "ur_arm_wrist_1_joint", 
+                      "ur_arm_wrist_2_joint", 
+                      "ur_arm_wrist_3_joint" ]
 JOINT_JUMP_THRESHOLD = np.pi/3
 POS_STEP_SIZE = 0.001
 ORI_STEP_SIZE = np.pi/18
@@ -64,31 +71,6 @@ def socket_recv_thread(socket_server, stop):
 
 ########################
 
-def get_bar_grasp_gen_fn(bar_length, tool_pose=pp.unit_pose(), reverse_grasp=False, safety_margin_length=0.0):
-    """
-    safety_margin_length: the maximal distance of a grasp point from the bar centroid.
-    return: gripper_from_bar
-
-    see: https://pybullet-planning.readthedocs.io/en/latest/reference/generated/pybullet_planning.primitives.grasp_gen.get_side_cylinder_grasps.html
-    """
-    # rotate the cylinder's frame to make x axis align with the longitude axis
-    longitude_x = pp.Pose(euler=pp.Euler(pitch=np.pi/2))
-    def gen_fn():
-        while True:
-            # translation along the longitude axis
-            slide_dist = random.uniform(-bar_length/2+safety_margin_length, bar_length/2-safety_margin_length)
-            translate_along_x_axis = pp.Pose(point=pp.Point(slide_dist,0,0))
-
-            for j in range(1 + reverse_grasp):
-                # the base pi/2 is to make y align with the longitude axis, conforming to the convention (see image in the doc)
-                # flip the gripper, gripper symmetry
-                rotate_around_z = pp.Pose(euler=[0, 0, np.pi/2 + j * np.pi])
-
-                object_from_gripper = pp.multiply(longitude_x, translate_along_x_axis, \
-                    rotate_around_z, tool_pose)
-                yield pp.invert(object_from_gripper)
-    return gen_fn
-
 def load_robot():
     robot_urdf = os.path.join(DATA_DIRECTORY,'husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf')
     gripper_obj = os.path.join(DATA_DIRECTORY,'husky_urdf/robotiq_85/meshes/static/robotiq_85_close_20mm.obj')
@@ -101,7 +83,8 @@ def load_robot():
     robot = pp.load_pybullet(robot_urdf, fixed_base=False, cylinder=True)
 
     # TODO get tool def from SRDF
-    ik_solver = TracIKSolver(robot_urdf, "world_link", "ur_arm_tool0")
+    # ik_solver = TracIKSolver(robot_urdf, "world_link", "ur_arm_tool0")
+    ik_solver = TracIKSolver(robot_urdf, "ur_arm_base_link", "ur_arm_tool0")
     # pp.camera_focus_on_body(robot)
 
     # TODO get disabled collision pairs from SRDF
@@ -181,7 +164,10 @@ def plan_pickup_motion(robot, ik_solver, current_conf, bar_body, attachments, ob
     #      (ee_body, pp.BASE_LINK)), # pp.link_from_name(ee_body, 'robotiq_85_base_link'))),
     #     ]
 
-    joints = pp.get_movable_joints(robot)
+    # joints = pp.get_movable_joints(robot)
+    arm_joints = pp.joints_from_names(robot, HUSKYU_JOINT_NAMES[3:])
+    base_joints = pp.joints_from_names(robot, HUSKYU_JOINT_NAMES[:3])
+
     # sample_fn = pp.get_sample_fn(robot, joints, custom_limits=custom_limits)
     # distance_fn = pp.get_distance_fn(robot, joints) #, weights=weights)
     # extend_fn = pp.get_extend_fn(robot, joints, resolutions=resolutions)
@@ -192,32 +178,43 @@ def plan_pickup_motion(robot, ik_solver, current_conf, bar_body, attachments, ob
     # path = []
     # start_conf = current_conf
     # end_conf = PICKUP_APPROACH_CONF
-
-    # TODO sample grasp and IK
-
     # grasp_gen = get_bar_grasp_gen_fn(bar_length)
     grasp_gen = pp.get_side_cylinder_grasps(bar_body)
 
-    # joints = pp.get_movable_joints(robot)
-    joint_names = ['x', 'y', 'theta', "ur_arm_shoulder_pan_joint", "ur_arm_shoulder_lift_joint",
-                   "ur_arm_elbow_joint", "ur_arm_wrist_1_joint", "ur_arm_wrist_2_joint", "ur_arm_wrist_3_joint" ]
-    joints = pp.joints_from_names(robot, joint_names)
-
+    world_from_base = pp.pose_from_pose2d(pp.get_joint_positions(robot, base_joints))
     world_from_object = pp.get_pose(bar_body)
     # tool0_from_ee = pp.Pose(euler=pp.Euler(yaw=-np.pi/2), point=[0,0,0.138])
     tool0_from_ee = pp.Pose(point=[0,0,0.138])
 
+    # * sample grasp and IK
     for _ in range(1):
         gripper_from_object = next(grasp_gen)
         # world_from_object = pp.multiply(tcp_pose, gripper_from_object)
         world_from_tcp_pose = pp.multiply(world_from_object, pp.invert(gripper_from_object))
-        pp.draw_pose(world_from_tcp_pose)
-        world_from_tool0 = pp.multiply(world_from_tcp_pose, pp.invert(tool0_from_ee))
+        base_from_tcp_pose = pp.multiply(pp.invert(world_from_base), world_from_tcp_pose)
+        pp.draw_pose(pp.multiply(world_from_base, base_from_tcp_pose))
 
-        conf = ik_solver.ik(pp.tform_from_pose(world_from_tool0))
-        pp.set_joint_positions(robot, joints, conf)
-        for attachment in attachments:
-            attachment.assign()
+        # qinit = [2.79508900e+00, -2.93108928e-01, 8.54168287e-01, -4.45593685e+00, 4.51131219e+00,5.08370770e+00]
+        # pp.set_joint_positions(robot, arm_joints, qinit)
+        # new_tool0_pose = pp.get_link_pose(robot, pp.link_from_name(robot, 'ur_arm_tool0'))
+        # pp.draw_pose(pp.multiply(new_tool0_pose, tool0_from_ee))
+
+        base_from_tool0 = pp.multiply(base_from_tcp_pose, pp.invert(tool0_from_ee))
+        # world_from_tool0 = pp.multiply(world_from_tcp_pose, pp.invert(tool0_from_ee))
+        # pp.wait_if_gui()
+
+        conf = ik_solver.ik(pp.tform_from_pose(base_from_tool0))
+        if conf:
+            pp.set_joint_positions(robot, arm_joints, conf)
+            for attachment in attachments:
+                attachment.assign()
+
+            print("base conf: ", conf)
+            base_pose = pp.pose_from_pose2d(conf[:3])
+            print("converted base conf: ", pp.pose2d_from_pose(base_pose))
+        else:
+            print("no ik solution")
+
         # pp.wait_if_gui()
 
     # with pp.LockRenderer():
@@ -300,6 +297,10 @@ def main():
     execute_button = p.addUserDebugParameter("execute", 1, 0, 0)
     prev_plan_button_value = p.readUserDebugParameter(plan_button)
     prev_execute_button_value = p.readUserDebugParameter(execute_button)
+    joint_sliders = []
+    joint_sliders.append(p.addUserDebugParameter(HUSKYU_JOINT_NAMES[0], -3, 3, 0))
+    joint_sliders.append(p.addUserDebugParameter(HUSKYU_JOINT_NAMES[1], -3, 3, 0))
+    joint_sliders.append(p.addUserDebugParameter(HUSKYU_JOINT_NAMES[2], 0, np.pi*2, 0))
 
     # * load all robots and objects
     pp.draw_pose(pp.unit_pose(), 1.0)
@@ -323,10 +324,12 @@ def main():
         'husky0804': robot,
     }
 
-    if args.disable_mocap_tracking:
-        # a recorded pose for debuggging purpose
-        temp_bar_pose = ((-1.062444806098938, 0.19626910984516144, 0.6585784554481506), (0.8137449622154236, -0.1838780641555786, 0.5276390910148621, -0.1600152850151062))
-        pp.set_pose(bar, temp_bar_pose)
+    # if args.disable_mocap_tracking:
+    #     # a recorded pose for debuggging purpose
+    #     temp_bar_pose = ((-1.062444806098938, 0.19626910984516144, 0.6585784554481506), (0.8137449622154236, -0.1838780641555786, 0.5276390910148621, -0.1600152850151062))
+    #     pp.set_pose(bar, temp_bar_pose)
+    #     base_conf = [-1.4235535195927922, -0.7633840253240234, 0.2961870562652696]
+    #     pp.set_joint_positions(robot, pp.joints_from_names(robot, HUSKYU_JOINT_NAMES[:3]), base_conf)
 
     # husky0804 (array([ 0.18541652,  1.16444933, -0.00769591]), array([-3.62287471e-03,  9.76011181e-04, -2.08073338e-01,  9.78106031e-01]))
     # bar ((-1.0624510049819946, 0.19626599550247192, 0.6585925817489624), (0.813710629940033, -0.18402758240699768, 0.5276156067848206, -0.16009564697742462))
@@ -367,36 +370,40 @@ def main():
 
         prev_handle = []
         planned_trajectory = None
-        husky_pose = pp.unit_pose()
+        base_joints = pp.joints_from_names(robot, HUSKYU_JOINT_NAMES[:3])
         while is_looping:
             if prev_handle:
                 pp.remove_handles(prev_handle)
                 prev_handle = []
 
             # * mocap position update
-            for mocap_id, name in name_from_mocap_id.items():
-                if mocap_id in rigid_body_poses:
-                    yup_from_rb = rigid_body_poses[mocap_id]
-                    zup_from_rb = pp.multiply(zup_from_yup, yup_from_rb)
+            if not args.disable_mocap_tracking:
+                for mocap_id, name in name_from_mocap_id.items():
+                    if mocap_id in rigid_body_poses:
+                        yup_from_rb = rigid_body_poses[mocap_id]
+                        zup_from_rb = pp.multiply(zup_from_yup, yup_from_rb)
 
-                    if name == 'husky0804':
-                        yup_tform = pp.tform_from_pose(zup_from_rb)
-                        zup_tform = np.copy(yup_tform)
-                        zup_tform[:3,0] = yup_tform[:3,2]
-                        zup_tform[:3,1] = yup_tform[:3,0]
-                        zup_tform[:3,2] = yup_tform[:3,1]
-                        zup_from_rb = pp.pose_from_tform(zup_tform)
-                        husky_pose = zup_from_rb
+                        if name == 'husky0804':
+                            yup_tform = pp.tform_from_pose(zup_from_rb)
+                            zup_tform = np.copy(yup_tform)
+                            zup_tform[:3,0] = yup_tform[:3,2]
+                            zup_tform[:3,1] = yup_tform[:3,0]
+                            zup_tform[:3,2] = yup_tform[:3,1]
+                            zup_from_rb = pp.pose_from_tform(zup_tform)
+                            husky_pose = zup_from_rb
 
-                    rb = rb_from_name[name]
-                    pp.set_pose(rb, zup_from_rb)
-                    prev_handle.extend(pp.draw_pose(zup_from_rb))
+                        rb = rb_from_name[name]
+                        pp.set_pose(rb, zup_from_rb)
+                        prev_handle.extend(pp.draw_pose(zup_from_rb))
+            else:
+                base_values = [p.readUserDebugParameter(bj) for bj in joint_sliders]
+                pp.set_joint_positions(robot, base_joints, base_values)
 
             # * joint state update
-            # arm_joint_state = socketRecvMessage(socket_server)
-            if arm_joint_state:
-                joints = pp.joints_from_names(robot, arm_joint_state['name'])
-                pp.set_joint_positions(robot, joints, arm_joint_state['position'])
+            if not args.disable_joint_tracking:
+                if arm_joint_state:
+                    joints = pp.joints_from_names(robot, arm_joint_state['name'])
+                    pp.set_joint_positions(robot, joints, arm_joint_state['position'])
 
             ee_attachment.assign()
             tcp_pose = pp.get_link_pose(robot, pp.link_from_name(robot, 'bar_tcp'))

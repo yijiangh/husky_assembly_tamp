@@ -3,6 +3,7 @@ import time
 import random
 import socket, json
 from threading import Thread
+from tracemalloc import start
 
 import numpy as np
 import pybullet_planning as pp
@@ -67,12 +68,49 @@ def socket_recv_thread(socket_server, stop):
                 # print("ERROR: command socket access error occurred:\n  %s" %msg)
                 print("shutting down joint data receiving thread")
 
+def send_base_arm_trajectory_command(socket_server, udp_ip, udp_port, joint_names, joint_positions, time_steps):
+    # check if jointPositions and timeSteps have the same size
+    if (len(joint_positions) != len(time_steps)):
+        print("Error: jointPositions and timeSteps have different sizes")
+        return
+
+    traj = [] # create an empty array
+    for i in range(len(joint_positions)):
+        if (len(joint_positions[i]) != 8):
+            print("Error: jointPositions[" + str(i) + "] has length " + str(len(joint_positions[i])) + " instead of 8")
+            return
+        traj_point = {}
+        traj_point["xVel"] = joint_positions[i][0]
+        traj_point["angVel"] = joint_positions[i][1]
+        traj_point["q1"] = joint_positions[i][2]
+        traj_point["q2"] = joint_positions[i][3]
+        traj_point["q3"] = joint_positions[i][4]
+        traj_point["q4"] = joint_positions[i][5]
+        traj_point["q5"] = joint_positions[i][6]
+        traj_point["q6"] = joint_positions[i][7]
+        traj_point["time_from_start"] = time_steps[i]
+        traj.append(traj_point)
+
+    j = {}
+    j["trajectory"] = traj
+    j["joint_names"] = joint_names
+
+    j_file = json.dumps(j)
+    # print("***************************")
+    # print("Sending message : " + str(j))
+
+    try:
+        socket_server.sendto(j_file.encode(), (udp_ip, udp_port))
+    except socket.error as e:
+        print("error while sending: %s" %e)
+
 ########################
 
 def load_robot(ik_from_arm_base=True):
     robot_urdf = os.path.join(DATA_DIRECTORY,'husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf')
     robot_srdf = os.path.join(DATA_DIRECTORY, 'husky_urdf/mt_husky_moveit_config/config/husky.srdf')
-    gripper_obj = os.path.join(DATA_DIRECTORY,'husky_urdf/robotiq_85/meshes/static/robotiq_85_close_20mm.obj')
+    # gripper_obj = os.path.join(DATA_DIRECTORY,'husky_urdf/robotiq_85/meshes/static/robotiq_85_close_20mm.obj')
+    gripper_obj = os.path.join(DATA_DIRECTORY,'husky_urdf/robotiq_85/meshes/static/robotiq_85_open.obj')
     # robot_urdf = os.path.join(HERE,'robotiq_85/urdf/robotiq_85_gripper_simple.urdf')
     # robot_urdf = os.path.join(HERE,'mt_husky_dual_ur5_e_moveit_config/urdf/husky_dual_ur5_e.urdf')
     # print(robot_urdf)
@@ -149,7 +187,7 @@ def check_path(joints, path, collision_fn=None, jump_threshold=None, diagnosis=F
                 return False
     return True
 
-def plan_pickup_motion(robot, ik_solver, current_conf, bar_body, attachments, obstacles, debug=False, ik_from_arm_base=True, disabled_collisions=None):
+def plan_pickup_motion(robot, ik_solver, current_conf, bar_body, attachments, obstacles, debug=False, ik_from_arm_base=True, disabled_collisions=None, teleop_goal_conf=None):
     # plan a transit motion from init conf to pick_approach conf  
     custom_limits = get_custom_limits(robot, {})
     resolutions = np.ones(6) * 0.1
@@ -202,55 +240,60 @@ def plan_pickup_motion(robot, ik_solver, current_conf, bar_body, attachments, ob
     # tool0_from_ee = pp.Pose(euler=pp.Euler(yaw=-np.pi/2), point=[0,0,0.138])
     tool0_from_ee = pp.Pose(point=[0,0,0.138])
 
-    # * sample grasp and IK
-    attach_conf = None
-    with pp.WorldSaver():
-        with pp.LockRenderer():
-            for _ in range(50):
-                gripper_from_object = next(grasp_gen)
-                world_from_tcp_pose = pp.multiply(world_from_object, pp.invert(gripper_from_object))
+    if teleop_goal_conf is None:
+        # * sample grasp and IK, and plan for approach motion
+        attach_conf = None
+        with pp.WorldSaver():
+            with pp.LockRenderer():
+                for _ in range(50):
+                    gripper_from_object = next(grasp_gen)
+                    world_from_tcp_pose = pp.multiply(world_from_object, pp.invert(gripper_from_object))
 
-                arm_base_from_tcp_pose = pp.multiply(pp.invert(world_from_arm_base), world_from_tcp_pose)
-                arm_base_from_tool0 = pp.multiply(arm_base_from_tcp_pose, pp.invert(tool0_from_ee))
-                # pp.draw_pose(pp.multiply(world_from_arm_base, arm_base_from_tcp_pose))
+                    arm_base_from_tcp_pose = pp.multiply(pp.invert(world_from_arm_base), world_from_tcp_pose)
+                    arm_base_from_tool0 = pp.multiply(arm_base_from_tcp_pose, pp.invert(tool0_from_ee))
+                    # pp.draw_pose(pp.multiply(world_from_arm_base, arm_base_from_tcp_pose))
 
-                attach_conf = ik_solver.ik(pp.tform_from_pose(arm_base_from_tool0))
-                if attach_conf is not None and not approach_collision_fn(attach_conf, diagnosis=debug):
-                    # print("solved conf: ", conf)
-                    # print("grasp: ", gripper_from_object)
+                    attach_conf = ik_solver.ik(pp.tform_from_pose(arm_base_from_tool0))
+                    if attach_conf is not None and not approach_collision_fn(attach_conf, diagnosis=debug):
+                        # print("solved conf: ", conf)
+                        # print("grasp: ", gripper_from_object)
 
-                    # * plan pregrasp motion
-                    # move world_from_tool0 in the minus z direction for 0.1m
-                    tool0_from_pregrasp = pp.Pose(point=[0,0,-0.1])
-                    arm_base_from_pregrasp = pp.multiply(arm_base_from_tool0, tool0_from_pregrasp)
+                        # * plan pregrasp motion
+                        # move world_from_tool0 in the minus z direction for 0.1m
+                        tool0_from_pregrasp = pp.Pose(point=[0,0,-0.1])
+                        arm_base_from_pregrasp = pp.multiply(arm_base_from_tool0, tool0_from_pregrasp)
 
-                    approach_path = []
-                    pregrasp_poses = list(pp.interpolate_poses(arm_base_from_tool0, arm_base_from_pregrasp, pos_step_size=POS_STEP_SIZE, ori_step_size=ORI_STEP_SIZE))
-                    prev_conf = attach_conf
-                    for fpose in pregrasp_poses:
-                        # pp.draw_pose(fpose)
-                        attach_conf = ik_solver.ik(pp.tform_from_pose(fpose), qinit=prev_conf)
-                        if attach_conf is None or approach_collision_fn(attach_conf, diagnosis=debug):
-                            print('ik can\'t find an ik solution for approaching')
-                            break
+                        approach_path = []
+                        pregrasp_poses = list(pp.interpolate_poses(arm_base_from_tool0, arm_base_from_pregrasp, pos_step_size=POS_STEP_SIZE, ori_step_size=ORI_STEP_SIZE))
+                        prev_conf = attach_conf
+                        for fpose in pregrasp_poses:
+                            # pp.draw_pose(fpose)
+                            attach_conf = ik_solver.ik(pp.tform_from_pose(fpose), qinit=prev_conf)
+                            if attach_conf is None or approach_collision_fn(attach_conf, diagnosis=debug):
+                                print('ik can\'t find an ik solution for approaching')
+                                break
+                            else:
+                                approach_path.append(attach_conf)
+                        if len(approach_path) != len(pregrasp_poses) or \
+                            not check_path(movable_joints, approach_path, jump_threshold=JOINT_JUMP_THRESHOLD):
+                            continue
                         else:
-                            approach_path.append(attach_conf)
-                    if len(approach_path) != len(pregrasp_poses) or \
-                        not check_path(movable_joints, approach_path, jump_threshold=JOINT_JUMP_THRESHOLD):
-                        continue
-                    else:
-                        print('Pregrasp path found: {} pts'.format(len(approach_path)))
-                        break
-            else:
-                print("no ik solution")
-                return None
+                            print('Pregrasp path found: {} pts'.format(len(approach_path)))
+                            break
+                else:
+                    print("no ik solution")
+                    return None
+        end_conf = approach_path[-1]
+    else:
+        assert len(teleop_goal_conf) == len(movable_joints)
+        end_conf = teleop_goal_conf
+        approach_path = []
 
     with pp.WorldSaver():
         with pp.LockRenderer(True):
             # * plan transit motion from current conf to pregrasp conf
             start_conf = pp.get_joint_positions(robot, movable_joints)
             print('start conf: ', start_conf)
-            end_conf = approach_path[-1]
             transit_path = None
 
             # new_collision_fn = lambda q, diagnosis=False: collision_fn(q, diagnosis=True)
@@ -291,6 +334,9 @@ def plan_pickup_motion(robot, ik_solver, current_conf, bar_body, attachments, ob
     #     path.append(approach_path[::-1])
     #     path.append(transit_path[::-1])
 
+def align_joint_conf_by_joint_names(source_joint_names, target_conf, target_joint_names):
+    return [target_conf[target_joint_names.index(joint_name)] for joint_name in source_joint_names]
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--disable_mocap_tracking', action='store_true',
@@ -305,7 +351,7 @@ def main():
     if not args.disable_mocap_tracking:
         CLIENT_IP = '192.168.0.7' # Set to your own IP
         MOCAP_IP = '192.168.0.117'
-        HUSKY_IP = '192.168.131.9'
+
         mocap_client = NatNetClient()
         mocap_client.set_client_address(CLIENT_IP)
         mocap_client.set_server_address(MOCAP_IP)
@@ -316,23 +362,25 @@ def main():
 
     # * create a new Husky client
     if not args.disable_joint_tracking:
-        # HOST = '192.168.0.113'  # Standard loopback interface address (localhost)
-        PORT = 65432  # Port to listen on (non-privileged ports are > 1023)
-        joint_state_server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        joint_state_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        HUSKY_IP = '192.168.0.113'
+        HUSKY_PORT = 65432
+        socket_server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        socket_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         # on the husky side, we set it to always send to the same port to the host
-        joint_state_server.bind((CLIENT_IP, PORT))
-        joint_state_server.settimeout(0.001)
+        socket_server.bind((CLIENT_IP, HUSKY_PORT))
+        socket_server.settimeout(0.001)
 
         # * a thread to receive data from the husky
         stop_thread = False
-        joint_state_stream_thread = Thread(target=socket_recv_thread, args=(joint_state_server, lambda : stop_thread))
+        joint_state_stream_thread = Thread(target=socket_recv_thread, args=(socket_server, lambda : stop_thread))
         joint_state_stream_thread.daemon = True
         joint_state_stream_thread.start()
 
     # * start pybullet simulator
     pp.connect(use_gui=True, shadows=True, color=[0.9, 0.9, 1.0])
     p.configureDebugVisualizer(p.COV_ENABLE_GUI, 1, physicsClientId=pp.CLIENT)
+    # pp.set_camera(np.deg2rad(92.0), np.deg2rad(-85), 5.20)
+    pp.set_camera(92.0, -85, 5.20)
 
     # * Control UI
     traj_param_slider = p.addUserDebugParameter("trajectory playback", 0.0, 1.0, 0.0)
@@ -344,9 +392,10 @@ def main():
     prev_execute_button_value = p.readUserDebugParameter(execute_button)
 
     ik_from_arm_base = 1
+    teleop_target = 1
 
     # * load all robots and objects
-    pp.draw_pose(pp.unit_pose(), 1.0)
+    pp.draw_pose(pp.unit_pose(), 0.5)
     with pp.LockRenderer():
         p.loadMJCF(os.path.join(HERE, "plane.xml"))
         # pp.create_plane(color=[0.9, 0.9, 1.0])
@@ -356,9 +405,21 @@ def main():
 
             # ! a shadow robot for displaying the trajectory
             shadow_robot, shadow_ee_attachment, _, _ = load_robot()
-            # shadow_color = [0.5, 0.5, 0.5, 0.6]
-            # pp.set_color(shadow_robot, shadow_color)
-            # pp.set_color(shadow_ee_attachment.child, shadow_color)
+            shadow_color = [0.5, 0.5, 0.5, 0.7]
+            pp.set_color(shadow_robot, shadow_color)
+            pp.set_color(shadow_ee_attachment.child, shadow_color)
+
+            goal_robot = None
+            goal_ee_attachment = None
+            if teleop_target:
+                goal_robot, goal_ee_attachment, _, _ = load_robot()
+                goal_color = [0, 0, 1.0, 0.7]
+                pp.set_color(goal_robot, goal_color)
+
+    first_joint_id = 3 if ik_from_arm_base else 0
+    planned_joint_names = HUSKYU_JOINT_NAMES[first_joint_id:]
+    planned_joints = pp.joints_from_names(robot, planned_joint_names)
+    base_cmd_names = ['xVel', 'angVel']
 
     recorded_conf = (0,0,0,-1.3227758407592773, -1.5873312950134277, -1.5211923122406006, 0.0, 0.0, 0.0)
     if args.disable_mocap_tracking:
@@ -368,19 +429,21 @@ def main():
 
         pp.set_joint_positions(robot, pp.joints_from_names(robot, HUSKYU_JOINT_NAMES), recorded_conf)
         pp.set_joint_positions(shadow_robot, pp.joints_from_names(robot, HUSKYU_JOINT_NAMES), recorded_conf)
-        ee_attachment.assign()
-        shadow_ee_attachment.assign()
+        # ee_attachment.assign()
+        # shadow_ee_attachment.assign()
+    else:
+        if arm_joint_state:
+            recorded_conf = align_joint_conf_by_joint_names(planned_joint_names, arm_joint_state['position'], arm_joint_state['name'])
 
     joint_sliders = []
-    all_joints = pp.joints_from_names(robot, HUSKYU_JOINT_NAMES)
-    for j, initial_v in zip(all_joints, recorded_conf):
+    for j, initial_v in zip(planned_joints, recorded_conf):
         lower, upper = pp.get_joint_limits(robot, j)
         joint_sliders.append(p.addUserDebugParameter(pp.get_joint_name(robot, j).decode("utf-8"), 
                                                      lower, upper, initial_v))
+        pp.set_joint_position(shadow_robot, j, initial_v)
+        if teleop_target:
+            pp.set_joint_position(goal_robot, j, initial_v)
     prev_joint_slider_values = [p.readUserDebugParameter(js) for js in joint_sliders]
-
-    first_joint_id = 3 if ik_from_arm_base else 0
-    planned_joints = pp.joints_from_names(robot, HUSKYU_JOINT_NAMES[first_joint_id:])
 
     obstacles = []
 
@@ -389,16 +452,12 @@ def main():
         'husky0804': robot,
     }
 
-# solved conf:  [-1.81951974e+00 -2.70217971e-04 -5.86842433e+37 -5.42704427e+00
-#  -1.67372424e+00 -1.34852926e+00  2.65833299e+00  4.13893596e+00
-#   1.78973138e+00]
-# grasp:  ((0.0, 0.4418979585170746, 0.0), (-0.6446115374565125, 0.2906475067138672, 0.2906475067138672, 0.6446115374565125))
-# converted base conf:  (-1.8195197415944886, -0.00027021797075961755, -1.2547157015094492)
-# 
-
-    # print(pp.get_joint_positions(robot, pp.get_movable_joints(robot)))
-    # pp.wait_if_gui()
-    # sys.exit(0)
+    # solved conf:  [-1.81951974e+00 -2.70217971e-04 -5.86842433e+37 -5.42704427e+00
+    #  -1.67372424e+00 -1.34852926e+00  2.65833299e+00  4.13893596e+00
+    #   1.78973138e+00]
+    # grasp:  ((0.0, 0.4418979585170746, 0.0), (-0.6446115374565125, 0.2906475067138672, 0.2906475067138672, 0.6446115374565125))
+    # converted base conf:  (-1.8195197415944886, -0.00027021797075961755, -1.2547157015094492)
+    # 
 
     # try:
     if True:
@@ -445,7 +504,6 @@ def main():
                     if mocap_id in rigid_body_poses:
                         yup_from_rb = rigid_body_poses[mocap_id]
                         zup_from_rb = pp.multiply(zup_from_yup, yup_from_rb)
-
                         if name == 'husky0804':
                             yup_tform = pp.tform_from_pose(zup_from_rb)
                             zup_tform = np.copy(yup_tform)
@@ -453,22 +511,27 @@ def main():
                             zup_tform[:3,1] = yup_tform[:3,0]
                             zup_tform[:3,2] = yup_tform[:3,1]
                             zup_from_rb = pp.pose_from_tform(zup_tform)
-                            # TODO convert to base joint configurations
-
-                        rb = rb_from_name[name]
-                        # TODO change to set_joint_positions
-                        pp.set_pose(rb, zup_from_rb)
+                            # estimation has some noise in roll and pitch
+                            base_conf = pp.pose2d_from_pose(zup_from_rb, tolerance=2e-2)
+                            pp.set_joint_positions(robot, base_joints, base_conf)
+                            pp.set_joint_positions(shadow_robot, base_joints, base_conf)
+                            if teleop_target:
+                                pp.set_joint_positions(goal_robot, base_joints, base_conf)
+                        else:
+                            rb = rb_from_name[name]
+                            # TODO change to set_joint_positions
+                            pp.set_pose(rb, zup_from_rb)
                         # prev_handle.extend(pp.draw_pose(zup_from_rb))
-            else:
-                # * set the husky base joint positions to the slider value
-                # only update when the slider value changes
+
+            # * set the husky arm joint positions to the slider value
+            # only update when the slider value changes
+            if teleop_target:
                 current_joint_slider_values = [p.readUserDebugParameter(js) for js in joint_sliders]
-                if ik_from_arm_base and current_joint_slider_values != prev_joint_slider_values:
-                    picked_values = [p.readUserDebugParameter(bj) for bj in joint_sliders]
-                    pp.set_joint_positions(robot, all_joints, picked_values)
-                    ee_attachment.assign()
-                    pp.set_joint_positions(shadow_robot, all_joints, picked_values)
-                    shadow_ee_attachment.assign()
+                if current_joint_slider_values != prev_joint_slider_values:
+                    pp.set_joint_positions(goal_robot, planned_joints, current_joint_slider_values)
+                    goal_ee_attachment.assign()
+
+                prev_joint_slider_values = current_joint_slider_values
 
             # * joint state update
             if not args.disable_joint_tracking:
@@ -477,7 +540,8 @@ def main():
                     pp.set_joint_positions(robot, joints, arm_joint_state['position'])
 
             ee_attachment.assign()
-            tcp_pose = pp.get_link_pose(robot, pp.link_from_name(robot, 'bar_tcp'))
+            shadow_ee_attachment.assign()
+            # tcp_pose = pp.get_link_pose(robot, pp.link_from_name(robot, 'bar_tcp'))
             # prev_handle.extend(pp.draw_pose(tcp_pose))
 
             current_plan_button_reading = p.readUserDebugParameter(plan_button)
@@ -487,8 +551,9 @@ def main():
                                                         [ee_attachment], obstacles + [bar], 
                                                         ik_from_arm_base=ik_from_arm_base, 
                                                         disabled_collisions=disabled_collisions,
-                                                        debug=args.debug)
-                prev_plan_button_value = current_plan_button_reading
+                                                        debug=args.debug,
+                                                        teleop_goal_conf=current_joint_slider_values if teleop_target else None)
+            prev_plan_button_value = current_plan_button_reading
 
             if planned_trajectory:
                 # set the shadow robot to the slider value
@@ -498,7 +563,14 @@ def main():
                 pp.set_joint_positions(shadow_robot, planned_joints, traj_pose)
                 shadow_ee_attachment.assign()
                 
-            # TODO if execute button is pressed, execute the planned trajectory
+            # * if execute button is pressed, execute the planned trajectory
+            current_execute_button_reading = p.readUserDebugParameter(execute_button)
+            if planned_trajectory and current_execute_button_reading > prev_execute_button_value:
+                # padd each trajectory point in planned_trajectory with two zeros at the beginning
+                padded_traj = np.concatenate([np.zeros((len(planned_trajectory), 2)), np.array(planned_trajectory)], axis=1)
+                time_from_start = np.linspace(0.0, 5.0, len(planned_trajectory))
+                send_base_arm_trajectory_command(socket_server, HUSKY_IP, HUSKY_PORT, base_cmd_names + planned_joint_names, padded_traj, time_from_start)
+            prev_execute_button_value = current_execute_button_reading
 
             time.sleep(0.01)
 

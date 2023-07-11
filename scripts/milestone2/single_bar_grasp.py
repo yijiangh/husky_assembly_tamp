@@ -57,7 +57,11 @@ def receive_joint_state(socket_server):
     # receive the message from socket and translate them into ROS messages
     global arm_joint_state
     data, CLIENT_IP = socket_server.recvfrom(65507)
-    arm_joint_state = json.loads(data.decode("utf-8"))
+    try:
+        arm_joint_state = json.loads(data.decode("utf-8"))
+    except Exception as e:
+        print("ERROR: unable to decode the received joint state")
+        print(e)
 
 def socket_recv_thread(socket_server, stop):
     while not stop():
@@ -96,11 +100,14 @@ def send_base_arm_trajectory_command(socket_server, udp_ip, udp_port, joint_name
     j["joint_names"] = joint_names
 
     j_file = json.dumps(j)
-    # print("***************************")
-    # print("Sending message : " + str(j))
+    encoded_json = (j_file).encode()
+    print("***************************")
+    print("Sending goal trajectory with pts = " + str(len(joint_positions)) + " and duration = " + str(time_steps[-1]))
+    print('Data size = %d' % len(encoded_json))
 
     try:
-        socket_server.sendto(j_file.encode(), (udp_ip, udp_port))
+        # socket_server.sendto(encoded_json, (udp_ip, udp_port))
+        socket_server.sendall(encoded_json)
     except socket.error as e:
         print("error while sending: %s" %e)
 
@@ -190,7 +197,7 @@ def check_path(joints, path, collision_fn=None, jump_threshold=None, diagnosis=F
 def plan_pickup_motion(robot, ik_solver, current_conf, bar_body, attachments, obstacles, debug=False, ik_from_arm_base=True, disabled_collisions=None, teleop_goal_conf=None):
     # plan a transit motion from init conf to pick_approach conf  
     custom_limits = get_custom_limits(robot, {})
-    resolutions = np.ones(6) * 0.1
+    resolutions = np.ones(6) * 0.05
     disabled_collisions = disabled_collisions or {}
     extra_disabled_collisions = [
         ((robot, pp.link_from_name(robot, 'ur_arm_wrist_3_link')), 
@@ -339,6 +346,8 @@ def align_joint_conf_by_joint_names(source_joint_names, target_conf, target_join
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--teleopt_target', action='store_true',
+                        help='')
     parser.add_argument('--disable_mocap_tracking', action='store_true',
                         help='Disable mocap connection.')
     parser.add_argument('--disable_joint_tracking', action='store_true',
@@ -347,11 +356,11 @@ def main():
                         help='')
     args = parser.parse_args()
 
+    CLIENT_IP = '192.168.0.7' # Set to your own IP
+
     # * create a new NatNet client
     if not args.disable_mocap_tracking:
-        CLIENT_IP = '192.168.0.7' # Set to your own IP
         MOCAP_IP = '192.168.0.117'
-
         mocap_client = NatNetClient()
         mocap_client.set_client_address(CLIENT_IP)
         mocap_client.set_server_address(MOCAP_IP)
@@ -364,11 +373,14 @@ def main():
     if not args.disable_joint_tracking:
         HUSKY_IP = '192.168.0.113'
         HUSKY_PORT = 65432
-        socket_server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        socket_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        socket_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        socket_server.connect((HUSKY_IP, HUSKY_PORT))
+
+        # socket_server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # socket_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         # on the husky side, we set it to always send to the same port to the host
-        socket_server.bind((CLIENT_IP, HUSKY_PORT))
-        socket_server.settimeout(0.001)
+        # socket_server.bind((CLIENT_IP, HUSKY_PORT))
+        # socket_server.settimeout(0.001)
 
         # * a thread to receive data from the husky
         stop_thread = False
@@ -392,7 +404,7 @@ def main():
     prev_execute_button_value = p.readUserDebugParameter(execute_button)
 
     ik_from_arm_base = 1
-    teleop_target = 1
+    teleop_target = args.teleopt_target
 
     # * load all robots and objects
     pp.draw_pose(pp.unit_pose(), 0.5)
@@ -457,7 +469,6 @@ def main():
     #   1.78973138e+00]
     # grasp:  ((0.0, 0.4418979585170746, 0.0), (-0.6446115374565125, 0.2906475067138672, 0.2906475067138672, 0.6446115374565125))
     # converted base conf:  (-1.8195197415944886, -0.00027021797075961755, -1.2547157015094492)
-    # 
 
     # try:
     if True:
@@ -568,7 +579,10 @@ def main():
             if planned_trajectory and current_execute_button_reading > prev_execute_button_value:
                 # padd each trajectory point in planned_trajectory with two zeros at the beginning
                 padded_traj = np.concatenate([np.zeros((len(planned_trajectory), 2)), np.array(planned_trajectory)], axis=1)
-                time_from_start = np.linspace(0.0, 5.0, len(planned_trajectory))
+
+                # time_from_start = np.linspace(0.0, 5.0, len(planned_trajectory))
+                time_from_start = [i * 0.2 for i in range(len(planned_trajectory))]
+
                 send_base_arm_trajectory_command(socket_server, HUSKY_IP, HUSKY_PORT, base_cmd_names + planned_joint_names, padded_traj, time_from_start)
             prev_execute_button_value = current_execute_button_reading
 

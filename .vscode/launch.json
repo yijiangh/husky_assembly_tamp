@@ -15,6 +15,7 @@
                 // "--disable_mocap_tracking",
                 // "--disable_joint_tracking",
                 // "--debug"
+                "--teleopt_target"
             ]
         }
     ]

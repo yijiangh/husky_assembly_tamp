@@ -20,8 +20,8 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "args": [
-                // "--disable_mocap_tracking",
-                // "--disable_joint_tracking",
+                // "--connect_to_mocap",
+                "--connect_to_hw",
                 // "--debug"
                 "--teleopt_target"
             ]

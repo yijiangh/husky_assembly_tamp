@@ -2,8 +2,8 @@ import sys, os, argparse
 import time
 import random
 import socket, json
+import struct
 from threading import Thread
-from tracemalloc import start
 
 import numpy as np
 import pybullet_planning as pp
@@ -17,6 +17,15 @@ from tracikpy import TracIKSolver
 from compas.robots import RobotModel
 from compas_fab.robots import RobotSemantics
 from compas_fab.robots import Robot as RobotClass
+
+# CLIENT_IP = '127.0.0.1'
+CLIENT_IP = '192.168.0.7' # Set to your own IP
+MOCAP_IP = '192.168.0.117'
+
+# HUSKY_IP = 'localhost'
+HUSKY_IP = '192.168.0.113'
+HUSKY_UDP_PORT = 65432
+HUSKY_TCP_PORT = 12345
 
 HERE = os.path.dirname(__file__)
 
@@ -46,6 +55,8 @@ name_from_mocap_id = {
 rigid_body_poses = {}
 arm_joint_state = {}
 
+###################
+
 # This is a callback function that gets connected to the NatNet client. It is called once per rigid body per frame
 def receive_rigid_body_frame( new_id, position, rotation ):
     global rigid_body_poses
@@ -72,7 +83,7 @@ def socket_recv_thread(socket_server, stop):
                 # print("ERROR: command socket access error occurred:\n  %s" %msg)
                 print("shutting down joint data receiving thread")
 
-def send_base_arm_trajectory_command(socket_server, udp_ip, udp_port, joint_names, joint_positions, time_steps):
+def send_base_arm_trajectory_command(socket_server, joint_names, joint_positions, time_steps):
     # check if jointPositions and timeSteps have the same size
     if (len(joint_positions) != len(time_steps)):
         print("Error: jointPositions and timeSteps have different sizes")
@@ -100,14 +111,15 @@ def send_base_arm_trajectory_command(socket_server, udp_ip, udp_port, joint_name
     j["joint_names"] = joint_names
 
     j_file = json.dumps(j)
-    encoded_json = (j_file).encode()
+    encoded_json = j_file.encode('utf-8')
+    msg = struct.pack('>I', len(encoded_json)) + encoded_json
     print("***************************")
     print("Sending goal trajectory with pts = " + str(len(joint_positions)) + " and duration = " + str(time_steps[-1]))
     print('Data size = %d' % len(encoded_json))
 
     try:
         # socket_server.sendto(encoded_json, (udp_ip, udp_port))
-        socket_server.sendall(encoded_json)
+        socket_server.sendall(msg)
     except socket.error as e:
         print("error while sending: %s" %e)
 
@@ -348,19 +360,16 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--teleopt_target', action='store_true',
                         help='')
-    parser.add_argument('--disable_mocap_tracking', action='store_true',
-                        help='Disable mocap connection.')
-    parser.add_argument('--disable_joint_tracking', action='store_true',
-                        help='Disable mocap connection.')
+    parser.add_argument('--connect_to_mocap', action='store_true',
+                        help='connect to mocap.')
+    parser.add_argument('--connect_to_hw', action='store_true',
+                        help='connect to robot hardware.')
     parser.add_argument('--debug', action='store_true',
                         help='')
     args = parser.parse_args()
 
-    CLIENT_IP = '192.168.0.7' # Set to your own IP
-
     # * create a new NatNet client
-    if not args.disable_mocap_tracking:
-        MOCAP_IP = '192.168.0.117'
+    if args.connect_to_mocap:
         mocap_client = NatNetClient()
         mocap_client.set_client_address(CLIENT_IP)
         mocap_client.set_server_address(MOCAP_IP)
@@ -370,23 +379,22 @@ def main():
         mocap_client.rigid_body_listener = receive_rigid_body_frame
 
     # * create a new Husky client
-    if not args.disable_joint_tracking:
-        HUSKY_IP = '192.168.0.113'
-        HUSKY_PORT = 65432
-        socket_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        socket_server.connect((HUSKY_IP, HUSKY_PORT))
-
-        # socket_server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        # socket_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        # on the husky side, we set it to always send to the same port to the host
-        # socket_server.bind((CLIENT_IP, HUSKY_PORT))
-        # socket_server.settimeout(0.001)
+    if args.connect_to_hw:
+        jt_socket_server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        jt_socket_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # ! on the husky side, we set it to always send to the same port to the host
+        jt_socket_server.bind((CLIENT_IP, HUSKY_UDP_PORT))
+        jt_socket_server.settimeout(0.001)
 
         # * a thread to receive data from the husky
         stop_thread = False
-        joint_state_stream_thread = Thread(target=socket_recv_thread, args=(socket_server, lambda : stop_thread))
+        joint_state_stream_thread = Thread(target=socket_recv_thread, args=(jt_socket_server, lambda : stop_thread))
         joint_state_stream_thread.daemon = True
         joint_state_stream_thread.start()
+
+        # # * TCP socket to send trajectory to the husky
+        traj_socket_client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        traj_socket_client.connect((HUSKY_IP, HUSKY_TCP_PORT))
 
     # * start pybullet simulator
     pp.connect(use_gui=True, shadows=True, color=[0.9, 0.9, 1.0])
@@ -434,7 +442,7 @@ def main():
     base_cmd_names = ['xVel', 'angVel']
 
     recorded_conf = (0,0,0,-1.3227758407592773, -1.5873312950134277, -1.5211923122406006, 0.0, 0.0, 0.0)
-    if args.disable_mocap_tracking:
+    if args.connect_to_mocap :
         # a recorded pose for debuggging purpose
         temp_bar_pose = ((-1.062444806098938, 0.19626910984516144, 0.6585784554481506), (0.8137449622154236, -0.1838780641555786, 0.5276390910148621, -0.1600152850151062))
         pp.set_pose(bar, temp_bar_pose)
@@ -475,7 +483,7 @@ def main():
         # Start up the streaming client now that the callbacks are set up.
         # This will run perpetually, and operate on a separate thread.
         is_looping = False
-        if not args.disable_mocap_tracking:
+        if args.connect_to_mocap:
             is_running = mocap_client.run()
             print_configuration(mocap_client)
             print("\n")
@@ -499,7 +507,7 @@ def main():
                 finally:
                     print("exiting")
 
-        is_looping = is_looping | args.disable_mocap_tracking
+        is_looping = is_looping | ~args.connect_to_mocap
 
         prev_handle = []
         planned_trajectory = None
@@ -510,7 +518,7 @@ def main():
                 prev_handle = []
 
             # * mocap position update
-            if not args.disable_mocap_tracking:
+            if args.connect_to_mocap:
                 for mocap_id, name in name_from_mocap_id.items():
                     if mocap_id in rigid_body_poses:
                         yup_from_rb = rigid_body_poses[mocap_id]
@@ -545,7 +553,7 @@ def main():
                 prev_joint_slider_values = current_joint_slider_values
 
             # * joint state update
-            if not args.disable_joint_tracking:
+            if args.connect_to_hw:
                 if arm_joint_state:
                     joints = pp.joints_from_names(robot, arm_joint_state['name'])
                     pp.set_joint_positions(robot, joints, arm_joint_state['position'])
@@ -583,7 +591,7 @@ def main():
                 # time_from_start = np.linspace(0.0, 5.0, len(planned_trajectory))
                 time_from_start = [i * 0.2 for i in range(len(planned_trajectory))]
 
-                send_base_arm_trajectory_command(socket_server, HUSKY_IP, HUSKY_PORT, base_cmd_names + planned_joint_names, padded_traj, time_from_start)
+                send_base_arm_trajectory_command(traj_socket_client, base_cmd_names + planned_joint_names, padded_traj, time_from_start)
             prev_execute_button_value = current_execute_button_reading
 
             time.sleep(0.01)
@@ -596,11 +604,11 @@ def main():
     # finally:
     #     stop_thread = True
 
-    #     if not args.disable_joint_tracking:
+    #     if args.connect_to_hw:
     #         joint_state_server.close()
     #         joint_state_stream_thread.join()
 
-    #     if not args.disable_joint_tracking:
+    #     if args.connect_to_mocap:
     #         mocap_client.shutdown()
 
     #     if pp.is_connected():

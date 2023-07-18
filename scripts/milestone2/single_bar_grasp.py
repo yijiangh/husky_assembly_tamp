@@ -4,6 +4,7 @@ import random
 import socket, json
 import struct
 from threading import Thread
+from plyer import notification
 
 import numpy as np
 import pybullet_planning as pp
@@ -18,11 +19,11 @@ from compas.robots import RobotModel
 from compas_fab.robots import RobotSemantics
 from compas_fab.robots import Robot as RobotClass
 
-# CLIENT_IP = '127.0.0.1'
+LOCAL_SERVER = True
 CLIENT_IP = '192.168.0.7' # Set to your own IP
+LOCAL_SERVER_IP = 'localhost' # '127.0.0.1'
 MOCAP_IP = '192.168.0.117'
 
-# HUSKY_IP = 'localhost'
 HUSKY_IP = '192.168.0.113'
 HUSKY_UDP_PORT = 65432
 HUSKY_TCP_PORT = 12345
@@ -67,7 +68,7 @@ def receive_rigid_body_frame( new_id, position, rotation ):
 def receive_joint_state(socket_server):
     # receive the message from socket and translate them into ROS messages
     global arm_joint_state
-    data, CLIENT_IP = socket_server.recvfrom(65507)
+    data, _ = socket_server.recvfrom(65507)
     try:
         arm_joint_state = json.loads(data.decode("utf-8"))
     except Exception as e:
@@ -289,7 +290,7 @@ def plan_pickup_motion(robot, ik_solver, current_conf, bar_body, attachments, ob
                             # pp.draw_pose(fpose)
                             attach_conf = ik_solver.ik(pp.tform_from_pose(fpose), qinit=prev_conf)
                             if attach_conf is None or approach_collision_fn(attach_conf, diagnosis=debug):
-                                print('ik can\'t find an ik solution for approaching')
+                                notify('ik can\'t find an ik solution for approaching')
                                 break
                             else:
                                 approach_path.append(attach_conf)
@@ -297,10 +298,10 @@ def plan_pickup_motion(robot, ik_solver, current_conf, bar_body, attachments, ob
                             not check_path(movable_joints, approach_path, jump_threshold=JOINT_JUMP_THRESHOLD):
                             continue
                         else:
-                            print('Pregrasp path found: {} pts'.format(len(approach_path)))
+                            notify('Pregrasp path found: {} pts'.format(len(approach_path)))
                             break
                 else:
-                    print("no ik solution")
+                    notify("no ik solution")
                     return None
         end_conf = approach_path[-1]
     else:
@@ -312,7 +313,7 @@ def plan_pickup_motion(robot, ik_solver, current_conf, bar_body, attachments, ob
         with pp.LockRenderer(True):
             # * plan transit motion from current conf to pregrasp conf
             start_conf = pp.get_joint_positions(robot, movable_joints)
-            print('start conf: ', start_conf)
+            # print('start conf: ', start_conf)
             transit_path = None
 
             # new_collision_fn = lambda q, diagnosis=False: collision_fn(q, diagnosis=True)
@@ -331,30 +332,48 @@ def plan_pickup_motion(robot, ik_solver, current_conf, bar_body, attachments, ob
                 #                         smooth=20, max_time=20, 
                 #                         coarse_waypoints=False)
             else:
-                print('initial and end conf not valid')
+                notify('initial and end conf not valid')
 
             if transit_path is None:
-                print('transit path not found')
+                notify('transit path not found')
                 return approach_path[::-1]
                 # return None
             else:
-                print('transit path found: transit {} pts'.format(len(transit_path)))
+                notify('transit path found: transit {} pts'.format(len(transit_path)))
             path = transit_path + approach_path[::-1]
 
     return path
 
-    # path = []
-    # base_pose = pp.pose_from_pose2d(conf[:3])
-    # print("converted base conf: ", pp.pose2d_from_pose(base_pose))
-
-    #         approach_path = None
-    #     assert approach_path is not None
-    #     path.append(approach_path)
-    #     path.append(approach_path[::-1])
-    #     path.append(transit_path[::-1])
+def notify(msg):
+    print(msg)
+    notification.notify(
+        title='husky_assembly',
+        message=msg,
+        app_icon=None,  # e.g. 'C:\\icon_32x32.ico'
+        timeout=2,  # seconds
+    )
 
 def align_joint_conf_by_joint_names(source_joint_names, target_conf, target_joint_names):
     return [target_conf[target_joint_names.index(joint_name)] for joint_name in source_joint_names]
+
+def save_joint_state_to_json():
+    global arm_joint_state
+    file_path = os.path.join(HERE, 'arm_joint_state.json')
+    with open(file_path, 'w') as f:
+        json.dump(arm_joint_state, f, indent=4)
+    notify('Arm joint state saved to {}'.format(file_path))
+
+def read_saved_joint_state_from_json():
+    file_path = os.path.join(HERE, 'arm_joint_state.json')
+    if not os.path.exists(file_path):
+        notify('no saved arm joint state found at {}'.format(file_path))
+        return None
+    with open(file_path, 'r') as f:
+        saved_arm_joint_state = json.load(f)
+    notify('Saved arm joint state read from {}'.format(file_path))
+    return saved_arm_joint_state
+
+#####################################
 
 def main():
     parser = argparse.ArgumentParser()
@@ -383,7 +402,7 @@ def main():
         jt_socket_server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         jt_socket_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         # ! on the husky side, we set it to always send to the same port to the host
-        jt_socket_server.bind((CLIENT_IP, HUSKY_UDP_PORT))
+        jt_socket_server.bind((CLIENT_IP if not LOCAL_SERVER else LOCAL_SERVER_IP, HUSKY_UDP_PORT))
         jt_socket_server.settimeout(0.001)
 
         # * a thread to receive data from the husky
@@ -394,7 +413,7 @@ def main():
 
         # # * TCP socket to send trajectory to the husky
         traj_socket_client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        traj_socket_client.connect((HUSKY_IP, HUSKY_TCP_PORT))
+        traj_socket_client.connect((HUSKY_IP if not LOCAL_SERVER else LOCAL_SERVER_IP, HUSKY_TCP_PORT))
 
     # * start pybullet simulator
     pp.connect(use_gui=True, shadows=True, color=[0.9, 0.9, 1.0])
@@ -407,6 +426,15 @@ def main():
     #  For a button, the value of getUserDebugParameter for a button increases 1 at each button press.
     plan_button = p.addUserDebugParameter("plan", 1, 0, 0)
     prev_plan_button_value = p.readUserDebugParameter(plan_button)
+
+    reverse_traj_button = p.addUserDebugParameter("reverse traj", 1, 0, 0)
+    prev_reverse_value = p.readUserDebugParameter(reverse_traj_button)
+
+    save_state_button = p.addUserDebugParameter("save arm joint state", 1, 0, 0)
+    prev_save_state_button = p.readUserDebugParameter(save_state_button)
+
+    plan_to_saved_state_button = p.addUserDebugParameter("plan to saved state", 1, 0, 0)
+    prev_plan_to_saved_state_button = p.readUserDebugParameter(plan_to_saved_state_button)
 
     execute_button = p.addUserDebugParameter("execute", 1, 0, 0)
     prev_execute_button_value = p.readUserDebugParameter(execute_button)
@@ -442,7 +470,7 @@ def main():
     base_cmd_names = ['xVel', 'angVel']
 
     recorded_conf = (0,0,0,-1.3227758407592773, -1.5873312950134277, -1.5211923122406006, 0.0, 0.0, 0.0)
-    if args.connect_to_mocap :
+    if not args.connect_to_mocap :
         # a recorded pose for debuggging purpose
         temp_bar_pose = ((-1.062444806098938, 0.19626910984516144, 0.6585784554481506), (0.8137449622154236, -0.1838780641555786, 0.5276390910148621, -0.1600152850151062))
         pp.set_pose(bar, temp_bar_pose)
@@ -455,15 +483,15 @@ def main():
         if arm_joint_state:
             recorded_conf = align_joint_conf_by_joint_names(planned_joint_names, arm_joint_state['position'], arm_joint_state['name'])
 
-    joint_sliders = []
-    for j, initial_v in zip(planned_joints, recorded_conf):
-        lower, upper = pp.get_joint_limits(robot, j)
-        joint_sliders.append(p.addUserDebugParameter(pp.get_joint_name(robot, j).decode("utf-8"), 
-                                                     lower, upper, initial_v))
-        pp.set_joint_position(shadow_robot, j, initial_v)
-        if teleop_target:
+    if teleop_target:
+        joint_sliders = []
+        for j, initial_v in zip(planned_joints, recorded_conf):
+            lower, upper = pp.get_joint_limits(robot, j)
+            joint_sliders.append(p.addUserDebugParameter(pp.get_joint_name(robot, j).decode("utf-8"), 
+                                                         lower, upper, initial_v))
+            pp.set_joint_position(shadow_robot, j, initial_v)
             pp.set_joint_position(goal_robot, j, initial_v)
-    prev_joint_slider_values = [p.readUserDebugParameter(js) for js in joint_sliders]
+        prev_joint_slider_values = [p.readUserDebugParameter(js) for js in joint_sliders]
 
     obstacles = []
 
@@ -574,6 +602,24 @@ def main():
                                                         teleop_goal_conf=current_joint_slider_values if teleop_target else None)
             prev_plan_button_value = current_plan_button_reading
 
+            current_plan_to_saved_state_button_reading = p.readUserDebugParameter(plan_to_saved_state_button)
+            if current_plan_to_saved_state_button_reading > prev_plan_to_saved_state_button:
+                saved_joint_state = read_saved_joint_state_from_json()
+                if saved_joint_state:
+                    saved_conf = align_joint_conf_by_joint_names(planned_joint_names, saved_joint_state['position'], saved_joint_state['name'])
+                    planned_trajectory = plan_pickup_motion(robot, ik_solver, None, bar, 
+                                                            [ee_attachment], obstacles + [bar], 
+                                                            ik_from_arm_base=ik_from_arm_base, 
+                                                            disabled_collisions=disabled_collisions,
+                                                            debug=args.debug,
+                                                            teleop_goal_conf=saved_conf)
+            prev_plan_to_saved_state_button = current_plan_to_saved_state_button_reading
+
+            current_save_state_reading = p.readUserDebugParameter(save_state_button)
+            if current_save_state_reading > prev_save_state_button:
+                save_joint_state_to_json()
+            prev_save_state_button = current_save_state_reading
+
             if planned_trajectory:
                 # set the shadow robot to the slider value
                 traj_param_value = p.readUserDebugParameter(traj_param_slider)
@@ -581,6 +627,11 @@ def main():
                 traj_pose = planned_trajectory[traj_idx]
                 pp.set_joint_positions(shadow_robot, planned_joints, traj_pose)
                 shadow_ee_attachment.assign()
+
+            current_reverse_value = p.readUserDebugParameter(reverse_traj_button)
+            if current_reverse_value > prev_reverse_value:
+                planned_trajectory = planned_trajectory[::-1]
+                prev_reverse_value = current_reverse_value
                 
             # * if execute button is pressed, execute the planned trajectory
             current_execute_button_reading = p.readUserDebugParameter(execute_button)

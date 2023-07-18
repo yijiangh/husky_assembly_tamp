@@ -28,6 +28,7 @@ exec(read('src', 'husky_assembly', '__version__.py'), about)
 requirements = [
     'pybullet_planning>=0.6.0',
     'compas_fab==0.28.0',
+    'plyer==2.1.0',
     # 'matplotlib',
 ]
 

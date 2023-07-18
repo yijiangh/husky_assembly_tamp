@@ -20,10 +20,10 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "args": [
-                // "--connect_to_mocap",
+                "--connect_to_mocap",
                 "--connect_to_hw",
                 // "--debug"
-                "--teleopt_target"
+                // "--teleopt_target"
             ]
         }
     ]

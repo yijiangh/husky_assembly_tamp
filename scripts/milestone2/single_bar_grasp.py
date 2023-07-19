@@ -50,6 +50,7 @@ ORI_STEP_SIZE = np.pi/18
 name_from_mocap_id = {
     1028 : 'husky0804',
     1011 : 'bar',
+    1029 : 'greybox',
 }
 
 # goal registar for optitrack to overwrite
@@ -207,7 +208,7 @@ def check_path(joints, path, collision_fn=None, jump_threshold=None, diagnosis=F
                 return False
     return True
 
-def plan_pickup_motion(robot, ik_solver, current_conf, bar_body, attachments, obstacles, debug=False, ik_from_arm_base=True, disabled_collisions=None, teleop_goal_conf=None):
+def plan_pickup_motion(robot, ik_solver, bar_body, attachments, obstacles, debug=False, ik_from_arm_base=True, disabled_collisions=None):
     # plan a transit motion from init conf to pick_approach conf  
     custom_limits = get_custom_limits(robot, {})
     resolutions = np.ones(6) * 0.05
@@ -225,8 +226,6 @@ def plan_pickup_motion(robot, ik_solver, current_conf, bar_body, attachments, ob
     sample_fn = pp.get_sample_fn(robot, movable_joints, custom_limits=custom_limits)
     distance_fn = pp.get_distance_fn(robot, movable_joints) #, weights=weights)
     extend_fn = pp.get_extend_fn(robot, movable_joints, resolutions=resolutions)
-
-    # TODO use compas_fab to load ignore collision pairs from SRDF
     transit_collision_fn = pp.get_collision_fn(robot, movable_joints, obstacles=obstacles,
                                                 attachments=attachments, 
                                                 self_collisions=1,
@@ -260,61 +259,111 @@ def plan_pickup_motion(robot, ik_solver, current_conf, bar_body, attachments, ob
     # tool0_from_ee = pp.Pose(euler=pp.Euler(yaw=-np.pi/2), point=[0,0,0.138])
     tool0_from_ee = pp.Pose(point=[0,0,0.138])
 
-    if teleop_goal_conf is None:
-        # * sample grasp and IK, and plan for approach motion
-        attach_conf = None
-        with pp.WorldSaver():
-            with pp.LockRenderer():
-                for _ in range(50):
-                    gripper_from_object = next(grasp_gen)
-                    world_from_tcp_pose = pp.multiply(world_from_object, pp.invert(gripper_from_object))
+    # * sample grasp and IK, and plan for approach motion
+    grasp_attempts = 50
+    attach_conf = None
+    path = None
+    with pp.WorldSaver():
+        with pp.LockRenderer():
+            for g_id in range(grasp_attempts):
+                print('Grasp attempt #{}/{}'.format(g_id, grasp_attempts))
+                gripper_from_object = next(grasp_gen)
+                world_from_tcp_pose = pp.multiply(world_from_object, pp.invert(gripper_from_object))
 
-                    arm_base_from_tcp_pose = pp.multiply(pp.invert(world_from_arm_base), world_from_tcp_pose)
-                    arm_base_from_tool0 = pp.multiply(arm_base_from_tcp_pose, pp.invert(tool0_from_ee))
-                    # pp.draw_pose(pp.multiply(world_from_arm_base, arm_base_from_tcp_pose))
+                arm_base_from_tcp_pose = pp.multiply(pp.invert(world_from_arm_base), world_from_tcp_pose)
+                arm_base_from_tool0 = pp.multiply(arm_base_from_tcp_pose, pp.invert(tool0_from_ee))
+                # pp.draw_pose(pp.multiply(world_from_arm_base, arm_base_from_tcp_pose))
 
-                    attach_conf = ik_solver.ik(pp.tform_from_pose(arm_base_from_tool0))
-                    if attach_conf is not None and not approach_collision_fn(attach_conf, diagnosis=debug):
-                        # print("solved conf: ", conf)
-                        # print("grasp: ", gripper_from_object)
+                attach_conf = ik_solver.ik(pp.tform_from_pose(arm_base_from_tool0))
+                if attach_conf is not None and not approach_collision_fn(attach_conf, diagnosis=debug):
+                    # print("solved conf: ", conf)
+                    # print("grasp: ", gripper_from_object)
 
-                        # * plan pregrasp motion
-                        # move world_from_tool0 in the minus z direction for 0.1m
-                        tool0_from_pregrasp = pp.Pose(point=[0,0,-0.1])
-                        arm_base_from_pregrasp = pp.multiply(arm_base_from_tool0, tool0_from_pregrasp)
+                    # * plan pregrasp motion
+                    # move world_from_tool0 in the minus z direction for 0.1m
+                    tool0_from_pregrasp = pp.Pose(point=[0,0,-0.1])
+                    arm_base_from_pregrasp = pp.multiply(arm_base_from_tool0, tool0_from_pregrasp)
 
-                        approach_path = []
-                        pregrasp_poses = list(pp.interpolate_poses(arm_base_from_tool0, arm_base_from_pregrasp, pos_step_size=POS_STEP_SIZE, ori_step_size=ORI_STEP_SIZE))
-                        prev_conf = attach_conf
-                        for fpose in pregrasp_poses:
-                            # pp.draw_pose(fpose)
-                            attach_conf = ik_solver.ik(pp.tform_from_pose(fpose), qinit=prev_conf)
-                            if attach_conf is None or approach_collision_fn(attach_conf, diagnosis=debug):
-                                notify('ik can\'t find an ik solution for approaching')
-                                break
-                            else:
-                                approach_path.append(attach_conf)
-                        if len(approach_path) != len(pregrasp_poses) or \
-                            not check_path(movable_joints, approach_path, jump_threshold=JOINT_JUMP_THRESHOLD):
+                    approach_path = []
+                    pregrasp_poses = list(pp.interpolate_poses(arm_base_from_tool0, arm_base_from_pregrasp, pos_step_size=POS_STEP_SIZE, ori_step_size=ORI_STEP_SIZE))
+                    prev_conf = attach_conf
+                    for fpose in pregrasp_poses:
+                        # pp.draw_pose(fpose)
+                        attach_conf = ik_solver.ik(pp.tform_from_pose(fpose), qinit=prev_conf)
+                        if attach_conf is None or approach_collision_fn(attach_conf, diagnosis=debug):
+                            notify('ik can\'t find an ik solution for approaching')
+                            break
+                        else:
+                            approach_path.append(attach_conf)
+
+                    if len(approach_path) != len(pregrasp_poses) or \
+                        not check_path(movable_joints, approach_path, jump_threshold=JOINT_JUMP_THRESHOLD):
+                        continue
+                    else:
+                        print('Pregrasp path found: {} pts'.format(len(approach_path)))
+                        # * plan transit motion from current conf to pregrasp conf
+                        start_conf = pp.get_joint_positions(robot, movable_joints)
+                        end_conf = approach_path[-1]
+                        # print('start conf: ', start_conf)
+                        transit_path = None
+
+                        if pp.check_initial_end(start_conf, end_conf, transit_collision_fn, diagnosis=debug):
+                            transit_path = pp.solve_motion_plan(start_conf, end_conf, 
+                                                        distance_fn, sample_fn, extend_fn,
+                                                        transit_collision_fn,
+                                                        algorithm='birrt', 
+                                                        max_time=10, 
+                                                        max_iterations=20, 
+                                                        smooth=20, diagnosis=debug,
+                                                        coarse_waypoints=False,
+                                                        ) 
+                        else:
+                            notify('initial and end confs for transit motion are not valid')
+
+                        if transit_path is None:
+                            # notify('transit path not found')
+                            # return approach_path[::-1]
+                            # return None
+                            # path = approach_path[::-1]
                             continue
                         else:
-                            notify('Pregrasp path found: {} pts'.format(len(approach_path)))
-                            break
-                else:
-                    notify("no ik solution")
-                    return None
-        end_conf = approach_path[-1]
-    else:
-        assert len(teleop_goal_conf) == len(movable_joints)
-        end_conf = teleop_goal_conf
-        approach_path = []
+                            notify('transit path found: transit {} pts'.format(len(transit_path)))
+                        path = transit_path + approach_path[::-1]
+                        break
+            else:
+                notify("no ik solution after {} grasp attempts".format(grasp_attempts))
 
+    return path
+
+def plan_transit_motion(robot, end_conf, attachments, obstacles, debug=False, ik_from_arm_base=True, disabled_collisions=None):
+    custom_limits = get_custom_limits(robot, {})
+    resolutions = np.ones(6) * 0.05
+    disabled_collisions = disabled_collisions or {}
+    extra_disabled_collisions = [
+        ((robot, pp.link_from_name(robot, 'ur_arm_wrist_3_link')), 
+         (attachments[0].child, pp.BASE_LINK)), 
+        ]
+
+    first_joint_id = 3 if ik_from_arm_base else 0
+    movable_joints = pp.joints_from_names(robot, HUSKYU_JOINT_NAMES[first_joint_id:])
+
+    sample_fn = pp.get_sample_fn(robot, movable_joints, custom_limits=custom_limits)
+    distance_fn = pp.get_distance_fn(robot, movable_joints) #, weights=weights)
+    extend_fn = pp.get_extend_fn(robot, movable_joints, resolutions=resolutions)
+
+    transit_collision_fn = pp.get_collision_fn(robot, movable_joints, obstacles=obstacles,
+                                                attachments=attachments, 
+                                                self_collisions=1,
+                                                disabled_collisions=disabled_collisions, extra_disabled_collisions=extra_disabled_collisions,
+                                                custom_limits=custom_limits, 
+                                                max_distance=0)
+
+    transit_path = None
     with pp.WorldSaver():
         with pp.LockRenderer(True):
             # * plan transit motion from current conf to pregrasp conf
             start_conf = pp.get_joint_positions(robot, movable_joints)
             # print('start conf: ', start_conf)
-            transit_path = None
 
             # new_collision_fn = lambda q, diagnosis=False: collision_fn(q, diagnosis=True)
             if pp.check_initial_end(start_conf, end_conf, transit_collision_fn, diagnosis=debug):
@@ -327,22 +376,14 @@ def plan_pickup_motion(robot, ik_solver, current_conf, bar_body, attachments, ob
                                             smooth=20, diagnosis=debug,
                                             coarse_waypoints=False,
                                             ) 
-                # transit_path = pp.birrt(start_conf, end_conf, 
-                #                         distance_fn, sample_fn, extend_fn, transit_collision_fn,
-                #                         smooth=20, max_time=20, 
-                #                         coarse_waypoints=False)
             else:
                 notify('initial and end conf not valid')
-
             if transit_path is None:
                 notify('transit path not found')
-                return approach_path[::-1]
-                # return None
             else:
                 notify('transit path found: transit {} pts'.format(len(transit_path)))
-            path = transit_path + approach_path[::-1]
 
-    return path
+    return transit_path
 
 def notify(msg):
     print(msg)
@@ -446,8 +487,10 @@ def main():
     pp.draw_pose(pp.unit_pose(), 0.5)
     with pp.LockRenderer():
         p.loadMJCF(os.path.join(HERE, "plane.xml"))
-        # pp.create_plane(color=[0.9, 0.9, 1.0])
-        bar = pp.create_cylinder(radius=0.01, height=1.0)
+        plane = pp.create_plane(color=[0.9, 0.9, 1.0, 0.0])
+        bar = pp.create_cylinder(radius=0.01, height=1.0, color=pp.BROWN)
+        box = pp.create_box(0.6, 0.4, 0.45, color=pp.apply_alpha(pp.GREY, 1))
+
         with pp.HideOutput():
             robot, ee_attachment, ik_solver, disabled_collisions = load_robot(ik_from_arm_base)
 
@@ -493,18 +536,13 @@ def main():
             pp.set_joint_position(goal_robot, j, initial_v)
         prev_joint_slider_values = [p.readUserDebugParameter(js) for js in joint_sliders]
 
-    obstacles = []
+    obstacles = [plane, box]
 
     rb_from_name = {
         'bar': bar,
         'husky0804': robot,
+        'greybox': box,
     }
-
-    # solved conf:  [-1.81951974e+00 -2.70217971e-04 -5.86842433e+37 -5.42704427e+00
-    #  -1.67372424e+00 -1.34852926e+00  2.65833299e+00  4.13893596e+00
-    #   1.78973138e+00]
-    # grasp:  ((0.0, 0.4418979585170746, 0.0), (-0.6446115374565125, 0.2906475067138672, 0.2906475067138672, 0.6446115374565125))
-    # converted base conf:  (-1.8195197415944886, -0.00027021797075961755, -1.2547157015094492)
 
     # try:
     if True:
@@ -594,12 +632,17 @@ def main():
             current_plan_button_reading = p.readUserDebugParameter(plan_button)
             if current_plan_button_reading > prev_plan_button_value:
                 # * plan the grasp, IK, and pick-up motion
-                planned_trajectory = plan_pickup_motion(robot, ik_solver, None, bar, 
-                                                        [ee_attachment], obstacles + [bar], 
-                                                        ik_from_arm_base=ik_from_arm_base, 
-                                                        disabled_collisions=disabled_collisions,
-                                                        debug=args.debug,
-                                                        teleop_goal_conf=current_joint_slider_values if teleop_target else None)
+                if teleop_target is not None:
+                    planned_trajectory = plan_transit_motion(robot, current_joint_slider_values, 
+                                                             [ee_attachment], 
+                                                             obstacles + [bar], 
+                                                             debug=args.debug, ik_from_arm_base=ik_from_arm_base, disabled_collisions=disabled_collisions)
+                else:
+                    planned_trajectory = plan_pickup_motion(robot, ik_solver, bar, 
+                                                            [ee_attachment], obstacles + [bar], 
+                                                            ik_from_arm_base=ik_from_arm_base, 
+                                                            disabled_collisions=disabled_collisions,
+                                                            debug=args.debug)
             prev_plan_button_value = current_plan_button_reading
 
             current_plan_to_saved_state_button_reading = p.readUserDebugParameter(plan_to_saved_state_button)
@@ -607,7 +650,7 @@ def main():
                 saved_joint_state = read_saved_joint_state_from_json()
                 if saved_joint_state:
                     saved_conf = align_joint_conf_by_joint_names(planned_joint_names, saved_joint_state['position'], saved_joint_state['name'])
-                    planned_trajectory = plan_pickup_motion(robot, ik_solver, None, bar, 
+                    planned_trajectory = plan_pickup_motion(robot, ik_solver, bar, 
                                                             [ee_attachment], obstacles + [bar], 
                                                             ik_from_arm_base=ik_from_arm_base, 
                                                             disabled_collisions=disabled_collisions,

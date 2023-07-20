@@ -120,7 +120,23 @@ def send_base_arm_trajectory_command(socket_server, joint_names, joint_positions
     print('Data size = %d' % len(encoded_json))
 
     try:
-        # socket_server.sendto(encoded_json, (udp_ip, udp_port))
+        socket_server.sendall(msg)
+    except socket.error as e:
+        print("error while sending: %s" %e)
+
+def send_gripper_command(socket_server, gripper_pos):
+    assert gripper_pos >= 0 and gripper_pos <= 255
+    j = {}
+    j["gripper_pos"] = gripper_pos
+
+    j_file = json.dumps(j)
+    encoded_json = j_file.encode('utf-8')
+    msg = struct.pack('>I', len(encoded_json)) + encoded_json
+    print("***************************")
+    print("Sending goal gripper pose = " + str(gripper_pos))
+    print('Data size = %d' % len(encoded_json))
+
+    try:
         socket_server.sendall(msg)
     except socket.error as e:
         print("error while sending: %s" %e)
@@ -263,6 +279,7 @@ def plan_pickup_motion(robot, ik_solver, bar_body, attachments, obstacles, debug
     grasp_attempts = 50
     attach_conf = None
     path = None
+    start_conf = pp.get_joint_positions(robot, movable_joints)
     with pp.WorldSaver():
         with pp.LockRenderer():
             for g_id in range(grasp_attempts):
@@ -302,7 +319,6 @@ def plan_pickup_motion(robot, ik_solver, bar_body, attachments, obstacles, debug
                     else:
                         print('Pregrasp path found: {} pts'.format(len(approach_path)))
                         # * plan transit motion from current conf to pregrasp conf
-                        start_conf = pp.get_joint_positions(robot, movable_joints)
                         end_conf = approach_path[-1]
                         # print('start conf: ', start_conf)
                         transit_path = None
@@ -480,6 +496,14 @@ def main():
     execute_button = p.addUserDebugParameter("execute", 1, 0, 0)
     prev_execute_button_value = p.readUserDebugParameter(execute_button)
 
+    open_gripper_button = p.addUserDebugParameter("open gripper", 1, 0, 0)
+    prev_open_gripper_value = p.readUserDebugParameter(open_gripper_button)
+
+    close_gripper_button = p.addUserDebugParameter("close gripper", 1, 0, 0)
+    prev_close_gripper_value = p.readUserDebugParameter(close_gripper_button)
+
+    # TODO slider to control the time gap between each trajectory point
+
     ik_from_arm_base = 1
     teleop_target = args.teleopt_target
 
@@ -631,13 +655,13 @@ def main():
 
             current_plan_button_reading = p.readUserDebugParameter(plan_button)
             if current_plan_button_reading > prev_plan_button_value:
-                # * plan the grasp, IK, and pick-up motion
-                if teleop_target is not None:
+                if teleop_target:
                     planned_trajectory = plan_transit_motion(robot, current_joint_slider_values, 
                                                              [ee_attachment], 
                                                              obstacles + [bar], 
                                                              debug=args.debug, ik_from_arm_base=ik_from_arm_base, disabled_collisions=disabled_collisions)
                 else:
+                    # * plan the grasp, IK, and pick-up motion
                     planned_trajectory = plan_pickup_motion(robot, ik_solver, bar, 
                                                             [ee_attachment], obstacles + [bar], 
                                                             ik_from_arm_base=ik_from_arm_base, 
@@ -687,6 +711,19 @@ def main():
 
                 send_base_arm_trajectory_command(traj_socket_client, base_cmd_names + planned_joint_names, padded_traj, time_from_start)
             prev_execute_button_value = current_execute_button_reading
+
+            # * open gripper execution
+            current_openg_button_reading = p.readUserDebugParameter(open_gripper_button)
+            if current_openg_button_reading > prev_open_gripper_value:
+                send_gripper_command(traj_socket_client, 255)
+            prev_open_gripper_value = current_openg_button_reading
+
+            # * close gripper execution
+            current_closeg_button_reading = p.readUserDebugParameter(close_gripper_button)
+            if current_closeg_button_reading > prev_close_gripper_value:
+                # diameter of the bar is 0.02
+                send_gripper_command(traj_socket_client, 0.02)
+            prev_close_gripper_value = current_closeg_button_reading
 
             time.sleep(0.01)
 

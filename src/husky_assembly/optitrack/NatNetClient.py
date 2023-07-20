@@ -21,6 +21,7 @@ import copy
 import time
 import husky_assembly.optitrack.DataDescriptions as DataDescriptions
 import husky_assembly.optitrack.MoCapData as MoCapData
+from collections import defaultdict
 
 def trace( *args ):
     # uncomment the one you want to use
@@ -30,13 +31,13 @@ def trace( *args ):
 #Used for Data Description functions
 def trace_dd( *args ):
     # uncomment the one you want to use
-    #print( "".join(map(str,args)) )
+    # print( "".join(map(str,args)) )
     pass
 
 #Used for MoCap Frame Data functions
 def trace_mf( *args ):
     # uncomment the one you want to use
-    #print( "".join(map(str,args)) )
+    # print( "".join(map(str,args)) )
     pass
 
 def get_message_id(data):
@@ -80,6 +81,7 @@ class NatNetClient:
 
         # Set this to a callback method of your choice to receive per-rigid-body data at each frame.
         self.rigid_body_listener = None
+        self.labeled_marker_listener = None
         self.new_frame_listener  = None
 
         # Set Application Name
@@ -399,7 +401,6 @@ class NatNetClient:
             else:
                 rigid_body.tracking_valid = False
 
-
         return offset, rigid_body
 
     # Unpack a skeleton object from a data packet
@@ -513,6 +514,10 @@ class NatNetClient:
     def __unpack_labeled_marker_data( self, data, packet_size, major, minor):
         labeled_marker_data = MoCapData.LabeledMarkerData()
         offset = 0
+
+        # For listener
+        labeled_marker_from_model_id = defaultdict(dict)
+
         # Labeled markers (Version 2.3 and later)
         labeled_marker_count = 0
         if( ( major == 2 and minor > 3 ) or major > 2 ):
@@ -533,7 +538,7 @@ class NatNetClient:
                 trace_mf("  pos  : [%3.2f, %3.2f, %3.2f]"%(pos[0],pos[1],pos[2]))
                 trace_mf("  size : [%3.2f]"%size)
 
-
+                labeled_marker_from_model_id[model_id][marker_id] = pos
                 # Version 2.6 and later
                 param = 0
                 if( ( major == 2 and minor >= 6 ) or major > 2):
@@ -552,6 +557,9 @@ class NatNetClient:
 
                 labeled_marker = MoCapData.LabeledMarker(tmp_id,pos,size,param, residual)
                 labeled_marker_data.add_labeled_marker(labeled_marker)
+        
+        if self.labeled_marker_listener is not None:
+            self.labeled_marker_listener(labeled_marker_from_model_id)
 
         return offset, labeled_marker_data
 

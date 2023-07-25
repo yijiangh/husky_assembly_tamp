@@ -50,8 +50,12 @@ ORI_STEP_SIZE = np.pi/18
 name_from_mocap_id = {
     1028 : 'husky0804',
     1011 : 'bar',
-    1029 : 'greybox',
+    1030 : 'foundation_bar',
+    # 1029 : 'greybox',
 }
+
+# TOOL0_FROM_EE = pp.Pose(point=[0,0,0.138])
+TOOL0_FROM_EE = pp.Pose(point=[0,0,0.160])
 
 # goal registar for optitrack to overwrite
 rigid_body_poses = {}
@@ -146,8 +150,8 @@ def send_gripper_command(socket_server, gripper_pos):
 def load_robot(ik_from_arm_base=True):
     robot_urdf = os.path.join(DATA_DIRECTORY,'husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf')
     robot_srdf = os.path.join(DATA_DIRECTORY, 'husky_urdf/mt_husky_moveit_config/config/husky.srdf')
-    # gripper_obj = os.path.join(DATA_DIRECTORY,'husky_urdf/robotiq_85/meshes/static/robotiq_85_close_20mm.obj')
-    gripper_obj = os.path.join(DATA_DIRECTORY,'husky_urdf/robotiq_85/meshes/static/robotiq_85_open.obj')
+    gripper_obj = os.path.join(DATA_DIRECTORY,'husky_urdf/robotiq_85/meshes/static/robotiq_85_close_20mm.obj')
+    # gripper_obj = os.path.join(DATA_DIRECTORY,'husky_urdf/robotiq_85/meshes/static/robotiq_85_open.obj')
     # robot_urdf = os.path.join(HERE,'robotiq_85/urdf/robotiq_85_gripper_simple.urdf')
     # robot_urdf = os.path.join(HERE,'mt_husky_dual_ur5_e_moveit_config/urdf/husky_dual_ur5_e.urdf')
     # print(robot_urdf)
@@ -157,7 +161,7 @@ def load_robot(ik_from_arm_base=True):
     move_group = 'manipulator'
     robot_model = RobotModel.from_urdf_file(robot_urdf)
     robot_semantics = RobotSemantics.from_srdf_file(robot_srdf, robot_model)
-    cp_robot = RobotClass(robot_model, semantics=robot_semantics)
+    # cp_robot = RobotClass(robot_model, semantics=robot_semantics)
 
     robot = pp.load_pybullet(robot_urdf, fixed_base=False, cylinder=False)
 
@@ -272,8 +276,6 @@ def plan_pickup_motion(robot, ik_solver, bar_body, attachments, obstacles, debug
     # pp.draw_pose(world_from_arm_base)
 
     world_from_object = pp.get_pose(bar_body)
-    # tool0_from_ee = pp.Pose(euler=pp.Euler(yaw=-np.pi/2), point=[0,0,0.138])
-    tool0_from_ee = pp.Pose(point=[0,0,0.138])
 
     # * sample grasp and IK, and plan for approach motion
     grasp_attempts = 50
@@ -288,7 +290,7 @@ def plan_pickup_motion(robot, ik_solver, bar_body, attachments, obstacles, debug
                 world_from_tcp_pose = pp.multiply(world_from_object, pp.invert(gripper_from_object))
 
                 arm_base_from_tcp_pose = pp.multiply(pp.invert(world_from_arm_base), world_from_tcp_pose)
-                arm_base_from_tool0 = pp.multiply(arm_base_from_tcp_pose, pp.invert(tool0_from_ee))
+                arm_base_from_tool0 = pp.multiply(arm_base_from_tcp_pose, pp.invert(TOOL0_FROM_EE))
                 # pp.draw_pose(pp.multiply(world_from_arm_base, arm_base_from_tcp_pose))
 
                 attach_conf = ik_solver.ik(pp.tform_from_pose(arm_base_from_tool0))
@@ -502,7 +504,8 @@ def main():
     close_gripper_button = p.addUserDebugParameter("close gripper", 1, 0, 0)
     prev_close_gripper_value = p.readUserDebugParameter(close_gripper_button)
 
-    # TODO slider to control the time gap between each trajectory point
+    # slider to control the time gap between each trajectory point
+    dt_slider = p.addUserDebugParameter("traj dt", 0.04, 0.2, 0.2)
 
     ik_from_arm_base = 1
     teleop_target = args.teleopt_target
@@ -513,7 +516,9 @@ def main():
         p.loadMJCF(os.path.join(HERE, "plane.xml"))
         plane = pp.create_plane(color=[0.9, 0.9, 1.0, 0.0])
         bar = pp.create_cylinder(radius=0.01, height=1.0, color=pp.BROWN)
-        box = pp.create_box(0.6, 0.4, 0.45, color=pp.apply_alpha(pp.GREY, 1))
+
+        foundation_bar = pp.create_cylinder(radius=0.01, height=0.75, color=pp.BROWN)
+        # box = pp.create_box(0.6, 0.4, 0.45, color=pp.apply_alpha(pp.GREY, 1))
 
         with pp.HideOutput():
             robot, ee_attachment, ik_solver, disabled_collisions = load_robot(ik_from_arm_base)
@@ -560,12 +565,13 @@ def main():
             pp.set_joint_position(goal_robot, j, initial_v)
         prev_joint_slider_values = [p.readUserDebugParameter(js) for js in joint_sliders]
 
-    obstacles = [plane, box]
+    obstacles = [plane, foundation_bar]
 
     rb_from_name = {
         'bar': bar,
         'husky0804': robot,
-        'greybox': box,
+        # 'greybox': box,
+        'foundation_bar': foundation_bar,
     }
 
     # try:
@@ -674,12 +680,12 @@ def main():
                 saved_joint_state = read_saved_joint_state_from_json()
                 if saved_joint_state:
                     saved_conf = align_joint_conf_by_joint_names(planned_joint_names, saved_joint_state['position'], saved_joint_state['name'])
-                    planned_trajectory = plan_pickup_motion(robot, ik_solver, bar, 
-                                                            [ee_attachment], obstacles + [bar], 
-                                                            ik_from_arm_base=ik_from_arm_base, 
-                                                            disabled_collisions=disabled_collisions,
-                                                            debug=args.debug,
-                                                            teleop_goal_conf=saved_conf)
+                    planned_trajectory = plan_transit_motion(robot, saved_conf,
+                                                             [ee_attachment], 
+                                                             obstacles + [bar], 
+                                                             ik_from_arm_base=ik_from_arm_base, 
+                                                             disabled_collisions=disabled_collisions,
+                                                             debug=args.debug)
             prev_plan_to_saved_state_button = current_plan_to_saved_state_button_reading
 
             current_save_state_reading = p.readUserDebugParameter(save_state_button)
@@ -706,9 +712,8 @@ def main():
                 # padd each trajectory point in planned_trajectory with two zeros at the beginning
                 padded_traj = np.concatenate([np.zeros((len(planned_trajectory), 2)), np.array(planned_trajectory)], axis=1)
 
-                # time_from_start = np.linspace(0.0, 5.0, len(planned_trajectory))
-                time_from_start = [i * 0.2 for i in range(len(planned_trajectory))]
-
+                dt_value = p.readUserDebugParameter(dt_slider)
+                time_from_start = [i * dt_value for i in range(len(planned_trajectory))]
                 send_base_arm_trajectory_command(traj_socket_client, base_cmd_names + planned_joint_names, padded_traj, time_from_start)
             prev_execute_button_value = current_execute_button_reading
 

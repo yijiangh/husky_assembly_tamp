@@ -727,7 +727,7 @@ def main():
             current_closeg_button_reading = p.readUserDebugParameter(close_gripper_button)
             if current_closeg_button_reading > prev_close_gripper_value:
                 # diameter of the bar is 0.02
-                send_gripper_command(traj_socket_client, 0.02)
+                send_gripper_command(traj_socket_client, 0.1)
             prev_close_gripper_value = current_closeg_button_reading
 
             time.sleep(0.01)

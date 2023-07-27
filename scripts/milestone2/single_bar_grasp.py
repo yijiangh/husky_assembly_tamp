@@ -52,6 +52,7 @@ name_from_mocap_id = {
     1011 : 'bar',
     1030 : 'foundation_bar',
     # 1029 : 'greybox',
+    # 1032 : 'ur_shoulder_link',
 }
 
 # TOOL0_FROM_EE = pp.Pose(point=[0,0,0.138])
@@ -585,23 +586,13 @@ def main():
             print("\n")
             if not is_running:
                 print("ERROR: Could not start streaming client.")
-                try:
-                    sys.exit(1)
-                except SystemExit:
-                    print("...")
-                finally:
-                    print("exiting")
+                sys.exit(1)
 
             is_looping = True
             time.sleep(1)
             if not mocap_client.connected():
                 print("ERROR: Could not connect properly.  Check that Motive streaming is on.")
-                try:
-                    sys.exit(2)
-                except SystemExit:
-                    print("...")
-                finally:
-                    print("exiting")
+                sys.exit(2)
 
         is_looping = is_looping | ~args.connect_to_mocap
 

@@ -25,6 +25,18 @@
                 // "--debug"
                 // "--teleopt_target"
             ]
-        }
+        },
+        {
+            "name": "urdf calibration",
+            "type": "python",
+            "request": "launch",
+            "program": "./scripts/milestone2/urdf_calibration.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": [
+                "--connect_to_mocap",
+                "--connect_to_hw",
+            ]
+        },
     ]
 }

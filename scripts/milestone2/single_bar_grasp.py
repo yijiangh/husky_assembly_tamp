@@ -148,10 +148,17 @@ def send_gripper_command(socket_server, gripper_pos):
 
 ########################
 
-def load_robot(ik_from_arm_base=True):
+def load_robot(ik_from_arm_base=True, load_calib_tip=False):
     robot_urdf = os.path.join(DATA_DIRECTORY,'husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf')
     robot_srdf = os.path.join(DATA_DIRECTORY, 'husky_urdf/mt_husky_moveit_config/config/husky.srdf')
-    gripper_obj = os.path.join(DATA_DIRECTORY,'husky_urdf/robotiq_85/meshes/static/robotiq_85_close_20mm.obj')
+
+    if load_calib_tip:
+        gripper_obj = os.path.join(HERE,'calibration_tip.stl')
+        gripper_scale = 1
+    else:
+        gripper_obj = os.path.join(DATA_DIRECTORY,'husky_urdf/robotiq_85/meshes/static/robotiq_85_close_20mm.obj')
+        gripper_scale = 1
+
     # gripper_obj = os.path.join(DATA_DIRECTORY,'husky_urdf/robotiq_85/meshes/static/robotiq_85_open.obj')
     # robot_urdf = os.path.join(HERE,'robotiq_85/urdf/robotiq_85_gripper_simple.urdf')
     # robot_urdf = os.path.join(HERE,'mt_husky_dual_ur5_e_moveit_config/urdf/husky_dual_ur5_e.urdf')
@@ -179,8 +186,9 @@ def load_robot(ik_from_arm_base=True):
 
     tool0_pose = pp.get_link_pose(robot, pp.link_from_name(robot, 'ur_arm_tool0'))
     # pp.draw_pose(tool0_pose)
-    ee = pp.create_obj(gripper_obj) 
+    ee = pp.create_obj(gripper_obj, scale=gripper_scale) 
     pp.set_pose(ee, pp.multiply(tool0_pose, pp.Pose(euler=pp.Euler(yaw=-np.pi/2))))
+    
     ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, 'ur_arm_tool0'), ee)
 
     # tool0_from_ee = pp.Pose(euler=pp.Euler(yaw=-np.pi/2), point=[0,0,0.138])

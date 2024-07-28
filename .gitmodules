@@ -10,3 +10,6 @@
 [submodule "ext/tracikpy"]
 	path = ext/tracikpy
 	url = https://github.com/mjd3/tracikpy.git
+[submodule "ext/pddlstream"]
+	path = ext/pddlstream
+	url = https://github.com/yijiangh/pddlstream.git

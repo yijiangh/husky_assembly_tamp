@@ -13,6 +13,25 @@
             "justMyCode": true
         },
         {
+            "name": "Plan Symbolic Planner Case 1",
+            "type": "python",
+            "request": "launch",
+            "program": "./scripts/pddl_experiments/plan_pddl.py",
+            "args": [
+                "--planning_cases",
+                "1",
+                "--process_file_name",
+                "test",
+                "--symbolic_planner",
+                "fd",
+                // "pyplanners",
+                "--output_to_file",
+                // "--debug",
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
             "name": "M2-single bar grasp",
             "type": "python",
             "request": "launch",

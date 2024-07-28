@@ -1,0 +1,41 @@
+[
+    {
+        "seq_n": 0,
+        "actions": [
+            {
+                "act_n": 0,
+                "action_name": "assemble_beam",
+                "args": [
+                    "b0"
+                ]
+            }
+        ],
+        "beam_id": "b0"
+    },
+    {
+        "seq_n": 1,
+        "actions": [
+            {
+                "act_n": 0,
+                "action_name": "assemble_beam",
+                "args": [
+                    "b1"
+                ]
+            }
+        ],
+        "beam_id": "b1"
+    },
+    {
+        "seq_n": 2,
+        "actions": [
+            {
+                "act_n": 0,
+                "action_name": "assemble_beam",
+                "args": [
+                    "b2"
+                ]
+            }
+        ],
+        "beam_id": "b2"
+    }
+]

@@ -4,9 +4,10 @@
         "actions": [
             {
                 "act_n": 0,
-                "action_name": "assemble_beam",
+                "action_name": "assemble_beam_and_hold",
                 "args": [
-                    "b0"
+                    "b0",
+                    "r0"
                 ]
             }
         ],
@@ -17,9 +18,18 @@
         "actions": [
             {
                 "act_n": 0,
-                "action_name": "assemble_beam",
+                "action_name": "release_hold",
                 "args": [
-                    "b1"
+                    "b1",
+                    "r0"
+                ]
+            },
+            {
+                "act_n": 1,
+                "action_name": "assemble_beam_and_hold",
+                "args": [
+                    "b1",
+                    "r1"
                 ]
             }
         ],
@@ -30,9 +40,26 @@
         "actions": [
             {
                 "act_n": 0,
-                "action_name": "assemble_beam",
+                "action_name": "release_hold",
                 "args": [
-                    "b2"
+                    "b1",
+                    "r1"
+                ]
+            },
+            {
+                "act_n": 1,
+                "action_name": "assemble_beam_and_hold",
+                "args": [
+                    "b2",
+                    "r1"
+                ]
+            },
+            {
+                "act_n": 0,
+                "action_name": "release_hold",
+                "args": [
+                    "b1",
+                    "r1"
                 ]
             }
         ],

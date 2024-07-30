@@ -1,0 +1,118 @@
+[
+    {
+        "seq_n": 0,
+        "actions": [
+            {
+                "act_n": 0,
+                "action_name": "assemble_beam_grounded",
+                "args": [
+                    "b0",
+                    "r0"
+                ]
+            }
+        ],
+        "beam_id": "b0"
+    },
+    {
+        "seq_n": 1,
+        "actions": [
+            {
+                "act_n": 0,
+                "action_name": "assemble_beam_grounded",
+                "args": [
+                    "b1",
+                    "r0"
+                ]
+            }
+        ],
+        "beam_id": "b1"
+    },
+    {
+        "seq_n": 2,
+        "actions": [
+            {
+                "act_n": 0,
+                "action_name": "assemble_beam_and_hold",
+                "args": [
+                    "b2",
+                    "r0"
+                ]
+            }
+        ],
+        "beam_id": "b2"
+    },
+    {
+        "seq_n": 3,
+        "actions": [
+            {
+                "act_n": 0,
+                "action_name": "release_hold",
+                "args": [
+                    "b2",
+                    "r0"
+                ]
+            },
+            {
+                "act_n": 1,
+                "action_name": "assemble_beam_and_hold",
+                "args": [
+                    "b3",
+                    "r0"
+                ]
+            }
+        ],
+        "beam_id": "b3"
+    },
+    {
+        "seq_n": 4,
+        "actions": [
+            {
+                "act_n": 0,
+                "action_name": "release_hold",
+                "args": [
+                    "b3",
+                    "r0"
+                ]
+            },
+            {
+                "act_n": 1,
+                "action_name": "assemble_beam_and_hold",
+                "args": [
+                    "b4",
+                    "r0"
+                ]
+            }
+        ],
+        "beam_id": "b4"
+    },
+    {
+        "seq_n": 5,
+        "actions": [
+            {
+                "act_n": 0,
+                "action_name": "release_hold",
+                "args": [
+                    "b4",
+                    "r0"
+                ]
+            },
+            {
+                "act_n": 1,
+                "action_name": "assemble_beam_and_hold",
+                "args": [
+                    "b5",
+                    "r0"
+                ]
+            },
+            {
+                "act_n": 0,
+                "action_name": "release_hold",
+                "args": [
+                    "b5",
+                    "r0"
+                ]
+            }
+        ],
+        "beam_id": "b5"
+    }
+]

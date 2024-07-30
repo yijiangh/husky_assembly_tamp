@@ -21,13 +21,27 @@
                 "--planning_cases",
                 "1",
                 "--process_file_name",
-                "test",
+                "one_tet_MT_layer_0_contact",
                 "--symbolic_planner",
                 "fd",
                 // "pyplanners",
                 "--output_to_file",
                 "--output_to_console",
                 // "--debug",
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Export PDDL from MT",
+            "type": "python",
+            "request": "launch",
+            "program": "./scripts/pddl_experiments/parse_symbolic.py",
+            "args": [
+                "--planning_cases",
+                "1",
+                "--mt_file_name",
+                "one_tet_MT_layer_0_contact.json",
             ],
             "console": "integratedTerminal",
             "justMyCode": true

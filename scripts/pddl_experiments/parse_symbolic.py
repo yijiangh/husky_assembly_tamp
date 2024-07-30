@@ -25,7 +25,7 @@ DOMAIN_NAMES = ['joint_only',
 
 ############################################
 
-def parse_mt(mt_json_file_name):
+def parse_mt_symbolic(mt_json_file_name):
     file_path = os.path.join(MT_DATA_PATH, mt_json_file_name)
     with open(file_path, 'r') as f:
         json_data = json.load(f)
@@ -33,13 +33,6 @@ def parse_mt(mt_json_file_name):
     line_pt_pairs = json_data['line_pt_pairs']
     contact_id_pairs = json_data['contact_id_pairs']
     beam_ids = [f'b{i}' for i in range(len(line_pt_pairs))]
-
-    if 'opt_parameters' in json_data:
-        bar_radius = json_data['opt_parameters'].get('bar_radius', 0.01)
-        clamp_gap = json_data['opt_parameters'].get('clamp_gap', 0.016)
-    else:
-        bar_radius = 0.01
-        clamp_gap = 0.016
 
     return beam_ids, contact_id_pairs
 
@@ -165,7 +158,7 @@ if __name__ == '__main__':
 
     # Load process file
     mt_file_name = args.mt_file_name
-    mt = parse_mt(mt_file_name)
+    mt  = parse_mt_symbolic(mt_file_name)
 
     mt_name = os.path.splitext(os.path.basename(mt_file_name))[0]
     problem_name = mt_name

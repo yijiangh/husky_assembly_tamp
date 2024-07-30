@@ -52,7 +52,7 @@ def main():
     # Planning Problem
     parser.add_argument('--planning_cases', metavar='N', type=int, nargs='+', default=[1,2,3,5],
                         help='Which planning case to parse [1,2,3,5]')
-    parser.add_argument('--process_file_names', nargs='+', default=['CantiBoxLeft_process'], 
+    parser.add_argument('--process_file_names', nargs='+', default=['CantiBoxLeft_process.json'], 
                         help='problem pddl file name')
     # Planner Config 
     parser.add_argument('--symbolic_planners', nargs='+', default=['pyplanners', 'fd'])

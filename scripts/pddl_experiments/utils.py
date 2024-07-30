@@ -126,23 +126,29 @@ def pddl_plan_to_string(plan):
 def pddl_plan_to_dict(plan):
     seq_n = 0 # Increment after the assembly of each beam
     act_n = 0 # Increment after every action , resets after new beam
-    sequences = []
-    
-    sequence = {'seq_n': seq_n, 'actions': []}
+    actions = []
     for action in plan:
         if isinstance(action, Action):
             action_name, args = action
-            sequence['actions'].append({'act_n': act_n, 'action_name': action_name, 'args': args})
+            actions.append({'act_n': act_n, 'action_name': action_name, 'args': args})
             act_n += 1
-            if action_name.startswith('assemble_beam'):
-                seq_n += 1
-                act_n = 0
-                sequence['beam_id'] = args[0]
-                sequences.append(sequence)
-                sequence = {'seq_n': seq_n, 'actions': []}
-    if len(sequence['actions']) > 0:
-        sequences[-1]['actions'].extend(sequence['actions'])
-    return sequences
+    return actions
+    
+    # sequence = {'seq_n': seq_n, 'actions': []}
+    # for action in plan:
+    #     if isinstance(action, Action):
+    #         action_name, args = action
+    #         sequence['actions'].append({'act_n': act_n, 'action_name': action_name, 'args': args})
+    #         act_n += 1
+    #         if action_name.startswith('assemble_beam'):
+    #             seq_n += 1
+    #             act_n = 0
+    #             sequence['beam_id'] = args[0]
+    #             sequences.append(sequence)
+    #             sequence = {'seq_n': seq_n, 'actions': []}
+    # if len(sequence['actions']) > 0:
+    #     sequences[-1]['actions'].extend(sequence['actions'])
+    # return sequences
 
 def save_plan_text(plan, pddl_folder, file_name):  
     # Create folder if not exists

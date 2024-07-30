@@ -1,6 +1,0 @@
-  1: assemble_beam_and_hold b0 r0
-  2: release_hold b1 r0
-  3: assemble_beam_and_hold b1 r1
-  4: release_hold b1 r1
-  5: assemble_beam_and_hold b2 r1
-  6: release_hold b1 r1

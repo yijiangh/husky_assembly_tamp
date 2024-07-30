@@ -13,6 +13,21 @@
             "justMyCode": true
         },
         {
+            "name": "Export PDDL from MT",
+            "type": "python",
+            "request": "launch",
+            "program": "./scripts/pddl_experiments/parse_symbolic.py",
+            "args": [
+                "--planning_cases",
+                "1",
+                "--mt_file_name",
+                // "one_tet_MT_layer_0_contact.json",
+                "tower_integral_one_len_MT_layer_0.json",
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
             "name": "Plan Symbolic Planner Case 1",
             "type": "python",
             "request": "launch",
@@ -21,7 +36,8 @@
                 "--planning_cases",
                 "1",
                 "--process_file_name",
-                "one_tet_MT_layer_0_contact",
+                // "one_tet_MT_layer_0_contact",
+                "tower_integral_one_len_MT_layer_0",
                 "--symbolic_planner",
                 "fd",
                 // "pyplanners",
@@ -33,15 +49,17 @@
             "justMyCode": true
         },
         {
-            "name": "Export PDDL from MT",
+            "name": "Visualize plan",
             "type": "python",
             "request": "launch",
-            "program": "./scripts/pddl_experiments/parse_symbolic.py",
+            "program": "./scripts/pddl_experiments/visualize_plan.py",
             "args": [
-                "--planning_cases",
+                "--planning_case",
                 "1",
                 "--mt_file_name",
-                "one_tet_MT_layer_0_contact.json",
+                "tower_integral_one_len_MT_layer_0.json",
+                "--symbolic_planner",
+                "fd",
             ],
             "console": "integratedTerminal",
             "justMyCode": true

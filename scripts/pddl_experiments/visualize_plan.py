@@ -1,74 +1,15 @@
-import os
-import json
 import argparse
 import time
-from collections import defaultdict
 
 import numpy as np
 import pybullet as p
 import pybullet_planning as pp
 
-from load_pddlstream import HERE
-from parse_symbolic import MT_DATA_PATH, PDDL_FOLDERS
+from multi_tangent.collision import create_collision_bodies
+from multi_tangent.convert import flatten_list
 
-from multi_tangent.collision import create_collision_bodies, create_swivel_coupler
-from multi_tangent.convert import flatten_list, list_to_pairs
-from multi_tangent.contact import compute_closest_t_between_lines
-
-def parse_mt_geometric(mt_json_file_name):
-    file_path = os.path.join(MT_DATA_PATH, mt_json_file_name)
-    with open(file_path, 'r') as f:
-        json_data = json.load(f)
-
-    line_pt_pairs = json_data['line_pt_pairs']
-    contact_id_pairs = json_data['contact_id_pairs']
-    beam_ids = [f'b{i}' for i in range(len(line_pt_pairs))]
-
-    if 'opt_parameters' in json_data:
-        bar_radius = json_data['opt_parameters'].get('bar_radius', 0.01)
-    else:
-        bar_radius = 0.01
-
-    return line_pt_pairs, contact_id_pairs, bar_radius
-
-def parse_plan_file(mt_json_file_name, symbolic_planner, case_number):
-    mt_name = mt_json_file_name.split('.')[0]
-    plan_file_name = f'result_{mt_name}_{symbolic_planner}.json'
-    plan_file_path = os.path.join(HERE, PDDL_FOLDERS[case_number - 1], plan_file_name)
-
-    with open(plan_file_path, 'r') as f:
-        json_data = json.load(f)
-
-    return json_data
-
-
-def init_pb():
-    # * start pybullet simulator
-    pp.connect(use_gui=True, shadows=True, color=[0.9, 0.9, 1.0])
-
-    # * y-up to be consistent with mocap
-    p.configureDebugVisualizer(p.COV_ENABLE_Y_AXIS_UP, 1, physicsClientId=pp.CLIENT)
-
-    p.configureDebugVisualizer(p.COV_ENABLE_GUI, 1, physicsClientId=pp.CLIENT)
-    # pp.set_camera(np.deg2rad(92.0), np.deg2rad(-85), 5.20)
-    # pp.set_camera(92.0, -85, 5.20)
-
-def create_couplers(line_pts_flattened, contact_id_pairs):
-    contact_ts = []
-    for ei, ej in contact_id_pairs:
-        t1, t2 = compute_closest_t_between_lines(line_pts_flattened[ei*2], line_pts_flattened[ei*2+1], line_pts_flattened[ej*2], line_pts_flattened[ej*2+1])
-        contact_ts.extend([t1,t2])
-
-    node_pairs = list_to_pairs(line_pts_flattened)
-    contact_t_pairs = list_to_pairs(contact_ts)
-    half_couplers = defaultdict(list)
-    with pp.LockRenderer():
-        for contact_idp, contact_tp in zip(contact_id_pairs, contact_t_pairs):
-            e0, e1 = contact_idp
-            # collision checking between clamps and bars performed inside
-            coupler_pair = create_swivel_coupler(node_pairs, e0, e1, *contact_tp)
-            half_couplers[frozenset([e0, e1])] = coupler_pair
-    return half_couplers
+from parse import parse_mt_geometric, parse_plan_file
+from collision import init_pb, create_couplers
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

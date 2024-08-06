@@ -10,6 +10,6 @@
 [submodule "ext/pddlstream"]
 	path = ext/pddlstream
 	url = https://github.com/yijiangh/pddlstream.git
-[submodule "data/multi_tangent_data"]
-	path = data/multi_tangent_data
-	url = https://github.com/yijiangh/multi_tangent_data.git
+[submodule "ext/FrameX"]
+	path = ext/FrameX
+	url = https://github.com/yijiangh/FrameX.git

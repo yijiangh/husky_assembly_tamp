@@ -14,7 +14,7 @@ from load_pddlstream import HERE
 from utils import LOGGER
 from export_pddl_utils import pddl_problem_with_original_names
 
-MT_DATA_PATH = os.path.join(HERE, '..', '..', 'data', 'multi_tangent_data', 'mt_results')
+MT_DATA_PATH = os.path.join(HERE, '..', '..', 'ext', 'FrameX', 'data', 'mt_results')
 
 ############################################
 

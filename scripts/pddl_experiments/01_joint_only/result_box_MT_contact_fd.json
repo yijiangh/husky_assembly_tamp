@@ -1,0 +1,178 @@
+[
+    {
+        "act_n": 0,
+        "action_name": "assemble_beam_grounded",
+        "args": [
+            "b0",
+            "r0"
+        ]
+    },
+    {
+        "act_n": 1,
+        "action_name": "assemble_beam_grounded",
+        "args": [
+            "b1",
+            "r0"
+        ]
+    },
+    {
+        "act_n": 2,
+        "action_name": "assemble_beam_and_hold",
+        "args": [
+            "b4",
+            "r0"
+        ]
+    },
+    {
+        "act_n": 3,
+        "action_name": "release_hold",
+        "args": [
+            "b4",
+            "r0"
+        ]
+    },
+    {
+        "act_n": 4,
+        "action_name": "assemble_beam_and_hold",
+        "args": [
+            "b5",
+            "r0"
+        ]
+    },
+    {
+        "act_n": 5,
+        "action_name": "release_hold",
+        "args": [
+            "b5",
+            "r0"
+        ]
+    },
+    {
+        "act_n": 6,
+        "action_name": "assemble_beam_and_hold",
+        "args": [
+            "b2",
+            "r0"
+        ]
+    },
+    {
+        "act_n": 7,
+        "action_name": "assemble_beam_and_hold",
+        "args": [
+            "b9",
+            "r1"
+        ]
+    },
+    {
+        "act_n": 8,
+        "action_name": "release_hold",
+        "args": [
+            "b9",
+            "r1"
+        ]
+    },
+    {
+        "act_n": 9,
+        "action_name": "release_hold",
+        "args": [
+            "b2",
+            "r0"
+        ]
+    },
+    {
+        "act_n": 10,
+        "action_name": "assemble_beam_and_hold",
+        "args": [
+            "b8",
+            "r0"
+        ]
+    },
+    {
+        "act_n": 11,
+        "action_name": "release_hold",
+        "args": [
+            "b8",
+            "r0"
+        ]
+    },
+    {
+        "act_n": 12,
+        "action_name": "assemble_beam_and_hold",
+        "args": [
+            "b11",
+            "r0"
+        ]
+    },
+    {
+        "act_n": 13,
+        "action_name": "release_hold",
+        "args": [
+            "b11",
+            "r0"
+        ]
+    },
+    {
+        "act_n": 14,
+        "action_name": "assemble_beam_and_hold",
+        "args": [
+            "b10",
+            "r0"
+        ]
+    },
+    {
+        "act_n": 15,
+        "action_name": "assemble_beam_and_hold",
+        "args": [
+            "b3",
+            "r1"
+        ]
+    },
+    {
+        "act_n": 16,
+        "action_name": "release_hold",
+        "args": [
+            "b10",
+            "r0"
+        ]
+    },
+    {
+        "act_n": 17,
+        "action_name": "release_hold",
+        "args": [
+            "b3",
+            "r1"
+        ]
+    },
+    {
+        "act_n": 18,
+        "action_name": "assemble_beam_and_hold",
+        "args": [
+            "b6",
+            "r0"
+        ]
+    },
+    {
+        "act_n": 19,
+        "action_name": "release_hold",
+        "args": [
+            "b6",
+            "r0"
+        ]
+    },
+    {
+        "act_n": 20,
+        "action_name": "assemble_beam_and_hold",
+        "args": [
+            "b7",
+            "r0"
+        ]
+    },
+    {
+        "act_n": 21,
+        "action_name": "release_hold",
+        "args": [
+            "b7",
+            "r0"
+        ]
+    }
+]

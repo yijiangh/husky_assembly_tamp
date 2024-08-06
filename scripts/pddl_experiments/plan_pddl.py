@@ -52,7 +52,7 @@ def main():
     # Planning Problem
     parser.add_argument('--planning_cases', metavar='N', type=int, nargs='+', default=[1,2,3,5],
                         help='Which planning case to parse [1,2,3,5]')
-    parser.add_argument('--process_file_names', nargs='+', default=['CantiBoxLeft_process.json'], 
+    parser.add_argument('--mt_file_names', nargs='+', default=['one_tet_MT_layer_0_contact.json'], 
                         help='problem pddl file name')
     # Planner Config 
     parser.add_argument('--symbolic_planners', nargs='+', default=['pyplanners', 'fd'])
@@ -65,12 +65,13 @@ def main():
     
     for symbolic_planner_name in args.symbolic_planners:
         for case_number in args.planning_cases:
-            for process_file_name in args.process_file_names:
+            for mt_file_name in args.mt_file_names:
                 # Parse Arguments
                 if case_number not in [1,2,3,5]:
                     raise NotImplementedError('Only planning case 1,2,3,5 are supported.')
                 pddl_folder = PDDL_FOLDERS[case_number - 1]
-                pddl_problem_name = 'problem_' + process_file_name + '.pddl'
+                mt_name = mt_file_name.split('.')[0]
+                pddl_problem_name = 'problem_' + mt_name + '.pddl'
 
                 debug=args.debug
 
@@ -93,12 +94,12 @@ def main():
                 if args.output_to_file:
                     if is_plan(plan):
                         # Save text excerpt
-                        text_result_file_name = 'result_' + process_file_name + '_' + symbolic_planner_name + '.txt'
+                        text_result_file_name = 'result_' + mt_name + '_' + symbolic_planner_name + '.txt'
                         save_plan_text(plan, pddl_folder, text_result_file_name)
                         LOGGER.info('Plan Text result saved to {}.'.format(text_result_file_name))
                         
                         # Save tamp result for visualization
-                        dict_result_file_name = 'result_' + process_file_name + '_' + symbolic_planner_name + '.json'
+                        dict_result_file_name = 'result_' + mt_name + '_' + symbolic_planner_name + '.json'
                         save_plan_dict(plan, pddl_folder, dict_result_file_name)
                         LOGGER.info('Plan Json result saved to {}.'.format(dict_result_file_name))
                     else:

@@ -1,13 +1,15 @@
 (define (domain joint_only)
     (:requirements :strips :negative-preconditions)
     (:predicates
+        ; static predicate, type
         (GroundedBeam ?beam)
+        (Joint ?earlierbeam ?laterbeam)
+        (Robot ?robot)
 
+        ; fluent predicate (state of the world)
         (BeamAtStorage ?beam)
         (BeamAtAssembled ?beam)
-        (Joint ?earlierbeam ?laterbeam)
 
-        (Robot ?robot)
         (RobotHold ?robot ?beam)
         (RobotFree ?robot)
     )

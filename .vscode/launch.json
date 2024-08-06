@@ -21,8 +21,9 @@
                 "--planning_cases",
                 "1",
                 "--mt_file_name",
+                // "box_MT_contact.json",
                 // "one_tet_MT_layer_0_contact.json",
-                "tower_integral_one_len_MT_layer_0.json",
+                // "tower_integral_one_len_MT_layer_0.json",
             ],
             "console": "integratedTerminal",
             "justMyCode": true
@@ -35,9 +36,10 @@
             "args": [
                 "--planning_cases",
                 "1",
-                "--process_file_name",
-                // "one_tet_MT_layer_0_contact",
-                "tower_integral_one_len_MT_layer_0",
+                "--mt_file_names",
+                "one_tet_MT_layer_0_contact.json",
+                // "tower_integral_one_len_MT_layer_0.json",
+                // "box_MT_contact.json",
                 "--symbolic_planner",
                 "fd",
                 // "pyplanners",
@@ -57,38 +59,14 @@
                 "--planning_case",
                 "1",
                 "--mt_file_name",
-                "tower_integral_one_len_MT_layer_0.json",
+                // "one_tet_MT_layer_0_contact",
+                // "tower_integral_one_len_MT_layer_0",
+                "box_MT_contact.json",
                 "--symbolic_planner",
                 "fd",
             ],
             "console": "integratedTerminal",
             "justMyCode": true
-        },
-        {
-            "name": "M2-single bar grasp",
-            "type": "python",
-            "request": "launch",
-            "program": "./scripts/milestone2/single_bar_grasp.py",
-            "console": "integratedTerminal",
-            "justMyCode": false,
-            "args": [
-                "--connect_to_mocap",
-                "--connect_to_hw",
-                // "--debug"
-                // "--teleopt_target"
-            ]
-        },
-        {
-            "name": "urdf calibration",
-            "type": "python",
-            "request": "launch",
-            "program": "./scripts/milestone2/urdf_calibration.py",
-            "console": "integratedTerminal",
-            "justMyCode": false,
-            "args": [
-                "--connect_to_mocap",
-                "--connect_to_hw",
-            ]
         },
     ]
 }

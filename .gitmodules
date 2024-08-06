@@ -4,9 +4,6 @@
 [submodule "ext/crl-husky"]
 	path = ext/crl-husky
 	url = git@gitlab.inf.ethz.ch:crl/robot-control/crl-husky.git
-[submodule "ext/pybullet_planning"]
-	path = ext/pybullet_planning
-	url = git@github.com:yijiangh/pybullet_planning.git
 [submodule "ext/tracikpy"]
 	path = ext/tracikpy
 	url = https://github.com/mjd3/tracikpy.git

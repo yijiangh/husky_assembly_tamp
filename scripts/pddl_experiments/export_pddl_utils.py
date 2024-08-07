@@ -1,5 +1,6 @@
 import load_pddlstream
-from collections import OrderedDict, Sequence
+from collections.abc import Sequence
+from collections import OrderedDict
 from pddlstream.language.constants import EQ, CONNECTIVES, QUANTIFIERS, OBJECTIVES, \
     get_prefix, get_args, is_parameter, Fact, Equal
 from pddlstream.language.object import Object, OptimisticObject

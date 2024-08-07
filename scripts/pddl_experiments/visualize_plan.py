@@ -5,6 +5,7 @@ import numpy as np
 import pybullet as p
 import pybullet_planning as pp
 
+import load_multi_tangent
 from multi_tangent.collision import create_collision_bodies
 from multi_tangent.convert import flatten_list
 

@@ -3,11 +3,12 @@ from collections import defaultdict, namedtuple
 import pybullet as p
 import pybullet_planning as pp
 
+import load_multi_tangent
 from multi_tangent.collision import create_swivel_coupler
 from multi_tangent.convert import flatten_list, list_to_pairs
 from multi_tangent.contact import compute_closest_t_between_lines
 
-Element = namedtuple('Element', ['index', 'body', 'goal_pose', 'axis_endpoints'])
+Element = namedtuple('Element', ['index', 'body', 'init_pose', 'goal_pose', 'axis_endpoints'])
 
 class Grasp(object):
     def __init__(self, element, gripper_from_object):

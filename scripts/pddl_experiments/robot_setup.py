@@ -13,20 +13,14 @@ from compas_fab.robots import Robot as RobotClass
 from compas_fab.robots import RobotSemantics
 from husky_assembly import DATA_DIRECTORY
 from tracikpy import TracIKSolver
+from utils import HUSKYU_JOINT_NAMES, plan_transit_motion
+
 
 TOOL0_FROM_EE = pp.Pose(point=[0, 0, 0.160])
 CONTROL_JOINT_NAMES = [
     "x",
     "y",
     "theta",
-    "ur_arm_shoulder_pan_joint",
-    "ur_arm_shoulder_lift_joint",
-    "ur_arm_elbow_joint",
-    "ur_arm_wrist_1_joint",
-    "ur_arm_wrist_2_joint",
-    "ur_arm_wrist_3_joint",
-]
-ARM_CONTROL_JOINT_NAMES = [
     "ur_arm_shoulder_pan_joint",
     "ur_arm_shoulder_lift_joint",
     "ur_arm_elbow_joint",
@@ -51,6 +45,7 @@ class RobotSetup(object):
         self.tool_link = pp.link_from_name(robot, "ur_arm_tool0")
 
         self.control_joints = pp.joints_from_names(robot, CONTROL_JOINT_NAMES)
+        self.arm_joints = pp.joints_from_names(robot, HUSKYU_JOINT_NAMES)
 
     def _load_robot(self, ik_from_arm_base=False):
         robot_urdf = os.path.join(DATA_DIRECTORY, "husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf")
@@ -113,17 +108,26 @@ class RobotSetup(object):
         custom_limits = custom_limits or {}
         limits = {pp.joint_from_name(robot, joint): limits for joint, limits in custom_limits.items()}
         return limits
-    
-    def get_relative_pose(self, world_tool_pose, link_name="ur_arm_base_link"):
-        link_pose = pp.get_link_pose(self.robot, pp.link_from_name(self.robot, link_name))
-        # pp.draw_pose(link_pose, length=0.5)
-        # cur_pose = pp.get_pose(self.robot) # world from baselink
 
-        # world_tool0_pose = pp.multiply(world_attach_pose, self.tool0_from_ee)
-        return pp.multiply(pp.invert(link_pose), world_tool_pose)
-    
-    def get_relative_ik_solution(self, tool_pose_world, q_init = None):
+    def get_relative_pose(self, pose_world, link_name="ur_arm_base_link"):
+        link_pose = pp.get_link_pose(self.robot, pp.link_from_name(self.robot, link_name))
+        return pp.multiply(pp.invert(link_pose), pose_world)
+
+    def get_relative_ik_solution(self, tool_pose_world, q_init=None):
         tool_pose_relative = self.get_relative_pose(tool_pose_world)
         conf = self.ik_solver_relative.ik(pp.tform_from_pose(tool_pose_relative), qinit=q_init)
         return conf
 
+    def plan_manipulator_path(self, init_q ,target_q, attachments, obstacles):
+        # print(HUSKYU_JOINT_NAMES, init_q)
+        pp.set_joint_positions(self.robot, self.arm_joints, init_q)
+        planned_path = plan_transit_motion(
+            self.robot,
+            target_q,
+            [self.ee_attachment] + attachments,
+            obstacles,
+            disabled_collisions=self.disabled_collisions,
+        )
+        if planned_path is not None:
+            planned_path = [np.array(conf) for conf in planned_path]
+        return planned_path

@@ -1,11 +1,11 @@
 import random
 from itertools import islice
+from typing import Tuple
 
 import numpy as np
 import pybullet_planning as pp
-
 from collision import Element, Grasp, create_couplers, init_pb
-from pybullet_planning import Euler, Point, Pose, get_distance, interpolate_poses, invert, multiply
+from pybullet_planning import Attachment, Euler, Point, Pose, get_distance, interpolate_poses, invert, multiply
 from robot_setup import RobotSetup
 from scipy.spatial.transform import Rotation as R
 from termcolor import cprint
@@ -368,7 +368,7 @@ def compute_place_path(
                 if verbose:
                     print("post attach ik failure.")
                 fail_flag = True
-                break                
+                break
         if fail_flag:
             continue
 
@@ -401,6 +401,176 @@ def compute_place_path(
 
     # world_from_tool0 = pp.multiply(attach_pose, pp.invert(tool0_from_ee))  # pose of end joint of husky
     # attach_conf = ik_solver.ik(pp.tform_from_pose(world_from_tool0))
+
+
+def compute_pick_path(
+    robot_setup: RobotSetup,
+    grasp,
+    element_index: int,
+    element_from_index,
+    obstacles,
+    unassambled_element_obstacles,
+    retreat_dist=RETREAT_DISTANCE,
+    verbose=False,
+    diagnosis=False,
+    teleops=False,
+    ik_search_max_attempt=10,
+    path_plan_max_attempt=50,
+) -> Tuple[list[np.ndarray], int, Attachment]:
+    """
+    @brief: generate path: init --> pre_pick_pose --> grasp_pick_pose --> post_pick_pose\n
+    ---
+    @param:\n
+        grasp: gripper from body\n
+    ---
+    @return:\n
+    """
+    element: Element = element_from_index[element_index]
+    body = element.body
+    body_init_pose = element.init_pose  # world from body
+    # body_init_pose_r = robot_setup.get_relative_pose(body_init_pose) # arm base from body
+    grasp_pick_pose = multiply(body_init_pose, invert(grasp))  # world from grasp
+
+    # print("\n\nview 2: body_init_pose\n", body_init_pose)
+
+    robot_init_conf = pp.get_joint_positions(robot_setup.robot, robot_setup.control_joints)
+    robot_base_init_conf = robot_init_conf[:3]
+    robot_arm_init_conf = robot_init_conf[3:]
+
+    # print("\n\nview 3: robot_init_conf\n", robot_init_conf)
+
+    # -------------------- approach --------------------#
+    approach_delta_point = tuple((np.array([0, 0, -1]) * retreat_dist).tolist())
+    approach_delta_pose = Pose(point=approach_delta_point, euler=Euler(roll=0, pitch=0, yaw=0))  # grasp from approach
+    approach_pick_pose = multiply(grasp_pick_pose, approach_delta_pose)  # world from approach
+    approach_tool0_pose = multiply(approach_pick_pose, invert(robot_setup.tool0_from_ee))  # world from tool0
+
+    # print("\n\nview 4: approach_pick_pose\n", approach_pick_pose)
+    # pp.draw_pose(approach_pick_pose, length=0.5)
+
+    # -------------------- collision checker without bar --------------------#
+    collision_fn_without_attach = pp.get_collision_fn(
+        robot_setup.robot,
+        robot_setup.control_joints,
+        obstacles=obstacles | unassambled_element_obstacles,
+        attachments=[],
+        self_collisions=ENABLE_SELF_COLLISIONS,
+        disabled_collisions=robot_setup.disabled_collisions,
+        max_distance=MAX_DISTANCE,
+    )
+
+    for _ in range(path_plan_max_attempt):
+        for ik_search_num in range(ik_search_max_attempt):
+            approach_pick_arm_conf = robot_setup.get_relative_ik_solution(approach_tool0_pose, robot_arm_init_conf)
+            if approach_pick_arm_conf is None:
+                if verbose:
+                    print("approach ik failure.")
+                continue
+            approach_pick_arm_conf = conf_refine(approach_pick_arm_conf)
+
+            approach_pick_conf = np.hstack((robot_base_init_conf, approach_pick_arm_conf))
+            if collision_fn_without_attach(approach_pick_conf, diagnosis):
+                if verbose:
+                    print("approach collision failure.")
+                continue
+
+            break
+        # -------------------- from init to approach --------------------#
+        pre_pick_path = robot_setup.plan_manipulator_path(
+            robot_arm_init_conf, approach_pick_arm_conf, attachments=[], obstacles=obstacles
+        )
+        if pre_pick_path is None:
+            if verbose:
+                print("pre pick plan failure.")
+            continue
+
+        pre_pick_path = [conf_refine(conf) for conf in pre_pick_path]
+        pre_pick_confs = [np.hstack((robot_base_init_conf, conf)) for conf in pre_pick_path]
+        # print("\n\nview 5.1: pre_pick_path\n", pre_pick_path)
+        # -------------------- pre pick path collision check --------------------#
+        fail_flag = False
+        for pre_pick_conf in pre_pick_confs:
+            if collision_fn_without_attach(pre_pick_conf, diagnosis):
+                if verbose:
+                    print("pre pick collision failure.")
+                fail_flag = True
+                break
+        if fail_flag:
+            continue
+        # -------------------- from pre pick to pick --------------------#
+        approach_pick_poses = list(
+            interpolate_poses(
+                approach_pick_pose, grasp_pick_pose, pos_step_size=POS_STEP_SIZE, ori_step_size=ORI_STEP_SIZE
+            )
+        )  # world from ee
+        # -------------------- approach IK --------------------#
+        approach_tool0_poses = [
+            pp.multiply(temp_pose, pp.invert(robot_setup.tool0_from_ee)) for temp_pose in approach_pick_poses
+        ]
+        approach_confs = []
+        fail_flag = False
+        robot_joint_conf_last = pre_pick_path[-1]
+        for approach_tool0_pose in approach_tool0_poses:
+            for ik_search_num in range(ik_search_max_attempt):
+                appraoch_joint_conf = robot_setup.get_relative_ik_solution(
+                    approach_tool0_pose, robot_joint_conf_last.tolist()
+                )
+                if appraoch_joint_conf is None:
+                    continue
+                appraoch_joint_conf = conf_refine(appraoch_joint_conf)
+                if np.linalg.norm(appraoch_joint_conf - robot_joint_conf_last) >= np.pi / 2:
+                    continue
+                approach_confs.append(np.hstack((robot_base_init_conf, appraoch_joint_conf)))
+                robot_joint_conf_last = appraoch_joint_conf
+                break
+            if ik_search_num == ik_search_max_attempt - 1:
+                if verbose:
+                    print("approach ik failure.")
+                fail_flag = True
+                break
+        if fail_flag:
+            continue
+        # -------------------- collision checker with bar --------------------#
+        pp.set_pose(body, body_init_pose)
+        pp.set_joint_positions(robot_setup.robot, robot_setup.control_joints, approach_confs[-1])
+        robot_setup.ee_attachment.assign()
+        cur_bar_attachment = pp.create_attachment(robot_setup.robot, robot_setup.tool_link, body)
+        collision_fn = pp.get_collision_fn(
+            robot_setup.robot,
+            robot_setup.control_joints,
+            obstacles=obstacles,
+            attachments=[cur_bar_attachment],
+            # attachments=[],
+            self_collisions=ENABLE_SELF_COLLISIONS,
+            # self_collisions=False,tool_link
+            disabled_collisions=robot_setup.disabled_collisions,
+            # custom_limits=get_custom_limits(robot),
+            max_distance=MAX_DISTANCE,
+        )
+        # -------------------- approach collision check --------------------#
+        fail_flag = False
+        for approach_conf in approach_confs:
+            # print(">>>> ", post_attach_conf)
+            if collision_fn(approach_conf, diagnosis):
+                # if collision_fn(post_attach_conf, True):
+                if verbose:
+                    print("approach collision failure.")
+                fail_flag = True
+                break
+            # break
+        if fail_flag:
+            continue
+
+        retreat_confs = approach_confs[::-1]
+
+        # -------------------- set position --------------------#
+        pp.set_pose(body, body_init_pose)
+        pp.set_joint_positions(robot_setup.robot, robot_setup.control_joints, approach_confs[-1])
+        robot_setup.ee_attachment.assign()
+
+        return pre_pick_confs + approach_confs + retreat_confs
+
+    return None
 
 
 def conf_refine(conf):
@@ -506,6 +676,84 @@ def get_place_gen_fn(
                 return
 
     return gen_fn
+
+
+def get_pick_gen_fn(
+    robot_setup: RobotSetup,
+    element_from_index,
+    fixed_obstacles,
+    collisions=True,
+    max_attempts=IK_MAX_ATTEMPTS,
+    allow_failure=False,
+    verbose=False,
+    teleops=False,
+):
+    def gen_fn(element_index: int, grasp, assembled=[], unassembled=[], diagnosis=False):
+        pick_element: Element = element_from_index[element_index]
+        # -------------------- obstacles --------------------#
+        assambled_element_obstacles = set({element_from_index[e].body for e in list(assembled)})
+        unassambled_element_obstacles = set({element_from_index[e].body for e in list(unassembled)})
+
+        obstacles = set(fixed_obstacles) | assambled_element_obstacles
+        if not collisions:
+            obstacles = set()
+
+        # -------------------- update init pose --------------------#
+        element = Element(
+            pick_element.index,
+            pick_element.body,
+            pp.get_pose(pick_element.body),
+            pick_element.goal_pose,
+            pick_element.axis_endpoints,
+        )
+        element_from_index[element_index] = element
+
+        for attempt in range(max_attempts):
+            print("attempt: ", attempt)
+
+            command = compute_pick_path(
+                robot_setup,
+                grasp,
+                element_index,
+                element_from_index,
+                obstacles,
+                unassambled_element_obstacles,
+                retreat_dist=RETREAT_DISTANCE,
+                verbose=verbose,
+                diagnosis=diagnosis,
+                teleops=teleops,
+            )
+            if command is None:
+                continue
+
+            cprint("Pick E#{} | Attempts: {} | Command: {}".format(element_index, attempt, len(command)), "green")
+
+            yield command
+            break
+        else:
+            if verbose:
+                cprint("E#{} | Attempts: {} | Max attempts exceeded!".format(element_index, max_attempts), "red")
+
+            if allow_failure:
+                yield None
+            else:
+                return
+
+    return gen_fn
+
+
+def get_transfer_gen_fn(
+    robot_setup: RobotSetup,
+    element_from_index,
+    fixed_obstacles,
+    collisions=True,
+    max_attempts=IK_MAX_ATTEMPTS,
+    max_grasp=GRASP_MAX_ATTEMPTS,
+    allow_failure=False,
+    verbose=False,
+    teleops=False,
+):
+    pass
 
 
 if __name__ == "__main__":

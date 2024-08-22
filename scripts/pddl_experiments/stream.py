@@ -21,11 +21,11 @@ GRASP_MAX_ATTEMPTS = 500
 ALLOWABLE_BAR_COLLISION_DEPTH = 1e-3
 
 # pregrasp delta sample
-EPSILON = 0.05
+EPSILON = 0.3
 ANGLE = np.pi / 3
 
 # pregrasp interpolation
-POS_STEP_SIZE = 0.01
+POS_STEP_SIZE = 0.005
 ORI_STEP_SIZE = np.pi / 128
 
 RETREAT_DISTANCE = 0.07
@@ -229,25 +229,24 @@ def get_pregrasp_gen_fn(
 
 
 def compute_place_path(
-    robot_setup,
+    robot_setup: RobotSetup,
     pregrasp_poses,
     grasp,
     index,
     element_from_index,
     obstacles,
     retreat_dist,
-    rotate_axis,
     verbose=False,
     diagnosis=False,
     teleops=False,
     gantry_sample_fn=None,
     max_attempt=50,
     ik_search_max_attempt=10,
-):
+    path_plan_max_attempt=15,
+) -> Tuple[list[np.ndarray], int, Attachment]:
     """Give the grasp and EE workspace poses, compute cartesian planning for pre-detach ~ detach ~ post-detach process."""
-    retreat_pose_gen = get_single_axis_delta_angle_pose_generator(retreat_dist, axis=rotate_axis)
+    # retreat_pose_gen = get_single_axis_delta_angle_pose_generator(retreat_dist, axis=rotate_axis)
 
-    robot_setup: RobotSetup
     robot = robot_setup.robot
     tool0_from_ee = robot_setup.tool0_from_ee
     ik_solver = robot_setup.ik_solver
@@ -255,7 +254,6 @@ def compute_place_path(
 
     element: Element = element_from_index[index]
     body = element.body
-    body_tar_pose = element.goal_pose  # world from tar_pose
 
     # -------------------- pre attach poses generation --------------------#
     pre_attach_poses = [multiply(bar_pose, invert(grasp)) for bar_pose in pregrasp_poses]
@@ -276,9 +274,7 @@ def compute_place_path(
         robot_joint_init_conf = conf_refine(robot_joint_init_conf)
         pre_attach_confs = [np.hstack((robot_base_conf, robot_joint_init_conf))]
 
-        # print(">>> view 1: robot init conf: ", robot_init_conf)
-        pp.set_joint_positions(robot, control_joints, robot_init_conf)
-        robot_setup.ee_attachment.assign()
+        robot_setup.set_joint_positions(control_joints, robot_init_conf)
 
         fail_flag = False
         robot_joint_conf_last = robot_joint_init_conf
@@ -312,18 +308,23 @@ def compute_place_path(
             obstacles=obstacles,
             attachments=[cur_bar_attachment],
             self_collisions=ENABLE_SELF_COLLISIONS,
-            # self_collisions=False,tool_link
             disabled_collisions=robot_setup.disabled_collisions,
-            # custom_limits=get_custom_limits(robot),
+            max_distance=MAX_DISTANCE,
+        )
+        collision_fn_no_attachment = pp.get_collision_fn(
+            robot,
+            robot_setup.control_joints,
+            obstacles=obstacles,
+            attachments=[],
+            self_collisions=ENABLE_SELF_COLLISIONS,
+            disabled_collisions=robot_setup.disabled_collisions,
             max_distance=MAX_DISTANCE,
         )
 
         # -------------------- pre attach collision check --------------------#
         fail_flag = False
         for pre_attach_conf in pre_attach_confs:
-            # print(">>>> ", post_attach_conf)
             if collision_fn(pre_attach_conf, diagnosis):
-                # if collision_fn(post_attach_conf, True):
                 if verbose:
                     print("pre attach collision failure.")
                 fail_flag = True
@@ -333,8 +334,6 @@ def compute_place_path(
             break
 
         # -------------------- retreat pose generation --------------------#
-        # retreat_delta_pose = next(retreat_pose_gen)
-
         retreat_delta_point = tuple((np.array([0, 0, -1]) * retreat_dist).tolist())
         retreat_delta_pose = Pose(point=retreat_delta_point, euler=Euler(roll=0, pitch=0, yaw=0))
 
@@ -375,27 +374,60 @@ def compute_place_path(
         # -------------------- post attach collision check --------------------#
         fail_flag = False
         for post_attach_conf in post_attach_confs:
-            # print(">>>> ", post_attach_conf)
             if collision_fn(post_attach_conf, diagnosis):
-                # if collision_fn(post_attach_conf, True):
                 if verbose:
                     print("post attach collision failure.")
                 fail_flag = True
                 break
-            # break
         if fail_flag:
             continue
 
-        pp.set_pose(body, body_tar_pose)
-        pp.set_joint_positions(robot, control_joints, post_attach_confs[0])
-        robot_setup.ee_attachment.assign()
-        # draw poses in the interpolate list
-        for pre_attach_pose in pre_attach_poses:
-            pp.draw_pose(pre_attach_pose)
-        for post_attach_pose in post_attach_poses:
-            pp.draw_pose(post_attach_pose)
-        pp.draw_pose(attach_pose, length=0.2)  # pose of contact point on the bar
-        return pre_attach_confs[:-1] + post_attach_confs, len(pre_attach_confs[:-1]), cur_bar_attachment
+        # -------------------- from post attach to init conf --------------------#
+        fail_flag = True
+        for plan_attempt in range(path_plan_max_attempt):
+            back_arm_path = robot_setup.plan_manipulator_path(
+                post_attach_confs[-1][3:],
+                robot_setup.arm_init_angles,
+                attachments=[],
+                obstacles=obstacles,
+            )
+            if back_arm_path is None:
+                if verbose:
+                    print("back plan failure.")
+                continue
+
+            back_arm_path = [conf_refine(conf) for conf in back_arm_path]
+            back_confs = [np.hstack((post_attach_confs[-1][:3], conf)) for conf in back_arm_path]
+
+            inner_fail_flag = False
+            for back_conf in back_confs:
+                if collision_fn_no_attachment(back_conf, diagnosis):
+                    if verbose:
+                        print("back collision failure.")
+                    inner_fail_flag = True
+                    break
+            if inner_fail_flag:
+                continue
+
+            fail_flag = False
+            break
+        if fail_flag:
+            continue
+
+        # pp.set_pose(body, body_tar_pose)
+        # pp.set_joint_positions(robot, control_joints, post_attach_confs[0])
+        # robot_setup.ee_attachment.assign()
+        # # draw poses in the interpolate list
+        # for pre_attach_pose in pre_attach_poses:
+        #     pp.draw_pose(pre_attach_pose)
+        # for post_attach_pose in post_attach_poses:
+        #     pp.draw_pose(post_attach_pose)
+        # pp.draw_pose(attach_pose, length=0.2)  # pose of contact point on the bar
+        return (
+            pre_attach_confs + post_attach_confs + back_confs,
+            [1] * (len(pre_attach_confs) + 1) + [0] * len(post_attach_confs[1:] + back_confs),
+            cur_bar_attachment,
+        )
 
     return None, None, None
 
@@ -416,7 +448,7 @@ def compute_pick_path(
     teleops=False,
     ik_search_max_attempt=10,
     path_plan_max_attempt=50,
-) -> Tuple[list[np.ndarray], int, Attachment]:
+) -> Tuple[list[np.ndarray], list, Attachment]:
     """
     @brief: generate path: init --> pre_pick_pose --> grasp_pick_pose --> post_pick_pose\n
     ---
@@ -460,6 +492,7 @@ def compute_pick_path(
     )
 
     for _ in range(path_plan_max_attempt):
+        fail_flag = True
         for ik_search_num in range(ik_search_max_attempt):
             approach_pick_arm_conf = robot_setup.get_relative_ik_solution(approach_tool0_pose, robot_arm_init_conf)
             if approach_pick_arm_conf is None:
@@ -473,8 +506,10 @@ def compute_pick_path(
                 if verbose:
                     print("approach collision failure.")
                 continue
-
+            fail_flag = False
             break
+        if fail_flag:
+            continue
         # -------------------- from init to approach --------------------#
         pre_pick_path = robot_setup.plan_manipulator_path(
             robot_arm_init_conf, approach_pick_arm_conf, attachments=[], obstacles=obstacles
@@ -530,45 +565,114 @@ def compute_pick_path(
                 break
         if fail_flag:
             continue
-        # -------------------- collision checker with bar --------------------#
-        pp.set_pose(body, body_init_pose)
-        pp.set_joint_positions(robot_setup.robot, robot_setup.control_joints, approach_confs[-1])
-        robot_setup.ee_attachment.assign()
-        cur_bar_attachment = pp.create_attachment(robot_setup.robot, robot_setup.tool_link, body)
-        collision_fn = pp.get_collision_fn(
-            robot_setup.robot,
-            robot_setup.control_joints,
-            obstacles=obstacles,
-            attachments=[cur_bar_attachment],
-            # attachments=[],
-            self_collisions=ENABLE_SELF_COLLISIONS,
-            # self_collisions=False,tool_link
-            disabled_collisions=robot_setup.disabled_collisions,
-            # custom_limits=get_custom_limits(robot),
-            max_distance=MAX_DISTANCE,
-        )
-        # -------------------- approach collision check --------------------#
-        fail_flag = False
-        for approach_conf in approach_confs:
-            # print(">>>> ", post_attach_conf)
-            if collision_fn(approach_conf, diagnosis):
-                # if collision_fn(post_attach_conf, True):
-                if verbose:
-                    print("approach collision failure.")
-                fail_flag = True
-                break
-            # break
-        if fail_flag:
-            continue
+        # # -------------------- collision checker with bar --------------------#
+        # pp.set_pose(body, body_init_pose)
+        # # pp.set_joint_positions(robot_setup.robot, robot_setup.control_joints, approach_confs[-1])
+        # robot_setup.set_joint_positions(robot_setup.control_joints, approach_confs[-1])
+        # cur_bar_attachment = pp.create_attachment(robot_setup.robot, robot_setup.tool_link, body)
+        # collision_fn = pp.get_collision_fn(
+        #     robot_setup.robot,
+        #     robot_setup.control_joints,
+        #     obstacles=obstacles,
+        #     attachments=[cur_bar_attachment],
+        #     # attachments=[],
+        #     self_collisions=ENABLE_SELF_COLLISIONS,
+        #     # self_collisions=False,tool_link
+        #     disabled_collisions=robot_setup.disabled_collisions,
+        #     # custom_limits=get_custom_limits(robot),
+        #     max_distance=MAX_DISTANCE,
+        # )
+        # # -------------------- approach collision check --------------------#
+        # fail_flag = False
+        # for approach_conf in approach_confs:
+        #     # print(">>>> ", post_attach_conf)
+        #     if collision_fn(approach_conf, diagnosis):
+        #         # if collision_fn(post_attach_conf, True):
+        #         if verbose:
+        #             print("approach collision failure.")
+        #         fail_flag = True
+        #         break
+        #     # break
+        # if fail_flag:
+        #     continue
 
         retreat_confs = approach_confs[::-1]
 
         # -------------------- set position --------------------#
-        pp.set_pose(body, body_init_pose)
-        pp.set_joint_positions(robot_setup.robot, robot_setup.control_joints, approach_confs[-1])
-        robot_setup.ee_attachment.assign()
+        # pp.set_pose(body, body_init_pose)
+        # pp.set_joint_positions(robot_setup.robot, robot_setup.control_joints, approach_confs[-1])
+        # robot_setup.ee_attachment.assign()
 
-        return pre_pick_confs + approach_confs + retreat_confs
+        return pre_pick_confs + approach_confs + retreat_confs, [0] * len(pre_pick_confs + approach_confs) + [1] * len(
+            retreat_confs
+        )
+
+    return None, None
+
+
+def compute_transfer_path(
+    robot_setup: RobotSetup,
+    body_attachment: Attachment,
+    start,
+    target,
+    obstacles,
+    unassambled_element_obstacles,
+    verbose=False,
+    diagnosis=False,
+    teleops=False,
+    path_plan_max_attempt=50,
+) -> Tuple[list[np.ndarray]]:
+    """
+    @brief: generate path: post_pick_pose --> pre_grasp_pose\n
+    ---
+    @param:\n
+        start: start conf\n
+        target: target conf\n
+    ---
+    @return:\n
+    """
+    collision_fn = pp.get_collision_fn(
+        robot_setup.robot,
+        robot_setup.control_joints,
+        obstacles=obstacles | unassambled_element_obstacles,
+        attachments=[body_attachment],
+        self_collisions=ENABLE_SELF_COLLISIONS,
+        disabled_collisions=robot_setup.disabled_collisions,
+        max_distance=MAX_DISTANCE,
+    )
+    start_base_conf = start[:3]
+    target_base_conf = target[:3]
+    if np.linalg.norm(start_base_conf - target_base_conf) >= 0.1:
+        raise RuntimeError("start pose of base must euqal to target pose of base!")
+    start_arm_conf = start[3:]
+    target_arm_conf = target[3:]
+
+    for _ in range(path_plan_max_attempt):
+        transfer_path = robot_setup.plan_manipulator_path(
+            start_arm_conf,
+            target_arm_conf,
+            attachments=[body_attachment],
+            obstacles=obstacles | unassambled_element_obstacles,
+        )
+        if transfer_path is None:
+            if verbose:
+                print("transfer plan failure.")
+            continue
+
+        transfer_path = [conf_refine(conf) for conf in transfer_path]
+        transfer_confs = [np.hstack((start_base_conf, conf)) for conf in transfer_path]
+
+        fail_flag = False
+        for transfer_conf in transfer_confs:
+            if collision_fn(transfer_conf, diagnosis):
+                if verbose:
+                    print("transfer collision failure.")
+                fail_flag = True
+                break
+        if fail_flag:
+            continue
+
+        return transfer_confs
 
     return None
 
@@ -590,45 +694,36 @@ def get_place_gen_fn(
     element_from_index,
     fixed_obstacles,
     collisions=True,
-    max_attempts=IK_MAX_ATTEMPTS,
-    max_grasp=GRASP_MAX_ATTEMPTS,
+    max_attempts=10,
+    max_grasp=1000,
     allow_failure=False,
     verbose=False,
     teleops=False,
 ):
-    if not collisions:
-        precompute_collisions = False
-
-    robot = robot_setup.robot
-    tool0_from_ee = robot_setup.tool0_from_ee
 
     # conditioned sampler
     pregrasp_gen_fn = get_pregrasp_gen_fn(
         element_from_index, fixed_obstacles, collision=collisions, teleops=teleops
     )  # max_attempts=max_attempts,
 
-    def gen_fn(element, assembled=[], diagnosis=False):
-        for bar_id in assembled:
-            bar_id_pyb = element_from_index[bar_id].index
-            pp.set_color(bar_id_pyb, pp.GREEN)
+    def gen_fn(element, assembled=[], unassembled=[], attachments=[], diagnosis=False):
+        # for bar_id in assembled:
+        #     bar_id_pyb = element_from_index[bar_id].index
+        #     pp.set_color(bar_id_pyb, pp.GREEN)
+        robot_setup.update_attachments(attachments)
+        robot_arm_init_conf = pp.get_joint_positions(robot_setup.robot, robot_setup.arm_joints)
 
         pp.set_pose(element_from_index[element].body, element_from_index[element].goal_pose)
 
-        # element_obstacles = get_element_body_in_goal_pose(element_from_index, assembled)
-        # element_obstacles = set({})
         element_obstacles = set({element_from_index[e].body for e in list(assembled)})
+        unassambled_element_obstacles = set({element_from_index[e].body for e in list(unassembled)})
 
-        obstacles = set(fixed_obstacles) | element_obstacles
+        obstacles = set(fixed_obstacles) | element_obstacles | unassambled_element_obstacles
         if not collisions:
             obstacles = set()
-        elements_order = [
-            e for e in element_from_index if (e != element) and (element_from_index[e].body not in obstacles)
-        ]
 
         grasp_gen = pp.get_side_cylinder_grasps(element_from_index[element].body, safety_margin_length=0.5)
         # keep track of sampled traj, prune newly sampled one with more collided element
-        element_goal_pose = element_from_index[element].goal_pose
-        # trajectories = []
         for attempt, grasp in enumerate(islice(grasp_gen, max_grasp)):
             print("attempt: ", attempt)
             # * ik iterations, usually 1 is enough
@@ -640,7 +735,7 @@ def get_place_gen_fn(
                         print("pregrasp failure.")
                     continue
 
-                command, pregrasp_length, bar_attach = compute_place_path(
+                command, grasp_mask, grasp_attach = compute_place_path(
                     robot_setup,
                     pregrasp_poses,
                     grasp,
@@ -648,7 +743,6 @@ def get_place_gen_fn(
                     element_from_index,
                     obstacles,
                     retreat_dist=RETREAT_DISTANCE,
-                    rotate_axis=[1, 0, 0],
                     verbose=verbose,
                     diagnosis=diagnosis,
                     teleops=teleops,
@@ -664,7 +758,9 @@ def get_place_gen_fn(
                 # if verbose:
                 cprint("Place E#{} | Attempts: {} | Command: {}".format(element, attempt, len(command)), "green")
 
-                yield command, pregrasp_length, bar_attach
+                robot_setup.set_joint_positions(robot_setup.arm_joints, robot_arm_init_conf)
+
+                yield command, grasp_mask, grasp_attach, grasp, pregrasp_poses[0]
                 break
         else:
             if verbose:
@@ -683,12 +779,13 @@ def get_pick_gen_fn(
     element_from_index,
     fixed_obstacles,
     collisions=True,
-    max_attempts=IK_MAX_ATTEMPTS,
+    max_attempts=20,
     allow_failure=False,
     verbose=False,
     teleops=False,
 ):
-    def gen_fn(element_index: int, grasp, assembled=[], unassembled=[], diagnosis=False):
+    def gen_fn(element_index: int, grasp_raw, assembled=[], unassembled=[], attachments=[], diagnosis=False):
+        robot_setup.update_attachments(attachments)
         pick_element: Element = element_from_index[element_index]
         # -------------------- obstacles --------------------#
         assambled_element_obstacles = set({element_from_index[e].body for e in list(assembled)})
@@ -708,10 +805,13 @@ def get_pick_gen_fn(
         )
         element_from_index[element_index] = element
 
+        grasp_temp = Pose([0, 0, 0], Euler(roll=np.pi / 2, pitch=0, yaw=0))
+        grasp = (grasp_raw[0], grasp_temp[1])
+
         for attempt in range(max_attempts):
             print("attempt: ", attempt)
 
-            command = compute_pick_path(
+            command, grasp_mask = compute_pick_path(
                 robot_setup,
                 grasp,
                 element_index,
@@ -728,14 +828,14 @@ def get_pick_gen_fn(
 
             cprint("Pick E#{} | Attempts: {} | Command: {}".format(element_index, attempt, len(command)), "green")
 
-            yield command
+            yield command, grasp_mask
             break
         else:
             if verbose:
                 cprint("E#{} | Attempts: {} | Max attempts exceeded!".format(element_index, max_attempts), "red")
 
             if allow_failure:
-                yield None
+                yield None, None
             else:
                 return
 
@@ -747,13 +847,61 @@ def get_transfer_gen_fn(
     element_from_index,
     fixed_obstacles,
     collisions=True,
-    max_attempts=IK_MAX_ATTEMPTS,
-    max_grasp=GRASP_MAX_ATTEMPTS,
+    max_attempts=50,
     allow_failure=False,
     verbose=False,
     teleops=False,
 ):
-    pass
+    def gen_fn(
+        element_index: int,
+        body_attachment,
+        start_conf,
+        tar_conf,
+        assembled=[],
+        unassembled=[],
+        attachments=[],
+        diagnosis=False,
+    ):
+        robot_setup.update_attachments(attachments)
+        # -------------------- obstacles --------------------#
+        assambled_element_obstacles = set({element_from_index[e].body for e in list(assembled)})
+        unassambled_element_obstacles = set({element_from_index[e].body for e in list(unassembled)})
+
+        obstacles = set(fixed_obstacles) | assambled_element_obstacles
+        if not collisions:
+            obstacles = set()
+
+        for attempt in range(max_attempts):
+            print("attempt: ", attempt)
+
+            command = compute_transfer_path(
+                robot_setup,
+                body_attachment,
+                start_conf,
+                tar_conf,
+                obstacles,
+                unassambled_element_obstacles,
+                verbose=verbose,
+                diagnosis=diagnosis,
+                teleops=teleops,
+            )
+            if command is None:
+                continue
+
+            cprint("Transfer E#{} | Attempts: {} | Command: {}".format(element_index, attempt, len(command)), "green")
+
+            yield command, [1] * len(command)
+            break
+        else:
+            if verbose:
+                cprint("E#{} | Attempts: {} | Max attempts exceeded!".format(element_index, max_attempts), "red")
+
+            if allow_failure:
+                yield None, None
+            else:
+                return
+
+    return gen_fn
 
 
 if __name__ == "__main__":

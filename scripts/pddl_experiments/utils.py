@@ -232,7 +232,7 @@ def get_custom_limits(robot, custom_limits=None):
 
 def plan_transit_motion(robot, end_conf, attachments, obstacles, debug=False, disabled_collisions=None):
     custom_limits = get_custom_limits(robot, {})
-    resolutions = np.ones(6) * 0.05
+    resolutions = np.ones(6) * 0.025
     disabled_collisions = disabled_collisions or {}
     extra_disabled_collisions = [
         ((robot, pp.link_from_name(robot, "ur_arm_wrist_3_link")), (attachments[0].child, pp.BASE_LINK)),

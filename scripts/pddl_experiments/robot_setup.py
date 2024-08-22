@@ -3,6 +3,8 @@ import sys
 
 import numpy as np
 import pybullet_planning as pp
+from pybullet_planning import Attachment, Euler, Point, Pose, get_distance, interpolate_poses, invert, multiply
+
 
 HERE = os.path.dirname(__file__)
 husky_assembly_path = os.path.abspath(os.path.join(HERE, "..", "..", "src"))
@@ -28,24 +30,28 @@ CONTROL_JOINT_NAMES = [
     "ur_arm_wrist_2_joint",
     "ur_arm_wrist_3_joint",
 ]
+INIT_ARM_JOINT_ANGLES = np.array([0, -np.pi/2, 0, 0, 0, 0])
 
 ########################
 
 
 class RobotSetup(object):
-    def __init__(self, robot_name="r0"):
+    def __init__(self, robot_name="r0", attachments=[]):
         self.name = robot_name
         robot, ee_attachment, ik_solver, ik_solver_relative, disabled_collisions = self._load_robot()
         self.robot = robot
         self.ik_solver = ik_solver
         self.ik_solver_relative = ik_solver_relative
         self.ee_attachment = ee_attachment
+        self.attachments = attachments
         self.disabled_collisions = disabled_collisions
         self.tool0_from_ee = TOOL0_FROM_EE
         self.tool_link = pp.link_from_name(robot, "ur_arm_tool0")
 
         self.control_joints = pp.joints_from_names(robot, CONTROL_JOINT_NAMES)
         self.arm_joints = pp.joints_from_names(robot, HUSKYU_JOINT_NAMES)
+        self.arm_init_angles = INIT_ARM_JOINT_ANGLES
+        self.set_joint_positions(self.arm_joints, self.arm_init_angles)
 
     def _load_robot(self, ik_from_arm_base=False):
         robot_urdf = os.path.join(DATA_DIRECTORY, "husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf")
@@ -120,7 +126,10 @@ class RobotSetup(object):
 
     def plan_manipulator_path(self, init_q ,target_q, attachments, obstacles):
         # print(HUSKYU_JOINT_NAMES, init_q)
-        pp.set_joint_positions(self.robot, self.arm_joints, init_q)
+        # pp.set_joint_positions(self.robot, self.arm_joints, init_q)
+        self.set_joint_positions(self.arm_joints, init_q)
+        # print("init q ", init_q, "target q ", target_q)
+        # print("disabled ", self.disabled_collisions)
         planned_path = plan_transit_motion(
             self.robot,
             target_q,
@@ -128,6 +137,24 @@ class RobotSetup(object):
             obstacles,
             disabled_collisions=self.disabled_collisions,
         )
+        self.ee_attachment.assign()
         if planned_path is not None:
             planned_path = [np.array(conf) for conf in planned_path]
         return planned_path
+
+    def set_base_pose(self, pose):
+        pp.set_pose(self.robot, pose)
+        self.ee_attachment.assign()
+        for attachment in self.attachments:
+            attachment: Attachment
+            attachment.assign()
+
+    def set_joint_positions(self, control_joints, conf):
+        pp.set_joint_positions(self.robot, control_joints, conf)
+        self.ee_attachment.assign()
+        for attachment in self.attachments:
+            attachment: Attachment
+            attachment.assign()
+
+    def update_attachments(self, attachments):
+        self.attachments = attachments

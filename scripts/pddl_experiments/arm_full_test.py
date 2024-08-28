@@ -1,6 +1,7 @@
 import argparse
 
 import load_multi_tangent
+import matplotlib.pyplot as plt
 import numpy as np
 import pybullet as p
 import pybullet_planning as pp
@@ -8,9 +9,11 @@ from collision import Element, create_couplers, init_pb
 from multi_tangent.collision import create_collision_bodies
 from multi_tangent.convert import flatten_list
 from parse import parse_mt_geometric
-from pybullet_planning import Attachment, Euler, Point, Pose, get_distance, interpolate_poses, invert, multiply
+from pybullet_planning import (Attachment, Euler, Point, Pose, get_distance,
+                               interpolate_poses, invert, multiply)
 from robot_setup import RobotSetup
-from stream import get_place_gen_fn, get_pick_gen_fn, get_transfer_gen_fn
+from scipy.spatial import ConvexHull
+from stream import get_pick_gen_fn, get_place_gen_fn, get_transfer_gen_fn
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -27,6 +30,12 @@ if __name__ == "__main__":
     mt_file_name = args.mt_file_name
     line_pt_pairs, contact_id_pairs, bar_radius = parse_mt_geometric(mt_file_name)
     line_pts_flattened = flatten_list(np.array(line_pt_pairs))
+    vertices = flatten_list(line_pt_pairs)
+
+    # reach_distance = 1.0
+    # sample_max_distance = 0.75
+    # safety_distance = 0.5
+    # sampling_number = 200
 
     min_z = np.min(line_pts_flattened, axis=0)[2]
     line_pts_flattened = [np.array([0, 0, -min_z]) + point for point in line_pts_flattened]
@@ -40,6 +49,9 @@ if __name__ == "__main__":
         robot_setup0 = RobotSetup("r0")
         element_bodies = create_collision_bodies(line_pts_flattened, radius_per_edge, viewer=True)
         half_coupler_from_contact_pair = create_couplers(line_pts_flattened, contact_id_pairs)
+        # temp = element_bodies[1]
+        # element_bodies[1] = element_bodies[2]
+        # element_bodies[2] = temp
 
     for i, e in enumerate(element_bodies):
         goal_poses[i] = pp.get_pose(e)
@@ -60,13 +72,15 @@ if __name__ == "__main__":
         i: Element(i, e, pp.get_pose(e), goal_poses[i], [line_pts_flattened[2 * i], line_pts_flattened[2 * i + 1]])
         for i, e in enumerate(element_bodies)
     }
-    place_gen = get_place_gen_fn(robot_setup0, element_from_index, [], verbose=False, collisions=True, teleops=False)
+    place_gen = get_place_gen_fn(robot_setup0, element_from_index, [], verbose=True, collisions=True, teleops=False)
     pick_gen = get_pick_gen_fn(robot_setup0, element_from_index, [], verbose=False, collisions=True, teleops=False)
     transfer_gen = get_transfer_gen_fn(
-        robot_setup0, element_from_index, [], verbose=False, collisions=True, teleops=False
+        robot_setup0, element_from_index, [], verbose=True, collisions=True, teleops=False
     )
 
     for i in element_from_index:
+        # if i == 0:
+        #     continue
         cur_attachment = bar_attachments.pop(0)
 
         assembled = list(range(i))
@@ -118,8 +132,6 @@ if __name__ == "__main__":
             traj_pose = traj[traj_idx]
             grasp_attach_flag = traj_grasp_mask[traj_idx]
             robot_setup0.set_joint_positions(robot_setup0.control_joints, traj_pose)
-
-            # grasp_attach.assign()
 
             if grasp_attach_flag:
                 grasp_attach.assign()

@@ -230,9 +230,11 @@ def get_custom_limits(robot, custom_limits=None):
     return limits
 
 
-def plan_transit_motion(robot, end_conf, attachments, obstacles, debug=False, disabled_collisions=None):
+def plan_transit_motion(
+    robot, end_conf, attachments, obstacles, debug=False, disabled_collisions=None, coarse_waypoints=False
+):
     custom_limits = get_custom_limits(robot, {})
-    resolutions = np.ones(6) * 0.025
+    resolutions = np.ones(6) * 0.05
     disabled_collisions = disabled_collisions or {}
     extra_disabled_collisions = [
         ((robot, pp.link_from_name(robot, "ur_arm_wrist_3_link")), (attachments[0].child, pp.BASE_LINK)),
@@ -252,7 +254,7 @@ def plan_transit_motion(robot, end_conf, attachments, obstacles, debug=False, di
         disabled_collisions=disabled_collisions,
         extra_disabled_collisions=extra_disabled_collisions,
         custom_limits=custom_limits,
-        max_distance=0,
+        max_distance=0.01,
     )
 
     transit_path = None
@@ -272,11 +274,11 @@ def plan_transit_motion(robot, end_conf, attachments, obstacles, debug=False, di
                     extend_fn,
                     transit_collision_fn,
                     algorithm="birrt",
-                    max_time=10,
-                    max_iterations=20,
+                    max_time=20,
+                    max_iterations=30,
                     smooth=20,
                     diagnosis=debug,
-                    coarse_waypoints=False,
+                    coarse_waypoints=coarse_waypoints,
                 )
             else:
                 notify("initial and end conf not valid")
@@ -286,3 +288,26 @@ def plan_transit_motion(robot, end_conf, attachments, obstacles, debug=False, di
                 notify("transit path found: transit {} pts".format(len(transit_path)))
 
     return transit_path
+
+
+###########################################
+
+
+def normalize_angles(angles):
+    for i in range(len(angles)):
+        angles[i] = normalize_angle(angles[i])
+    return angles
+
+
+def normalize_angle(angle):
+    angle = np.fmod(angle + np.pi, 2 * np.pi)
+    if angle <= 0:
+        return angle + np.pi
+    else:
+        return angle - np.pi
+
+
+def angles_distance(angles1, angles2):
+    diff = angles1 - angles2
+    diff = normalize_angles(diff)
+    return np.linalg.norm(diff)

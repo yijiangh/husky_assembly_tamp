@@ -133,3 +133,5 @@ statistics
 visualizations
 
 .idea
+
+scripts/pddl_experiments/test*.py

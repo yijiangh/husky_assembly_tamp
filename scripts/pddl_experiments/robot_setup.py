@@ -30,7 +30,8 @@ CONTROL_JOINT_NAMES = [
     "ur_arm_wrist_2_joint",
     "ur_arm_wrist_3_joint",
 ]
-INIT_ARM_JOINT_ANGLES = np.array([0, -np.pi/2, 0, 0, 0, 0])
+BASE_CONTROL_JOINT_NAMES = ["x", "y", "theta"]
+INIT_ARM_JOINT_ANGLES = np.array([0, -np.pi / 2, 0, 0, 0, 0])
 
 ########################
 
@@ -50,6 +51,7 @@ class RobotSetup(object):
 
         self.control_joints = pp.joints_from_names(robot, CONTROL_JOINT_NAMES)
         self.arm_joints = pp.joints_from_names(robot, HUSKYU_JOINT_NAMES)
+        self.base_joints = pp.joints_from_names(robot, BASE_CONTROL_JOINT_NAMES)
         self.arm_init_angles = INIT_ARM_JOINT_ANGLES
         self.set_joint_positions(self.arm_joints, self.arm_init_angles)
 
@@ -122,22 +124,56 @@ class RobotSetup(object):
     def get_relative_ik_solution(self, tool_pose_world, q_init=None):
         tool_pose_relative = self.get_relative_pose(tool_pose_world)
         conf = self.ik_solver_relative.ik(pp.tform_from_pose(tool_pose_relative), qinit=q_init)
+        self.ee_attachment.assign()
         return conf
 
-    def plan_manipulator_path(self, init_q ,target_q, attachments, obstacles):
-        # print(HUSKYU_JOINT_NAMES, init_q)
+    def plan_manipulator_path(self, init_q, target_q, attachments, obstacles, sub_way_points=False, way_points_max_num=10):
         # pp.set_joint_positions(self.robot, self.arm_joints, init_q)
         self.set_joint_positions(self.arm_joints, init_q)
-        # print("init q ", init_q, "target q ", target_q)
-        # print("disabled ", self.disabled_collisions)
-        planned_path = plan_transit_motion(
+
+        print(">>> short path")
+        planned_path_coarse = plan_transit_motion(
             self.robot,
             target_q,
             [self.ee_attachment] + attachments,
             obstacles,
+            debug=True,
             disabled_collisions=self.disabled_collisions,
+            coarse_waypoints=sub_way_points,
         )
         self.ee_attachment.assign()
+
+        if planned_path_coarse is not None:
+            planned_path_coarse = [np.array(conf) for conf in planned_path_coarse]
+        else:
+            return planned_path_coarse
+        if not sub_way_points:
+            return planned_path_coarse
+        if len(planned_path_coarse) >= way_points_max_num:
+            step = int(len(planned_path_coarse)/way_points_max_num)
+            temp = [planned_path_coarse[i:i+step] for i in range(0, len(planned_path_coarse), step)]
+            way_points = [conf[0] for conf in temp]
+            way_points.append(np.array(target_q))
+        else:
+            way_points = planned_path_coarse.copy()
+
+        print(">>> long path")
+        planned_path = []
+        for idx, conf in enumerate(way_points[:-1]):
+            self.set_joint_positions(self.arm_joints, conf)
+            next_conf = way_points[idx + 1]
+            planned_path_segment = plan_transit_motion(
+                self.robot,
+                next_conf,
+                [self.ee_attachment] + attachments,
+                obstacles,
+                disabled_collisions=self.disabled_collisions,
+            )
+            self.ee_attachment.assign()
+            if planned_path_segment is None:
+                return None
+            planned_path.extend(planned_path_segment)
+
         if planned_path is not None:
             planned_path = [np.array(conf) for conf in planned_path]
         return planned_path

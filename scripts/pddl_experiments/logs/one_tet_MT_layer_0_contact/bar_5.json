@@ -1,0 +1,1 @@
+{"place": {"init attach ik failure": 321, "pre attach ik failure": 27, "pre attach collision failure": 36, "post attach ik failure": 4, "post attach collision failure": 13, "back plan failure": 1}, "pick": {"approach ik failure": 0, "pre pick plan failure": 0, "pre pick collision failure": 0}, "transfer": {"transfer plan failure": 8, "transfer collision failure": 56}}

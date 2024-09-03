@@ -190,7 +190,7 @@ def robot_pose_sampler(
     sample_idx = 0
 
     while True:
-        print("sampler sample_idx: ", sample_idx)
+        # print("sampler sample_idx: ", sample_idx)
         sample_idx += 1
         if sample_idx > max_attempt:
             return None

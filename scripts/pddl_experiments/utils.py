@@ -1,8 +1,12 @@
+import json
 import logging
 import os
+from collections import defaultdict
 from functools import partial
 
 import load_pddlstream
+import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
 import numpy as np
 import pybullet_planning as pp
 from load_pddlstream import HERE
@@ -265,7 +269,8 @@ def plan_transit_motion(
             # print('start conf: ', start_conf)
 
             # new_collision_fn = lambda q, diagnosis=False: collision_fn(q, diagnosis=True)
-            if pp.check_initial_end(start_conf, end_conf, transit_collision_fn, diagnosis=debug):
+            # if pp.check_initial_end(start_conf, end_conf, transit_collision_fn, diagnosis=debug):
+            if not transit_collision_fn(end_conf, diagnosis=debug):
                 transit_path = pp.solve_motion_plan(
                     start_conf,
                     end_conf,
@@ -280,12 +285,12 @@ def plan_transit_motion(
                     diagnosis=debug,
                     coarse_waypoints=coarse_waypoints,
                 )
-            else:
-                notify("initial and end conf not valid")
-            if transit_path is None:
-                notify("transit path not found")
-            else:
-                notify("transit path found: transit {} pts".format(len(transit_path)))
+            # else:
+            #     notify("initial and end conf not valid")
+            # if transit_path is None:
+            #     notify("transit path not found")
+            # else:
+            #     notify("transit path found: transit {} pts".format(len(transit_path)))
 
     return transit_path
 
@@ -311,3 +316,108 @@ def angles_distance(angles1, angles2):
     diff = angles1 - angles2
     diff = normalize_angles(diff)
     return np.linalg.norm(diff)
+
+
+def angle_distance(angle1, angle2):
+    diff = angle1 - angle2
+    diff = normalize_angle(diff)
+    return diff
+
+
+###########################################
+
+
+class CounterValue:
+    def __init__(self, name, parent):
+        self.name = name
+        self.parent = parent
+        self.value = 0
+        parent.values[name] = self
+
+    def increment(self, value=1):
+        self.value += value
+
+
+class CounterModule:
+    def __init__(self, root=None, name=None, parent=None):
+        if root is None:
+            self.modules = {}
+            self.name = "root"
+        else:
+            self.modules = root.modules
+
+        self.name = name
+        self.parent = parent
+        self.children = []
+        self.values = {}
+
+        if name is not None:
+            if name not in self.modules:
+                self.modules[name] = self
+            if parent:
+                parent.children.append(self)
+
+    def create_handle(self, name):
+        return CounterModule(root=self, name=name, parent=self)
+
+    def add_counter_value(self, name):
+        if name in self.values:
+            return self.values[name]
+        else:
+            counter_value = CounterValue(name, self)
+            return counter_value
+
+    def plot(self):
+        def collect_data(module, collected=None):
+            if collected is None:
+                collected = defaultdict(lambda: defaultdict(int))
+            if module.name is not None:
+                for value in module.values:
+                    collected[module.name][value.name] += value.value
+            for child in module.children:
+                collect_data(child, collected)
+            return collected
+
+        data = collect_data(self)
+
+        handles = list(data.keys())
+        value_labels = list(set(vname for handle_values in data.values() for vname in handle_values.keys()))
+
+        # 获取颜色映射
+        color_map = dict(zip(value_labels, plt.cm.viridis(np.linspace(0, 1, len(value_labels)))))
+
+        bar_width = 0.8 / len(value_labels)
+        index = np.arange(len(handles))
+
+        plt.figure(figsize=(10, 5))
+
+        for i, value_name in enumerate(value_labels):
+            heights = [data[handle].get(value_name, 0) for handle in handles]
+            bar_positions = index + i * bar_width
+            plt.bar(bar_positions, heights, bar_width, color=color_map[value_name], label=value_name)
+
+            for j, height in enumerate(heights):
+                if height > 0:
+                    plt.text(bar_positions[j], height + 0.1, str(height), ha="center")
+
+        plt.xlabel("Handle Names")
+        plt.ylabel("Counts")
+        plt.title("Counter Module with Side-by-Side Values per Handle")
+        plt.xticks(index + bar_width * (len(value_labels) - 1) / 2, handles)
+        plt.legend(title="Value Names")
+        plt.show()
+
+    def reset(self):
+        for module in self.modules.values():
+            for value in module.values:
+                value.value = 0
+
+    def save(self, path, filename):
+        data_to_save = {
+            name: {value.name: value.value for value in module.values.values()} for name, module in self.modules.items()
+        }
+        os.makedirs(path, exist_ok=True)
+        file_path = os.path.join(path, filename)
+        with open(file_path, "w") as file:
+            json.dump(data_to_save, file)
+        print(f"Counter values saved to {filename}")

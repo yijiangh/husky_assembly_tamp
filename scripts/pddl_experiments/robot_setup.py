@@ -127,17 +127,19 @@ class RobotSetup(object):
         self.ee_attachment.assign()
         return conf
 
-    def plan_manipulator_path(self, init_q, target_q, attachments, obstacles, sub_way_points=False, way_points_max_num=10):
+    def plan_manipulator_path(
+        self, init_q, target_q, attachments, obstacles, sub_way_points=False, way_points_max_num=15
+    ):
         # pp.set_joint_positions(self.robot, self.arm_joints, init_q)
         self.set_joint_positions(self.arm_joints, init_q)
 
-        print(">>> short path")
+        # print(">>> short path")
         planned_path_coarse = plan_transit_motion(
             self.robot,
             target_q,
             [self.ee_attachment] + attachments,
             obstacles,
-            debug=True,
+            debug=False,
             disabled_collisions=self.disabled_collisions,
             coarse_waypoints=sub_way_points,
         )
@@ -150,14 +152,14 @@ class RobotSetup(object):
         if not sub_way_points:
             return planned_path_coarse
         if len(planned_path_coarse) >= way_points_max_num:
-            step = int(len(planned_path_coarse)/way_points_max_num)
-            temp = [planned_path_coarse[i:i+step] for i in range(0, len(planned_path_coarse), step)]
+            step = int(len(planned_path_coarse) / way_points_max_num)
+            temp = [planned_path_coarse[i : i + step] for i in range(0, len(planned_path_coarse), step)]
             way_points = [conf[0] for conf in temp]
             way_points.append(np.array(target_q))
         else:
             way_points = planned_path_coarse.copy()
 
-        print(">>> long path")
+        # print(">>> long path")
         planned_path = []
         for idx, conf in enumerate(way_points[:-1]):
             self.set_joint_positions(self.arm_joints, conf)
@@ -179,6 +181,14 @@ class RobotSetup(object):
         return planned_path
 
     def set_base_pose(self, pose):
+        pp.set_pose(self.robot, pose)
+        self.ee_attachment.assign()
+        for attachment in self.attachments:
+            attachment: Attachment
+            attachment.assign()
+
+    def set_base_pose_2d(self, x, y, yaw=0):
+        pose = pp.Pose(point=[x, y, 0], euler=pp.Euler(0, 0, yaw))
         pp.set_pose(self.robot, pose)
         self.ee_attachment.assign()
         for attachment in self.attachments:

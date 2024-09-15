@@ -1,0 +1,77 @@
+import argparse
+import os
+
+import numpy as np
+
+cur_dir = os.path.dirname(os.path.abspath(__file__))
+
+# -------------------- self-defined modules --------------------#
+import load_multi_tangent
+import pybullet_planning as pp
+from collision import Element, create_couplers, init_pb
+from element_object import ElementObject, ElementStatus
+from multi_tangent.collision import create_collision_bodies
+from multi_tangent.convert import flatten_list
+from parse import parse_mt_geometric
+from planner import GetElementObjects, Plan, UpdateElements
+
+if __name__ == "__main__":
+    with pp.HideOutput():
+        parser = argparse.ArgumentParser()
+        parser.add_argument(
+            "--mt_file_name",
+            default="tower_integral_one_len_MT_layer_0.json",
+            help='The name of the multi tangent file to solve (json file\'s name, e.g. "tower_integral_one_len_MT_layer_0.json")',
+        )
+        args = parser.parse_args()
+
+        # -------------------- Load process file --------------------#
+        mt_file_name = args.mt_file_name
+        line_pt_pairs, contact_id_pairs, bar_radius = parse_mt_geometric(mt_file_name)
+        line_pt_pairs: list[list[list]]  # bar list
+        contact_id_pairs: list[list]  # contact pairs
+        bar_radius: float
+        line_pts_flattened: list[np.ndarray] = flatten_list(np.array(line_pt_pairs))  # numpy points list
+        vertices: list[list] = flatten_list(line_pt_pairs)  # points list
+
+        # -------------------- Eliminate Z-axis deviation --------------------#
+        min_z = np.min(line_pts_flattened, axis=0)[2]
+        line_pts_flattened = [np.array([0, 0, -min_z]) + point for point in line_pts_flattened]
+
+        radius_per_edge = [bar_radius] * int(len(line_pts_flattened) / 2)
+
+        # -------------------- Init --------------------#
+        init_pb()
+        with pp.LockRenderer():
+            element_bodies = create_collision_bodies(line_pts_flattened, radius_per_edge, viewer=True)
+            half_coupler_from_contact_pair = create_couplers(line_pts_flattened, contact_id_pairs)
+        element_from_index = {
+            i: Element(i, e, pp.get_pose(e), pp.get_pose(e), [line_pts_flattened[2 * i], line_pts_flattened[2 * i + 1]])
+            for i, e in enumerate(element_bodies)
+        }
+
+        grounded_elements_index = [0, 1, 4, 19]  # tower_integral_one_len_MT_layer_0
+        # for index in grounded_elements_index:
+        #     pp.set_color(element_from_index[index].body, pp.BLACK)
+
+        # -------------------- Plan --------------------#
+        path = Plan(element_from_index, contact_id_pairs, grounded_elements_index)
+        element_object_list = GetElementObjects(element_from_index, contact_id_pairs, grounded_elements_index)
+
+        # -------------------- Visualization --------------------#
+        assembled = []
+        for index in path:
+            element_object_list[index].Assemble(assembled)
+            assembled.append(index)
+            UpdateElements(assembled, element_object_list)
+            with pp.LockRenderer():
+                for element_obj in element_object_list:
+                    if element_obj.status == ElementStatus.float:
+                        pp.set_color(element_obj.body, pp.YELLOW)
+                    elif element_obj.status == ElementStatus.rotate:
+                        pp.set_color(element_obj.body, pp.GREEN)
+                    elif element_obj.status == ElementStatus.fixed:
+                        pp.set_color(element_obj.body, pp.RED)
+                    else:
+                        pp.set_color(element_obj.body, (1, 0, 0, 0.1))
+            pp.wait_for_user(f"cur update index: {index}/{len(path)-1}")

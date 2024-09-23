@@ -421,3 +421,13 @@ class CounterModule:
         with open(file_path, "w") as file:
             json.dump(data_to_save, file)
         print(f"Counter values saved to {filename}")
+
+
+def flatten(nested_list):
+    result = []
+    for element in nested_list:
+        if isinstance(element, list):
+            result.extend(flatten(element))
+        else:
+            result.append(element)
+    return result

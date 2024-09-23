@@ -1,3 +1,4 @@
+import operator
 from collections import deque
 from copy import deepcopy
 from enum import Enum
@@ -12,6 +13,7 @@ class ElementStatus(Enum):
     rotate = 2
     fixed = 3
 
+# TODO consider hold
 
 class ElementObject(object):
     def __init__(
@@ -32,13 +34,14 @@ class ElementObject(object):
         self.coupled_elements = coupled_elements  # bars that should be connected with self
         self.is_grounded = is_grounded
 
-        self.assigned_couplers = []  # installed couplers
+        self.heuristic_value = 0
+        # self.assigned_couplers = []  # installed couplers
         self.assembled_elements = []  # connected elements index
         self.status = ElementStatus.unassembled
-        self.status_checker = RecursiveChecker()
+        self.status_checker = TwoFixConstrainChecker()
 
     def __str__(self) -> str:
-        return f"index: {self.index}, status: {self.status.name}, assigned: {self.assigned_couplers}"
+        return f"index: {self.index}, status: {self.status.name}, assembled: {self.assembled_elements}"
 
     def __repr__(self) -> str:
         # return f"index: {self.index}"
@@ -48,6 +51,10 @@ class ElementObject(object):
         self.status = ElementStatus.float
         self.UpdateConstrain(assembled_list)
 
+    def Disassemble(self):
+        self.status = ElementStatus.unassembled
+        self.assembled_elements = []
+
     def UpdateConstrain(self, assembled_list: list):
         if self.status != ElementStatus.unassembled:
             for assembled_index in assembled_list:
@@ -55,12 +62,17 @@ class ElementObject(object):
                     self.AddAssembleElement(assembled_index)
 
     def UpdateStatus(self, element_object_list: list):
+        element_object_list.sort(key=operator.attrgetter("index"))
         self.status = self.status_checker.Check(self.index, element_object_list)
+        element_object_list.sort(key=operator.attrgetter("heuristic_value"))
         # print(f"index {self.index}: ", self.status.name)
 
     def AddAssembleElement(self, index: int):
         if index not in self.assembled_elements:
             self.assembled_elements.append(index)
+
+    def SetHeuristicValue(self, value: float):
+        self.heuristic_value = value
 
     @staticmethod
     def GetCoupledElements(element_index: int, contact_id_pairs: list[list]) -> list:
@@ -151,8 +163,50 @@ class GroundedChecker(object):
                     visited.add(neighbor_index)
         return ground_num
 
+    @staticmethod
+    def GetGroundPath(index: int, element_object_list: list[ElementObject]) -> list[ElementObject]:
+        queue = deque([index])
+        visited = set([index])
+        predecessor = {index: None}
 
-class RecursiveChecker(object):
+        path = []
+        while queue:
+            node_index = queue.popleft()
+            if element_object_list[node_index].is_grounded:
+                while node_index is not None:
+                    path.append(node_index)
+                    node_index = predecessor[node_index]
+                return path[::-1]
+            for neighbor_index in element_object_list[node_index].assembled_elements:
+                if neighbor_index not in visited:
+                    queue.append(neighbor_index)
+                    visited.add(neighbor_index)
+                    predecessor[neighbor_index] = node_index
+        return []
+
+    @staticmethod
+    def GetTrueGroundPath(index: int, element_object_list: list[ElementObject]) -> list[ElementObject]:
+        queue = deque([index])
+        visited = set([index])
+        predecessor = {index: None}
+
+        path = []
+        while queue:
+            node_index = queue.popleft()
+            if element_object_list[node_index].is_grounded:
+                while node_index is not None:
+                    path.append(node_index)
+                    node_index = predecessor[node_index]
+                return path[::-1]
+            for neighbor_index in element_object_list[node_index].coupled_elements:
+                if neighbor_index not in visited:
+                    queue.append(neighbor_index)
+                    visited.add(neighbor_index)
+                    predecessor[neighbor_index] = node_index
+        return []
+
+
+class TwoFixConstrainChecker(object):
     def __init__(self) -> None:
         super().__init__()
 
@@ -171,22 +225,16 @@ class RecursiveChecker(object):
         if element_object_list[index].is_grounded:
             return ElementStatus.fixed
 
-        #-------------------- check total ground num --------------------#
-        ground_num = GroundedChecker.CheckGroundNum(index, element_object_list)
-        if ground_num >= 3:
-            return ElementStatus.fixed
-        # else:
-        #     return ElementStatus.rotate
-
         # -------------------- judge the fixed constrain num --------------------#
         fix_constrain_num = 0
         element_object = element_object_list[index]
         for neighbor_index in element_object.assembled_elements:
             if neighbor_index in visited:
                 continue
-            neighbor_status = RecursiveChecker.Check(neighbor_index, element_object_list, visited + [index])
+            neighbor_status = TwoFixConstrainChecker.Check(neighbor_index, element_object_list, visited + [index])
             if neighbor_status == ElementStatus.fixed:
                 fix_constrain_num += 1
+        
         if fix_constrain_num >= 2:
             return ElementStatus.fixed
         else:

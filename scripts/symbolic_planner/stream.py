@@ -875,7 +875,7 @@ def get_place_gen_fn(
                         print("pregrasp failure.")
                     continue
 
-                if element != 0:
+                if len(assembled) != 0:
                     preview_point = preview_point_calculation(assembled + [element], element_from_index)
                     pp.draw_point(preview_point, size=0.1)
                     attach_pose = multiply(pregrasp_poses[-1], invert(grasp))

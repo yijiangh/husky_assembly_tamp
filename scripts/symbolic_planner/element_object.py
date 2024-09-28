@@ -62,9 +62,7 @@ class ElementObject(object):
                     self.AddAssembleElement(assembled_index)
 
     def UpdateStatus(self, element_object_list: list):
-        element_object_list.sort(key=operator.attrgetter("index"))
         self.status = self.status_checker.Check(self.index, element_object_list)
-        element_object_list.sort(key=operator.attrgetter("heuristic_value"))
         # print(f"index {self.index}: ", self.status.name)
 
     def AddAssembleElement(self, index: int):

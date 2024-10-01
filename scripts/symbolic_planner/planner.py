@@ -13,6 +13,7 @@ from utils import flatten
 # TODO  * trace back for Search
 #       * trace back for SearchRobotCooperation
 #       * plan transit/transfer/pick motion
+#       * store planned path
 
 class Planner(object):
     def __init__(self, robot_num: int, robots: list[Robot]) -> None:
@@ -98,8 +99,22 @@ class Planner(object):
                     Planner.MultiDisassemble(task, visited_index_list, element_object_list)
                     Planner.Disassemble(element_object_index, visited_index_list, element_object_list)
                     blacklist_index.append(element_object_index)
+                    
             else:
                 raise RuntimeError("This status is not possible!")
+
+            #-------------------- Check if backtracking is necessary --------------------#
+            if len(not_visited_index) == 0 and len(blacklist_index) != 0:
+                print("********** Dead end reached, need to backtrack! **********")
+                # not_visited_index.extend(blacklist_index)
+                # blacklist_index.clear()
+                # # -------------------- pop --------------------#
+                # element_object_index_backtrack, _ = Planner.FindMax(list(visited_index), element_object_list)
+                # backtrack_index_list = Planner.GetBacktrackElementsFromPath(element_object_index_backtrack, path_index)
+                # for index_temp in backtrack_index_list:
+                #     visited_index.remove(index_temp)
+                # path_index.remove(backtrack_index_list)
+                # blacklist_index.extend(backtrack_index_list)
 
         return list(path_index)
 
@@ -238,6 +253,13 @@ class Planner(object):
                 blacklist_index.append(element_object_index)
 
         return list(path_index)[::-1]
+
+    @staticmethod
+    def GetBacktrackElementsFromPath(element_index: int, path: deque) -> list:
+        for path_step in path:
+            if element_index in path_step:
+                return list(path_step)
+        return []
 
     @staticmethod
     def GetElementObjects(

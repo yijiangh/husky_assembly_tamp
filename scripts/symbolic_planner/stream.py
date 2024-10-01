@@ -34,7 +34,7 @@ ANGLE = np.pi / 6
 POS_STEP_SIZE = 0.005
 ORI_STEP_SIZE = np.pi / 128
 
-RETREAT_DISTANCE = 0.07
+RETREAT_DISTANCE = 0.12
 MAX_DISTANCE = 0.01
 # MAX_DISTANCE = 0.07
 
@@ -520,6 +520,8 @@ def compute_pick_path(
 
     # print("\n\nview 2: body_init_pose\n", body_init_pose)
 
+    pp.set_joint_positions(robot_setup.robot, robot_setup.arm_joints, robot_setup.arm_init_angles)
+
     robot_init_conf = pp.get_joint_positions(robot_setup.robot, robot_setup.control_joints)
     robot_base_init_conf = robot_init_conf[:3]
     robot_arm_init_conf = robot_init_conf[3:]
@@ -607,16 +609,16 @@ def compute_pick_path(
         robot_joint_conf_last = pre_pick_path[-1]
         for approach_tool0_pose in approach_tool0_poses:
             for ik_search_num in range(ik_search_max_attempt):
-                appraoch_joint_conf = robot_setup.get_relative_ik_solution(
+                approach_joint_conf = robot_setup.get_relative_ik_solution(
                     approach_tool0_pose, robot_joint_conf_last.tolist()
                 )
-                if appraoch_joint_conf is None:
+                if approach_joint_conf is None:
                     continue
-                appraoch_joint_conf = normalize_angles(appraoch_joint_conf)
-                if angles_distance(appraoch_joint_conf, robot_joint_conf_last) >= np.pi / 2:
+                approach_joint_conf = normalize_angles(approach_joint_conf)
+                if angles_distance(approach_joint_conf, robot_joint_conf_last) >= np.pi / 2:
                     continue
-                approach_confs.append(np.hstack((robot_base_init_conf, appraoch_joint_conf)))
-                robot_joint_conf_last = appraoch_joint_conf
+                approach_confs.append(np.hstack((robot_base_init_conf, approach_joint_conf)))
+                robot_joint_conf_last = approach_joint_conf
                 break
             if ik_search_num == ik_search_max_attempt - 1:
                 if verbose:
@@ -659,14 +661,56 @@ def compute_pick_path(
 
         retreat_confs = approach_confs[::-1]
 
+        # -------------------- from post pick to init conf --------------------#
+        post_pick_arm_conf = retreat_confs[-1][3:]
+        step = (robot_setup.arm_init_angles - post_pick_arm_conf) / 40
+        pick_back_arm_confs = []
+        for i in range(40 + 1):
+            pick_back_arm_temp = post_pick_arm_conf + i * step
+            pick_back_arm_confs.append(np.hstack((robot_base_init_conf, pick_back_arm_temp)))
+
+        # fail_flag = True
+        # for plan_attempt in range(path_plan_max_attempt):
+        #     back_arm_path = robot_setup.plan_manipulator_path(
+        #         retreat_confs[-1][3:],
+        #         robot_setup.arm_init_angles,
+        #         attachments=[],
+        #         obstacles=obstacles,
+        #     )
+        #     if back_arm_path is None:
+        #         if verbose:
+        #             print("    back plan not found.")
+        #         continue
+
+        #     back_arm_path = [normalize_angles(conf) for conf in back_arm_path]
+        #     back_confs = [np.hstack((retreat_confs[-1][:3], conf)) for conf in back_arm_path]
+
+        #     inner_fail_flag = False
+        #     for back_conf in back_confs:
+        #         if collision_fn_no_attachment(back_conf, diagnosis):
+        #             if verbose:
+        #                 print("    back collision not pass.")
+        #             inner_fail_flag = True
+        #             break
+        #     if inner_fail_flag:
+        #         continue
+
+        #     fail_flag = False
+        #     break
+        # if fail_flag:
+        #     if verbose:
+        #         print("back plan failure.")
+        #     back_plan_val.increment()
+        #     continue
+
         # -------------------- set position --------------------#
         # pp.set_pose(body, body_init_pose)
         # pp.set_joint_positions(robot_setup.robot, robot_setup.control_joints, approach_confs[-1])
         # robot_setup.ee_attachment.assign()
 
-        return pre_pick_confs + approach_confs + retreat_confs, [0] * len(pre_pick_confs + approach_confs) + [1] * len(
-            retreat_confs
-        )
+        return pre_pick_confs + approach_confs + retreat_confs + pick_back_arm_confs, [0] * len(
+            pre_pick_confs + approach_confs
+        ) + [1] * len(retreat_confs + pick_back_arm_confs)
 
     return None, None
 
@@ -1005,7 +1049,7 @@ def get_pick_gen_fn(
             if allow_failure:
                 yield None, None
             else:
-                return
+                return None, None
 
     return gen_fn
 
@@ -1069,7 +1113,7 @@ def get_transfer_gen_fn(
             if allow_failure:
                 yield None, None
             else:
-                return
+                return None, None
 
     return gen_fn
 
@@ -1126,7 +1170,7 @@ def get_transit_gen_fn(
             if allow_failure:
                 yield None, None
             else:
-                return
+                return None, None
 
     return gen_fn
 

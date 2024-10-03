@@ -1,5 +1,6 @@
 from typing import Dict, List, Tuple
 from copy import deepcopy
+from collections import namedtuple
 
 import numpy as np
 import pybullet_planning as pp
@@ -8,6 +9,8 @@ from pybullet_planning import Attachment, Euler, Point, Pose, get_distance, inte
 from robot_setup import RobotSetup
 from stream import get_pick_gen_fn, get_place_gen_fn, get_transfer_gen_fn, get_transit_gen_fn
 from utils import CounterModule, CounterValue
+
+ConcretePath = namedtuple("ConcretePath", ["base_path", "manipulator_path"])
 
 
 class PathItem(object):
@@ -26,6 +29,31 @@ class PathItem(object):
         self.mask = masks + self.mask
 
 
+class PathWithIndex(object):
+    def __init__(self) -> None:
+        self.storage = {}
+
+    def add_manipulator(self, index: int, path: PathItem):
+        if index in self.storage.keys():
+            last: ConcretePath = self.storage[index]
+            self.storage[index] = ConcretePath(last.base_path, path)
+        else:
+            self.storage[index] = ConcretePath(None, path)
+
+    def add_base(self, index: int, path: PathItem):
+        if index in self.storage.keys():
+            last: ConcretePath = self.storage[index]
+            self.storage[index] = ConcretePath(path, last.manipulator_path)
+        else:
+            self.storage[index] = ConcretePath(path, None)
+
+    def get(self, index: int) -> ConcretePath:
+        try:
+            return self.storage[index]
+        except:
+            return None, None
+
+
 class Robot(object):
     def __init__(
         self,
@@ -33,6 +61,7 @@ class Robot(object):
         robot_setup: RobotSetup,
         element_from_index: Dict[int, Element],
         attachments: List[Attachment] = [],
+        storage: PathWithIndex = None,
     ) -> None:
         self.index = index
         self.robot_setup = robot_setup
@@ -43,7 +72,7 @@ class Robot(object):
 
         self.element_from_index = element_from_index
         self.attachments = attachments
-        self.path = []
+        self.path_storage = storage
         self.last_pose2d = np.array([5, 5, 0])
 
         self.place_gen = get_place_gen_fn(
@@ -54,7 +83,7 @@ class Robot(object):
             collisions=True,
             teleops=False,
             allow_failure=True,
-            max_grasp=20,
+            max_grasp=50,
         )
 
         self.pick_gen = get_pick_gen_fn(
@@ -65,19 +94,25 @@ class Robot(object):
             self.robot_setup,
             element_from_index,
             [],
-            verbose=False,
+            verbose=True,
             collisions=True,
             teleops=False,
             allow_failure=True,
-            max_attempts=10,
+            max_attempts=15,
         )
 
         self.transit_gen = get_transit_gen_fn(
-            self.robot_setup, element_from_index, [], verbose=True, collisions=True, teleops=False
+            self.robot_setup,
+            element_from_index,
+            [],
+            verbose=False,
+            collisions=True,
+            teleops=True,
+            allow_failure=True,
         )
 
-        self.planner_fn = self.DefaultPlan
-        # self.planner_fn = self.MotionPlan
+        # self.manipulator_planner_fn = self.DefaultPlan
+        self.manipulator_planner_fn = self.ManipulatorMotionPlan
 
     def DefaultPlan(
         self,
@@ -88,7 +123,7 @@ class Robot(object):
     ) -> bool:
         return True
 
-    def MotionPlan(
+    def ManipulatorMotionPlan(
         self,
         element_index: int,
         assembled_index_list: List[int],
@@ -109,7 +144,6 @@ class Robot(object):
         if place_cmd is None:
             return False
         path_obj = PathItem(element_index, grasp_attach)
-        base_path_obj = PathItem(element_index, grasp_attach)
 
         # -------------------- Pick --------------------#
         self.UpdateElementsRobot(element_index)
@@ -132,27 +166,34 @@ class Robot(object):
         if transfer_cmd is None:
             return False
 
-        # -------------------- Transit --------------------#
-        transit_cmd, transit_grasp_mask = self.TransitPathPlan(
-            element_index,
-            assembled_index_list,
-            attachment_list,
-            self.last_pose2d,
-            place_cmd[0][:3],
-        )
-        if transit_cmd is None:
-            return False
-
-        # print(transfer_cmd)
-        self.last_pose2d = place_cmd[0][:3]
-
-        base_path_obj.Append(transit_cmd, transit_grasp_mask)
         path_obj.Append(pick_cmd, pick_grasp_mask)
         path_obj.Append(transfer_cmd, transfer_grasp_mask)
         path_obj.Append(place_cmd, place_grasp_mask)
 
-        self.path.append((base_path_obj, path_obj))
+        if self.path_storage is not None:
+            self.path_storage.add_manipulator(element_index, path_obj)
         return True
+
+    def BaseMotionPlan(self, path: List[List[int]]):
+        assembled = []
+        for index_list in path:
+            for i in self.element_from_index.keys():
+                if i in assembled:
+                    pp.set_pose(self.element_from_index[i].body, self.element_from_index[i].goal_pose)
+                else:
+                    pp.set_pose(self.element_from_index[i].body, pp.Pose(point=(5, 0, 0), euler=pp.Euler(0, 1.5708, 0)))
+
+            index = index_list[0]
+            base_path_obj = PathItem(index, None)
+            # -------------------- Transit --------------------#
+            # TODO attachment list
+            transit_cmd, transit_grasp_mask = self.TransitPathPlan(
+                index, assembled, [], self.last_pose2d, self.path_storage.get(index).manipulator_path.conf[-1][:3]
+            )
+            self.last_pose2d = self.path_storage.get(index).manipulator_path.conf[-1][:3]
+            base_path_obj.Append(transit_cmd, transit_grasp_mask)
+            self.path_storage.add_base(index, base_path_obj)
+            assembled.append(index)
 
     def UpdateElementsRobot(self, element_index: int):
         # 设置当前element到机器人上的托盘
@@ -254,20 +295,20 @@ class Robot(object):
         else:
             diagnosis = False
         diagnosis = False
-        with pp.LockRenderer():
-            transfer_cmd, transfer_grasp_mask = next(
-                self.transfer_gen(
-                    element_index,
-                    grasp_attach,
-                    start_conf,
-                    target_conf,
-                    assembled=assembled_index_list,
-                    unassembled=unassembled_index_list,
-                    attachments=attachment_list,
-                    counter=self.transfer_counter_handle,
-                    diagnosis=diagnosis,
-                )
+        # with pp.LockRenderer():
+        transfer_cmd, transfer_grasp_mask = next(
+            self.transfer_gen(
+                element_index,
+                grasp_attach,
+                start_conf,
+                target_conf,
+                assembled=assembled_index_list,
+                unassembled=unassembled_index_list,
+                attachments=attachment_list,
+                counter=self.transfer_counter_handle,
+                diagnosis=diagnosis,
             )
+        )
 
         return transfer_cmd, transfer_grasp_mask
 
@@ -290,15 +331,15 @@ class Robot(object):
             grasp_mask: List[int]\n
         """
         pp.set_pose(self.element_from_index[element_index].body, self.element_from_index[element_index].goal_pose)
-        with pp.LockRenderer():
-            transit_cmd, transit_grasp_mask = next(
-                self.transit_gen(
-                    element_index,
-                    start_pose2d,
-                    target_pose2d,
-                    assembled_index_list,
-                    attachment_list,
-                )
+        # with pp.LockRenderer():
+        transit_cmd, transit_grasp_mask = next(
+            self.transit_gen(
+                element_index,
+                start_pose2d,
+                target_pose2d,
+                assembled_index_list,
+                attachment_list,
             )
+        )
 
         return transit_cmd, transit_grasp_mask

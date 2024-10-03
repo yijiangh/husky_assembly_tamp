@@ -132,6 +132,9 @@ class RobotSetup(object):
     ):
         # pp.set_joint_positions(self.robot, self.arm_joints, init_q)
         self.set_joint_positions(self.arm_joints, init_q)
+        self.ee_attachment.assign()
+        for att in attachments:
+            att.assign()
 
         # print(">>> short path")
         planned_path_coarse = plan_transit_motion(
@@ -145,10 +148,10 @@ class RobotSetup(object):
         )
         self.ee_attachment.assign()
 
-        if planned_path_coarse is not None:
+        if planned_path_coarse is not None and planned_path_coarse != False:
             planned_path_coarse = [np.array(conf) for conf in planned_path_coarse]
         else:
-            return planned_path_coarse
+            return None
         if not sub_way_points:
             return planned_path_coarse
         if len(planned_path_coarse) >= way_points_max_num:

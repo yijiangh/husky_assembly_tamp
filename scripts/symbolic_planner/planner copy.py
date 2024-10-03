@@ -7,19 +7,18 @@ import numpy as np
 from collision import Element
 from element_object import ElementObject, ElementStatus
 from heuristic import BasicHeuristic, CenterDistanceHeuristic, GroundedChainHeuristic, GroundedHeightHeuristic
-from robot import Robot, PathItem
-from termcolor import cprint
+from robot import Robot
 from utils import flatten
-import pybullet_planning as pp
 
-# TODO  * 在多机协同的时候，需要将其他机器人也考虑进来（碰撞）
-# TODO  * 需要考虑多机协同时候的路径存储
-# TODO  * transfer的planner需要改一改
+# TODO  * trace back for Search
+#       * trace back for SearchRobotCooperation
+#       * store planned path
+
 
 class PlanState(object):
     _instances = {}
 
-    def __new__(cls, assembled, unassembled, blacklist):
+    def __new__(cls, assembled, *args, **kwargs):
         sorted_id = tuple(sorted(assembled))
         if sorted_id not in cls._instances:
             instance = super().__new__(cls)
@@ -31,12 +30,9 @@ class PlanState(object):
             self._assembled = assembled
             self._unassembled = unassembled
             self._blacklist = blacklist
-
             self._father = None
             self.is_deadend = False
             self.initialized = True
-
-            self.path = []
 
     def __repr__(self):
         return f"PlanState(assembled={self._assembled}, unassembled={self._unassembled}, blacklist={self._blacklist})"
@@ -107,16 +103,13 @@ class PlanState(object):
     def father(self) -> "PlanState":
         return self._father
 
-    @staticmethod
-    def GenerateNextState(current_state: "PlanState", index_list: list) -> "PlanState":
-        """
-        @brief: 产生下一个状态，清空blacklist\n
-        """
+    @classmethod
+    def GenerateNextState(cls, current_state: "PlanState", index_list: list) -> "PlanState":
         assembled = deepcopy(current_state._assembled)
         unassembled = deepcopy(current_state._unassembled)
         blacklist = deepcopy(current_state._blacklist)
 
-        # push element from index_list to assembled
+        # push element from unassembled to assembled
         for index in index_list:
             if index not in assembled:
                 assembled.append(index)
@@ -128,7 +121,7 @@ class PlanState(object):
             if index not in unassembled:
                 unassembled.append(index)
 
-        rtn = PlanState(assembled, unassembled, [])
+        rtn = cls(assembled, unassembled, [])
         rtn.SetFather(current_state)
 
         return rtn
@@ -148,136 +141,6 @@ class PlanState(object):
         return path_invert[::-1]
 
 
-class CooperationPlanState(object):
-    _instances = {}
-
-    def __new__(cls, assembled, unassembled, blacklist, hold, root=None):
-        sorted_id = (tuple(sorted(assembled)), tuple(sorted(hold)))
-        if sorted_id not in cls._instances:
-            instance = super().__new__(cls)
-            cls._instances[sorted_id] = instance
-        return cls._instances[sorted_id]
-
-    def __init__(self, assembled, unassembled, blacklist, hold, root: PlanState = None):
-        if not hasattr(self, "initialized"):
-            self._assembled = assembled
-            self._unassembled = unassembled
-            self._blacklist = blacklist
-
-            self._father = None
-            self.is_deadend = False
-            self.initialized = True
-
-            self._hold = hold
-            self._root = root
-
-    def __repr__(self):
-        return f"CooperationPlanState(assembled={self._assembled}, unassembled={self._unassembled}, blacklist={self._blacklist}, hold={self._hold})"
-
-    def UpdateBlacklist(self, index_list: list):
-        for index in index_list:
-            if index in self._hold:
-                self._hold.remove(index)
-            if index in self._unassembled:
-                self._unassembled.remove(index)
-            if index not in self.blacklist:
-                self._blacklist.append(index)
-
-    def UpdateFatherState(self):
-        cur_state = self
-        while cur_state.deadend and cur_state.father != None:
-            new_blacklist_list = CooperationPlanState.Difference(cur_state.hold, cur_state.father.hold)
-            cur_state.father.UpdateBlacklist(new_blacklist_list)
-            cur_state = cur_state.father
-
-    def UnassembledRemove(self, index_list: list):
-        rtn = self.unassembled
-        for index in index_list:
-            if index in rtn:
-                rtn.remove(index)
-        return rtn
-
-    def FindNextIndex(self, fn_handle, **kwargs):
-        return fn_handle(list(self._unassembled), **kwargs)
-
-    def SetFather(self, father: "CooperationPlanState"):
-        self._father = father
-
-    def TraceBack(self) -> "CooperationPlanState":
-        self.UpdateFatherState()
-        cur_state = self
-        while cur_state.deadend and cur_state.father != None:
-            cur_state = cur_state.father
-        return cur_state
-
-    def TraceBack2Root(self) -> PlanState:
-        state = self.TraceBack()
-        return state.root
-
-    @property
-    def deadend(self) -> bool:
-        if len(self._unassembled) == 0 and len(self._blacklist) != 0:
-            self.is_deadend = True
-        else:
-            self.is_deadend = False
-        return self.is_deadend
-
-    @property
-    def assembled(self) -> list:
-        return list(deepcopy(self._assembled))
-
-    @property
-    def unassembled(self) -> list:
-        return list(deepcopy(self._unassembled))
-
-    @property
-    def blacklist(self) -> list:
-        return list(deepcopy(self._blacklist))
-
-    @property
-    def hold(self) -> list:
-        return list(deepcopy(self._hold))
-
-    @property
-    def father(self) -> "CooperationPlanState":
-        return self._father
-
-    @property
-    def root(self) -> PlanState:
-        return self._root
-
-    @staticmethod
-    def GenerateNextState(current_state: "CooperationPlanState", index_list: list) -> "CooperationPlanState":
-        """
-        @brief: 产生下一个状态，清空blacklist\n
-        """
-        assembled = current_state.assembled
-        unassembled = current_state.unassembled
-        blacklist = current_state.blacklist
-        hold = current_state.hold
-
-        # push element from index_list to hold
-        for index in index_list:
-            if index not in hold:
-                hold.append(index)
-            if index in unassembled:
-                unassembled.remove(index)
-
-        # push element from blacklist to unassembled
-        for index in blacklist:
-            if index not in unassembled:
-                unassembled.append(index)
-
-        rtn = CooperationPlanState(assembled, unassembled, [], hold)
-        rtn.SetFather(current_state)
-
-        return rtn
-
-    @staticmethod
-    def Difference(minuend: list, subtrahend: list):
-        return list(set(minuend) - set(subtrahend))
-
-
 class Planner(object):
     def __init__(self, robot_num: int, robots: list[Robot]) -> None:
         self.robot_num = robot_num
@@ -295,39 +158,23 @@ class Planner(object):
 
         path_index = self.Search(element_object_list)
         # path_index = self.BackwardSearchWithoutMotionPlan(element_object_list)
-
-        # TODO: 多机协同
-        self.robots[0].BaseMotionPlan(path_index)
         return path_index
 
     def Search(self, element_object_list: list[ElementObject]) -> list:
         # -------------------- init --------------------#
-        current_state = PlanState([], [obj.index for obj in element_object_list], [])
+        # not_visited_index = deque([obj.index for obj in element_object_list])
+        # visited_index = deque([])
+        # path_index = deque([])
+        # blacklist_index = deque([])
+
+        current_state = PlanState(deque([]), deque([obj.index for obj in element_object_list]), deque([]))
         root_state = current_state
 
         # -------------------- loop --------------------#
-        while not root_state.deadend:
-
-            Planner.UpdateElements([obj.index for obj in element_object_list], element_object_list)
-
-            for element_obj in element_object_list:
-                if element_obj.index in current_state.assembled:
-                    pp.set_pose(element_obj.body, element_obj.goal_pose)
-                else:
-                    pp.set_pose(element_obj.body, pp.Pose(point=(5, 0, 0), euler=pp.Euler(0, 1.5708, 0)))
-
+        while not root_state.is_deadend:
             # -------------------- pop --------------------#
             element_object_index, _ = current_state.FindNextIndex(
                 Planner.FindMin, element_object_list=element_object_list
-            )
-
-            print(
-                f"\n-------------------------------------------------------------------------------------------------------"
-            )
-            print(f"start plan {element_object_index}: {current_state}")
-            print(f"current path {PlanState.GetPath(current_state)}")
-            print(
-                f"-------------------------------------------------------------------------------------------------------\n"
             )
 
             # -------------------- assemble --------------------#
@@ -345,140 +192,144 @@ class Planner(object):
 
                 if plan_status:
                     Planner.MultiDisassemble(current_state.blacklist, current_state.assembled, element_object_list)
-                    cprint(f"========== plan {element_object_index}: {current_state} success ==========", "green")
                     next_state = PlanState.GenerateNextState(current_state, [element_object_index])
                     current_state = next_state
+                    # not_visited_index.extend(blacklist_index)
+                    # blacklist_index.clear()
+                    # visited_index.append(element_object_index)
+                    # path_index.append([element_object_index])
                 else:
                     Planner.Disassemble(element_object_index, current_state.assembled, element_object_list)
-                    cprint(f"********** plan {element_object_index}: {current_state} failed **********", "red")
                     current_state.UpdateBlacklist([element_object_index])
+                    # blacklist_index.append(element_object_index)
 
             elif status == ElementStatus.float:
                 Planner.Disassemble(element_object_index, current_state.assembled, element_object_list)
-                cprint(f"********** {element_object_index}: {current_state} is float **********", "red")
                 current_state.UpdateBlacklist([element_object_index])
 
             elif status == ElementStatus.rotate:
-                current_coop_state = CooperationPlanState(
-                    current_state.assembled,
-                    current_state.UnassembledRemove([element_object_index]) + current_state.blacklist,
-                    [],
-                    [element_object_index],
-                    current_state,
+                state, task = self.SearchRobotCooperation(
+                    element_object_list, current_state.assembled, current_state.unassembled, [element_object_index]
                 )
-                solve_status, task = self.SearchRobotCooperation(element_object_list, current_coop_state)
-                if solve_status:
+                if state:
                     Planner.MultiDisassemble(current_state.blacklist, current_state.assembled, element_object_list)
                     Planner.MultiAssemble(task, current_state.assembled, element_object_list)
-                    cprint(f"========== plan {element_object_index}: {task} success ==========", "green")
                     next_state = PlanState.GenerateNextState(current_state, task)
                     current_state = next_state
+                    # not_visited_index.extend(blacklist_index)
+                    # blacklist_index.clear()
+                    # for temp_element_index in task:  # remove task from not_visited
+                    #     not_visited_index = deque(
+                    #         [
+                    #             element_temp_index
+                    #             for element_temp_index in not_visited_index
+                    #             if element_temp_index != temp_element_index
+                    #         ]
+                    #     )
+                    # visited_index.extend(task)
+                    # path_index.append(task)
                 else:
                     Planner.MultiDisassemble(task, current_state.assembled, element_object_list)
-                    # Planner.Disassemble(element_object_index, current_state.assembled, element_object_list)
-                    cprint(f"********** cooperation plan {element_object_index}: {current_state} not found **********", "red")
-                    current_state.UpdateBlacklist([element_object_index])  # TODO: 这里不考虑把所有task全加到blacklist
+                    # Planner.Disassemble(element_object_index, visited_index_list, element_object_list)
+                    current_state.UpdateBlacklist([element_object_index])
 
             else:
                 raise RuntimeError("This status is not possible!")
 
             # -------------------- Check if goal is reached --------------------#
             if current_state.finished:
-                cprint("========== Finished! ==========", "green")
+                print("********** Finished! **********")
                 return PlanState.GetPath(current_state)
 
             # -------------------- Check if backtracking is necessary --------------------#
             if current_state.deadend:
-                cprint("\n****************************** Deadend reached, need to traceback! *********************************", "cyan")
-                cprint(f"current state: {current_state}", "cyan")
+                print("********** Dead end reached, need to backtrack! **********")
                 current_state = current_state.TraceBack()
-                cprint(f"traceback state: {current_state}", "cyan")
-                cprint("****************************************************************************************************\n", "cyan")
 
-        cprint("********** Plan failed! **********", "red")
         return []
 
     def SearchRobotCooperation(
-        self, element_object_list: list[ElementObject], cur_state: CooperationPlanState
+        self,
+        element_object_list: list[ElementObject],
+        visited_index_list: list,
+        not_visited_index_list: list,
+        hold_index_list: list,
     ) -> Tuple[bool, list[ElementObject]]:
-        current_state = cur_state
-        current_root = cur_state
+        visited_index_list = deepcopy(visited_index_list)
+        not_visited_index_list = deepcopy(not_visited_index_list)
+        visited_index = deque(visited_index_list)
+        not_visited_index = deque(not_visited_index_list)
+        hold_index = deque(hold_index_list)
+        blacklist_index = deque()
 
-        if len(current_state.hold) == self.robot_num:
-            return False, current_state.hold
+        if len(hold_index_list) == self.robot_num:
+            return False, hold_index_list
 
         # -------------------- loop --------------------#
-        while not current_root.deadend:
+        while len(not_visited_index) != 0:
             # -------------------- pop --------------------#
-            element_object_index, _ = current_state.FindNextIndex(
-                Planner.FindMin, element_object_list=element_object_list
-            )
+            element_object_index, _ = Planner.FindMin(list(not_visited_index), element_object_list)
+            not_visited_index.remove(element_object_index)
 
             # -------------------- assemble --------------------#
-            Planner.Assemble(element_object_index, current_state.assembled + current_state.hold, element_object_list)
+            visited_hold_index_list = list(visited_index) + list(hold_index)
+            Planner.Assemble(element_object_index, visited_hold_index_list, element_object_list)
             status = element_object_list[element_object_index].status
 
-            if status == ElementStatus.fixed and not Planner.ElementsStatusCheck(
-                current_state.hold, element_object_list
-            ):
-                Planner.Disassemble(
-                    element_object_index, current_state.assembled + current_state.hold, element_object_list
-                )
-                current_state.UpdateBlacklist([element_object_index])
+            if status == ElementStatus.fixed and not Planner.ElementsStatusCheck(list(hold_index), element_object_list):
+                visited_hold_index_list = list(visited_index) + list(hold_index)
+                Planner.Disassemble(element_object_index, visited_hold_index_list, element_object_list)
+                blacklist_index.append(element_object_index)
 
-            elif status == ElementStatus.fixed and Planner.ElementsStatusCheck(current_state.hold, element_object_list):
+            elif status == ElementStatus.fixed and Planner.ElementsStatusCheck(list(hold_index), element_object_list):
+                hold_index.append(element_object_index)
+
                 plan_status = True
-                planned_index = []
-                for i, hold_element_index in enumerate(current_state.hold + [element_object_index]):
+                for i, hold_element_index in enumerate(hold_index):
                     robot = self.robots[i]
-                    plan_status = robot.manipulator_planner_fn(
-                        hold_element_index,
-                        current_state.assembled + planned_index,
-                        current_state.UnassembledRemove(planned_index),
-                        [],
-                    )
+                    plan_status = robot.manipulator_planner_fn(hold_element_index, list(visited_index), list(not_visited_index), [])
                     if plan_status == False:
                         break
-                    planned_index.append(hold_element_index)
+                        # return False, hold_index_list
 
                 if plan_status:
-                    return True, current_state.hold + [element_object_index], path_tuple
+                    return True, list(hold_index)
                 else:
-                    # visited_hold_index_list = list(visited_index) + list(hold_index)
-                    Planner.Disassemble(
-                        element_object_index, current_state.assembled + current_state.hold, element_object_list
-                    )
-                    # Planner.MultiDisassemble(list(hold_index), list(visited_index), element_object_list)
-                    # Planner.MultiAssemble(list(hold_index), list(visited_index), element_object_list)
-                    current_state.UpdateBlacklist([element_object_index])
+                    visited_hold_index_list = list(visited_index) + list(hold_index)
+                    Planner.Disassemble(element_object_index, visited_hold_index_list, element_object_list)
+                    Planner.MultiDisassemble(list(hold_index), list(visited_index), element_object_list)
+                    Planner.MultiAssemble(list(hold_index), list(visited_index), element_object_list)
+                    blacklist_index.append(element_object_index)
+                    continue
 
             elif status == ElementStatus.rotate:
-                next_state = CooperationPlanState.GenerateNextState(current_state, [element_object_index])
-                solve_status, task, path_tuple = self.SearchRobotCooperation(element_object_list, next_state)
-                if solve_status:
-                    return solve_status, task, path_tuple
+                state, task = self.SearchRobotCooperation(
+                    element_object_list,
+                    list(visited_index),
+                    list(not_visited_index),
+                    [element_object_index] + list(hold_index),
+                )
+                if state:
+                    return state, task
                 else:
-                    Planner.Disassemble(
-                        element_object_index, current_state.assembled + current_state.hold, element_object_list
-                    )
-                    current_state.UpdateBlacklist([element_object_index])
+                    visited_hold_index_list = list(visited_index) + list(hold_index)
+                    Planner.MultiDisassemble(task, list(visited_index), element_object_list)
+                    Planner.Disassemble(element_object_index, visited_hold_index_list, element_object_list)
+                    Planner.MultiDisassemble(list(hold_index), list(visited_index), element_object_list)
+                    Planner.MultiAssemble(list(hold_index), list(visited_index), element_object_list)
+                    blacklist_index.append(element_object_index)
 
             elif status == ElementStatus.float:
-                Planner.Disassemble(
-                    element_object_index, current_state.assembled + current_state.hold, element_object_list
-                )
-                current_state.UpdateBlacklist([element_object_index])
+                visited_hold_index_list = list(visited_index) + list(hold_index)
+                Planner.Disassemble(element_object_index, visited_hold_index_list, element_object_list)
+                Planner.MultiDisassemble(list(hold_index), list(visited_index), element_object_list)
+                Planner.MultiAssemble(list(hold_index), list(visited_index), element_object_list)
+                blacklist_index.append(element_object_index)
 
             else:
                 raise RuntimeError("This status is not possible!")
 
-            # -------------------- Check if backtracking is necessary --------------------#
-            # if current_state.deadend:
-            #     print("********** SearchRobotCooperation: Deadend reached, need to traceback! **********")
-            #     current_state = current_state.TraceBack()
-
-        # print("***** Cooperation search not found! *****")
-        return False, current_root.hold, None
+        return False, []
 
     def BackwardSearchWithoutMotionPlan(self, element_object_list: list[ElementObject]) -> list:
         # -------------------- init --------------------#
@@ -659,24 +510,10 @@ class Planner(object):
 
 
 if __name__ == "__main__":
-    # state1 = PlanState([1, 2, 3], [4, 5, 6], [0])
-    # state2 = PlanState.GenerateNextState(state1, [5])
-    # print(state1)
-    # print(state2)
-    # print(state2._father)
-    # state1.UpdateBlacklist([5])
-    # print(state2._father)
-
-    f_state1 = PlanState([1, 2, 3], [4, 5, 6], [0])
-
-    state1 = CooperationPlanState([1, 2, 3], [4, 5, 6], [0], [7, 8], [])
-    state11 = CooperationPlanState([3, 2, 1], [4, 5, 6], [0], [7, 8, 9], [])
-    state12 = CooperationPlanState([1, 2, 3], [4, 5, 6], [0], [8, 7], [])
-
-    print(state11 is state1)
-    print(state12 is state1)
-    print(f_state1 is state1)
-
+    state1 = PlanState([1, 2, 3], [4, 5, 6], [0])
+    state2 = PlanState.GenerateNextState(state1, [5])
     print(state1)
-    print(state11)
-    print(state12)
+    print(state2)
+    print(state2._father)
+    state1.UpdateBlacklist([5])
+    print(state2._father)

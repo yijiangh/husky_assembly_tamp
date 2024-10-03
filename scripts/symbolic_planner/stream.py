@@ -27,8 +27,8 @@ GRASP_MAX_ATTEMPTS = 500
 ALLOWABLE_BAR_COLLISION_DEPTH = 1e-3
 
 # pregrasp delta sample
-EPSILON = 0.2
-ANGLE = np.pi / 6
+EPSILON = 0.25
+ANGLE = np.pi
 
 # pregrasp interpolation
 POS_STEP_SIZE = 0.005
@@ -757,6 +757,7 @@ def compute_transfer_path(
     target_arm_conf = target[3:]
 
     for _ in range(path_plan_max_attempt):
+        body_attachment.assign()
         transfer_path = robot_setup.plan_manipulator_path(
             start_arm_conf,
             target_arm_conf,
@@ -808,7 +809,7 @@ def compute_transit_path(
     ---
     @return:\n
     """
-    planner = RRTStar(0.2, -5, 5, -5, 5, max_sample_time=20)
+    planner = RRTStar(0.05, -5, 5, -5, 5, max_sample_time=30)
     collision_fn = pp.get_collision_fn(
         robot_setup.robot,
         robot_setup.control_joints,
@@ -843,6 +844,9 @@ def compute_transit_path(
     )
     x_control, y_control, yaw_control = controller.run()
 
+    # path = [
+    #     np.array([x, y, yaw] + INIT_ARM_JOINT_ANGLES.tolist()) for x, y, yaw in zip(path_x, path_y, path_yaw)
+    # ]
     path = [
         np.array([x, y, yaw] + INIT_ARM_JOINT_ANGLES.tolist()) for x, y, yaw in zip(x_control, y_control, yaw_control)
     ]
@@ -900,16 +904,17 @@ def get_place_gen_fn(
             vertices=vertices,
             edges=edges,
             target_edge=element_from_index[element].axis_endpoints,
-            sample_max_distance=1.25,
-            safety_distance=0.6,
-            reach_distance=1.25,
+            sample_max_distance=1.0, # dist in 2d plane
+            safety_distance=0.5, # safty dist in 2d plane
+            reach_distance=1.5, # dist in 3d space
             sampling_number=200,
         )
 
-        grasp_gen = pp.get_side_cylinder_grasps(element_from_index[element].body, safety_margin_length=0.5)
+        grasp_gen = pp.get_side_cylinder_grasps(element_from_index[element].body, safety_margin_length=0.25)
         # keep track of sampled traj, prune newly sampled one with more collided element
         for attempt, grasp in enumerate(islice(grasp_gen, max_grasp)):
-            print("attempt: ", attempt)
+            if verbose:
+                print("attempt: ", attempt)
             # * ik iterations, usually 1 is enough
             for _ in range(max_attempts):
                 # ! when used in pddlstream (except incremental_sm), the pregrasp sampler assumes no elements assembled at all time
@@ -919,19 +924,19 @@ def get_place_gen_fn(
                         print("pregrasp failure.")
                     continue
 
-                if len(assembled) != 0:
-                    preview_point = preview_point_calculation(assembled + [element], element_from_index)
-                    pp.draw_point(preview_point, size=0.1)
-                    attach_pose = multiply(pregrasp_poses[-1], invert(grasp))
-                    # print(attach_pose)
-                    attach_pose = redirector(
-                        element_from_index[element].axis_endpoints[0],
-                        element_from_index[element].axis_endpoints[1],
-                        attach_pose,
-                        preview_point,
-                    )
-                    grasp = multiply(invert(attach_pose), pregrasp_poses[-1])
-                    pp.draw_pose(attach_pose, length=0.25)
+                # if len(assembled) != 0:
+                preview_point = preview_point_calculation(assembled + [element], element_from_index)
+                # pp.draw_point(preview_point, size=0.1)
+                attach_pose = multiply(pregrasp_poses[-1], invert(grasp))
+                # print(attach_pose)
+                attach_pose = redirector(
+                    element_from_index[element].axis_endpoints[0],
+                    element_from_index[element].axis_endpoints[1],
+                    attach_pose,
+                    preview_point,
+                )
+                grasp = multiply(invert(attach_pose), pregrasp_poses[-1])
+                    # pp.draw_pose(attach_pose, length=0.25)
 
                 # if element == 4:
                 #     diagnosis = True
@@ -1020,7 +1025,8 @@ def get_pick_gen_fn(
         grasp = (grasp_raw[0], grasp_temp[1])
 
         for attempt in range(max_attempts):
-            print("attempt: ", attempt)
+            if verbose:
+                print("attempt: ", attempt)
 
             command, grasp_mask = compute_pick_path(
                 robot_setup,
@@ -1085,7 +1091,8 @@ def get_transfer_gen_fn(
             obstacles = set()
 
         for attempt in range(max_attempts):
-            print("attempt: ", attempt)
+            if verbose:
+                print("attempt: ", attempt)
 
             command = compute_transfer_path(
                 robot_setup,
@@ -1145,7 +1152,8 @@ def get_transit_gen_fn(
             obstacles = set()
 
         for attempt in range(max_attempts):
-            print("attempt: ", attempt)
+            if verbose:
+                print("attempt: ", attempt)
 
             command = compute_transit_path(
                 robot_setup,

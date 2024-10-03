@@ -94,7 +94,7 @@ class RRTStar(object):
         rrt_tree = kdtree.create(self.node_list)
         start_tick = time.time()
         cur_tick = time.time()
-        is_reach_target = False
+        is_reach_target = self.is_reach_target(start_node, target_node)
         id = 1
         # pp.wait_for_user("path plan break 1")
         while not is_reach_target and cur_tick - start_tick < self.max_sample_time:
@@ -131,10 +131,10 @@ class RRTStar(object):
             self.node_list.append(target_node)
             if not rrt_tree.is_balanced:
                 rrt_tree.rebalance()
-                path_x, path_y = self.trace_back(target_node)
-                self.path_smoothing(path_x, path_y, 5, collision_fn)
-                path_x.reverse()
-                path_y.reverse()
+            path_x, path_y = self.trace_back(target_node)
+            self.path_smoothing(path_x, path_y, 5, collision_fn)
+            path_x.reverse()
+            path_y.reverse()
             return path_x, path_y
         else:
             return [], []

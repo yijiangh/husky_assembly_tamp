@@ -1,48 +1,67 @@
-from collections import deque
+class TreeNode:
+    _instances = {}
 
-def bfs_path(graph, start, target):
-    # 创建一个队列来存储要访问的节点，并初始化路径信息
-    queue = deque([start])
-    # 用于记录访问过的节点，防止重复访问
-    visited = set([start])
-    # 前驱节点字典，用于记录每个节点是从哪个节点访问过来的
-    predecessor = {start: None}
-    
-    while queue:
-        # 弹出队列中的第一个节点
-        node = queue.popleft()
+    def __new__(cls, identifier1: list[int], data_list_1: list[int], data_list_2: list[int], identifier4: list[int]):
+        # 将 identifier1 和 identifier4 排序并组合成元组，以确保唯一性
+        sorted_id = (tuple(sorted(identifier1)), tuple(sorted(identifier4)))
+        if sorted_id not in cls._instances:
+            instance = super().__new__(cls)
+            cls._instances[sorted_id] = instance
+        return cls._instances[sorted_id]
 
-        # 如果找到了目标节点，重建路径并返回
-        if node == target:
-            path = []
-            while node is not None:
-                path.append(node)
-                node = predecessor[node]
-            return path[::-1]  # 反转路径，因为我们是从目标到起点进行回溯的
+    def __init__(self, identifier1: list[int], data_list_1: list[int], data_list_2: list[int], identifier4: list[int]):
+        # 防止重复初始化
+        if not hasattr(self, 'initialized'):
+            self.identifier1 = identifier1  # 用于唯一标识节点的列表1
+            self.data_list_1 = data_list_1   # 其他数据列表1
+            self.data_list_2 = data_list_2   # 其他数据列表2
+            self.identifier4 = identifier4    # 用于唯一标识节点的列表4
+            self.father = None
+            self.children = []
+            self.initialized = True  # 标记已初始化
 
-        # 遍历该节点的邻居
-        for neighbor in graph[node]:
-            if neighbor not in visited:
-                # 将未访问的邻居加入队列
-                queue.append(neighbor)
-                # 标记该邻居为已访问
-                visited.add(neighbor)
-                # 记录前驱节点
-                predecessor[neighbor] = node
+    def set_father(self, father: 'TreeNode'):
+        self.father = father
+        father.children.append(self)
 
-    # 如果没有找到目标节点，返回空列表
-    return []
+    def __repr__(self):
+        return (f"TreeNode(identifier1={self.identifier1}, "
+                f"data_list_1={self.data_list_1}, data_list_2={self.data_list_2}, "
+                f"identifier4={self.identifier4})")
 
-# 定义一个图，使用字典的邻接表表示
-graph = {
-    'A': ['B', 'C'],
-    'B': ['A', 'D', 'E'],
-    'C': ['A', 'F'],
-    'D': ['B'],
-    'E': ['B', 'F'],
-    'F': ['C', 'E']
-}
 
-# 从节点 'A' 到节点 'F' 执行广度优先搜索，返回路径
-path = bfs_path(graph, 'A', 'F')
-print("Path from A to F:", path)
+class ExtendedTreeNode(TreeNode, object):
+    _instances_extended = {}
+
+    def __new__(cls, identifier1: list[int], data_list_1: list[int], data_list_2: list[int], identifier4: list[int], identifier5: list[int]):
+        # 将 identifier1、identifier4 和 identifier5 排序并组合成元组，以确保唯一性
+        sorted_id = (tuple(sorted(identifier1)), tuple(sorted(identifier4)), tuple(sorted(identifier5)))
+        if sorted_id not in cls._instances_extended:
+            instance = super().__new__(cls)
+            cls._instances_extended[sorted_id] = instance
+        return cls._instances_extended[sorted_id]
+
+    def __init__(self, identifier1: list[int], data_list_1: list[int], data_list_2: list[int], identifier4: list[int], identifier5: list[int]):
+        # 调用父类构造函数
+        super().__init__(identifier1, data_list_1, data_list_2, identifier4)
+        # 只在第一次初始化时设置 identifier5
+        if not hasattr(self, 'initialized_extended'):
+            self.identifier5 = identifier5  # 新的标识符
+            self.initialized_extended = True  # 标记已初始化
+
+    def __repr__(self):
+        return (f"ExtendedTreeNode(identifier1={self.identifier1}, "
+                f"data_list_1={self.data_list_1}, data_list_2={self.data_list_2}, "
+                f"identifier4={self.identifier4}, identifier5={self.identifier5})")
+
+
+# 创建两个 ExtendedTreeNode 实例
+extended_node_1 = ExtendedTreeNode([1, 2, 3], [10, 20], [30, 40], [7, 8, 9], [100, 200])
+extended_node_2 = ExtendedTreeNode([1, 2, 3], [50, 60], [70, 80], [7, 8, 9], [300, 400])
+
+# 显示 ExtendedTreeNode 的信息
+print(extended_node_1)
+print(extended_node_2)
+
+# 检查是否指向同一实例
+print(extended_node_1 is extended_node_2)  # 输出: False

@@ -41,7 +41,7 @@ def redirector(edge_start, edge_end, attach, target_point):
     y_direction = normalize(edge_end - edge_start)
     x_direction = np.cross(y_direction, z_direction)
 
-    pp.draw_point(projection_Q, size=0.25)
+    # pp.draw_point(projection_Q, size=0.25)
 
     x_direction = x_direction.reshape((3, 1))
     y_direction = y_direction.reshape((3, 1))
@@ -51,7 +51,7 @@ def redirector(edge_start, edge_end, attach, target_point):
     new_rotation = R.from_matrix(new_rotation_matrix)
 
     pose = (attach[0], tuple(new_rotation.as_quat().tolist()))
-    new_pose_delta = pp.Pose(point=[0, 0, 0], euler=pp.Euler(0, np.random.uniform(-np.pi/6, np.pi/6), 0))
+    new_pose_delta = pp.Pose(point=[0, 0, 0], euler=pp.Euler(0, np.random.uniform(-np.pi, np.pi), 0))
     new_pose = pp.multiply(pose, new_pose_delta)
 
     return new_pose

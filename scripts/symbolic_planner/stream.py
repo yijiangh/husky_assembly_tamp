@@ -34,7 +34,7 @@ ANGLE = np.pi
 POS_STEP_SIZE = 0.005
 ORI_STEP_SIZE = np.pi / 128
 
-RETREAT_DISTANCE = 0.12
+RETREAT_DISTANCE = 0.07
 MAX_DISTANCE = 0.01
 # MAX_DISTANCE = 0.07
 
@@ -1153,7 +1153,7 @@ def get_transit_gen_fn(
 
         for attempt in range(max_attempts):
             if verbose:
-                print("attempt: ", attempt)
+                print(f"attempt from {start_pose_2d} to {tar_pose_2d}: ", attempt)
 
             command = compute_transit_path(
                 robot_setup,

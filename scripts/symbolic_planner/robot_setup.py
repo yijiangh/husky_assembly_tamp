@@ -142,11 +142,13 @@ class RobotSetup(object):
             target_q,
             [self.ee_attachment] + attachments,
             obstacles,
-            debug=False,
+            debug=True,
             disabled_collisions=self.disabled_collisions,
             coarse_waypoints=sub_way_points,
         )
         self.ee_attachment.assign()
+
+        # print(planned_path_coarse)
 
         if planned_path_coarse is not None and planned_path_coarse != False:
             planned_path_coarse = [np.array(conf) for conf in planned_path_coarse]

@@ -105,9 +105,9 @@ class Robot(object):
             self.robot_setup,
             element_from_index,
             [],
-            verbose=False,
+            verbose=True,
             collisions=True,
-            teleops=True,
+            teleops=False,
             allow_failure=True,
         )
 
@@ -330,7 +330,7 @@ class Robot(object):
             command: List[np.ndarray]\n
             grasp_mask: List[int]\n
         """
-        pp.set_pose(self.element_from_index[element_index].body, self.element_from_index[element_index].goal_pose)
+        # pp.set_pose(self.element_from_index[element_index].body, self.element_from_index[element_index].goal_pose)
         # with pp.LockRenderer():
         transit_cmd, transit_grasp_mask = next(
             self.transit_gen(

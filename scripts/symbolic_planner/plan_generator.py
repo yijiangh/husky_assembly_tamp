@@ -1,10 +1,13 @@
 import argparse
 import os
+from datetime import datetime
 
 import numpy as np
 import pybullet as p
 
 cur_dir = os.path.dirname(os.path.abspath(__file__))
+mt_file_name = "one_tet_MT_contact"
+log_dir = os.path.join(cur_dir, f"logs/{mt_file_name}")
 
 # -------------------- self-defined modules --------------------#
 import load_multi_tangent
@@ -15,7 +18,7 @@ from multi_tangent.collision import create_collision_bodies
 from multi_tangent.convert import flatten_list
 from parse import parse_mt_geometric
 from planner import Planner
-from robot import Robot, PathItem, PathWithIndex
+from robot import PathItem, PathWithIndex, Robot
 from robot_setup import RobotSetup
 
 if __name__ == "__main__":
@@ -23,7 +26,7 @@ if __name__ == "__main__":
         parser = argparse.ArgumentParser()
         parser.add_argument(
             "--mt_file_name",
-            default="one_tet_MT_contact.json",
+            default=mt_file_name + ".json",
             # default="tower_integral_one_len_MT_layer_0.json",
             # default="triangle_reciprocal_MT_contact.json",
             help='The name of the multi tangent file to solve (json file\'s name, e.g. "tower_integral_one_len_MT_layer_0.json")',
@@ -61,7 +64,7 @@ if __name__ == "__main__":
             for i, e in enumerate(element_bodies)
         }
 
-        #-------------------- Path storage --------------------#
+        # -------------------- Path storage --------------------#
         path_storage = PathWithIndex()
 
         # -------------------- Robots Init --------------------#
@@ -80,6 +83,12 @@ if __name__ == "__main__":
         planner = Planner(robot_num=robot_num, robots=robots)
         path_index = planner.Plan(element_from_index, contact_id_pairs, grounded_elements_index)
         element_object_list = Planner.GetElementObjects(element_from_index, contact_id_pairs, grounded_elements_index)
+
+        # -------------------- save log file --------------------#
+        current_time_str = datetime.now().strftime("%y%m%d_%H%M%S")
+        for robot in robots:
+            robot: Robot
+            robot.SaveLog(log_dir, suffix=f"_{current_time_str}")
 
         # -------------------- Visualization --------------------#
         assembled = []
@@ -114,7 +123,7 @@ if __name__ == "__main__":
             pp.set_color(element_obj.body, (1, 0, 0, 0.1))
             pp.set_pose(element_obj.body, pp.Pose(point=(5, 0, 0), euler=pp.Euler(0, 1.5708, 0)))
         for step_num, index_list in enumerate(path_index):
-            index = index_list[0] # TODO: 考虑多机器人协作的问题
+            index = index_list[0]  # TODO: 考虑多机器人协作的问题
             path = path_storage.get(index)
             base_path_item = path.base_path
             path_item = path.manipulator_path
@@ -135,7 +144,7 @@ if __name__ == "__main__":
             if base_path_item is not None:
                 base_traj = base_path_item.conf
                 base_traj_grasp_mask = base_path_item.mask
-        
+
             pp.set_color(path_item.element_index, pp.RED)
 
             for i in assembled_list:
@@ -152,7 +161,7 @@ if __name__ == "__main__":
 
                 manipulator_traj_param_value = p.readUserDebugParameter(manipulator_param_slider)
                 manipulator_traj_idx = int(manipulator_traj_param_value * (len(manipulator_traj) - 1))
-                
+
                 if base_path_item is not None:
                     base_traj_param_value = p.readUserDebugParameter(base_param_slider)
                     base_traj_idx = int(base_traj_param_value * (len(base_traj) - 1))

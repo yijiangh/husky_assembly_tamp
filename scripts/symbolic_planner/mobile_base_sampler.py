@@ -61,15 +61,15 @@ def distance_point_to_line_3d(point, line_start, line_end):
 
 def point_to_line_segment_vector(point, line_start, line_end):
     """
-    Calculate the vector from the point to the nearest point on the line segment in 3D space.
-
-    Parameters:
-    point: [x, y, z] - The coordinates of the point in 3D.
-    line_start: [x1, y1, z1] - The start of the line segment in 3D.
-    line_end: [x2, y2, z2] - The end of the line segment in 3D.
-
-    Returns:
-    direction_vector: np.ndarray - The direction vector from the point to the nearest point on the line segment.
+    @brief: calculate the vector from the point to the nearest point on the line segment in 3D space\n
+    ---
+    @param:\n
+        point: [x, y, z], the coordinates of the point in 3D\n
+        line_start: [x1, y1, z1], the start of the line segment in 3D\n
+        line_end: [x2, y2, z2], the end of the line segment in 3D\n
+    ---
+    @return:\n
+        direction_vector: np.ndarray, The direction vector from the point to the nearest point on the line segment\n
     """
     # Convert input to numpy arrays
     point = np.array(point)
@@ -98,13 +98,13 @@ def point_to_line_segment_vector(point, line_start, line_end):
 
 def calculate_yaw(direction_vector):
     """
-    Calculate the yaw angle of the direction vector's projection onto the XY plane.
-
-    Parameters:
-    direction_vector: np.ndarray - The direction vector in 3D space.
-
-    Returns:
-    yaw_angle: float - The yaw angle in radians.
+    @brief: calculate the yaw angle of the direction vector's projection onto the XY plane\n
+    ---
+    @param:\n
+        direction_vector: np.ndarray, the direction vector in 3D space\n
+    ---
+    @return:\n
+        yaw_angle: float, the yaw angle in radians\n
     """
     # Project the direction vector onto the XY plane
     xy_projection = direction_vector[:2]  # Ignore the z component
@@ -190,7 +190,6 @@ def robot_pose_sampler(
     sample_idx = 0
 
     while True:
-        # print("sampler sample_idx: ", sample_idx)
         sample_idx += 1
         if sample_idx > max_attempt:
             return None
@@ -205,9 +204,9 @@ def robot_pose_sampler(
 
         if valid_candidates == []:
             continue
-        
 
         return random.choice(valid_candidates)
+        # return valid_candidates
 
 
 def plot_structure_and_poses(vertices, edges, target_edge, poses):
@@ -250,10 +249,9 @@ def plot_structure_and_poses(vertices, edges, target_edge, poses):
 
 
 if __name__ == "__main__":
-    point = [2, 1, 0]
-    start = [0, 0, 0]
-    end = [1, 0, 0]
-    d = distance_point_to_line(point[:2], start[:2], end[:2])
-    print(d)
-    d = distance_point_to_line_3d(point, start, end)
-    print(d)
+    vertices = [[0, 0, 0], [1, 0, 0]]
+    edges = [[[0, 0, 0], [1, 0, 0]]]
+    target_edge = [[0, 0, 0], [1, 0, 0]]
+    poses = robot_pose_sampler(vertices, edges, target_edge, 1.0, 0.75, 1.0, 100)
+    print(poses)
+    plot_structure_and_poses(vertices, edges, target_edge, poses)

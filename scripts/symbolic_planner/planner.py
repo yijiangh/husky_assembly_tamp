@@ -297,7 +297,7 @@ class Planner(object):
         # path_index = self.BackwardSearchWithoutMotionPlan(element_object_list)
 
         # TODO: 多机协同
-        self.robots[0].BaseMotionPlan(path_index)
+        # self.robots[0].BaseMotionPlan(path_index)
         return path_index
 
     def Search(self, element_object_list: list[ElementObject]) -> list:

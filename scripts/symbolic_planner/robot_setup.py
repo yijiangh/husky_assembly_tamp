@@ -1,22 +1,22 @@
 import os
 import sys
+from functools import partial
 
 import numpy as np
 import pybullet_planning as pp
 from pybullet_planning import Attachment, Euler, Point, Pose, get_distance, interpolate_poses, invert, multiply
 
-
 HERE = os.path.dirname(__file__)
 husky_assembly_path = os.path.abspath(os.path.join(HERE, "..", "..", "src"))
 sys.path.append(husky_assembly_path)
 
-from compas_fab.robots.robot import RobotModel
 from compas_fab.robots import Robot as RobotClass
 from compas_fab.robots import RobotSemantics
+from compas_fab.robots.robot import RobotModel
 from husky_assembly import DATA_DIRECTORY
+from ik_solver.pinocchio_solver import PinocchioSolver
 from tracikpy import TracIKSolver
 from utils import HUSKYU_JOINT_NAMES, plan_transit_motion
-
 
 TOOL0_FROM_EE = pp.Pose(point=[0, 0, 0.160])
 CONTROL_JOINT_NAMES = [
@@ -73,8 +73,16 @@ class RobotSetup(object):
         robot = pp.load_pybullet(robot_urdf, fixed_base=False, cylinder=False)
 
         if not ik_from_arm_base:
-            ik_solver = TracIKSolver(robot_urdf, "world_link", "ur_arm_tool0")
-            ik_solver_relative = TracIKSolver(robot_urdf, "ur_arm_base_link", "ur_arm_tool0")
+            # trac_ik_solver = TracIKSolver(robot_urdf, "world_link", "ur_arm_tool0")
+            # trac_ik_solver_relative = TracIKSolver(robot_urdf, "ur_arm_base_link", "ur_arm_tool0")
+            # ik_solver = trac_ik_solver.ik
+            # ik_solver_relative = trac_ik_solver_relative.ik
+
+            pinocchio_solver = PinocchioSolver(robot_urdf)
+            ik_solver = partial(pinocchio_solver.ik, base_name="world_link", tip_name="ur_arm_tool0", relative=False)
+            ik_solver_relative = partial(
+                pinocchio_solver.ik, base_name="ur_arm_base_link", tip_name="ur_arm_tool0", relative=True
+            )
         else:
             ik_solver = TracIKSolver(robot_urdf, "ur_arm_base_link", "ur_arm_tool0")
             ik_solver_relative = None
@@ -123,7 +131,7 @@ class RobotSetup(object):
 
     def get_relative_ik_solution(self, tool_pose_world, q_init=None):
         tool_pose_relative = self.get_relative_pose(tool_pose_world)
-        conf = self.ik_solver_relative.ik(pp.tform_from_pose(tool_pose_relative), qinit=q_init)
+        conf = self.ik_solver_relative(pp.tform_from_pose(tool_pose_relative), qinit=q_init)
         self.ee_attachment.assign()
         return conf
 

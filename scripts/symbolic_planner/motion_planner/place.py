@@ -1,7 +1,8 @@
 import random
+import time
 from functools import partial
 from itertools import islice
-from typing import List, Tuple, Set
+from typing import List, Set, Tuple
 
 import numpy as np
 import pybullet_planning as pp
@@ -171,18 +172,18 @@ def compute_place_path(
         pregrasp_poses ([pp.Pose]): pregrasp poses (world_from_body), pregrasp --> attach_pose (goal_pose)
         grasp (pp.Pose): grasp pose (gripper_from_body)
         index (int): index of current element
-        assambled ([index]): indices of assembled elements
+        assambled ([index], [not used]): indices of assembled elements
         element_from_index ({index: Element}): dict of elements
         obstacles (Set[index]): fixed obstacles + assembled elements
         pose_sampler (function): pose_sampler(attach_point=np.ndarray)
         counter (CounterModule, None): counter module to count failures
         retreat_dist (float, RETREAT_DISTANCE): retreat distance after attach_pose (goal_pose)
         max_attempt (int, 10): number of attempts for current pregrasp_poses and grasp
-        ik_search_max_attempt (int, 5): number of attempts for searching ik solution
-        path_plan_max_attempt (int, 5): number of attempts for manipulator path planner
+        ik_search_max_attempt (int, 1): number of attempts for searching ik solution
+        path_plan_max_attempt (int, 1): number of attempts for manipulator path planner
         verbose (bool, False): whether print debug information
         diagnosis (bool, False): whether stop and display it in pybullet if a collision is detected
-        teleops (bool, False): whether use interpolation or path plan to fill the middle point
+        teleops (bool, False, [not used]): whether use interpolation or path plan to fill the middle point
 
     Returns:
         command ([np.ndarray]): place path (mobile manipulator conf): pregrasp --> attach_pose (goal_pose) --> home_pose
@@ -208,6 +209,10 @@ def compute_place_path(
         pp.multiply(temp_pose, pp.invert(robot_setup.tool0_from_ee)) for temp_pose in pre_attach_poses
     ]  # world_from_tool0
     attach_pose = pre_attach_poses[0]  # world_from_gripper (world_from_ee)
+
+    if verbose:
+        pp.remove_all_debug()
+        pp.draw_pose(attach_pose, length=0.4)
 
     # -------------------- init attachment of current element --------------------#
     grasp_attachment = None
@@ -261,6 +266,7 @@ def compute_place_path(
         # -------------------- inversely generate pre attach confs excluding attach_pose --------------------#
         fail_flag = False
         robot_joint_conf_last = robot_joint_attach_conf
+        pose_last = pre_tool0_poses[-1]
         for pre_tool0_pose in pre_tool0_poses[::-1][1:]:
             inner_fail_flag = True
             for ik_search_num in range(ik_search_max_attempt):
@@ -274,10 +280,27 @@ def compute_place_path(
                 pre_attach_joint_conf = normalize_angles(pre_attach_joint_conf)
                 if angles_distance(pre_attach_joint_conf, robot_joint_conf_last) >= np.pi / 2:
                     if verbose:
-                        print("    pre attach ik interval too large: ", pre_attach_joint_conf, robot_joint_conf_last)
+                        print(
+                            "    pre attach ik interval too large:\n",
+                            "       next: ",
+                            pre_attach_joint_conf,
+                            "\n",
+                            "       last: ",
+                            robot_joint_conf_last,
+                            "\n",
+                            "       diff: ",
+                            angles_distance(pre_attach_joint_conf, robot_joint_conf_last),
+                            "\n",
+                            "       next pose:",
+                            pre_tool0_pose,
+                            "\n",
+                            "       last pose:",
+                            pose_last,
+                        )
                     continue
                 pre_attach_confs = [np.hstack((robot_base_conf, pre_attach_joint_conf))] + pre_attach_confs
                 robot_joint_conf_last = pre_attach_joint_conf
+                pose_last = pre_tool0_pose
                 inner_fail_flag = False
                 break
             # check whether to exit early. If not, the solution fails.
@@ -306,11 +329,14 @@ def compute_place_path(
         # post attach (retreat)
         # **************************************************************************
 
+        # -------------------- set current element to goal pose and calculate collision --------------------#
+        pp.set_pose(cur_element.body, cur_element.goal_pose)
+
         # -------------------- init collision checker --------------------#
         collision_fn_without_grasp = pp.get_collision_fn(
             robot_setup.robot,
             robot_setup.control_joints,
-            obstacles=obstacles,
+            obstacles=obstacles | set([index]),
             attachments=robot_setup.attachments,
             self_collisions=ENABLE_SELF_COLLISIONS,
             disabled_collisions=robot_setup.disabled_collisions,
@@ -322,7 +348,9 @@ def compute_place_path(
         retreat_delta_pose = Pose(point=retreat_delta_point, euler=Euler(roll=0, pitch=0, yaw=0))
         retreat_pose = multiply(pre_tool0_poses[-1], retreat_delta_pose)
         post_tool0_poses = list(
-            interpolate_poses(pre_tool0_poses[-1], retreat_pose, pos_step_size=POS_STEP_SIZE, ori_step_size=ORI_STEP_SIZE)
+            interpolate_poses(
+                pre_tool0_poses[-1], retreat_pose, pos_step_size=POS_STEP_SIZE, ori_step_size=ORI_STEP_SIZE
+            )
         )
 
         # -------------------- generate post attach confs --------------------#
@@ -413,63 +441,7 @@ def compute_place_path(
         mask = [True] * len(pre_attach_confs) + [False] * len(post_attach_confs) + [False] * len(back_confs)
         return command, mask, grasp_attachment
 
-        # -------------------- trash --------------------#
-
-        ## robot = robot_setup.robot
-        ## tool0_from_ee = robot_setup.tool0_from_ee
-        ## ik_solver = robot_setup.ik_solver
-        ## control_joints = robot_setup.control_joints
-
-        ## element: Element = element_from_index[index]
-        ## body = element.body
-
-        ## pre_tool0_poses_rev = pre_tool0_poses[::-1]
-        ## pp.draw_pose(attach_pose, length=0.4)
-
-        ## pp.draw_pose(grasp, length=0.3)
-        ## pp.draw_pose(attach_pose, length=0.3)
-
-        # -------------------- pre attach confs generation based on pose sampler --------------------#
-
-        # robot_setup.set_base_pose_2d(*robot_base_conf)
-
-        # pp.wait_for_user()
-
-        # -------------------- pre attach confs generation --------------------#
-        # robot_init_conf = ik_solver.ik(pp.tform_from_pose(pre_tool0_poses_rev[0]))
-        # if robot_init_conf is None:
-        #     if verbose:
-        #         print("init attach ik failure.")
-        #     continue
-        # robot_base_conf = robot_init_conf[:3]
-        # robot_joint_init_conf = robot_init_conf[3:]
-        # robot_joint_init_conf = normalize_angles(robot_joint_init_conf)
-        # pre_attach_confs = [np.hstack((robot_base_conf, robot_joint_init_conf))]
-
-        ## robot_setup.set_joint_positions(control_joints, robot_attach_conf)
-
-        # -----------------------------------------------------------------------------------------------------------------------------------------------
-
-        # # pp.set_pose(body, body_tar_pose)
-        # # pp.set_joint_positions(robot, control_joints, post_attach_confs[0])
-        # # robot_setup.ee_attachment.assign()
-        # # # draw poses in the interpolate list
-        # # for pre_attach_pose in pre_attach_poses:
-        # #     pp.draw_pose(pre_attach_pose)
-        # # for post_attach_pose in post_attach_poses:
-        # #     pp.draw_pose(post_attach_pose)
-        # # pp.draw_pose(attach_pose, length=0.2)  # pose of contact point on the bar
-        # a = 1
-        # return (
-        #     pre_attach_confs + post_attach_confs + back_confs,
-        #     [1] * (len(pre_attach_confs) + 1) + [0] * len(post_attach_confs[1:] + back_confs),
-        #     cur_bar_attachment,
-        # )
-
     return None, None, None
-
-    # world_from_tool0 = pp.multiply(attach_pose, pp.invert(tool0_from_ee))  # pose of end joint of husky
-    # attach_conf = ik_solver.ik(pp.tform_from_pose(world_from_tool0))
 
 
 def get_place_gen_fn(

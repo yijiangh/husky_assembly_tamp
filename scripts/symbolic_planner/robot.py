@@ -80,7 +80,7 @@ class Robot(object):
             self.robot_setup,
             element_from_index,
             [],
-            verbose=False,
+            verbose=True,
             collisions=True,
             teleops=False,
             allow_failure=True,

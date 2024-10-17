@@ -73,7 +73,7 @@ def create_plot_title(structure_name, compare_module, algorithms):
 # 主程序
 def main():
     log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
-    log_name = "one_tet_MT_contact-pose_sample_location"
+    log_name = "one_tet_MT_contact-pose_sample"
     # 根文件夹路径
     root_folder = os.path.join(log_dir, log_name)
 

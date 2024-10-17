@@ -4,11 +4,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-# 提取文件夹信息并返回相关部分
+# 提取主文件夹信息，识别结构名和compare模块
 def extract_folder_info(folder_path):
     folder_name = os.path.basename(folder_path)
-    structure_name, algorithm1, _, algorithm2 = folder_name.split("-")
-    return structure_name, algorithm1, algorithm2
+
+    # structure_name从第一个'-'之前提取
+    structure_name = folder_name.split("-")[0]
+
+    # compare模块从第一个'-'之后提取
+    compare_module = folder_name.split("-")[1]
+
+    return structure_name, compare_module
 
 
 # 读取json文件并返回数据
@@ -23,9 +29,10 @@ def load_json_logs(folder):
     return logs
 
 
-# 提取所有日志文件中的place部分失败计数，并累积每个日志中的失败类型
+# 计算每个文件夹中的失败计数平均值
 def extract_failures(folder):
     failure_types = [
+        "pregrasp failure",
         "attach ik failure",
         "pre attach ik failure",
         "pre attach collision failure",
@@ -55,47 +62,65 @@ def extract_failures(folder):
 
 
 # 生成对比图的标题和题注
-def create_plot_title(structure_name, algorithm1, algorithm2):
-    title = f"Failure Comparison between {algorithm1} and {algorithm2}"
-    caption = f"Comparison of failure types for {structure_name} using {algorithm1} vs {algorithm2}."
+def create_plot_title(structure_name, compare_module, algorithms):
+    algorithm_list = ", ".join(algorithms)
+    title = f'Failure Comparison (Averages) for {compare_module} module'
+    # caption = f'Comparison of average failure types for {structure_name} in the {compare_module} module using {algorithm_list}.'
+    caption = ''
     return title, caption
 
 
 # 主程序
 def main():
+    log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+    log_name = "one_tet_MT_contact-pose_sample_location"
     # 根文件夹路径
-    root_folder = "/home/jeong/summer_research/eth/husky_assembly/scripts/symbolic_planner/logs/one_tet_MT_contact-trac-vs-pinocchio"
+    root_folder = os.path.join(log_dir, log_name)
 
-    # 提取结构名和算法名
-    structure_name, algorithm1, algorithm2 = extract_folder_info(root_folder)
+    # 提取结构名和compare模块
+    structure_name, compare_module = extract_folder_info(root_folder)
 
-    # 读取子文件夹路径
-    folder_algorithm1 = os.path.join(root_folder, algorithm1)
-    folder_algorithm2 = os.path.join(root_folder, algorithm2)
+    # 获取所有子文件夹（算法）
+    algorithms = [d for d in os.listdir(root_folder) if os.path.isdir(os.path.join(root_folder, d))]
+    algorithms.sort()
 
-    # 提取失败数据
-    failures_algorithm1 = extract_failures(folder_algorithm1)
-    failures_algorithm2 = extract_failures(folder_algorithm2)
+    # 提取所有算法的失败数据
+    failures_all_algorithms = {}
+    for algorithm in algorithms:
+        folder_algorithm = os.path.join(root_folder, algorithm)
+        failures_all_algorithms[algorithm] = extract_failures(folder_algorithm)
 
     # 生成图表标题和题注
-    plot_title, plot_caption = create_plot_title(structure_name, algorithm1, algorithm2)
+    plot_title, plot_caption = create_plot_title(structure_name, compare_module, algorithms)
 
     # 绘制对比图
-    failure_types = list(failures_algorithm1.keys())
-    values_algorithm1 = [failures_algorithm1[ftype] for ftype in failure_types]
-    values_algorithm2 = [failures_algorithm2[ftype] for ftype in failure_types]
-
+    failure_types = list(failures_all_algorithms[algorithms[0]].keys())
     x = np.arange(len(failure_types))  # 失败类型的数量
 
-    # 绘制柱状图
-    width = 0.35  # 柱的宽度
-    fig, ax = plt.subplots(figsize=(10, 6))
+    width = 0.8 / len(algorithms)  # 动态设置柱的宽度
+    fig, ax = plt.subplots(figsize=(18, 12))
 
-    rects1 = ax.bar(x - width / 2, values_algorithm1, width, label=algorithm1)
-    rects2 = ax.bar(x + width / 2, values_algorithm2, width, label=algorithm2)
+    for i, algorithm in enumerate(algorithms):
+        values = [failures_all_algorithms[algorithm][ftype] for ftype in failure_types]
+        rects = ax.bar(x + i * width - (len(algorithms) - 1) * width / 2, values, width, label=algorithm)
+
+        # 自动显示柱状图顶部的数值
+        def autolabel(rects):
+            for rect in rects:
+                height = rect.get_height()
+                ax.annotate(
+                    f"{height:.2f}",  # 保留两位小数
+                    xy=(rect.get_x() + rect.get_width() / 2, height),
+                    xytext=(0, 3),  # 3 points vertical offset
+                    textcoords="offset points",
+                    ha="center",
+                    va="bottom",
+                )
+
+        autolabel(rects)
 
     # 添加文本标签、标题和图例
-    ax.set_ylabel("Failure Counts")
+    ax.set_ylabel("Average Failure Counts")
     ax.set_title(plot_title)
     ax.set_xticks(x)
     ax.set_xticklabels(failure_types, rotation=45, ha="right")
@@ -104,23 +129,12 @@ def main():
     # 添加图注
     plt.figtext(0.5, -0.05, plot_caption, wrap=True, horizontalalignment="center", fontsize=12)
 
-    # 自动显示柱状图顶部的数值
-    def autolabel(rects):
-        for rect in rects:
-            height = rect.get_height()
-            ax.annotate(
-                f"{height}",
-                xy=(rect.get_x() + rect.get_width() / 2, height),
-                xytext=(0, 3),  # 3 points vertical offset
-                textcoords="offset points",
-                ha="center",
-                va="bottom",
-            )
-
-    autolabel(rects1)
-    autolabel(rects2)
-
     plt.tight_layout()
+
+    fig_name = "result.png"
+    fig_path = os.path.join(root_folder, fig_name)
+    plt.savefig(fig_path)
+
     plt.show()
 
 

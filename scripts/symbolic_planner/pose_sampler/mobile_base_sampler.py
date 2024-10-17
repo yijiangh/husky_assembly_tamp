@@ -1,4 +1,9 @@
+import os
 import random
+import sys
+from typing import Tuple, List
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -166,17 +171,34 @@ def is_valid_pose(candidate_point, target_edge, edges, safety_distance, reach_di
 
 
 def robot_pose_sampler(
-    vertices,
-    edges,
-    target_edge,
-    sample_max_distance,
-    safety_distance,
-    reach_distance,
-    sampling_number,
+    vertices: List[List[float]],
+    edges: List[List[List[float]]],
+    target_edge: List[List[float]],
+    sample_max_distance: float,
+    safety_distance: float,
+    reach_distance: float,
+    sampling_number: int,
     attach_point=None,
-    max_attempt=10,
-):
-    # def sample_robot_pose():
+    max_attempt: int = 10,
+) -> Tuple[np.ndarray, float]:
+    """
+    Sample a base pose 2d.
+
+    Params:
+        vertices ([[x, y, z]]): vertices of assembled structure
+        edges ([[edge_start, edge_end]]): edges of assembled structure
+        target_edge ([edge_start, edge_end]): element to assemble
+        sample_max_distance (float): the max 2D distance between target edge and sampled points
+        safety_distance (float): the 3D distance between all elements and sampled points > safety_distance
+        reach_distance (float): the 3D distance between target edge and sampled points < reach_distance
+        sampling_number (int): the max sample numbers
+        attach_point (None, not used): grasp point on the elements
+        max_attempt (int): max attempts to generate sample pose
+
+    Returns:
+        position (np.ndarray): [x, y, z]
+        yaw (float): yaw (deg)
+    """
     vertices = np.array(vertices)
     target_edge = np.array(target_edge)
 
@@ -254,4 +276,6 @@ if __name__ == "__main__":
     target_edge = [[0, 0, 0], [1, 0, 0]]
     poses = robot_pose_sampler(vertices, edges, target_edge, 1.0, 0.75, 1.0, 100)
     print(poses)
+    position, yaw = robot_pose_sampler(vertices, edges, target_edge, 1.0, 0.75, 1.0, 100)
+    print(position, yaw)
     plot_structure_and_poses(vertices, edges, target_edge, poses)

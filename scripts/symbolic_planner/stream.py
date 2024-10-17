@@ -1,4 +1,6 @@
+import os
 import random
+import sys
 from functools import partial
 from itertools import islice
 from typing import Tuple
@@ -9,12 +11,13 @@ from collision import Element, Grasp, create_couplers, init_pb
 from grasp_redirector import preview_point_calculation, redirector
 from mobile_base_controller import Stanley, State
 from mobile_base_planner import RRTStar, fill_yaw_angle
-from mobile_base_sampler import robot_pose_sampler
 from pybullet_planning import Attachment, Euler, Point, Pose, get_distance, interpolate_poses, invert, multiply
 from robot_setup import INIT_ARM_JOINT_ANGLES, RobotSetup
 from scipy.spatial.transform import Rotation as R
 from termcolor import cprint
 from utils import CounterModule, CounterValue, angles_distance, normalize_angles
+
+from pose_sampler.mobile_base_sampler import robot_pose_sampler
 
 ##############################
 
@@ -904,9 +907,9 @@ def get_place_gen_fn(
             vertices=vertices,
             edges=edges,
             target_edge=element_from_index[element].axis_endpoints,
-            sample_max_distance=1.0, # dist in 2d plane
-            safety_distance=0.5, # safty dist in 2d plane
-            reach_distance=1.5, # dist in 3d space
+            sample_max_distance=1.0,  # dist in 2d plane
+            safety_distance=0.5,  # safty dist in 2d plane
+            reach_distance=1.5,  # dist in 3d space
             sampling_number=200,
         )
 
@@ -936,7 +939,7 @@ def get_place_gen_fn(
                     preview_point,
                 )
                 grasp = multiply(invert(attach_pose), pregrasp_poses[-1])
-                    # pp.draw_pose(attach_pose, length=0.25)
+                # pp.draw_pose(attach_pose, length=0.25)
 
                 # if element == 4:
                 #     diagnosis = True

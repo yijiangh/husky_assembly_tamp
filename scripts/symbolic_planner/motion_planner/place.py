@@ -1,8 +1,12 @@
+import os
 import random
+import sys
 import time
 from functools import partial
 from itertools import islice
 from typing import List, Set, Tuple
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 import pybullet_planning as pp
@@ -10,7 +14,8 @@ from collision import Element, Grasp, create_couplers, init_pb
 from grasp_redirector import preview_point_calculation, redirector
 from mobile_base_controller import Stanley, State
 from mobile_base_planner import RRTStar, fill_yaw_angle
-from mobile_base_sampler import robot_pose_sampler
+from pose_sampler.mobile_base_sampler import robot_pose_sampler
+from pose_sampler.grasp_sampler import grasp_sampler
 from pybullet_planning import Attachment, Euler, Point, Pose, get_distance, interpolate_poses, invert, multiply
 from robot_setup import INIT_ARM_JOINT_ANGLES, RobotSetup
 from scipy.spatial.transform import Rotation as R
@@ -154,7 +159,8 @@ def compute_place_path(
     assambled: List[int],
     element_from_index: dict,
     obstacles: Set[int],
-    pose_sampler,
+    base_position: np.ndarray,
+    base_yaw: float,
     counter: CounterModule = None,
     retreat_dist: float = RETREAT_DISTANCE,
     max_attempt: int = 10,
@@ -175,7 +181,8 @@ def compute_place_path(
         assambled ([index], [not used]): indices of assembled elements
         element_from_index ({index: Element}): dict of elements
         obstacles (Set[index]): fixed obstacles + assembled elements
-        pose_sampler (function): pose_sampler(attach_point=np.ndarray)
+        base_position (np.ndarray): base position [x, y, z]
+        base_yaw (float): base yaw (deg)
         counter (CounterModule, None): counter module to count failures
         retreat_dist (float, RETREAT_DISTANCE): retreat distance after attach_pose (goal_pose)
         max_attempt (int, 10): number of attempts for current pregrasp_poses and grasp
@@ -192,6 +199,7 @@ def compute_place_path(
     """
 
     cur_element: Element = element_from_index[index]
+    base_pose_tup = (base_position, base_yaw)
 
     # -------------------- init counter module --------------------#
     attach_ik_val = counter.add_counter_value("attach ik failure")
@@ -203,27 +211,23 @@ def compute_place_path(
 
     # -------------------- generate pre_attach poses --------------------#
     pre_attach_poses = [
-        multiply(bar_pose, invert(grasp)) for bar_pose in pregrasp_poses
+        pp.multiply(bar_pose, pp.invert(grasp)) for bar_pose in pregrasp_poses
     ]  # world_from_gripper (world_from_ee)
     pre_tool0_poses = [
         pp.multiply(temp_pose, pp.invert(robot_setup.tool0_from_ee)) for temp_pose in pre_attach_poses
     ]  # world_from_tool0
-    attach_pose = pre_attach_poses[0]  # world_from_gripper (world_from_ee)
+    attach_pose = pre_attach_poses[-1]  # world_from_gripper (world_from_ee)
 
     if verbose:
         pp.remove_all_debug()
         pp.draw_pose(attach_pose, length=0.4)
+        pp.draw_point(cur_element.axis_endpoints[0], size=0.2)
 
     # -------------------- init attachment of current element --------------------#
     grasp_attachment = None
 
     # -------------------- loop: find a solution of place --------------------#
     for _ in range(max_attempt):
-
-        # -------------------- generate robot base pose --------------------#
-        base_pose_tup = pose_sampler(attach_point=np.array(attach_pose[0]))  # (np.array([x, y, z]), yaw)
-        if base_pose_tup is None:
-            continue
 
         # **************************************************************************
         # attach
@@ -448,8 +452,7 @@ def get_place_gen_fn(
     robot_setup: RobotSetup,
     element_from_index: dict,
     fixed_obstacles: List[int],
-    max_attempts: int = 10,
-    max_grasp: int = 400,
+    max_attempts: int = 100,
     collisions: bool = True,
     allow_failure: bool = False,
     verbose: bool = False,
@@ -462,8 +465,7 @@ def get_place_gen_fn(
         robot_setup (RobotSetup): RobotSetup instance
         element_from_index ({index: Element}): element dict
         fixed_obstacles ([int]): list of id in pybullet
-        max_attempts (int, 10): repeat num for a single grasp
-        max_grasp (int, 400): the number of attempts to generate grasp
+        max_attempts (int, 100): attempts to generate place motion
         collisions (bool, True): whether consider collision
         allow_failure (bool, False): yield (None * 5), False: return (None * 5) and raise an error
         verbose (bool, False): whether print debug information
@@ -536,72 +538,74 @@ def get_place_gen_fn(
             vertices=vertices,
             edges=edges,
             target_edge=cur_element.axis_endpoints,
-            sample_max_distance=1.0,  # dist in 2d plane
-            safety_distance=0.5,  # safty dist in 2d plane
-            reach_distance=1.5,  # dist in 3d space
+            sample_max_distance=1.25,  # dist in 2d plane, log name 1
+            safety_distance=0.75,  # safty dist in 2d plane, log name 3
+            reach_distance=1.25,  # dist in 3d space, log name 2
             sampling_number=200,
         )
 
-        # -------------------- genegrate grasp: gripper_from_body --------------------#
-        grasp_gen = pp.get_side_cylinder_grasps(cur_element.body, safety_margin_length=0.25)
+        pregrasp_val = counter.add_counter_value("pregrasp failure")
 
-        # -------------------- loop: traversing the grasp --------------------#
-        for attempt, grasp in enumerate(islice(grasp_gen, max_grasp)):
+        # -------------------- loop: plan place motion --------------------#
+        for attempt in range(max_attempts):
             if verbose:
                 print("attempt: ", attempt)
 
-            # -------------------- loop: try to find a solution of current grasp --------------------#
-            for _ in range(max_attempts):
-                # -------------------- generate pregrasp path: (world_from_body) pregrasp --> goal_pose --------------------#
-                # TODO: 这里可能有改进方案，即plan一条从结构外部到goal_pose的path
-                pregrasp_poses = next(pregrasp_gen_fn(index, assembled, diagnosis=diagnosis))
-                if not pregrasp_poses:
-                    if verbose:
-                        print("pregrasp failure.")
-                    continue
+            # -------------------- sample a base pose --------------------#
+            base_position, base_yaw = pose_sampler()
 
-                # -------------------- calculate preview point and regenerate grasp --------------------#
-                preview_point = preview_point_calculation(assembled + [index], element_from_index)
-                # pp.draw_point(preview_point, size=0.1)
-                attach_pose = multiply(pregrasp_poses[-1], invert(grasp))
-                attach_pose = redirector(
-                    cur_element.axis_endpoints[0],
-                    cur_element.axis_endpoints[1],
-                    attach_pose,
-                    preview_point,
-                )
-                grasp = multiply(invert(attach_pose), pregrasp_poses[-1])
-                # pp.draw_pose(attach_pose, length=0.25)
+            # -------------------- sample a grasp pose: gripper_from_body --------------------#
+            grasp = grasp_sampler(
+                base_position,
+                base_yaw,
+                index,
+                assembled,
+                element_from_index,
+                sample_range=0.10,
+                grasp_method="robot",
+                redirect_method="robot",
+            )
 
-                # -------------------- compute place path --------------------#
-                command, mask, grasp_attachment = compute_place_path(
-                    robot_setup,
-                    pregrasp_poses,
-                    grasp,
-                    index,
-                    assembled,
-                    element_from_index,
-                    obstacles,
-                    pose_sampler,
-                    counter=counter,
-                    verbose=verbose,
-                    diagnosis=diagnosis,
-                    teleops=teleops,
-                )
+            # -------------------- generate pregrasp path: (world_from_body) pregrasp --> goal_pose --------------------#
+            # TODO: 这里可能有改进方案，即plan一条从结构外部到goal_pose的path
+            pregrasp_poses = next(pregrasp_gen_fn(index, assembled, diagnosis=diagnosis))
+            if pregrasp_poses is None:
+                pregrasp_val.increment()
+                if verbose:
+                    print("pregrasp failure.")
+                continue
 
-                if command is None:
-                    continue
+            # -------------------- compute place path --------------------#
+            command, mask, grasp_attachment = compute_place_path(
+                robot_setup,
+                pregrasp_poses,
+                grasp,
+                index,
+                assembled,
+                element_from_index,
+                obstacles,
+                base_position,
+                base_yaw,
+                counter=counter,
+                verbose=verbose,
+                diagnosis=diagnosis,
+                teleops=teleops,
+            )
 
-                cprint("Place E#{} | Attempts: {} | Command: {}".format(index, attempt, len(command)), "green")
+            if command is None:
+                continue
 
-                # -------------------- back to init position --------------------#
-                robot_setup.set_joint_positions(robot_setup.arm_joints, robot_arm_init_conf)
+            cprint("Place E#{} | Attempts: {} | Command: {}".format(index, attempt, len(command)), "green")
 
-                yield command, mask, grasp_attachment, grasp, pregrasp_poses[0]
-                break
+            # -------------------- back to init position --------------------#
+            robot_setup.set_joint_positions(robot_setup.arm_joints, robot_arm_init_conf)
 
+            yield command, mask, grasp_attachment, grasp, pregrasp_poses[0]
+            break
+
+        # -------------------- fail --------------------#
         if verbose:
-            cprint("E#{} | Attempts: {} | Max attempts exceeded!".format(index, max_grasp), "red")
+            cprint("E#{} | Attempts: {} | Max attempts exceeded!".format(index, max_attempts), "red")
 
         if allow_failure:
             yield None, None, None, None, None

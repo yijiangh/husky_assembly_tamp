@@ -1,20 +1,27 @@
 import operator
+import time
 from collections import deque
 from copy import deepcopy
 from typing import Tuple
 
 import numpy as np
-from utils.collision import Element
-from symbolic_planner.element_object import ElementObject, ElementStatus
-from symbolic_planner.heuristic import BasicHeuristic, CenterDistanceHeuristic, GroundedChainHeuristic, GroundedHeightHeuristic
-from robot.robot import Robot, PathItem
-from termcolor import cprint
-from utils.utils import flatten
 import pybullet_planning as pp
+from robot.robot import PathItem, Robot
+from symbolic_planner.element_object import ElementObject, ElementStatus
+from symbolic_planner.heuristic import (
+    BasicHeuristic,
+    CenterDistanceHeuristic,
+    GroundedChainHeuristic,
+    GroundedHeightHeuristic,
+)
+from termcolor import cprint
+from utils.collision import Element
+from utils.utils import flatten, timeit_decorator
 
 # TODO  * 在多机协同的时候，需要将其他机器人也考虑进来（碰撞）
 # TODO  * 需要考虑多机协同时候的路径存储
 # TODO  * transfer的planner需要改一改
+
 
 class PlanState(object):
     _instances = {}
@@ -300,6 +307,7 @@ class Planner(object):
         # self.robots[0].BaseMotionPlan(path_index)
         return path_index
 
+    @timeit_decorator
     def Search(self, element_object_list: list[ElementObject]) -> list:
         # -------------------- init --------------------#
         current_state = PlanState([], [obj.index for obj in element_object_list], [])
@@ -307,6 +315,8 @@ class Planner(object):
 
         # -------------------- loop --------------------#
         while not root_state.deadend:
+
+            last_time = time.time()
 
             Planner.UpdateElements([obj.index for obj in element_object_list], element_object_list)
 
@@ -345,7 +355,12 @@ class Planner(object):
 
                 if plan_status:
                     Planner.MultiDisassemble(current_state.blacklist, current_state.assembled, element_object_list)
-                    cprint(f"========== plan {element_object_index}: {current_state} success ==========", "green")
+                    cur_time = time.time()
+                    cprint(
+                        f"========== plan {element_object_index}: {current_state} success {cur_time-last_time}s ==========",
+                        "green",
+                    )
+                    last_time = cur_time
                     next_state = PlanState.GenerateNextState(current_state, [element_object_index])
                     current_state = next_state
                 else:
@@ -370,13 +385,21 @@ class Planner(object):
                 if solve_status:
                     Planner.MultiDisassemble(current_state.blacklist, current_state.assembled, element_object_list)
                     Planner.MultiAssemble(task, current_state.assembled, element_object_list)
-                    cprint(f"========== plan {element_object_index}: {task} success ==========", "green")
+                    cur_time = time.time()
+                    cprint(
+                        f"========== plan {element_object_index}: {task} success {cur_time-last_time}s ==========",
+                        "green",
+                    )
+                    last_time = cur_time
                     next_state = PlanState.GenerateNextState(current_state, task)
                     current_state = next_state
                 else:
                     Planner.MultiDisassemble(task, current_state.assembled, element_object_list)
                     # Planner.Disassemble(element_object_index, current_state.assembled, element_object_list)
-                    cprint(f"********** cooperation plan {element_object_index}: {current_state} not found **********", "red")
+                    cprint(
+                        f"********** cooperation plan {element_object_index}: {current_state} not found **********",
+                        "red",
+                    )
                     current_state.UpdateBlacklist([element_object_index])  # TODO: 这里不考虑把所有task全加到blacklist
 
             else:
@@ -389,11 +412,17 @@ class Planner(object):
 
             # -------------------- Check if backtracking is necessary --------------------#
             if current_state.deadend:
-                cprint("\n****************************** Deadend reached, need to traceback! *********************************", "cyan")
+                cprint(
+                    "\n****************************** Deadend reached, need to traceback! *********************************",
+                    "cyan",
+                )
                 cprint(f"current state: {current_state}", "cyan")
                 current_state = current_state.TraceBack()
                 cprint(f"traceback state: {current_state}", "cyan")
-                cprint("****************************************************************************************************\n", "cyan")
+                cprint(
+                    "****************************************************************************************************\n",
+                    "cyan",
+                )
 
         cprint("********** Plan failed! **********", "red")
         return []

@@ -1,10 +1,9 @@
 import os
 import sys
 from functools import partial
+from typing import List, Tuple, Union
 
 import numpy as np
-import pybullet_planning as pp
-from pybullet_planning import Attachment, Euler, Point, Pose, get_distance, interpolate_poses, invert, multiply
 
 HERE = os.path.dirname(__file__)
 husky_assembly_path = os.path.abspath(os.path.join(HERE, "..", "..", "..", "src"))
@@ -12,11 +11,13 @@ cur_project_path = os.path.dirname(HERE)
 sys.path.append(husky_assembly_path)
 sys.path.append(cur_project_path)
 
+import pybullet_planning as pp
 from compas_fab.robots import Robot as RobotClass
 from compas_fab.robots import RobotSemantics
 from compas_fab.robots.robot import RobotModel
 from husky_assembly import DATA_DIRECTORY
 from ik_solver.pinocchio_solver import PinocchioSolver
+from pybullet_planning import Attachment, Euler, Point, Pose, get_distance, interpolate_poses, invert, multiply
 from tracikpy import TracIKSolver
 from utils.utils import HUSKYU_JOINT_NAMES, plan_transit_motion
 
@@ -131,7 +132,19 @@ class RobotSetup(object):
         link_pose = pp.get_link_pose(self.robot, pp.link_from_name(self.robot, link_name))
         return pp.multiply(pp.invert(link_pose), pose_world)
 
-    def get_relative_ik_solution(self, tool_pose_world, q_init=None):
+    def get_relative_ik_solution(
+        self, tool_pose_world: Tuple[Tuple[float], Tuple[float]], q_init: Union[List[float], None] = None
+    ) -> np.ndarray:
+        """
+        Calculate ik solution of manipulator.
+
+        Params:
+            tool_pose_world (Tuple[Tuple[float], Tuple[float]]): pp.Pose, world_from_tool0
+            q_init ([float] | None, None): conf of manipulator as initial guess
+
+        Returns:
+            q (np.ndarray): ik solution of conf
+        """
         tool_pose_relative = self.get_relative_pose(tool_pose_world)
         conf = self.ik_solver_relative(pp.tform_from_pose(tool_pose_relative), qinit=q_init)
         self.ee_attachment.assign()
@@ -139,7 +152,21 @@ class RobotSetup(object):
 
     def plan_manipulator_path(
         self, init_q, target_q, attachments, obstacles, sub_way_points=False, way_points_max_num=15
-    ):
+    )-> List[np.ndarray]:
+        """
+        Plan manipulator path from init_q to target_q with attachments.
+        
+        Params:
+            init_q (np.ndarray): start conf
+            target_q (np.ndarray): target conf
+            attachments ([Attachment]): Attachments on the robot including base and manipulator
+            obstacles (Set[int]): fixed obstacles + assembled elements
+            sub_way_points (bool, False): whether generate intermediate points
+            way_points_max_num (int, 15): max num of intermediate points
+        
+        Returns:
+            path ([np.ndarray]): confs from start to target
+        """
         # pp.set_joint_positions(self.robot, self.arm_joints, init_q)
         self.set_joint_positions(self.arm_joints, init_q)
         self.ee_attachment.assign()
@@ -152,7 +179,7 @@ class RobotSetup(object):
             target_q,
             [self.ee_attachment] + attachments,
             obstacles,
-            debug=True,
+            debug=False,
             disabled_collisions=self.disabled_collisions,
             coarse_waypoints=sub_way_points,
         )

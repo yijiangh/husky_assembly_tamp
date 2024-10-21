@@ -32,13 +32,16 @@ def load_json_logs(folder):
 # 计算每个文件夹中的失败计数平均值
 def extract_failures(folder):
     failure_types = [
-        "pregrasp failure",
-        "attach ik failure",
-        "pre attach ik failure",
-        "pre attach collision failure",
-        "post attach ik failure",
-        "post attach collision failure",
-        "back plan failure",
+        # "attach ik failure",
+        "attach failure",
+        # "pre attach ik failure",
+        # "pre attach plan failure",
+        "pre attach failure",
+        # "post attach ik failure",
+        # "post attach collision failure",
+        "post attach failure",
+        # "back plan failure",
+        "back failure",
     ]
     failure_counts = {ftype: 0 for ftype in failure_types}
     log_count = 0
@@ -64,16 +67,16 @@ def extract_failures(folder):
 # 生成对比图的标题和题注
 def create_plot_title(structure_name, compare_module, algorithms):
     algorithm_list = ", ".join(algorithms)
-    title = f'Failure Comparison (Averages) for {compare_module} module'
+    title = f"Failure Comparison (Averages) for {compare_module} module"
     # caption = f'Comparison of average failure types for {structure_name} in the {compare_module} module using {algorithm_list}.'
-    caption = ''
+    caption = ""
     return title, caption
 
 
 # 主程序
 def main():
-    log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
-    log_name = "one_tet_MT_contact-pose_sample"
+    log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
+    log_name = "one_tet_MT_contact-pregrasp"
     # 根文件夹路径
     root_folder = os.path.join(log_dir, log_name)
 

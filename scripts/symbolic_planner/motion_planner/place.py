@@ -11,17 +11,13 @@ import numpy as np
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pybullet_planning as pp
-from utils.collision import Element, Grasp, create_couplers, init_pb
-from motion_planner.grasp_redirector import preview_point_calculation, redirector
-from motion_planner.mobile_base_controller import Stanley, State
-from motion_planner.mobile_base_planner import RRTStar, fill_yaw_angle
-from pybullet_planning import Attachment, Euler, Point, Pose, get_distance, interpolate_poses, invert, multiply
-from robot.robot_setup import INIT_ARM_JOINT_ANGLES, RobotSetup
+from utils.collision import Element
+from pybullet_planning import Attachment, interpolate_poses
+from robot.robot_setup import RobotSetup
 from sampler.grasp_sampler import grasp_sampler
 from sampler.mobile_base_sampler import robot_pose_sampler
-from scipy.spatial.transform import Rotation as R
 from termcolor import cprint
-from utils.utils import CounterModule, CounterValue, angles_distance, normalize_angles
+from utils.utils import CounterModule, angles_distance, normalize_angles
 
 # place retreat
 RETREAT_DISTANCE = 0.07
@@ -30,8 +26,8 @@ RETREAT_DISTANCE = 0.07
 PREGRASP_MAX_ATTEMPTS = 100
 
 # pregrasp delta sample
-EPSILON = 0.25
-ANGLE = np.pi
+EPSILON = 0.05
+ANGLE = np.pi / 6
 
 # pregrasp/retreat interpolation step
 POS_STEP_SIZE = 0.005
@@ -63,7 +59,7 @@ def get_delta_pose_generator(epsilon=EPSILON, angle=ANGLE):
     lower = [-epsilon] * 3 + [-angle] * 3
     upper = [epsilon] * 3 + [angle] * 3
     for [x, y, z, roll, pitch, yaw] in pp.interval_generator(lower, upper):  # halton?
-        pose = Pose(point=[x, y, z], euler=Euler(roll=roll, pitch=pitch, yaw=yaw))
+        pose = pp.Pose(point=[x, y, z], euler=pp.Euler(roll=roll, pitch=pitch, yaw=yaw))
         yield pose
 
 
@@ -124,7 +120,7 @@ def get_pregrasp_gen_fn(
             pre_grasp_delta_pose = next(pre_grasp_pose_gen)  # tar_pose from pre_grasp_pose
             # attach_pose = multiply(body_tar_pose, attach_delta_pose)
             attach_pose = body_tar_pose
-            pre_grasp_pose = multiply(attach_pose, pre_grasp_delta_pose)
+            pre_grasp_pose = pp.multiply(attach_pose, pre_grasp_delta_pose)
             is_colliding = False
             if not teleops:
                 offset_path = list(
@@ -202,13 +198,23 @@ def compute_place_path(
     cur_element: Element = element_from_index[index]
 
     # -------------------- init counter module --------------------#
-    pregrasp_val = counter.add_counter_value("pregrasp failure")
     attach_ik_val = counter.add_counter_value("attach ik failure")
+    attach_val = counter.add_counter_value("attach failure")
+
     pre_attach_ik_val = counter.add_counter_value("pre attach ik failure")
     pre_attach_collision_val = counter.add_counter_value("pre attach collision failure")
+    pre_attach_plan_val = counter.add_counter_value("pre attach plan failure")
+    pre_attach_val = counter.add_counter_value("pre attach failure")
+
     post_attach_ik_val = counter.add_counter_value("post attach ik failure")
     post_attach_collision_val = counter.add_counter_value("post attach collision failure")
+    post_attach_val = counter.add_counter_value("post attach failure")
+
     back_plan_val = counter.add_counter_value("back plan failure")
+    back_val = counter.add_counter_value("back failure")
+
+    # -------------------- init variables --------------------#
+    bar_tar_pose = cur_element.goal_pose  # world_from_body
 
     # if verbose:
     #     pp.remove_all_debug()
@@ -220,6 +226,8 @@ def compute_place_path(
 
     # -------------------- loop: find a solution of place --------------------#
     for _ in range(max_attempt):
+
+        # pp.wait_for_user()
 
         # **************************************************************************
         # base pose
@@ -239,7 +247,103 @@ def compute_place_path(
         grasp = grasp_sampler(base_pose_tup[0], base_pose_tup[1])
 
         # **************************************************************************
-        # pregrasp
+        # attach
+        # **************************************************************************
+
+        # -------------------- generate pose --------------------#
+        attach_pose = pp.multiply(bar_tar_pose, pp.invert(grasp))  # world_from_gripper
+        attach_tool0_pose = pp.multiply(attach_pose, pp.invert(robot_setup.tool0_from_ee))  # world_from_tool0
+
+        # -------------------- generate attach conf --------------------#
+        robot_base_conf = np.hstack((base_pose_tup[0][:2], np.array([base_pose_tup[1]])))  # np.array([x, y, yaw])
+        robot_setup.set_joint_positions(robot_setup.base_joints, robot_base_conf)  # update pose2d in pybullet
+        robot_joint_attach_conf = robot_setup.get_relative_ik_solution(attach_tool0_pose)
+        if robot_joint_attach_conf is None:
+            if verbose:
+                cprint("attach ik failure", "red")
+            attach_ik_val.increment()
+            attach_val.increment()
+            continue
+        robot_joint_attach_conf = normalize_angles(robot_joint_attach_conf)
+        robot_attach_conf = np.hstack((robot_base_conf, robot_joint_attach_conf))
+        # pre_attach_confs = [robot_attach_conf]  # [conf], pregrasp --> attach_pose
+
+        # -------------------- create attachment of current element --------------------#
+        # if grasp_attachment is None:
+        pp.set_pose(cur_element.body, cur_element.goal_pose)
+        robot_setup.set_joint_positions(robot_setup.control_joints, robot_attach_conf)
+        grasp_attachment = pp.create_attachment(robot_setup.robot, robot_setup.tool_link, cur_element.body)
+
+        # **************************************************************************
+        # pre attach (birrt)
+        # **************************************************************************
+
+        # # -------------------- init collision checker --------------------#
+        # collision_fn = pp.get_collision_fn(
+        #     robot_setup.robot,
+        #     robot_setup.control_joints,
+        #     obstacles=obstacles,
+        #     attachments=[grasp_attachment] + robot_setup.attachments,
+        #     self_collisions=ENABLE_SELF_COLLISIONS,
+        #     disabled_collisions=robot_setup.disabled_collisions,
+        #     max_distance=MAX_DISTANCE,
+        # )
+
+        # # -------------------- generate delta pose and calculate pre_grasp --------------------#
+        # pre_grasp_pose_gen = get_delta_pose_generator()
+        # pre_grasp_delta_pose = next(pre_grasp_pose_gen)  # tar_from_pre_grasp
+        # pre_grasp_pose = pp.multiply(cur_element.goal_pose, pre_grasp_delta_pose)  # world_from_body
+
+        # # -------------------- generate pre grasp conf --------------------#
+        # pre_attach_pose = pp.multiply(pre_grasp_pose, pp.invert(grasp))  # world_from_gripper
+        # pre_tool0_pose = pp.multiply(pre_attach_pose, pp.invert(robot_setup.tool0_from_ee))  # world_from_tool0
+        # robot_joint_pre_grasp_conf = robot_setup.get_relative_ik_solution(pre_tool0_pose)
+        # if robot_joint_pre_grasp_conf is None:
+        #     if verbose:
+        #         cprint("pre attach ik failure", "red")
+        #     pre_attach_ik_val.increment()
+        #     pre_attach_val.increment()
+        #     continue
+
+        # # -------------------- from pre attach to attach --------------------#
+        # pre_attach_confs = []
+        # fail_flag = True
+        # for plan_attempt in range(path_plan_max_attempt):
+        #     pre_attach_path = robot_setup.plan_manipulator_path(
+        #         robot_joint_pre_grasp_conf,
+        #         robot_joint_attach_conf,
+        #         robot_setup.attachments + [grasp_attachment],
+        #         obstacles,
+        #         sub_way_points=True,
+        #     )
+        #     if pre_attach_path is None:
+        #         if verbose:
+        #             print("    pre attach plan not found")
+        #         continue
+
+        #     pre_attach_path = [normalize_angles(conf) for conf in pre_attach_path]
+        #     pre_attach_confs = [np.hstack((robot_base_conf, conf)) for conf in pre_attach_path] + [robot_attach_conf]
+
+        #     inner_fail_flag = False
+        #     for temp_conf in pre_attach_confs:
+        #         if collision_fn(temp_conf, diagnosis):
+        #             if verbose:
+        #                 print("    pre attach collision not pass")
+        #             inner_fail_flag = True
+        #             break
+        #     if inner_fail_flag:
+        #         continue
+        #     fail_flag = False
+        #     break
+        # if fail_flag:
+        #     if verbose:
+        #         cprint("pre attach plan failure", "red")
+        #     pre_attach_plan_val.increment()
+        #     pre_attach_val.increment()
+        #     continue
+
+        # **************************************************************************
+        # pre attach (interpolation)
         # **************************************************************************
 
         # -------------------- generate pregrasp path: (world_from_body) pregrasp --> goal_pose --------------------#
@@ -247,8 +351,9 @@ def compute_place_path(
         if pregrasp_poses is None:
             if verbose:
                 cprint("pregrasp failure", "red")
-            pregrasp_val.increment()
+            # pregrasp_val.increment()
             continue
+        pre_grasp_pose = pregrasp_poses[0]
 
         # -------------------- generate pre attach poses --------------------#
         pre_attach_poses = [
@@ -257,34 +362,7 @@ def compute_place_path(
         pre_tool0_poses = [
             pp.multiply(temp_pose, pp.invert(robot_setup.tool0_from_ee)) for temp_pose in pre_attach_poses
         ]  # world_from_tool0
-        attach_pose = pre_attach_poses[-1]  # world_from_gripper (world_from_ee)
-
-        # **************************************************************************
-        # attach
-        # **************************************************************************
-
-        # -------------------- generate attach conf --------------------#
-        robot_base_conf = np.hstack((base_pose_tup[0][:2], np.array([base_pose_tup[1]])))  # np.array([x, y, yaw])
-        robot_setup.set_joint_positions(robot_setup.base_joints, robot_base_conf)  # update pose2d in pybullet
-        robot_joint_attach_conf = robot_setup.get_relative_ik_solution(pre_tool0_poses[-1])
-        if robot_joint_attach_conf is None:
-            if verbose:
-                cprint("attach ik failure", "red")
-            attach_ik_val.increment()
-            continue
-        robot_joint_attach_conf = normalize_angles(robot_joint_attach_conf)
-        robot_attach_conf = np.hstack((robot_base_conf, robot_joint_attach_conf))
-        pre_attach_confs = [robot_attach_conf]  # [conf], pregrasp --> attach_pose
-
-        # -------------------- create attachment of current element --------------------#
-        if grasp_attachment is None:
-            pp.set_pose(cur_element.body, cur_element.goal_pose)
-            robot_setup.set_joint_positions(robot_setup.control_joints, robot_attach_conf)
-            grasp_attachment = pp.create_attachment(robot_setup.robot, robot_setup.tool_link, cur_element.body)
-
-        # **************************************************************************
-        # pre attach
-        # **************************************************************************
+        # attach_pose = pre_attach_poses[-1]  # world_from_gripper (world_from_ee)
 
         # -------------------- init collision checker --------------------#
         collision_fn = pp.get_collision_fn(
@@ -298,9 +376,10 @@ def compute_place_path(
         )
 
         # -------------------- inversely generate pre attach confs excluding attach_pose --------------------#
+        pre_attach_confs = [robot_attach_conf]
         fail_flag = False
         robot_joint_conf_last = robot_joint_attach_conf
-        pose_last = pre_tool0_poses[-1]
+        pose_last = attach_tool0_pose
         for pre_tool0_pose in pre_tool0_poses[::-1][1:]:
             inner_fail_flag = True
             for ik_search_num in range(ik_search_max_attempt):
@@ -342,6 +421,7 @@ def compute_place_path(
                 if verbose:
                     cprint("pre attach ik failure", "red")
                 pre_attach_ik_val.increment()
+                pre_attach_val.increment()
                 fail_flag = True
                 break
         if fail_flag:
@@ -354,10 +434,12 @@ def compute_place_path(
                 if verbose:
                     cprint("pre attach collision failure", "red")
                 pre_attach_collision_val.increment()
+                pre_attach_val.increment()
                 fail_flag = True
                 break
         if fail_flag:
             break
+
 
         # **************************************************************************
         # post attach (retreat)
@@ -379,20 +461,14 @@ def compute_place_path(
 
         # -------------------- generate post attach pose (retreat) --------------------#
         retreat_delta_point = tuple((np.array([0, 0, -1]) * retreat_dist).tolist())
-        retreat_delta_pose = Pose(point=retreat_delta_point, euler=Euler(roll=0, pitch=0, yaw=0))
-        retreat_pose = multiply(pre_tool0_poses[-1], retreat_delta_pose)
+        retreat_delta_pose = pp.Pose(point=retreat_delta_point, euler=pp.Euler(roll=0, pitch=0, yaw=0))
+        retreat_pose = pp.multiply(attach_tool0_pose, retreat_delta_pose)
         post_tool0_poses = list(
-            interpolate_poses(
-                pre_tool0_poses[-1], retreat_pose, pos_step_size=POS_STEP_SIZE, ori_step_size=ORI_STEP_SIZE
-            )
+            interpolate_poses(attach_tool0_pose, retreat_pose, pos_step_size=POS_STEP_SIZE, ori_step_size=ORI_STEP_SIZE)
         )
 
         # -------------------- generate post attach confs --------------------#
-        # post_tool0_poses = [
-        #     pp.multiply(temp_pose, pp.invert(robot_setup.tool0_from_ee)) for temp_pose in post_attach_poses
-        # ]
         post_attach_confs = []
-
         fail_flag = False
         robot_joint_conf_last = robot_joint_attach_conf
         for posttool0_pose in post_tool0_poses:
@@ -414,6 +490,7 @@ def compute_place_path(
                 if verbose:
                     cprint("post attach ik failure", "red")
                 post_attach_ik_val.increment()
+                post_attach_val.increment()
                 fail_flag = True
                 break
         if fail_flag:
@@ -426,6 +503,7 @@ def compute_place_path(
                 if verbose:
                     cprint("post attach collision failure", "red")
                 post_attach_collision_val.increment()
+                post_attach_val.increment()
                 fail_flag = True
                 break
         if fail_flag:
@@ -468,12 +546,13 @@ def compute_place_path(
             if verbose:
                 cprint("back plan failure", "red")
             back_plan_val.increment()
+            back_val.increment()
             continue
 
         # -------------------- return command, mask, grasp_attach, grasp, pregrasp --------------------#
         command = pre_attach_confs + post_attach_confs + back_confs
         mask = [True] * len(pre_attach_confs) + [False] * len(post_attach_confs) + [False] * len(back_confs)
-        return command, mask, grasp_attachment, grasp, pregrasp_poses[0]
+        return command, mask, grasp_attachment, grasp, pre_grasp_pose
 
     return None, None, None, None, None
 

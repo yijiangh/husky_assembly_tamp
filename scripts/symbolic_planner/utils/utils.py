@@ -1,21 +1,22 @@
 import json
 import logging
 import os
+import time
 from collections import defaultdict
 from functools import partial
 
-import utils.load_pddlstream as load_pddlstream
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 import pybullet_planning as pp
-from utils.load_pddlstream import HERE
+import utils.load_pddlstream as load_pddlstream
 from pddlstream.algorithms.algorithm import parse_problem
 from pddlstream.algorithms.downward import get_problem, task_from_domain_problem
 from pddlstream.language.constants import Action, DurativeAction, FunctionAction, StreamAction, is_plan
 from pddlstream.language.conversion import obj_from_pddl
 from pddlstream.utils import str_from_object
-from termcolor import colored
+from termcolor import colored, cprint
+from utils.load_pddlstream import HERE
 
 HUSKYU_JOINT_NAMES = [
     "ur_arm_shoulder_pan_joint",
@@ -27,6 +28,20 @@ HUSKYU_JOINT_NAMES = [
 ]
 
 PROJECT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def timeit_decorator(func):
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        cprint(
+            f"\n============================================================\nFunction '{func.__name__}' executed in {end_time - start_time:.6f} seconds!\n============================================================\n",
+            "cyan",
+        )
+        return result
+
+    return wrapper
 
 
 ###########################################

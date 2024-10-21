@@ -4,12 +4,12 @@ from copy import deepcopy
 from typing import Tuple
 
 import numpy as np
-from collision import Element
-from element_object import ElementObject, ElementStatus
-from heuristic import BasicHeuristic, CenterDistanceHeuristic, GroundedChainHeuristic, GroundedHeightHeuristic
-from robot import Robot, PathItem
+from utils.collision import Element
+from symbolic_planner.element_object import ElementObject, ElementStatus
+from symbolic_planner.heuristic import BasicHeuristic, CenterDistanceHeuristic, GroundedChainHeuristic, GroundedHeightHeuristic
+from robot.robot import Robot, PathItem
 from termcolor import cprint
-from utils import flatten
+from utils.utils import flatten
 import pybullet_planning as pp
 
 # TODO  * 在多机协同的时候，需要将其他机器人也考虑进来（碰撞）

@@ -1,15 +1,19 @@
+import os
+import sys
 from collections import namedtuple
 from copy import deepcopy
 from typing import Dict, List, Tuple
 
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import numpy as np
 import pybullet_planning as pp
-from collision import Element
+from utils.collision import Element
 from motion_planner.place import get_place_gen_fn
 from pybullet_planning import Attachment, Euler, Point, Pose, get_distance, interpolate_poses, invert, multiply
-from robot_setup import RobotSetup
-from stream import get_pick_gen_fn, get_transfer_gen_fn, get_transit_gen_fn
-from utils import CounterModule, CounterValue
+from robot.robot_setup import RobotSetup
+# from stream import get_pick_gen_fn, get_transfer_gen_fn, get_transit_gen_fn
+from utils.utils import CounterModule, CounterValue
 
 ConcretePath = namedtuple("ConcretePath", ["base_path", "manipulator_path"])
 
@@ -80,7 +84,7 @@ class Robot(object):
             self.robot_setup,
             element_from_index,
             [],
-            verbose=False,
+            verbose=True,
             collisions=True,
             teleops=False,
             allow_failure=True,

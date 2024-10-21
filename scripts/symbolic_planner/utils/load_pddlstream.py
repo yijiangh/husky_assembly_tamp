@@ -1,7 +1,7 @@
 import os, sys
 from termcolor import cprint
 
-HERE = os.path.abspath(os.path.dirname(__file__))
+HERE = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 try:
     # prioritize local pddlstream first
     # add your PDDLStream path here: https://github.com/caelan/pddlstream

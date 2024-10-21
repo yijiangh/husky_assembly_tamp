@@ -8,7 +8,7 @@ import numpy as np
 import pybullet_planning as pp
 from matplotlib import pyplot as plt
 from matplotlib.patches import Circle, Rectangle
-from robot_setup import INIT_ARM_JOINT_ANGLES, RobotSetup
+from robot.robot_setup import INIT_ARM_JOINT_ANGLES, RobotSetup
 from scipy.interpolate import CubicSpline
 
 

@@ -1,8 +1,8 @@
 import os
 import json
 
-from load_pddlstream import HERE
-from parse_symbolic import MT_DATA_PATH, PDDL_FOLDERS
+from utils.load_pddlstream import HERE
+from utils.parse_symbolic import MT_DATA_PATH, PDDL_FOLDERS
 
 def parse_mt_geometric(mt_json_file_name):
     file_path = os.path.join(MT_DATA_PATH, mt_json_file_name)

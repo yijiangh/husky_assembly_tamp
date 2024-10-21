@@ -4,15 +4,14 @@ import json
 from termcolor import colored
 import argparse
 
-import load_pddlstream
+import utils.load_pddlstream as load_pddlstream
 
 from pddlstream.utils import read, write
 from pddlstream.language.constants import And, Equal, TOTAL_COST, Not
 from pddlstream.language.temporal import parse_domain
 
-from load_pddlstream import HERE
-from utils import LOGGER
-from export_pddl_utils import pddl_problem_with_original_names
+from utils.load_pddlstream import HERE
+from utils.utils import LOGGER
 
 MT_DATA_PATH = os.path.join(HERE, '..', '..', 'ext', 'FrameX', 'data', 'mt_results')
 
@@ -111,22 +110,6 @@ def mt_to_init_goal_joints(
 
 # Utility functions for parsing
 
-def export_pddl(domain_name, init, goal, pddl_folder, problem_name):
-    """export PDDL domain file
-    """
-    # parse domain pddl to make sure the domain and problem have consistent names
-
-    # [parsed_domain_name] = re.findall(r'\(domain ([^ ]+)\)', domain_name)
-    # problem_pddl_str = pddl_problem_with_original_names(problem_name, parsed_domain_name, init, goal)
-    problem_pddl_str = pddl_problem_with_original_names(
-        problem_name, domain_name, init, goal)
-
-    pddl_problem_path = os.path.join(
-        HERE, pddl_folder, 'problem_' + problem_name + '.pddl')
-    write(pddl_problem_path, problem_pddl_str)
-    LOGGER.info(colored('Exported PDDL domain file to {}'.format(
-        pddl_problem_path), 'green'))
-
 def mt_to_init_goal_by_case(
         beam_ids, contact_id_pairs,
         case_number: int,
@@ -162,17 +145,3 @@ if __name__ == '__main__':
 
     mt_name = os.path.splitext(os.path.basename(mt_file_name))[0]
     problem_name = mt_name
-
-    # Hard coded domain names and folder names
-    pddl_folders = PDDL_FOLDERS
-    domain_names = DOMAIN_NAMES
-
-    # Create PDDL problem from process and export
-    for case_number in range(1, 6):
-        if case_number in args.planning_cases:
-            # Extract init and goal
-            init, unioned_goal = mt_to_init_goal_by_case(
-                *mt, case_number, [], [])
-            # Export PDDL domain file
-            export_pddl(domain_names[case_number - 1], init,
-                        unioned_goal, pddl_folders[case_number - 1], problem_name)

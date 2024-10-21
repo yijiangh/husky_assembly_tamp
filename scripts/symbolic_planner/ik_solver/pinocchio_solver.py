@@ -246,8 +246,8 @@ if __name__ == "__main__":
 
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-    from collision import init_pb
-    from robot_setup import RobotSetup
+    from utils.collision import init_pb
+    from robot.robot_setup import RobotSetup
 
     robot_urdf = (
         "/home/jeong/summer_research/eth/husky_assembly/data/husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf"

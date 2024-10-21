@@ -7,15 +7,15 @@ from typing import Tuple
 
 import numpy as np
 import pybullet_planning as pp
-from collision import Element, Grasp, create_couplers, init_pb
-from grasp_redirector import preview_point_calculation, redirector
-from mobile_base_controller import Stanley, State
-from mobile_base_planner import RRTStar, fill_yaw_angle
+from utils.collision import Element, Grasp, create_couplers, init_pb
+from motion_planner.grasp_redirector import preview_point_calculation, redirector
+from motion_planner.mobile_base_controller import Stanley, State
+from motion_planner.mobile_base_planner import RRTStar, fill_yaw_angle
 from pybullet_planning import Attachment, Euler, Point, Pose, get_distance, interpolate_poses, invert, multiply
 from robot_setup import INIT_ARM_JOINT_ANGLES, RobotSetup
 from scipy.spatial.transform import Rotation as R
 from termcolor import cprint
-from utils import CounterModule, CounterValue, angles_distance, normalize_angles
+from utils.utils import CounterModule, CounterValue, angles_distance, normalize_angles
 
 from pose_sampler.mobile_base_sampler import robot_pose_sampler
 

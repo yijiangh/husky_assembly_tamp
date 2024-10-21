@@ -11,16 +11,16 @@ mt_file_name = "one_tet_MT_contact"
 log_dir = os.path.join(cur_dir, f"logs/{mt_file_name}")
 
 # -------------------- self-defined modules --------------------#
-import load_multi_tangent
+import utils.load_multi_tangent as load_multi_tangent
 import pybullet_planning as pp
-from collision import Element, create_couplers, init_pb
-from element_object import ElementObject, ElementStatus
+from utils.collision import Element, create_couplers, init_pb
+from symbolic_planner.element_object import ElementObject, ElementStatus
 from multi_tangent.collision import create_collision_bodies
 from multi_tangent.convert import flatten_list
-from parse import parse_mt_geometric
-from planner import Planner
-from robot import PathItem, PathWithIndex, Robot
-from robot_setup import RobotSetup
+from utils.parse import parse_mt_geometric
+from symbolic_planner.planner import Planner
+from robot.robot import PathItem, PathWithIndex, Robot
+from robot.robot_setup import RobotSetup
 
 if __name__ == "__main__":
 

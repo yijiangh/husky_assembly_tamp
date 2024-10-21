@@ -1,7 +1,8 @@
 import numpy as np
 import pybullet_planning as pp
 from scipy.spatial.transform import Rotation as R
-from collision import Element
+
+from utils.collision import Element
 
 
 def normalize(v):

@@ -7,8 +7,10 @@ import pybullet_planning as pp
 from pybullet_planning import Attachment, Euler, Point, Pose, get_distance, interpolate_poses, invert, multiply
 
 HERE = os.path.dirname(__file__)
-husky_assembly_path = os.path.abspath(os.path.join(HERE, "..", "..", "src"))
+husky_assembly_path = os.path.abspath(os.path.join(HERE, "..", "..", "..", "src"))
+cur_project_path = os.path.dirname(HERE)
 sys.path.append(husky_assembly_path)
+sys.path.append(cur_project_path)
 
 from compas_fab.robots import Robot as RobotClass
 from compas_fab.robots import RobotSemantics
@@ -16,7 +18,7 @@ from compas_fab.robots.robot import RobotModel
 from husky_assembly import DATA_DIRECTORY
 from ik_solver.pinocchio_solver import PinocchioSolver
 from tracikpy import TracIKSolver
-from utils import HUSKYU_JOINT_NAMES, plan_transit_motion
+from utils.utils import HUSKYU_JOINT_NAMES, plan_transit_motion
 
 TOOL0_FROM_EE = pp.Pose(point=[0, 0, 0.160])
 CONTROL_JOINT_NAMES = [

@@ -4,12 +4,12 @@ import os
 from collections import defaultdict
 from functools import partial
 
-import load_pddlstream
+import utils.load_pddlstream as load_pddlstream
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 import pybullet_planning as pp
-from load_pddlstream import HERE
+from utils.load_pddlstream import HERE
 from pddlstream.algorithms.algorithm import parse_problem
 from pddlstream.algorithms.downward import get_problem, task_from_domain_problem
 from pddlstream.language.constants import Action, DurativeAction, FunctionAction, StreamAction, is_plan
@@ -25,6 +25,8 @@ HUSKYU_JOINT_NAMES = [
     "ur_arm_wrist_2_joint",
     "ur_arm_wrist_3_joint",
 ]
+
+PROJECT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 ###########################################

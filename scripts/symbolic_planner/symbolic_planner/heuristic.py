@@ -1,5 +1,5 @@
 import numpy as np
-from element_object import ElementObject, ElementStatus, GroundedChecker
+from symbolic_planner.element_object import ElementObject, ElementStatus, GroundedChecker
 
 
 class BasicHeuristic(object):

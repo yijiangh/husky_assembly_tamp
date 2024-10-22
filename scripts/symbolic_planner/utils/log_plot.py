@@ -67,7 +67,7 @@ def extract_failures(folder):
 # 生成对比图的标题和题注
 def create_plot_title(structure_name, compare_module, algorithms):
     algorithm_list = ", ".join(algorithms)
-    title = f"Failure Comparison (Averages) for {compare_module} module"
+    title = f"Failure Comparison (Averages) using {structure_name} for {compare_module} module"
     # caption = f'Comparison of average failure types for {structure_name} in the {compare_module} module using {algorithm_list}.'
     caption = ""
     return title, caption

@@ -7,16 +7,16 @@ from itertools import islice
 from typing import Callable, List, Set, Tuple
 
 import numpy as np
+import pybullet_planning as pp
+from termcolor import cprint
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import pybullet_planning as pp
-from utils.collision import Element
 from pybullet_planning import Attachment, interpolate_poses
 from robot.robot_setup import RobotSetup
 from sampler.grasp_sampler import grasp_sampler
 from sampler.mobile_base_sampler import robot_pose_sampler
-from termcolor import cprint
+from utils.collision import Element
 from utils.utils import CounterModule, angles_distance, normalize_angles
 
 # place retreat
@@ -439,7 +439,6 @@ def compute_place_path(
                 break
         if fail_flag:
             break
-
 
         # **************************************************************************
         # post attach (retreat)

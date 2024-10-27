@@ -205,6 +205,7 @@ def grasp_sampler(
     assembled: List[int],
     element_from_index: Dict,
     sample_range: float = 0.0,
+    reachable_margin: float = 0.3,
     grasp_method: str = "robot",
     redirect_method: str = "robot",
 ) -> Tuple[Tuple[float], Tuple[float]]:
@@ -218,6 +219,7 @@ def grasp_sampler(
         assembled (List[int]): indices of assembled structure
         element_from_index ({index: Element}): dict of elements
         sample_range (float, 0.0): the distance to sample around the reference point
+        reachable_margin (float, 0.3): the radius of the circle centered at the center of the bar
         grasp_method (str, "robot"): grasp generation method robot/cylinder
         redirect_method (str, "robot"): redirect method robot/preview/none(only for cylinder)
 
@@ -236,12 +238,23 @@ def grasp_sampler(
         )
         start = np.array(target_edge[0])
         end = np.array(target_edge[1])
+        edge_length = np.linalg.norm(end - start)
 
-        sample_alpha = sample_range / np.linalg.norm(end - start)
+        sample_alpha = sample_range / edge_length
+        reachable_alpha = reachable_margin / edge_length
 
-        alpha_min = max(0.0, alpha - sample_alpha)
-        alpha_max = min(1.0, alpha + sample_alpha)
-        alpha_sample = random.uniform(alpha_min, alpha_max)
+        sample_alpha_min = max(0.0, alpha - sample_alpha)
+        sample_alpha_max = min(1.0, alpha + sample_alpha)
+        reachable_alpha_min = max(0.0, 0.5 - reachable_alpha)
+        reachable_alpha_max = min(1.0, 0.5 + reachable_alpha)
+
+        alpha_min = max(sample_alpha_min, reachable_alpha_min)
+        alpha_max = min(sample_alpha_max, reachable_alpha_max)
+
+        if alpha_min > alpha_max:
+            alpha_sample = random.uniform(reachable_alpha_min, reachable_alpha_max)
+        else:
+            alpha_sample = random.uniform(alpha_min, alpha_max)
 
         grasp_point_world_arr = (1 - alpha_sample) * start + alpha_sample * end
         attach_temp = (tuple(grasp_point_world_arr), (0, 0, 0, 1))
@@ -250,6 +263,7 @@ def grasp_sampler(
         start = np.array(target_edge[0])
         end = np.array(target_edge[1])
         edge_length = np.linalg.norm(end - start)
+
         safety_margin_length = edge_length / 2.0 - sample_range
         grasp_gen = pp.get_side_cylinder_grasps(cur_element.body, safety_margin_length=safety_margin_length)
         gripper_from_body = next(grasp_gen)

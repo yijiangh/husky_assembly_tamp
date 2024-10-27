@@ -76,16 +76,20 @@ class RobotSetup(object):
         robot = pp.load_pybullet(robot_urdf, fixed_base=False, cylinder=False)
 
         if not ik_from_arm_base:
-            # trac_ik_solver = TracIKSolver(robot_urdf, "world_link", "ur_arm_tool0")
-            # trac_ik_solver_relative = TracIKSolver(robot_urdf, "ur_arm_base_link", "ur_arm_tool0")
-            # ik_solver = trac_ik_solver.ik
-            # ik_solver_relative = trac_ik_solver_relative.ik
+            trac_ik_solver = TracIKSolver(robot_urdf, "world_link", "ur_arm_tool0")
+            trac_ik_solver_relative = TracIKSolver(robot_urdf, "ur_arm_base_link", "ur_arm_tool0")
+            ik_solver = trac_ik_solver.ik
+            ik_solver_relative = trac_ik_solver_relative.ik
+            self.tracik_ik_solver = trac_ik_solver.ik
+            self.tracik_ik_solver_relative = trac_ik_solver_relative.ik
 
             pinocchio_solver = PinocchioSolver(robot_urdf)
             ik_solver = partial(pinocchio_solver.ik, base_name="world_link", tip_name="ur_arm_tool0", relative=False)
             ik_solver_relative = partial(
                 pinocchio_solver.ik, base_name="ur_arm_base_link", tip_name="ur_arm_tool0", relative=True
             )
+            self.pinocchio_ik_solver = ik_solver
+            self.pinocchio_ik_solver_relative = ik_solver_relative
         else:
             ik_solver = TracIKSolver(robot_urdf, "ur_arm_base_link", "ur_arm_tool0")
             ik_solver_relative = None
@@ -133,7 +137,7 @@ class RobotSetup(object):
         return pp.multiply(pp.invert(link_pose), pose_world)
 
     def get_relative_ik_solution(
-        self, tool_pose_world: Tuple[Tuple[float], Tuple[float]], q_init: Union[List[float], None] = None
+        self, tool_pose_world: Tuple[Tuple[float], Tuple[float]], q_init: Union[List[float], None] = None, solver: str = "pinocchio"
     ) -> np.ndarray:
         """
         Calculate ik solution of manipulator.
@@ -141,21 +145,25 @@ class RobotSetup(object):
         Params:
             tool_pose_world (Tuple[Tuple[float], Tuple[float]]): pp.Pose, world_from_tool0
             q_init ([float] | None, None): conf of manipulator as initial guess
+            solver (str, "pinocchio"): pinocchio/tracik
 
         Returns:
             q (np.ndarray): ik solution of conf
         """
         tool_pose_relative = self.get_relative_pose(tool_pose_world)
-        conf = self.ik_solver_relative(pp.tform_from_pose(tool_pose_relative), qinit=q_init)
+        if solver == "pinocchio":
+            conf = self.pinocchio_ik_solver_relative(pp.tform_from_pose(tool_pose_relative), qinit=q_init)
+        else:
+            conf = self.tracik_ik_solver_relative(pp.tform_from_pose(tool_pose_relative), qinit=q_init)
         self.ee_attachment.assign()
         return conf
 
     def plan_manipulator_path(
         self, init_q, target_q, attachments, obstacles, sub_way_points=False, way_points_max_num=15
-    )-> List[np.ndarray]:
+    ) -> List[np.ndarray]:
         """
         Plan manipulator path from init_q to target_q with attachments.
-        
+
         Params:
             init_q (np.ndarray): start conf
             target_q (np.ndarray): target conf
@@ -163,7 +171,7 @@ class RobotSetup(object):
             obstacles (Set[int]): fixed obstacles + assembled elements
             sub_way_points (bool, False): whether generate intermediate points
             way_points_max_num (int, 15): max num of intermediate points
-        
+
         Returns:
             path ([np.ndarray]): confs from start to target
         """
@@ -246,3 +254,20 @@ class RobotSetup(object):
 
     def update_attachments(self, attachments):
         self.attachments = attachments
+
+    def create_aboard_attachment(self, body: int) -> Attachment:
+        """
+        Create attachment on the robot.
+        
+        Params:
+            body (int): index in the PyBullet
+        
+        Returns:
+            Attachment: attachment between robot and body
+        """
+        ipad_link_pose = pp.get_link_pose(self.robot, pp.link_from_name(self.robot, "ipad_rack_link"))
+        delta_pose = Pose(point=[0, 0, 0.5], euler=Euler(roll=-np.pi / 2, pitch=0, yaw=0))
+        bar_pose = multiply(ipad_link_pose, delta_pose)
+        pp.set_pose(body, bar_pose)
+        attachment = pp.create_attachment(self.robot, pp.link_from_name(self.robot, "ipad_rack_link"), body)
+        return attachment

@@ -10,8 +10,10 @@ import numpy as np
 import pybullet_planning as pp
 from utils.collision import Element
 from motion_planner.place import get_place_gen_fn
+from motion_planner.pick import get_pick_gen_fn
 from pybullet_planning import Attachment, Euler, Point, Pose, get_distance, interpolate_poses, invert, multiply
 from robot.robot_setup import RobotSetup
+
 # from stream import get_pick_gen_fn, get_transfer_gen_fn, get_transit_gen_fn
 from utils.utils import CounterModule, CounterValue
 
@@ -90,9 +92,15 @@ class Robot(object):
             allow_failure=True,
         )
 
-        # self.pick_gen = get_pick_gen_fn(
-        #     self.robot_setup, element_from_index, [], verbose=False, collisions=True, teleops=False, allow_failure=True
-        # )
+        self.pick_gen = get_pick_gen_fn(
+            self.robot_setup,
+            element_from_index,
+            [],
+            verbose=True,
+            collisions=True,
+            teleops=False,
+            allow_failure=True,
+        )
 
         # self.transfer_gen = get_transfer_gen_fn(
         #     self.robot_setup,
@@ -154,11 +162,11 @@ class Robot(object):
 
         # -------------------- Pick --------------------#
         # self.UpdateElementsRobot(element_index)
-        # pick_cmd, pick_grasp_mask = self.PickPathPlan(
-        #     element_index, assembled_index_list, unassembled_index_list, attachment_list, grasp
-        # )
-        # if pick_cmd is None:
-        #     return False
+        pick_cmd, pick_grasp_mask = self.PickPathPlan(
+            element_index, assembled_index_list, unassembled_index_list, attachment_list, grasp, pp_show=True
+        )
+        if pick_cmd is None:
+            return False
 
         # -------------------- Transfer --------------------#
         # transfer_cmd, transfer_grasp_mask = self.TransferPathPlan(
@@ -219,7 +227,9 @@ class Robot(object):
         unassembled_index_list: List[int],
         attachment_list: List[Attachment],
         pp_show: bool = False,
-    ) -> Tuple[List[np.ndarray], List[int], Attachment, Tuple, Tuple]:
+    ) -> Tuple[
+        List[np.ndarray], List[bool], Attachment, Tuple[Tuple[float], Tuple[float]], Tuple[Tuple[float], Tuple[float]]
+    ]:
         """
         Compute place path.
 
@@ -260,38 +270,57 @@ class Robot(object):
                 )
         return command, mask, grasp_attachment, grasp, pregrasp
 
-    # def PickPathPlan(
-    #     self,
-    #     element_index: int,
-    #     assembled_index_list: List[int],
-    #     unassembled_index_list: List[int],
-    #     attachment_list: List[Attachment],
-    #     grasp: Tuple[Tuple, Tuple],
-    # ) -> Tuple[List[np.ndarray], List[int]]:
-    #     """
-    #     @brief: compute pick path\n
-    #     ---
-    #     @param:\n
-    #         : \n
-    #     ---
-    #     @return:\n
-    #         command: List[np.ndarray]\n
-    #         grasp_mask: List[int]\n
-    #     """
-    #     unassembled_index_list = deepcopy(unassembled_index_list)
-    #     with pp.LockRenderer():
-    #         pick_cmd, pick_grasp_mask = next(
-    #             self.pick_gen(
-    #                 element_index,
-    #                 grasp,
-    #                 assembled_index_list,
-    #                 unassembled_index_list + [element_index],
-    #                 attachment_list,
-    #                 self.pick_counter_handle,
-    #             )
-    #         )
+    def PickPathPlan(
+        self,
+        element_index: int,
+        assembled_index_list: List[int],
+        unassembled_index_list: List[int],
+        attachment_list: List[Attachment],
+        grasp: Tuple[Tuple[float], Tuple[float]],
+        pp_show: bool = False,
+    ) -> Tuple[List[np.ndarray], List[bool]]:
+        """
+        Compute pick path.
 
-    #     return pick_cmd, pick_grasp_mask
+        Params:
+            element_index (int): index of plance element
+            assembled_index_list ([int]): indices of assembled elements
+            unassembled_index_list ([int]): indices of unassembled elements excluding current element
+            attachment_list ([Attachment]): list of attachments
+            grasp (pp.Pose): gripper_from_body
+            pp_show (bool, False): whether show in pybullet GUI while planning
+
+        Returns:
+            command ([np.ndarray]): list of robot confs
+            mask ([bool]): list of attachment masks
+        """
+        if pp_show:
+            pick_cmd, pick_grasp_mask = next(
+                self.pick_gen(
+                    element_index,
+                    grasp,
+                    assembled_index_list,
+                    unassembled_index_list,
+                    attachment_list,
+                    self.pick_counter_handle,
+                    diagnosis=False,
+                )
+            )
+        else:
+            with pp.LockRenderer():
+                pick_cmd, pick_grasp_mask = next(
+                    self.pick_gen(
+                        element_index,
+                        grasp,
+                        assembled_index_list,
+                        unassembled_index_list,
+                        attachment_list,
+                        self.pick_counter_handle,
+                        diagnosis=False,
+                    )
+                )
+
+        return pick_cmd, pick_grasp_mask
 
     # def TransferPathPlan(
     #     self,

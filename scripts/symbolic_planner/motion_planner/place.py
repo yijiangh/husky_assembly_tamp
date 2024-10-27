@@ -4,7 +4,7 @@ import sys
 import time
 from functools import partial
 from itertools import islice
-from typing import Callable, List, Set, Tuple
+from typing import Callable, List, Set, Tuple, Dict, Union
 
 import numpy as np
 import pybullet_planning as pp
@@ -157,7 +157,7 @@ def compute_place_path(
     base_pose_sampler: Callable[[], Tuple[np.ndarray, float]],
     grasp_sampler: Callable[[np.ndarray, float], Tuple[Tuple[float], Tuple[float]]],
     pregrasp_gen_fn: Callable[[int, List[int], bool], List[Tuple[Tuple[float], Tuple[float]]]],
-    counter: CounterModule = None,
+    counter: Union[CounterModule, None] = None,
     retreat_dist: float = RETREAT_DISTANCE,
     max_attempt: int = 10,
     ik_search_max_attempt: int = 1,
@@ -176,9 +176,9 @@ def compute_place_path(
         element_from_index ({index: Element}): dict of elements
         obstacles (Set[index]): fixed obstacles + assembled elements
         base_pose_sampler (function): [] --> Tuple[np.ndarray, float] ([x, y, z], yaw)
-        grasp_sampler (function): [np.ndarray, float] ([x, y, z], yaw) --> Tuple[Tuple[float], Tuple[float]]] (pp.Pose, gripper_from_body)
+        grasp_sampler (function): [np.ndarray, float] ([x, y, z], yaw) --> Tuple[Tuple[float], Tuple[float]] (pp.Pose, gripper_from_body)
         pregrasp_gen_fn (function): [int, List[int], bool] (index, assembled, diagnosis) --> List[Tuple[Tuple[float], Tuple[float]]] ([pp.Pose], world_from_body),
-        counter (CounterModule, None): counter module to count failures
+        counter (CounterModule | None, None): counter module to count failures
         retreat_dist (float, RETREAT_DISTANCE): retreat distance after attach_pose (goal_pose)
         max_attempt (int, 10): number of attempts for current pregrasp_poses and grasp
         ik_search_max_attempt (int, 1): number of attempts for searching ik solution
@@ -430,7 +430,7 @@ def compute_place_path(
         # -------------------- pre attach collision check --------------------#
         fail_flag = False
         for pre_attach_conf in pre_attach_confs:
-            if collision_fn(pre_attach_conf, diagnosis):
+            if collision_fn(pre_attach_conf, diagnosis=diagnosis):
                 if verbose:
                     cprint("pre attach collision failure", "red")
                 pre_attach_collision_val.increment()
@@ -451,7 +451,7 @@ def compute_place_path(
         collision_fn_without_grasp = pp.get_collision_fn(
             robot_setup.robot,
             robot_setup.control_joints,
-            obstacles=obstacles | set([index]),
+            obstacles=obstacles | set([cur_element.body]),
             attachments=robot_setup.attachments,
             self_collisions=ENABLE_SELF_COLLISIONS,
             disabled_collisions=robot_setup.disabled_collisions,
@@ -498,7 +498,7 @@ def compute_place_path(
         # -------------------- post attach collision check --------------------#
         fail_flag = False
         for post_attach_conf in post_attach_confs:
-            if collision_fn_without_grasp(post_attach_conf, diagnosis):
+            if collision_fn_without_grasp(post_attach_conf, diagnosis=diagnosis):
                 if verbose:
                     cprint("post attach collision failure", "red")
                 post_attach_collision_val.increment()
@@ -532,7 +532,7 @@ def compute_place_path(
 
             inner_fail_flag = False
             for back_conf in back_confs:
-                if collision_fn_without_grasp(back_conf, diagnosis):
+                if collision_fn_without_grasp(back_conf, diagnosis=diagnosis):
                     if verbose:
                         print("    back collision not pass")
                     inner_fail_flag = True
@@ -558,14 +558,19 @@ def compute_place_path(
 
 def get_place_gen_fn(
     robot_setup: RobotSetup,
-    element_from_index: dict,
+    element_from_index: Dict,
     fixed_obstacles: List[int],
     max_attempts: int = 100,
     collisions: bool = True,
     allow_failure: bool = False,
     verbose: bool = False,
     teleops: bool = False,
-):
+) -> Callable[
+    [int, List[int], List[int], List[Attachment], CounterModule, bool],
+    Tuple[
+        List[np.ndarray], List[bool], Attachment, Tuple[Tuple[float], Tuple[float]], Tuple[Tuple[float], Tuple[float]]
+    ],
+]:
     """
     Generate place motion planner function.
 
@@ -580,7 +585,7 @@ def get_place_gen_fn(
         teleops (bool, False): whether to interpolate the intermediate paths
 
     Returns:
-        gen_fn: gen_fn(element, assembled, unassembled, attachments, counter, diagnosis)
+        Callable: gen_fn(index, assembled, unassembled, attachments, counter, diagnosis)
     """
 
     # pregrasp sampler
@@ -590,7 +595,7 @@ def get_place_gen_fn(
         index: int,
         assembled: List[int] = [],
         unassembled: List[int] = [],
-        attachments: List[int] = [],
+        attachments: List[Attachment] = [],
         counter: CounterModule = None,
         diagnosis: bool = False,
     ):
@@ -598,7 +603,7 @@ def get_place_gen_fn(
         Generate place motion and return path.
 
         Params:
-            element (int): the index of element that needs to assemble
+            index (int): the index of element that needs to assemble
             assembled ([int], []): indices of assembled elements
             unassembled ([int], []): indices of unassembled elements (excluding the current element)
             attachments ([Attachment], []): list of attachments bound to the robot (excluding the current element)
@@ -651,8 +656,6 @@ def get_place_gen_fn(
             reach_distance=1.25,  # dist in 3d space, log name 2
             sampling_number=200,
         )
-
-        pregrasp_val = counter.add_counter_value("pregrasp failure")
 
         # -------------------- loop: plan place motion --------------------#
         for attempt in range(max_attempts):

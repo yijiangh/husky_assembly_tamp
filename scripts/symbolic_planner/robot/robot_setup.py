@@ -1,7 +1,7 @@
 import os
 import sys
 from functools import partial
-from typing import List, Tuple, Union, Set
+from typing import Dict, List, Set, Tuple, Union
 
 import numpy as np
 
@@ -19,7 +19,7 @@ from husky_assembly import DATA_DIRECTORY
 from ik_solver.pinocchio_solver import PinocchioSolver
 from pybullet_planning import Attachment, Euler, Point, Pose, get_distance, interpolate_poses, invert, multiply
 from tracikpy import TracIKSolver
-from utils.utils import HUSKYU_JOINT_NAMES, plan_transit_motion
+from utils.utils import HUSKYU_JOINT_NAMES, get_custom_limits
 
 TOOL0_FROM_EE = pp.Pose(point=[0, 0, 0.160])
 CONTROL_JOINT_NAMES = [
@@ -176,31 +176,39 @@ class RobotSetup(object):
         Params:
             init_q (np.ndarray): start conf
             target_q (np.ndarray): target conf
-            attachments ([Attachment]): Attachments on the robot including base and manipulator
+            attachments ([Attachment]): Attachments on the robot including base and manipulator, excluding ee_attachment
             obstacles (Set[int]): fixed obstacles + assembled elements
             sub_way_points (bool, False, [not used]): whether generate intermediate points
             way_points_max_num (int, 15, [not used]): max num of intermediate points
 
         Returns:
-            path ([np.ndarray]): confs from start to target
+            path ([np.ndarray]): manipulator confs from start to target
         """
         self.set_joint_positions(self.arm_joints, init_q)
         self.ee_attachment.assign()
         for att in attachments:
             att.assign()
 
-        planned_path = plan_transit_motion(
-            self.robot,
-            target_q,
+        base_conf: Tuple = pp.get_joint_positions(self.robot, self.base_joints)
+        init_conf = np.hstack((np.array(base_conf), init_q))
+        target_conf = np.hstack((np.array(base_conf), target_q))
+        frozen_joints = list(self.base_joints)
+        frozen_values = [init_conf[self.control_joints.index(joint_id)] for joint_id in frozen_joints]
+
+        planned_path = self.plan_manipulator_motion(
+            init_conf,
+            target_conf,
             [self.ee_attachment] + attachments,
             obstacles,
-            debug=False,
             disabled_collisions=self.disabled_collisions,
+            frozen_joints=frozen_joints,
+            frozen_values=frozen_values,
+            diagnosis=False,
         )
         self.ee_attachment.assign()
 
         if planned_path is not None:
-            planned_path = [np.array(conf) for conf in planned_path]
+            planned_path = [np.array(conf)[3:] for conf in planned_path]
         return planned_path
 
     def set_base_pose(self, pose):
@@ -244,3 +252,101 @@ class RobotSetup(object):
         pp.set_pose(body, bar_pose)
         attachment = pp.create_attachment(self.robot, pp.link_from_name(self.robot, "ipad_rack_link"), body)
         return attachment
+
+    def plan_manipulator_motion(
+        self,
+        start_conf: np.ndarray,
+        end_conf: np.ndarray,
+        attachments: List[Attachment],
+        obstacles: Set[int],
+        disabled_collisions: Dict = {},
+        frozen_joints: List[int] = [],
+        frozen_values: List[float] = [],
+        coarse_waypoints: bool = False,
+        diagnosis: bool = True,
+    ):
+        """
+        Plan manipulator path from current conf to end conf.
+
+        Params:
+            start_conf (np.ndarray): start conf of manipulator and base
+            end_conf (np.ndarray): target conf of manipulator and base
+            attachments ([Attachment]): Attachments on the robot including base, manipulator and ee_attachment
+            obstacles (Set[int]): fixed obstacles + assembled elements
+            disabled_collisions (Dict, {}): disabled collisions, TODO: need to consider
+            frozen_joints ([int], []): id of joints need to freeze
+            frozen_values ([float], []): value of joints need to freeze
+            coarse_waypoints (bool, False): whether generate sparse points
+            diagnosis (bool, True): whether stop and display it in pybullet if a collision is detected
+
+        Returns:
+            bool: True if successful, False otherwise.
+        """
+
+        def get_sample_fn(body, joints, frozen_joints, frozen_values, custom_limits={}, **kwargs):
+            lower_limits, upper_limits = pp.get_custom_limits(
+                body, joints, custom_limits, circular_limits=pp.CIRCULAR_LIMITS
+            )
+            generator = pp.interval_generator(lower_limits, upper_limits, **kwargs)
+
+            def fn():
+                sample = list(next(generator))
+                for id, value in zip(frozen_joints, frozen_values):
+                    sample[id] = value
+                return tuple(sample)
+
+            return fn
+
+        # -------------------- init params --------------------#
+        custom_limits = get_custom_limits(self.robot, {})
+        resolutions = np.array(list(map(lambda id: 1.0 if id in frozen_joints else 0.05, self.control_joints)))
+        disabled_collisions = disabled_collisions or {}
+        extra_disabled_collisions = [
+            ((self.robot, pp.link_from_name(self.robot, "ur_arm_wrist_3_link")), (attachments[0].child, pp.BASE_LINK)),
+        ]
+
+        # -------------------- init functions --------------------#
+        # sample_fn = pp.get_sample_fn(self.robot, self.control_joints, custom_limits=custom_limits)
+        sample_fn = get_sample_fn(
+            self.robot,
+            self.control_joints,
+            frozen_joints=frozen_joints,
+            frozen_values=frozen_values,
+            custom_limits=custom_limits,
+        )
+        distance_fn = pp.get_distance_fn(self.robot, self.control_joints)
+        extend_fn = pp.get_extend_fn(self.robot, self.control_joints, resolutions=resolutions)
+
+        transit_collision_fn = pp.get_collision_fn(
+            self.robot,
+            self.control_joints,
+            obstacles=obstacles,
+            attachments=attachments,
+            self_collisions=True,
+            disabled_collisions=disabled_collisions,
+            extra_disabled_collisions=extra_disabled_collisions,
+            custom_limits=custom_limits,
+            max_distance=0.0,
+        )
+
+        transit_path = None
+        with pp.WorldSaver():
+            with pp.LockRenderer(True):
+                # if pp.check_initial_end(start_conf, end_conf, transit_collision_fn, diagnosis=debug):
+                if not transit_collision_fn(end_conf, diagnosis=True):
+                    transit_path = pp.solve_motion_plan(
+                        start_conf,
+                        end_conf,
+                        distance_fn,
+                        sample_fn,
+                        extend_fn,
+                        transit_collision_fn,
+                        algorithm="birrt",
+                        max_time=20,
+                        max_iterations=30,
+                        smooth=20,
+                        diagnosis=diagnosis,
+                        coarse_waypoints=coarse_waypoints,
+                    )
+
+        return transit_path

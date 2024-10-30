@@ -1,9 +1,6 @@
 import os
-import random
 import sys
-import time
 from functools import partial
-from itertools import islice
 from typing import Callable, List, Set, Tuple, Dict, Union
 
 import numpy as np
@@ -702,7 +699,7 @@ def get_place_gen_fn(
 
         # -------------------- fail --------------------#
         if verbose:
-            cprint("E#{} | Attempts: {} | Max attempts exceeded!".format(index, max_attempts), "red")
+            cprint("Place E#{} | Attempts: {} | Max attempts exceeded!".format(index, max_attempts), "red")
 
         if allow_failure:
             yield None, None, None, None, None

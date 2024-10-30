@@ -252,7 +252,7 @@ def get_custom_limits(robot, custom_limits=None):
 
 
 def plan_transit_motion(
-    robot, end_conf, attachments, obstacles, debug=False, disabled_collisions=None, coarse_waypoints=False
+    robot, end_conf, attachments, obstacles, debug=True, disabled_collisions=None, coarse_waypoints=False
 ):
     custom_limits = get_custom_limits(robot, {})
     resolutions = np.ones(6) * 0.05
@@ -260,6 +260,7 @@ def plan_transit_motion(
     extra_disabled_collisions = [
         ((robot, pp.link_from_name(robot, "ur_arm_wrist_3_link")), (attachments[0].child, pp.BASE_LINK)),
     ]
+    # extra_disabled_collisions = []
 
     movable_joints = pp.joints_from_names(robot, HUSKYU_JOINT_NAMES)
     sample_fn = pp.get_sample_fn(robot, movable_joints, custom_limits=custom_limits)
@@ -271,11 +272,11 @@ def plan_transit_motion(
         movable_joints,
         obstacles=obstacles,
         attachments=attachments,
-        self_collisions=1,
+        self_collisions=True,
         disabled_collisions=disabled_collisions,
         extra_disabled_collisions=extra_disabled_collisions,
         custom_limits=custom_limits,
-        max_distance=0.01,
+        max_distance=0.0,
     )
 
     transit_path = None
@@ -283,11 +284,9 @@ def plan_transit_motion(
         with pp.LockRenderer(True):
             # * plan transit motion from current conf to pregrasp conf
             start_conf = pp.get_joint_positions(robot, movable_joints)
-            # print('start conf: ', start_conf)
 
-            # new_collision_fn = lambda q, diagnosis=False: collision_fn(q, diagnosis=True)
             # if pp.check_initial_end(start_conf, end_conf, transit_collision_fn, diagnosis=debug):
-            if not transit_collision_fn(end_conf, diagnosis=debug):
+            if not transit_collision_fn(end_conf, diagnosis=True):
                 transit_path = pp.solve_motion_plan(
                     start_conf,
                     end_conf,
@@ -302,6 +301,17 @@ def plan_transit_motion(
                     diagnosis=debug,
                     coarse_waypoints=coarse_waypoints,
                 )
+                # transit_path = pp.solve_motion_plan(
+                #     start_conf,
+                #     end_conf,
+                #     distance_fn,
+                #     sample_fn,
+                #     extend_fn,
+                #     transit_collision_fn,
+                #     algorithm="rrt_star",
+                #     max_time=20,
+                #     max_iterations=30,
+                # )
             # else:
             #     notify("initial and end conf not valid")
             # if transit_path is None:

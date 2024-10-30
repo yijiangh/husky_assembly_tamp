@@ -8,16 +8,27 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 import pybullet_planning as pp
-from utils.collision import Element
-from motion_planner.place import get_place_gen_fn
 from motion_planner.pick import get_pick_gen_fn
+from motion_planner.place import get_place_gen_fn
+from motion_planner.transfer import get_transfer_gen_fn
 from pybullet_planning import Attachment, Euler, Point, Pose, get_distance, interpolate_poses, invert, multiply
 from robot.robot_setup import RobotSetup
-
-# from stream import get_pick_gen_fn, get_transfer_gen_fn, get_transit_gen_fn
+from utils.collision import Element
 from utils.utils import CounterModule, CounterValue
 
 ConcretePath = namedtuple("ConcretePath", ["base_path", "manipulator_path"])
+
+PLACE_VERBOSE = False
+PLACE_DIAGNOSIS = False
+PLACE_SHOW = False
+
+PICK_VERBOSE = False
+PICK_DIAGNOSIS = False
+PICK_SHOW = False
+
+TRANSFER_VERBOSE = False
+TRANSFER_DIAGNOSIS = False
+TRANSFER_SHOW = False
 
 
 class PathItem(object):
@@ -86,7 +97,7 @@ class Robot(object):
             self.robot_setup,
             element_from_index,
             [],
-            verbose=False,
+            verbose=PLACE_VERBOSE,
             collisions=True,
             teleops=False,
             allow_failure=True,
@@ -96,22 +107,21 @@ class Robot(object):
             self.robot_setup,
             element_from_index,
             [],
-            verbose=True,
+            verbose=PICK_VERBOSE,
             collisions=True,
             teleops=False,
             allow_failure=True,
         )
 
-        # self.transfer_gen = get_transfer_gen_fn(
-        #     self.robot_setup,
-        #     element_from_index,
-        #     [],
-        #     verbose=True,
-        #     collisions=True,
-        #     teleops=False,
-        #     allow_failure=True,
-        #     max_attempts=15,
-        # )
+        self.transfer_gen = get_transfer_gen_fn(
+            self.robot_setup,
+            element_from_index,
+            [],
+            verbose=TRANSFER_VERBOSE,
+            collisions=True,
+            teleops=False,
+            allow_failure=True,
+        )
 
         # self.transit_gen = get_transit_gen_fn(
         #     self.robot_setup,
@@ -153,36 +163,37 @@ class Robot(object):
             )
 
         # -------------------- Place --------------------#
-        place_cmd, place_grasp_mask, grasp_attach, grasp, pregrasp_pose = self.PlacePathPlan(
-            element_index, assembled_index_list, unassembled_index_list, attachment_list, pp_show=False
+        place_cmd, place_grasp_mask, grasp_attachment, grasp, pregrasp_pose = self.PlacePathPlan(
+            element_index, assembled_index_list, unassembled_index_list, attachment_list, pp_show=PLACE_SHOW
         )
         if place_cmd is None:
             return False
-        path_obj = PathItem(element_index, grasp_attach)
+        path_obj = PathItem(element_index, grasp_attachment)
 
         # -------------------- Pick --------------------#
         # self.UpdateElementsRobot(element_index)
         pick_cmd, pick_grasp_mask = self.PickPathPlan(
-            element_index, assembled_index_list, unassembled_index_list, attachment_list, grasp, pp_show=True
+            element_index, assembled_index_list, unassembled_index_list, attachment_list, grasp, pp_show=PICK_SHOW
         )
         if pick_cmd is None:
             return False
 
         # -------------------- Transfer --------------------#
-        # transfer_cmd, transfer_grasp_mask = self.TransferPathPlan(
-        #     element_index,
-        #     assembled_index_list,
-        #     unassembled_index_list,
-        #     attachment_list,
-        #     grasp_attach,
-        #     pick_cmd[-1],
-        #     place_cmd[0],
-        # )
-        # if transfer_cmd is None:
-        #     return False
+        transfer_cmd, transfer_grasp_mask = self.TransferPathPlan(
+            element_index,
+            assembled_index_list,
+            unassembled_index_list,
+            attachment_list,
+            grasp_attachment,
+            pick_cmd[-1],
+            place_cmd[0],
+            pp_show=TRANSFER_SHOW,
+        )
+        if transfer_cmd is None:
+            return False
 
-        # path_obj.Append(pick_cmd, pick_grasp_mask)
-        # path_obj.Append(transfer_cmd, transfer_grasp_mask)
+        path_obj.Append(pick_cmd, pick_grasp_mask)
+        path_obj.Append(transfer_cmd, transfer_grasp_mask)
         path_obj.Append(place_cmd, place_grasp_mask)
 
         if self.path_storage is not None:
@@ -255,6 +266,7 @@ class Robot(object):
                     unassembled=unassembled_index_list,
                     attachments=attachment_list,
                     counter=self.place_counter_handle,
+                    diagnosis=PLACE_DIAGNOSIS,
                 )
             )
         else:
@@ -266,6 +278,7 @@ class Robot(object):
                         unassembled=unassembled_index_list,
                         attachments=attachment_list,
                         counter=self.place_counter_handle,
+                        diagnosis=PLACE_DIAGNOSIS,
                     )
                 )
         return command, mask, grasp_attachment, grasp, pregrasp
@@ -303,7 +316,7 @@ class Robot(object):
                     unassembled_index_list,
                     attachment_list,
                     self.pick_counter_handle,
-                    diagnosis=False,
+                    diagnosis=PICK_DIAGNOSIS,
                 )
             )
         else:
@@ -316,53 +329,71 @@ class Robot(object):
                         unassembled_index_list,
                         attachment_list,
                         self.pick_counter_handle,
-                        diagnosis=False,
+                        diagnosis=PICK_DIAGNOSIS,
                     )
                 )
 
         return pick_cmd, pick_grasp_mask
 
-    # def TransferPathPlan(
-    #     self,
-    #     element_index: int,
-    #     assembled_index_list: List[int],
-    #     unassembled_index_list: List[int],
-    #     attachment_list: List[Attachment],
-    #     grasp_attach: Attachment,
-    #     start_conf: np.ndarray,
-    #     target_conf: np.ndarray,
-    # ) -> Tuple[List[np.ndarray], List[int]]:
-    #     """
-    #     @brief: compute transfer path\n
-    #     ---
-    #     @param:\n
-    #         : \n
-    #     ---
-    #     @return:\n
-    #         command: List[np.ndarray]\n
-    #         grasp_mask: List[int]\n
-    #     """
-    #     if element_index != 0:
-    #         diagnosis = True
-    #     else:
-    #         diagnosis = False
-    #     diagnosis = False
-    #     with pp.LockRenderer():
-    #         transfer_cmd, transfer_grasp_mask = next(
-    #             self.transfer_gen(
-    #                 element_index,
-    #                 grasp_attach,
-    #                 start_conf,
-    #                 target_conf,
-    #                 assembled=assembled_index_list,
-    #                 unassembled=unassembled_index_list,
-    #                 attachments=attachment_list,
-    #                 counter=self.transfer_counter_handle,
-    #                 diagnosis=diagnosis,
-    #             )
-    #         )
+    def TransferPathPlan(
+        self,
+        element_index: int,
+        assembled_index_list: List[int],
+        unassembled_index_list: List[int],
+        attachment_list: List[Attachment],
+        grasp_attachment: Attachment,
+        start_conf: np.ndarray,
+        target_conf: np.ndarray,
+        pp_show: bool = False,
+    ) -> Tuple[List[np.ndarray], List[int]]:
+        """
+        Compute transfer path.
 
-    #     return transfer_cmd, transfer_grasp_mask
+        Params:
+            element_index (int): index of plance element
+            assembled_index_list ([int]): indices of assembled elements
+            unassembled_index_list ([int]): indices of unassembled elements excluding current element
+            attachment_list ([Attachment]): list of attachments
+            grasp_attachment (Attachment): grasp attachment of current element
+            start_conf (np.ndarray): start conf of robot
+            target_conf (np.ndarray): target conf of robot
+            pp_show (bool, False): whether show in pybullet GUI while planning
+
+        Returns:
+            command ([np.ndarray]): list of robot confs
+            mask ([bool]): list of attachment masks
+        """
+        if pp_show:
+            transfer_cmd, transfer_grasp_mask = next(
+                self.transfer_gen(
+                    element_index,
+                    start_conf,
+                    target_conf,
+                    grasp_attachment,
+                    assembled=assembled_index_list,
+                    unassembled=unassembled_index_list,
+                    attachments=attachment_list,
+                    counter=self.transfer_counter_handle,
+                    diagnosis=TRANSFER_DIAGNOSIS,
+                )
+            )
+        else:
+            with pp.LockRenderer():
+                transfer_cmd, transfer_grasp_mask = next(
+                    self.transfer_gen(
+                        element_index,
+                        start_conf,
+                        target_conf,
+                        grasp_attachment,
+                        assembled=assembled_index_list,
+                        unassembled=unassembled_index_list,
+                        attachments=attachment_list,
+                        counter=self.transfer_counter_handle,
+                        diagnosis=TRANSFER_DIAGNOSIS,
+                    )
+                )
+
+        return transfer_cmd, transfer_grasp_mask
 
     # def TransitPathPlan(
     #     self,

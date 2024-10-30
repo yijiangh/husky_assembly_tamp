@@ -1,7 +1,7 @@
 import os
 import sys
 from functools import partial
-from typing import List, Tuple, Union
+from typing import List, Tuple, Union, Set
 
 import numpy as np
 
@@ -137,7 +137,10 @@ class RobotSetup(object):
         return pp.multiply(pp.invert(link_pose), pose_world)
 
     def get_relative_ik_solution(
-        self, tool_pose_world: Tuple[Tuple[float], Tuple[float]], q_init: Union[List[float], None] = None, solver: str = "pinocchio"
+        self,
+        tool_pose_world: Tuple[Tuple[float], Tuple[float]],
+        q_init: Union[List[float], None] = None,
+        solver: str = "pinocchio",
     ) -> np.ndarray:
         """
         Calculate ik solution of manipulator.
@@ -159,7 +162,13 @@ class RobotSetup(object):
         return conf
 
     def plan_manipulator_path(
-        self, init_q, target_q, attachments, obstacles, sub_way_points=False, way_points_max_num=15
+        self,
+        init_q: np.ndarray,
+        target_q: np.ndarray,
+        attachments: List[Attachment],
+        obstacles: Set[int],
+        sub_way_points: bool = False,
+        way_points_max_num: int = 15,
     ) -> List[np.ndarray]:
         """
         Plan manipulator path from init_q to target_q with attachments.
@@ -169,62 +178,26 @@ class RobotSetup(object):
             target_q (np.ndarray): target conf
             attachments ([Attachment]): Attachments on the robot including base and manipulator
             obstacles (Set[int]): fixed obstacles + assembled elements
-            sub_way_points (bool, False): whether generate intermediate points
-            way_points_max_num (int, 15): max num of intermediate points
+            sub_way_points (bool, False, [not used]): whether generate intermediate points
+            way_points_max_num (int, 15, [not used]): max num of intermediate points
 
         Returns:
             path ([np.ndarray]): confs from start to target
         """
-        # pp.set_joint_positions(self.robot, self.arm_joints, init_q)
         self.set_joint_positions(self.arm_joints, init_q)
         self.ee_attachment.assign()
         for att in attachments:
             att.assign()
 
-        # print(">>> short path")
-        planned_path_coarse = plan_transit_motion(
+        planned_path = plan_transit_motion(
             self.robot,
             target_q,
             [self.ee_attachment] + attachments,
             obstacles,
             debug=False,
             disabled_collisions=self.disabled_collisions,
-            coarse_waypoints=sub_way_points,
         )
         self.ee_attachment.assign()
-
-        # print(planned_path_coarse)
-
-        if planned_path_coarse is not None and planned_path_coarse != False:
-            planned_path_coarse = [np.array(conf) for conf in planned_path_coarse]
-        else:
-            return None
-        if not sub_way_points:
-            return planned_path_coarse
-        if len(planned_path_coarse) >= way_points_max_num:
-            step = int(len(planned_path_coarse) / way_points_max_num)
-            temp = [planned_path_coarse[i : i + step] for i in range(0, len(planned_path_coarse), step)]
-            way_points = [conf[0] for conf in temp]
-            way_points.append(np.array(target_q))
-        else:
-            way_points = planned_path_coarse.copy()
-
-        # print(">>> long path")
-        planned_path = []
-        for idx, conf in enumerate(way_points[:-1]):
-            self.set_joint_positions(self.arm_joints, conf)
-            next_conf = way_points[idx + 1]
-            planned_path_segment = plan_transit_motion(
-                self.robot,
-                next_conf,
-                [self.ee_attachment] + attachments,
-                obstacles,
-                disabled_collisions=self.disabled_collisions,
-            )
-            self.ee_attachment.assign()
-            if planned_path_segment is None:
-                return None
-            planned_path.extend(planned_path_segment)
 
         if planned_path is not None:
             planned_path = [np.array(conf) for conf in planned_path]
@@ -258,10 +231,10 @@ class RobotSetup(object):
     def create_aboard_attachment(self, body: int) -> Attachment:
         """
         Create attachment on the robot.
-        
+
         Params:
             body (int): index in the PyBullet
-        
+
         Returns:
             Attachment: attachment between robot and body
         """

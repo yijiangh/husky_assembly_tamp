@@ -161,7 +161,7 @@ if __name__ == "__main__":
             while True:
                 current_continue_button_value = p.readUserDebugParameter(continue_button)
                 if current_continue_button_value > prev_continue_button_value:
-                    assembled_list.append(i)
+                    assembled_list.append(index)
                     prev_continue_button_value = current_continue_button_value
                     break
 

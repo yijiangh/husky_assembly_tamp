@@ -1,10 +1,6 @@
 import copy
 import os
-import random
 import sys
-import time
-from functools import partial
-from itertools import islice
 from typing import Callable, Dict, List, Set, Tuple, Union
 
 import numpy as np
@@ -15,8 +11,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pybullet_planning import Attachment, interpolate_poses
 from robot.robot_setup import INIT_ARM_JOINT_ANGLES, RobotSetup
-from sampler.grasp_sampler import grasp_sampler
-from sampler.mobile_base_sampler import robot_pose_sampler
 from utils.collision import Element
 from utils.utils import CounterModule, angles_distance, normalize_angles
 
@@ -40,7 +34,7 @@ def compute_pick_path(
     grasp: Tuple[Tuple[float], Tuple[float]],
     element_from_index: Dict,
     obstacles: Set[int],
-    unassambled_element_obstacles,
+    unassambled_element_obstacles: Set[int],
     counter: Union[CounterModule, None] = None,
     retreat_dist: float = RETREAT_DISTANCE,
     ik_search_max_attempt: int = 1,
@@ -358,7 +352,7 @@ def get_pick_gen_fn(
             break
 
         # -------------------- fail --------------------#
-        cprint("E#{} | Attempts: {} | Max attempts exceeded!".format(index, max_attempts), "red")
+        cprint("Pick E#{} | Attempts: {} | Max attempts exceeded!".format(index, max_attempts), "red")
 
         if allow_failure:
             yield None, None

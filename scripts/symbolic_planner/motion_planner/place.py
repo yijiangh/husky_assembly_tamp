@@ -210,6 +210,8 @@ def compute_place_path(
     back_plan_val = counter.add_counter_value("back plan failure")
     back_val = counter.add_counter_value("back failure")
 
+    place_val = counter.add_counter_value("place failure")
+
     # -------------------- init variables --------------------#
     bar_tar_pose = cur_element.goal_pose  # world_from_body
 
@@ -235,6 +237,7 @@ def compute_place_path(
             if verbose:
                 cprint("base pose sample failure", "red")
             # TODO: 添加计数模块
+            # place_val.increment()
             continue
 
         # **************************************************************************
@@ -260,6 +263,7 @@ def compute_place_path(
                 cprint("attach ik failure", "red")
             attach_ik_val.increment()
             attach_val.increment()
+            place_val.increment()
             continue
         robot_joint_attach_conf = normalize_angles(robot_joint_attach_conf)
         robot_attach_conf = np.hstack((robot_base_conf, robot_joint_attach_conf))
@@ -349,6 +353,7 @@ def compute_place_path(
             if verbose:
                 cprint("pregrasp failure", "red")
             # pregrasp_val.increment()
+            place_val.increment()
             continue
         pre_grasp_pose = pregrasp_poses[0]
 
@@ -419,6 +424,7 @@ def compute_place_path(
                     cprint("pre attach ik failure", "red")
                 pre_attach_ik_val.increment()
                 pre_attach_val.increment()
+                place_val.increment()
                 fail_flag = True
                 break
         if fail_flag:
@@ -432,6 +438,7 @@ def compute_place_path(
                     cprint("pre attach collision failure", "red")
                 pre_attach_collision_val.increment()
                 pre_attach_val.increment()
+                place_val.increment()
                 fail_flag = True
                 break
         if fail_flag:
@@ -487,6 +494,7 @@ def compute_place_path(
                     cprint("post attach ik failure", "red")
                 post_attach_ik_val.increment()
                 post_attach_val.increment()
+                place_val.increment()
                 fail_flag = True
                 break
         if fail_flag:
@@ -500,6 +508,7 @@ def compute_place_path(
                     cprint("post attach collision failure", "red")
                 post_attach_collision_val.increment()
                 post_attach_val.increment()
+                place_val.increment()
                 fail_flag = True
                 break
         if fail_flag:
@@ -543,6 +552,7 @@ def compute_place_path(
                 cprint("back plan failure", "red")
             back_plan_val.increment()
             back_val.increment()
+            place_val.increment()
             continue
 
         # -------------------- return command, mask, grasp_attach, grasp, pregrasp --------------------#
@@ -666,6 +676,7 @@ def get_place_gen_fn(
                 assembled=assembled,
                 element_from_index=element_from_index,
                 sample_range=0.10,
+                reachable_margin=0.25,
                 grasp_method="robot",
                 redirect_method="robot",
             )

@@ -21,7 +21,7 @@ def extract_folder_info(folder_path):
 def load_json_logs(folder):
     logs = []
     for filename in os.listdir(folder):
-        if filename.endswith(".log"):
+        if filename.endswith(".json"):
             filepath = os.path.join(folder, filename)
             with open(filepath, "r") as f:
                 data = json.load(f)
@@ -31,19 +31,18 @@ def load_json_logs(folder):
 
 # 计算每个文件夹中的失败计数平均值
 def extract_failures(folder):
-    failure_types = [
-        # "attach ik failure",
-        "attach failure",
-        # "pre attach ik failure",
-        # "pre attach plan failure",
-        "pre attach failure",
-        # "post attach ik failure",
-        # "post attach collision failure",
-        "post attach failure",
-        # "back plan failure",
-        "back failure",
+    types_all = [
+        ["place failure"],
+        ["pick failure"],
+        ["transfer failure"],
+        ["total time"]
     ]
-    failure_counts = {ftype: 0 for ftype in failure_types}
+    modules_all = ["place", "pick", "transfer", "others"]
+
+    counts = {}
+    for module, types in zip(modules_all, types_all):
+        counts.update({module + "/" + ftype: 0 for ftype in types})
+
     log_count = 0
 
     # 读取所有日志文件
@@ -51,23 +50,24 @@ def extract_failures(folder):
     log_count = len(logs)
 
     if log_count == 0:
-        return failure_counts  # 防止除零错误
+        return counts  # 防止除零错误
 
     for log in logs:
-        place_data = log.get("place", {})
-        for ftype in failure_types:
-            failure_counts[ftype] += place_data.get(ftype, 0)
+        for module, types in zip(modules_all, types_all):
+            data = log.get(module, {})
+            for ftype in types:
+                counts[module + "/" + ftype] += data.get(ftype, 0)
 
     # 计算每种失败的平均值
-    failure_averages = {ftype: failure_counts[ftype] / log_count for ftype in failure_types}
+    averages = {ftype: counts[ftype] / log_count for ftype in counts.keys()}
 
-    return failure_averages
+    return averages
 
 
 # 生成对比图的标题和题注
 def create_plot_title(structure_name, compare_module, algorithms):
     algorithm_list = ", ".join(algorithms)
-    title = f"Failure Comparison (Averages) using {structure_name} for {compare_module} module"
+    title = f"Comparison (Averages) using {structure_name} for {compare_module} module"
     # caption = f'Comparison of average failure types for {structure_name} in the {compare_module} module using {algorithm_list}.'
     caption = ""
     return title, caption
@@ -76,7 +76,7 @@ def create_plot_title(structure_name, compare_module, algorithms):
 # 主程序
 def main():
     log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
-    log_name = "one_tet_MT_contact-pregrasp"
+    log_name = "one_tet_MT_contact-pick_side"
     # 根文件夹路径
     root_folder = os.path.join(log_dir, log_name)
 

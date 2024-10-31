@@ -36,6 +36,14 @@ CONTROL_JOINT_NAMES = [
 BASE_CONTROL_JOINT_NAMES = ["x", "y", "theta"]
 INIT_ARM_JOINT_ANGLES = np.array([0, -np.pi / 2, 0, 0, 0, 0])
 
+# on the left side of the robot
+ONBOARD_POSE = [0.0, -0.5, 0.5, -np.pi / 2, 0.0, np.pi / 2]  # [x, y, z, r, p, y]
+ONBOARD_LINK = "ur_arm_base_link"
+
+# on the back side of the robot
+# ONBOARD_POSE = [0.4, 0.0, 0.5, -np.pi / 2, 0.0, 0.0]  # [x, y, z, r, p, y]
+# ONBOARD_LINK = "ur_arm_base_link"
+
 ########################
 
 
@@ -246,11 +254,14 @@ class RobotSetup(object):
         Returns:
             Attachment: attachment between robot and body
         """
-        ipad_link_pose = pp.get_link_pose(self.robot, pp.link_from_name(self.robot, "ipad_rack_link"))
-        delta_pose = Pose(point=[0, 0, 0.5], euler=Euler(roll=-np.pi / 2, pitch=0, yaw=0))
+        ipad_link_pose = pp.get_link_pose(self.robot, pp.link_from_name(self.robot, ONBOARD_LINK))
+        delta_pose = Pose(
+            point=ONBOARD_POSE[:3], euler=Euler(roll=ONBOARD_POSE[3], pitch=ONBOARD_POSE[4], yaw=ONBOARD_POSE[5])
+        )
         bar_pose = multiply(ipad_link_pose, delta_pose)
         pp.set_pose(body, bar_pose)
-        attachment = pp.create_attachment(self.robot, pp.link_from_name(self.robot, "ipad_rack_link"), body)
+        # pp.draw_pose(bar_pose, length=0.3)
+        attachment = pp.create_attachment(self.robot, pp.link_from_name(self.robot, ONBOARD_LINK), body)
         return attachment
 
     def plan_manipulator_motion(
@@ -263,8 +274,8 @@ class RobotSetup(object):
         frozen_joints: List[int] = [],
         frozen_values: List[float] = [],
         coarse_waypoints: bool = False,
-        diagnosis: bool = True,
-    ):
+        diagnosis: bool = False,
+    ) -> Union[List[Tuple[float]], None]:
         """
         Plan manipulator path from current conf to end conf.
 
@@ -280,7 +291,7 @@ class RobotSetup(object):
             diagnosis (bool, True): whether stop and display it in pybullet if a collision is detected
 
         Returns:
-            bool: True if successful, False otherwise.
+            [(conf_1), (conf_2), ..., (conf_n)] | None: path of manipulator and base
         """
 
         def get_sample_fn(body, joints, frozen_joints, frozen_values, custom_limits={}, **kwargs):
@@ -333,7 +344,7 @@ class RobotSetup(object):
         with pp.WorldSaver():
             with pp.LockRenderer(True):
                 # if pp.check_initial_end(start_conf, end_conf, transit_collision_fn, diagnosis=debug):
-                if not transit_collision_fn(end_conf, diagnosis=True):
+                if not transit_collision_fn(end_conf, diagnosis=diagnosis):
                     transit_path = pp.solve_motion_plan(
                         start_conf,
                         end_conf,
@@ -348,5 +359,8 @@ class RobotSetup(object):
                         diagnosis=diagnosis,
                         coarse_waypoints=coarse_waypoints,
                     )
+
+        if isinstance(transit_path, bool):
+            transit_path = None
 
         return transit_path

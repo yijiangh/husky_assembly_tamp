@@ -16,7 +16,7 @@ from symbolic_planner.heuristic import (
 )
 from termcolor import cprint
 from utils.collision import Element
-from utils.utils import flatten, timeit_decorator
+from utils.utils import flatten, timeit_decorator_counter
 
 # TODO  * 在多机协同的时候，需要将其他机器人也考虑进来（碰撞）
 # TODO  * 需要考虑多机协同时候的路径存储
@@ -307,7 +307,7 @@ class Planner(object):
         # self.robots[0].BaseMotionPlan(path_index)
         return path_index
 
-    @timeit_decorator
+    @timeit_decorator_counter(output=True)
     def Search(self, element_object_list: list[ElementObject]) -> list:
         # -------------------- init --------------------#
         current_state = PlanState([], [obj.index for obj in element_object_list], [])

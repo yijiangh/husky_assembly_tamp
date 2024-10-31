@@ -12,9 +12,9 @@ from motion_planner.pick import get_pick_gen_fn
 from motion_planner.place import get_place_gen_fn
 from motion_planner.transfer import get_transfer_gen_fn
 from pybullet_planning import Attachment, Euler, Point, Pose, get_distance, interpolate_poses, invert, multiply
-from robot.robot_setup import RobotSetup
+from robot.robot_setup import RobotSetup, ONBOARD_POSE, ONBOARD_LINK
 from utils.collision import Element
-from utils.utils import CounterModule, CounterValue
+from utils.utils import CounterModule, CounterValue, timeit_decorator_counter
 
 ConcretePath = namedtuple("ConcretePath", ["base_path", "manipulator_path"])
 
@@ -87,6 +87,7 @@ class Robot(object):
         self.place_counter_handle = self.counter_handle.create_handle("place")
         self.pick_counter_handle = self.counter_handle.create_handle("pick")
         self.transfer_counter_handle = self.counter_handle.create_handle("transfer")
+        self.others_counter_handle = self.counter_handle.create_handle("others")
 
         self.element_from_index = element_from_index
         self.attachments = attachments
@@ -137,7 +138,7 @@ class Robot(object):
         self.manipulator_planner_fn = self.ManipulatorMotionPlan
 
     def SaveLog(self, path: str, suffix=""):
-        self.counter_handle.save(path, f"r{self.index}{suffix}.log")
+        self.counter_handle.save(path, f"r{self.index}{suffix}.json")
 
     def DefaultPlan(
         self,
@@ -148,6 +149,7 @@ class Robot(object):
     ) -> bool:
         return True
 
+    @timeit_decorator_counter("others_counter_handle")
     def ManipulatorMotionPlan(
         self,
         element_index: int,
@@ -225,9 +227,11 @@ class Robot(object):
         # 设置当前element到机器人上的托盘
         with pp.LockRenderer():
             ipad_link_pose = pp.get_link_pose(
-                self.robot_setup.robot, pp.link_from_name(self.robot_setup.robot, "ipad_rack_link")
+                self.robot_setup.robot, pp.link_from_name(self.robot_setup.robot, ONBOARD_LINK)
             )
-            delta_pose = Pose(point=[0, 0, 0.5], euler=Euler(roll=-np.pi / 2, pitch=0, yaw=0))
+            delta_pose = Pose(
+                point=ONBOARD_POSE[:3], euler=Euler(roll=ONBOARD_POSE[3], pitch=ONBOARD_POSE[4], yaw=ONBOARD_POSE[5])
+            )
             bar_pose = multiply(ipad_link_pose, delta_pose)
             pp.set_pose(self.element_from_index[element_index].body, bar_pose)
 

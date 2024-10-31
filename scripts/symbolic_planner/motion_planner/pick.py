@@ -40,7 +40,7 @@ def compute_pick_path(
     ik_search_max_attempt: int = 1,
     path_plan_max_attempt: int = 1,
     verbose: bool = False,
-    diagnosis: bool = True,
+    diagnosis: bool = False,
     teleops: bool = False,
 ) -> Tuple[List[np.ndarray], List[bool]]:
     """
@@ -290,7 +290,7 @@ def get_pick_gen_fn(
         unassembled: List[int] = [],
         attachments: List[Attachment] = [],
         counter: CounterModule = None,
-        diagnosis: bool = True,
+        diagnosis: bool = False,
     ):
         """
         Generate pick motion and return path.

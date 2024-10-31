@@ -4,7 +4,7 @@ import os
 import time
 from collections import defaultdict
 from functools import partial
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Set, Tuple, Union
 
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
@@ -31,20 +31,6 @@ HUSKYU_JOINT_NAMES = [
 ]
 
 PROJECT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-
-def timeit_decorator(func):
-    def wrapper(*args, **kwargs):
-        start_time = time.time()
-        result = func(*args, **kwargs)
-        end_time = time.time()
-        cprint(
-            f"\n============================================================\nFunction '{func.__name__}' executed in {end_time - start_time:.6f} seconds!\n============================================================\n",
-            "cyan",
-        )
-        return result
-
-    return wrapper
 
 
 ###########################################
@@ -254,96 +240,6 @@ def get_custom_limits(robot, custom_limits=None):
     return limits
 
 
-# def plan_manipulator_motion(
-#     robot: int,
-#     end_conf: np.ndarray,
-#     attachments: List[Attachment],
-#     obstacles: Set[int],
-#     debug: bool = True,
-#     disabled_collisions: Dict = {},
-#     coarse_waypoints: bool = False,
-# ):
-
-#     def get_sample_fn(body, joints, frozen_joints, frozen_values, custom_limits={}, **kwargs):
-#         lower_limits, upper_limits = get_custom_limits(body, joints, custom_limits, circular_limits=CIRCULAR_LIMITS)
-#         generator = pp.interval_generator(lower_limits, upper_limits, **kwargs)
-
-#         def fn():
-#             sample = list(next(generator))
-#             for id, value in zip(frozen_joints, frozen_values):
-#                 sample[id] = value
-#             return tuple(sample)
-
-#         return fn
-
-#     custom_limits = get_custom_limits(robot, {})
-#     resolutions = np.ones(6) * 0.05
-#     disabled_collisions = disabled_collisions or {}
-#     extra_disabled_collisions = [
-#         ((robot, pp.link_from_name(robot, "ur_arm_wrist_3_link")), (attachments[0].child, pp.BASE_LINK)),
-#     ]
-#     # extra_disabled_collisions = []
-
-#     movable_joints = pp.joints_from_names(robot, HUSKYU_JOINT_NAMES)
-#     sample_fn = pp.get_sample_fn(robot, movable_joints, custom_limits=custom_limits)
-#     distance_fn = pp.get_distance_fn(robot, movable_joints)  # , weights=weights)
-#     extend_fn = pp.get_extend_fn(robot, movable_joints, resolutions=resolutions)
-
-#     transit_collision_fn = pp.get_collision_fn(
-#         robot,
-#         movable_joints,
-#         obstacles=obstacles,
-#         attachments=attachments,
-#         self_collisions=True,
-#         disabled_collisions=disabled_collisions,
-#         extra_disabled_collisions=extra_disabled_collisions,
-#         custom_limits=custom_limits,
-#         max_distance=0.0,
-#     )
-
-#     transit_path = None
-#     with pp.WorldSaver():
-#         with pp.LockRenderer(True):
-#             # * plan transit motion from current conf to pregrasp conf
-#             start_conf = pp.get_joint_positions(robot, movable_joints)
-
-#             # if pp.check_initial_end(start_conf, end_conf, transit_collision_fn, diagnosis=debug):
-#             if not transit_collision_fn(end_conf, diagnosis=True):
-#                 transit_path = pp.solve_motion_plan(
-#                     start_conf,
-#                     end_conf,
-#                     distance_fn,
-#                     sample_fn,
-#                     extend_fn,
-#                     transit_collision_fn,
-#                     algorithm="birrt",
-#                     max_time=20,
-#                     max_iterations=30,
-#                     smooth=20,
-#                     diagnosis=debug,
-#                     coarse_waypoints=coarse_waypoints,
-#                 )
-#                 # transit_path = pp.solve_motion_plan(
-#                 #     start_conf,
-#                 #     end_conf,
-#                 #     distance_fn,
-#                 #     sample_fn,
-#                 #     extend_fn,
-#                 #     transit_collision_fn,
-#                 #     algorithm="rrt_star",
-#                 #     max_time=20,
-#                 #     max_iterations=30,
-#                 # )
-#             # else:
-#             #     notify("initial and end conf not valid")
-#             # if transit_path is None:
-#             #     notify("transit path not found")
-#             # else:
-#             #     notify("transit path found: transit {} pts".format(len(transit_path)))
-
-#     return transit_path
-
-
 ###########################################
 
 
@@ -385,6 +281,9 @@ class CounterValue:
 
     def increment(self, value=1):
         self.value += value
+
+    def update(self, value):
+        self.value = value
 
 
 class CounterModule:
@@ -480,3 +379,29 @@ def flatten(nested_list):
         else:
             result.append(element)
     return result
+
+
+def timeit_decorator_counter(counter_name: str = "", output: bool = False):
+
+    def timeit_decorator(func):
+        def wrapper(self, *args, **kwargs):
+            start_time = time.time()
+            result = func(self, *args, **kwargs)
+            end_time = time.time()
+
+            if output:
+                cprint(
+                    f"\n============================================================\nFunction '{func.__name__}' executed in {end_time - start_time:.6f} seconds!\n============================================================\n",
+                    "cyan",
+                )
+
+            if counter_name != "":
+                others_handle: CounterModule = getattr(self, counter_name)
+                time_handle: CounterValue = others_handle.add_counter_value("total time")
+                time_handle.increment(end_time - start_time)
+
+            return result
+
+        return wrapper
+
+    return timeit_decorator

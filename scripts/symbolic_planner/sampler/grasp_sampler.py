@@ -252,7 +252,11 @@ def grasp_sampler(
         alpha_max = min(sample_alpha_max, reachable_alpha_max)
 
         if alpha_min > alpha_max:
-            alpha_sample = random.uniform(reachable_alpha_min, reachable_alpha_max)
+            # alpha_sample = random.uniform(reachable_alpha_min, reachable_alpha_max)
+            if alpha >= reachable_alpha_max:
+                alpha_sample = reachable_alpha_max
+            if alpha <= reachable_alpha_min:
+                alpha_sample = reachable_alpha_min
         else:
             alpha_sample = random.uniform(alpha_min, alpha_max)
 

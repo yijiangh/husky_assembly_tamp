@@ -35,8 +35,8 @@ from utils.parse import parse_mt_geometric
 
 if __name__ == "__main__":
 
-    random.seed(10086)
-    np.random.seed(10086)
+    # random.seed(10086)
+    # np.random.seed(10086)
 
     with pp.HideOutput():
         parser = argparse.ArgumentParser()

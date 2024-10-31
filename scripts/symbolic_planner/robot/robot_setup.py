@@ -343,7 +343,7 @@ class RobotSetup(object):
         transit_path = None
         with pp.WorldSaver():
             # if pp.check_initial_end(start_conf, end_conf, transit_collision_fn, diagnosis=debug):
-            if not transit_collision_fn(end_conf, diagnosis=True): # TODO fuck
+            if not transit_collision_fn(end_conf, diagnosis=diagnosis):
                 transit_path = pp.solve_motion_plan(
                     start_conf,
                     end_conf,

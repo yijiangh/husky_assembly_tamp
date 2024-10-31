@@ -202,12 +202,12 @@ def robot_pose_sampler(
     vertices = np.array(vertices)
     target_edge = np.array(target_edge)
 
-    if len(edges) == 1:
-        hull = None
-        projected_polygon = None
-    else:
+    if len(edges) > 1 and len(np.unique(vertices[:, :2], axis=0)) >= 3:
         hull = ConvexHull(vertices[:, :2])
         projected_polygon = vertices[hull.vertices][:, :2]
+    else:
+        hull = None
+        projected_polygon = None
 
     sample_idx = 0
 

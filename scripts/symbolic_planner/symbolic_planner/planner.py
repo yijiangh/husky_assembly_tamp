@@ -20,7 +20,6 @@ from utils.utils import flatten, timeit_decorator_counter
 
 # TODO  * 在多机协同的时候，需要将其他机器人也考虑进来（碰撞）
 # TODO  * 需要考虑多机协同时候的路径存储
-# TODO  * transfer的planner需要改一改
 
 
 class PlanState(object):

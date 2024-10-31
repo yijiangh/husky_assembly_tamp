@@ -39,6 +39,7 @@ class ElementObject(object):
         self.assembled_elements = []  # connected elements index
         self.status = ElementStatus.unassembled
         self.status_checker = TwoFixConstrainChecker()
+        # self.status_checker = DefaultChecker()
 
     def __str__(self) -> str:
         return f"index: {self.index}, status: {self.status.name}, assembled: {self.assembled_elements}"
@@ -82,6 +83,14 @@ class ElementObject(object):
                 coupled_elements.append(contact_id_pair[0])
         return coupled_elements
 
+
+class DefaultChecker(object):
+    def __init__(self) -> None:
+        pass
+
+    @staticmethod
+    def Check(index: int, element_object_list: list[ElementObject]) -> ElementStatus:
+        return ElementStatus.fixed
 
 class BasicChecker(object):
     def __init__(self) -> None:

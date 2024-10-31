@@ -70,7 +70,6 @@ def compute_pick_path(
     # -------------------- init counter module --------------------#
     pick_ik_val = counter.add_counter_value("pick ik failure")
     pick_collision_val = counter.add_counter_value("pick collision failure")
-    pick_val = counter.add_counter_value("pick failure")
 
     pre_pick_ik_val = counter.add_counter_value("pre pick ik failure")
     # pre_pick_plan_val = counter.add_counter_value("pre pick plan failure")
@@ -78,6 +77,8 @@ def compute_pick_path(
     pre_pick_val = counter.add_counter_value("pre pick failure")
 
     approach_val = counter.add_counter_value("approach failure")
+
+    pick_val = counter.add_counter_value("pick failure")
 
     # -------------------- generate new grasp (gripper_from_body) --------------------#
     grasp_temp = pp.Pose([0, 0, 0], pp.Euler(roll=np.pi / 2, pitch=0, yaw=0))
@@ -210,6 +211,7 @@ def compute_pick_path(
                 cprint("pre pick ik failure", "red")
             pre_pick_ik_val.increment()
             pre_pick_val.increment()
+            pick_val.increment()
             fail_flag = True
             break
     if fail_flag:
@@ -258,6 +260,7 @@ def compute_pick_path(
         if verbose:
             cprint("approach plan failure", "red")
         approach_val.increment()
+        pick_val.increment()
         return None, None
 
     # -------------------- return command, mask --------------------#

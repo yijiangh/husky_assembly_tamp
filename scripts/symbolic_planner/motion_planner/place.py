@@ -223,6 +223,18 @@ def compute_place_path(
     # -------------------- init attachment of current element --------------------#
     grasp_attachment = None
 
+    #-------------------- init extra_disabled_collisions --------------------#
+    extra_disabled_collisions = [
+        (
+            (robot_setup.robot, pp.link_from_name(robot_setup.robot, "ur_arm_wrist_3_link")),
+            (robot_setup.ee_attachment.child, pp.BASE_LINK),
+        ),
+        (
+            (robot_setup.ee_attachment.child, pp.BASE_LINK),
+            (cur_element.body, pp.BASE_LINK),
+        )
+    ]
+
     # -------------------- loop: find a solution of place --------------------#
     for _ in range(max_attempt):
 
@@ -371,9 +383,10 @@ def compute_place_path(
             robot_setup.robot,
             robot_setup.control_joints,
             obstacles=obstacles,
-            attachments=[grasp_attachment] + robot_setup.attachments,
+            attachments=[grasp_attachment, robot_setup.ee_attachment] + robot_setup.attachments,
             self_collisions=ENABLE_SELF_COLLISIONS,
             disabled_collisions=robot_setup.disabled_collisions,
+            extra_disabled_collisions=extra_disabled_collisions,
             max_distance=MAX_DISTANCE,
         )
 
@@ -456,9 +469,10 @@ def compute_place_path(
             robot_setup.robot,
             robot_setup.control_joints,
             obstacles=obstacles | set([cur_element.body]),
-            attachments=robot_setup.attachments,
+            attachments=[robot_setup.ee_attachment] + robot_setup.attachments,
             self_collisions=ENABLE_SELF_COLLISIONS,
             disabled_collisions=robot_setup.disabled_collisions,
+            extra_disabled_collisions=extra_disabled_collisions,
             max_distance=MAX_DISTANCE,
         )
 

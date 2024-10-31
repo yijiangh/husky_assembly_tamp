@@ -65,12 +65,16 @@ def compute_transfer_path(
             (robot_setup.robot, pp.link_from_name(robot_setup.robot, "ur_arm_wrist_3_link")),
             (robot_setup.ee_attachment.child, pp.BASE_LINK),
         ),
+        (
+            (robot_setup.ee_attachment.child, pp.BASE_LINK),
+            (grasp_attachment.child, pp.BASE_LINK),
+        ),
     ]
     collision_fn = pp.get_collision_fn(
         robot_setup.robot,
         robot_setup.arm_joints,
         obstacles=obstacles,
-        attachments=[robot_setup.ee_attachment, grasp_attachment] + robot_setup.attachments,
+        attachments=[grasp_attachment, robot_setup.ee_attachment] + robot_setup.attachments,
         self_collisions=ENABLE_SELF_COLLISIONS,
         disabled_collisions=robot_setup.disabled_collisions,
         extra_disabled_collisions=extra_disabled_collisions,

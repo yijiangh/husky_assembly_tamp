@@ -20,15 +20,15 @@ ConcretePath = namedtuple("ConcretePath", ["base_path", "manipulator_path"])
 
 PLACE_VERBOSE = False
 PLACE_DIAGNOSIS = False
-PLACE_SHOW = False
+PLACE_SHOW = False or PLACE_DIAGNOSIS
 
 PICK_VERBOSE = False
 PICK_DIAGNOSIS = False
-PICK_SHOW = False
+PICK_SHOW = False or PICK_DIAGNOSIS
 
 TRANSFER_VERBOSE = False
 TRANSFER_DIAGNOSIS = False
-TRANSFER_SHOW = False
+TRANSFER_SHOW = False or TRANSFER_DIAGNOSIS
 
 
 class PathItem(object):

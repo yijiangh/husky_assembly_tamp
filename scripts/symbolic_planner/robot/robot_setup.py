@@ -37,12 +37,12 @@ BASE_CONTROL_JOINT_NAMES = ["x", "y", "theta"]
 INIT_ARM_JOINT_ANGLES = np.array([0, -np.pi / 2, 0, 0, 0, 0])
 
 # on the left side of the robot
-ONBOARD_POSE = [0.0, -0.5, 0.5, -np.pi / 2, 0.0, np.pi / 2]  # [x, y, z, r, p, y]
-ONBOARD_LINK = "ur_arm_base_link"
+# ONBOARD_POSE = [0.0, -0.5, 0.5, -np.pi / 2, 0.0, np.pi / 2]  # [x, y, z, r, p, y]
+# ONBOARD_LINK = "ur_arm_base_link"
 
 # on the back side of the robot
-# ONBOARD_POSE = [0.4, 0.0, 0.5, -np.pi / 2, 0.0, 0.0]  # [x, y, z, r, p, y]
-# ONBOARD_LINK = "ur_arm_base_link"
+ONBOARD_POSE = [0.4, 0.0, 0.5, -np.pi / 2, 0.0, 0.0]  # [x, y, z, r, p, y]
+ONBOARD_LINK = "ur_arm_base_link"
 
 ########################
 
@@ -342,23 +342,24 @@ class RobotSetup(object):
 
         transit_path = None
         with pp.WorldSaver():
-            with pp.LockRenderer(True):
-                # if pp.check_initial_end(start_conf, end_conf, transit_collision_fn, diagnosis=debug):
-                if not transit_collision_fn(end_conf, diagnosis=diagnosis):
-                    transit_path = pp.solve_motion_plan(
-                        start_conf,
-                        end_conf,
-                        distance_fn,
-                        sample_fn,
-                        extend_fn,
-                        transit_collision_fn,
-                        algorithm="birrt",
-                        max_time=20,
-                        max_iterations=30,
-                        smooth=20,
-                        diagnosis=diagnosis,
-                        coarse_waypoints=coarse_waypoints,
-                    )
+            # if pp.check_initial_end(start_conf, end_conf, transit_collision_fn, diagnosis=debug):
+            if not transit_collision_fn(end_conf, diagnosis=True): # TODO fuck
+                transit_path = pp.solve_motion_plan(
+                    start_conf,
+                    end_conf,
+                    distance_fn,
+                    sample_fn,
+                    extend_fn,
+                    transit_collision_fn,
+                    algorithm="birrt",
+                    max_time=20,
+                    max_iterations=30,
+                    smooth=20,
+                    diagnosis=diagnosis,
+                    coarse_waypoints=coarse_waypoints,
+                )
+            else:
+                print("end collision not pass")
 
         if isinstance(transit_path, bool):
             transit_path = None

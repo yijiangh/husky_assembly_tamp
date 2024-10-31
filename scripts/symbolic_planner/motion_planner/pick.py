@@ -97,6 +97,18 @@ def compute_pick_path(
     robot_init_conf = pp.get_joint_positions(robot_setup.robot, robot_setup.control_joints)
     robot_base_conf = robot_init_conf[:3]
 
+    #-------------------- init extra_disabled_collisions --------------------#
+    extra_disabled_collisions = [
+        (
+            (robot_setup.robot, pp.link_from_name(robot_setup.robot, "ur_arm_wrist_3_link")),
+            (robot_setup.ee_attachment.child, pp.BASE_LINK),
+        ),
+        (
+            (robot_setup.ee_attachment.child, pp.BASE_LINK),
+            (cur_element.body, pp.BASE_LINK),
+        )
+    ]
+
     # **************************************************************************
     # pick
     # **************************************************************************
@@ -106,9 +118,10 @@ def compute_pick_path(
         robot_setup.robot,
         robot_setup.control_joints,
         obstacles=obstacles | set([cur_element.body]),
-        attachments=robot_setup.attachments,
+        attachments=[robot_setup.ee_attachment] + robot_setup.attachments,
         self_collisions=ENABLE_SELF_COLLISIONS,
         disabled_collisions=robot_setup.disabled_collisions,
+        extra_disabled_collisions=extra_disabled_collisions,
         max_distance=MAX_DISTANCE,
     )
 

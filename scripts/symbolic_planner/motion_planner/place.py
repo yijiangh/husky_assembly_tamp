@@ -15,6 +15,7 @@ from sampler.grasp_sampler import grasp_sampler
 from sampler.mobile_base_sampler import robot_pose_sampler
 from utils.collision import Element
 from utils.utils import CounterModule, angles_distance, normalize_angles
+from utils.params import *
 
 # place retreat
 RETREAT_DISTANCE = 0.07
@@ -31,7 +32,7 @@ POS_STEP_SIZE = 0.005
 ORI_STEP_SIZE = np.pi / 128
 
 # collision check threshold
-MAX_DISTANCE = 0.01
+MAX_DISTANCE = 0.0
 
 # collision check enable
 ENABLE_SELF_COLLISIONS = True
@@ -223,7 +224,7 @@ def compute_place_path(
     # -------------------- init attachment of current element --------------------#
     grasp_attachment = None
 
-    #-------------------- init extra_disabled_collisions --------------------#
+    # -------------------- init extra_disabled_collisions --------------------#
     extra_disabled_collisions = [
         (
             (robot_setup.robot, pp.link_from_name(robot_setup.robot, "ur_arm_wrist_3_link")),
@@ -232,7 +233,7 @@ def compute_place_path(
         (
             (robot_setup.ee_attachment.child, pp.BASE_LINK),
             (cur_element.body, pp.BASE_LINK),
-        )
+        ),
     ]
 
     # -------------------- loop: find a solution of place --------------------#
@@ -672,9 +673,9 @@ def get_place_gen_fn(
             vertices=vertices,
             edges=edges,
             target_edge=cur_element.axis_endpoints,
-            sample_max_distance=1.25,  # dist in 2d plane, log name 1
-            safety_distance=0.75,  # safty dist in 2d plane, log name 3
-            reach_distance=1.25,  # dist in 3d space, log name 2
+            sample_max_distance=SAMPLE_MAX_DISTANCE,  # dist in 2d plane
+            safety_distance=SAFETY_DISTANCE,  # safty dist in 2d plane
+            reach_distance=REACH_DISTANCE,  # dist in 3d space
             sampling_number=200,
         )
 
@@ -689,10 +690,10 @@ def get_place_gen_fn(
                 index=index,
                 assembled=assembled,
                 element_from_index=element_from_index,
-                sample_range=0.10,
-                reachable_margin=0.25,
-                grasp_method="robot",
-                redirect_method="robot",
+                sample_range=SAMPLE_RANGE,
+                reachable_margin=REACHABLE_MARGIN,
+                grasp_method=GRASP_METHOD,
+                redirect_method=REDIRECT_METHOD,
             )
 
             # -------------------- compute place path --------------------#

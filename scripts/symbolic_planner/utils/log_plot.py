@@ -31,17 +31,14 @@ def load_json_logs(folder):
 
 # 计算每个文件夹中的失败计数平均值
 def extract_failures(folder):
-    types_all = [
-        ["place failure"],
-        ["pick failure"],
-        ["transfer failure"],
-        ["total time"]
-    ]
+    types_all = [["place failure"], ["pick failure"], ["transfer failure"], ["total time"]]
     modules_all = ["place", "pick", "transfer", "others"]
 
     counts = {}
+    counts_raw = {}
     for module, types in zip(modules_all, types_all):
         counts.update({module + "/" + ftype: 0 for ftype in types})
+        counts_raw.update({module + "/" + ftype: [] for ftype in types})
 
     log_count = 0
 
@@ -50,18 +47,19 @@ def extract_failures(folder):
     log_count = len(logs)
 
     if log_count == 0:
-        return counts  # 防止除零错误
+        return counts, counts_raw  # 防止除零错误
 
     for log in logs:
         for module, types in zip(modules_all, types_all):
             data = log.get(module, {})
             for ftype in types:
                 counts[module + "/" + ftype] += data.get(ftype, 0)
+                counts_raw[module + "/" + ftype].append(data.get(ftype, 0))
 
     # 计算每种失败的平均值
     averages = {ftype: counts[ftype] / log_count for ftype in counts.keys()}
 
-    return averages
+    return averages, counts_raw
 
 
 # 生成对比图的标题和题注
@@ -76,7 +74,7 @@ def create_plot_title(structure_name, compare_module, algorithms):
 # 主程序
 def main():
     log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
-    log_name = "box_MT_contact-pick_side"
+    log_name = "one_tet_MT_contact-pm"
     # 根文件夹路径
     root_folder = os.path.join(log_dir, log_name)
 
@@ -88,28 +86,30 @@ def main():
     algorithms.sort()
 
     # 提取所有算法的失败数据
-    failures_all_algorithms = {}
+    data_avg = {}
+    data_raw = {}
     for algorithm in algorithms:
         folder_algorithm = os.path.join(root_folder, algorithm)
-        failures_all_algorithms[algorithm] = extract_failures(folder_algorithm)
+        data_avg[algorithm], data_raw[algorithm] = extract_failures(folder_algorithm)
 
     # 生成图表标题和题注
     plot_title, plot_caption = create_plot_title(structure_name, compare_module, algorithms)
 
     # 绘制对比图
-    failure_types = list(failures_all_algorithms[algorithms[0]].keys())
-    x = np.arange(len(failure_types))  # 失败类型的数量
+    names = list(data_avg[algorithms[0]].keys())
+    x = np.arange(len(names))  # 失败类型的数量
 
     width = 0.8 / len(algorithms)  # 动态设置柱的宽度
     fig, ax = plt.subplots(figsize=(18, 12))
 
     for i, algorithm in enumerate(algorithms):
-        values = [failures_all_algorithms[algorithm][ftype] for ftype in failure_types]
+        values = [data_avg[algorithm][ftype] for ftype in names]
+        values_raw = [data_raw[algorithm][ftype] for ftype in names]
         rects = ax.bar(x + i * width - (len(algorithms) - 1) * width / 2, values, width, label=algorithm)
 
         # 自动显示柱状图顶部的数值
-        def autolabel(rects):
-            for rect in rects:
+        def autolabel(rects, values_raw):
+            for rect, values in zip(rects, values_raw):
                 height = rect.get_height()
                 ax.annotate(
                     f"{height:.2f}",  # 保留两位小数
@@ -119,14 +119,24 @@ def main():
                     ha="center",
                     va="bottom",
                 )
+                ax.annotate(
+                    f"{len(values)}",  # 保留两位小数
+                    xy=(rect.get_x() + rect.get_width() / 2, height / 2),
+                    xytext=(0, 3),  # 3 points vertical offset
+                    textcoords="offset points",
+                    ha="center",
+                    va="bottom",
+                )
+                for value in values:
+                    ax.plot(rect.get_x() + rect.get_width() / 2, value, "o", color="black")
 
-        autolabel(rects)
+        autolabel(rects, values_raw)
 
     # 添加文本标签、标题和图例
     ax.set_ylabel("Average Failure Counts")
     ax.set_title(plot_title)
     ax.set_xticks(x)
-    ax.set_xticklabels(failure_types, rotation=45, ha="right")
+    ax.set_xticklabels(names, rotation=45, ha="right")
     ax.legend()
 
     # 添加图注

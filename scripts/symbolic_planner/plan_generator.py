@@ -8,18 +8,6 @@ import pybullet as p
 
 cur_dir = os.path.dirname(os.path.abspath(__file__))
 
-# mt_file_name = "one_tet_MT_contact"
-# mt_file_name = "tower_integral_one_len_MT_layer_0"
-# mt_file_name = "triangle_reciprocal_MT_contact"
-mt_file_name = "box_MT_contact"
-
-# grounded_elements_index = [0, 1, 2]  # one_tet_MT_contact
-# grounded_elements_index = [0, 1, 4, 19]  # tower_integral_one_len_MT_layer_0
-# grounded_elements_index = [0, 1, 2]  # triangle_reciprocal_MT_contact
-grounded_elements_index = [0, 1, 2]  # box_MT_contact
-
-log_dir = os.path.join(cur_dir, f"logs/{mt_file_name}")
-
 import pybullet_planning as pp
 
 # -------------------- self-defined modules --------------------#
@@ -32,17 +20,28 @@ from symbolic_planner.element_object import ElementObject, ElementStatus
 from symbolic_planner.planner import Planner
 from utils.collision import Element, create_couplers, init_pb
 from utils.parse import parse_mt_geometric
+from utils.params import *
+
+log_dir = os.path.join(cur_dir, f"logs/{MT_FILE_NAME}")
+
+# mt_file_name = "tower_integral_one_len_MT_layer_0"
+# mt_file_name = "triangle_reciprocal_MT_contact"
+# mt_file_name = "box_MT_contact"
+
+# grounded_elements_index = [0, 1, 4, 19]  # tower_integral_one_len_MT_layer_0
+# grounded_elements_index = [0, 1, 2]  # triangle_reciprocal_MT_contact
+# grounded_elements_index = [0, 1, 2]  # box_MT_contact
 
 if __name__ == "__main__":
 
-    # random.seed(10086)
-    # np.random.seed(10086)
+    random.seed(128363)
+    np.random.seed(98765)
 
     with pp.HideOutput():
         parser = argparse.ArgumentParser()
         parser.add_argument(
             "--mt_file_name",
-            default=mt_file_name + ".json",
+            default=MT_FILE_NAME + ".json",
             help='The name of the multi tangent file to solve (json file\'s name, e.g. "tower_integral_one_len_MT_layer_0.json")',
         )
         parser.add_argument(
@@ -93,6 +92,8 @@ if __name__ == "__main__":
             for i in range(robot_num):
                 rb = RobotSetup(f"r{i}")
                 robots.append(Robot(i, rb, element_from_index, [], path_storage))
+
+        grounded_elements_index = GROUNDED_ELEMENTS_INDEX
 
         # -------------------- Plan --------------------#
         planner = Planner(robot_num=robot_num, robots=robots)

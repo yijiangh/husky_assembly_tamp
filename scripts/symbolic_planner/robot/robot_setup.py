@@ -20,6 +20,7 @@ from ik_solver.pinocchio_solver import PinocchioSolver
 from pybullet_planning import Attachment, Euler, Point, Pose, get_distance, interpolate_poses, invert, multiply
 from tracikpy import TracIKSolver
 from utils.utils import HUSKYU_JOINT_NAMES, get_custom_limits
+from utils.params import *
 
 TOOL0_FROM_EE = pp.Pose(point=[0, 0, 0.160])
 CONTROL_JOINT_NAMES = [
@@ -36,13 +37,12 @@ CONTROL_JOINT_NAMES = [
 BASE_CONTROL_JOINT_NAMES = ["x", "y", "theta"]
 INIT_ARM_JOINT_ANGLES = np.array([0, -np.pi / 2, 0, 0, 0, 0])
 
-# on the left side of the robot
-# ONBOARD_POSE = [0.0, -0.5, 0.5, -np.pi / 2, 0.0, np.pi / 2]  # [x, y, z, r, p, y]
-# ONBOARD_LINK = "ur_arm_base_link"
-
-# on the back side of the robot
-ONBOARD_POSE = [0.4, 0.0, 0.5, -np.pi / 2, 0.0, 0.0]  # [x, y, z, r, p, y]
-ONBOARD_LINK = "ur_arm_base_link"
+if PICK_DIRECTION == "left":
+    ONBOARD_POSE = [0.0, -0.5, 0.5, -np.pi / 2, 0.0, np.pi / 2]  # [x, y, z, r, p, y]
+    ONBOARD_LINK = "ur_arm_base_link"
+elif PICK_DIRECTION == "behind":
+    ONBOARD_POSE = [0.4, 0.0, 0.5, -np.pi / 2, 0.0, 0.0]  # [x, y, z, r, p, y]
+    ONBOARD_LINK = "ur_arm_base_link"
 
 ########################
 
@@ -82,6 +82,7 @@ class RobotSetup(object):
         # cp_robot = RobotClass(robot_model, semantics=robot_semantics)
 
         robot = pp.load_pybullet(robot_urdf, fixed_base=False, cylinder=False)
+        cloned_b1 = pp.clone_body(robot, links=[7], collision=True, visual=False)
 
         if not ik_from_arm_base:
             trac_ik_solver = TracIKSolver(robot_urdf, "world_link", "ur_arm_tool0")
@@ -340,6 +341,14 @@ class RobotSetup(object):
             max_distance=0.0,
         )
 
+
+        print(frozen_values)
+        if frozen_values == [-0.5360113100861537, 1.0070301411544869, -0.2208000858080496]:
+            transit_collision_fn_debug = partial(transit_collision_fn, diagnosis=True)
+        else:
+            transit_collision_fn_debug = transit_collision_fn
+
+
         transit_path = None
         with pp.WorldSaver():
             # if pp.check_initial_end(start_conf, end_conf, transit_collision_fn, diagnosis=debug):
@@ -350,7 +359,7 @@ class RobotSetup(object):
                     distance_fn,
                     sample_fn,
                     extend_fn,
-                    transit_collision_fn,
+                    transit_collision_fn_debug,
                     algorithm="birrt",
                     max_time=20,
                     max_iterations=30,

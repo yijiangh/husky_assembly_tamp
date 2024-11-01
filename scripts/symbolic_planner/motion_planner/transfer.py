@@ -12,6 +12,7 @@ from pybullet_planning import Attachment
 from robot.robot_setup import RobotSetup
 from utils.collision import Element
 from utils.utils import CounterModule, normalize_angles, get_custom_limits
+from utils.utils import *
 
 # collision check threshold
 MAX_DISTANCE = 0.0

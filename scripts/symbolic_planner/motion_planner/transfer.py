@@ -138,7 +138,7 @@ def get_transfer_gen_fn(
     robot_setup: RobotSetup,
     element_from_index: Dict,
     fixed_obstacles: List[int],
-    max_attempts: int = 10,
+    max_attempts: int = 1,
     collisions: bool = True,
     allow_failure: bool = False,
     verbose: bool = False,
@@ -164,7 +164,7 @@ def get_transfer_gen_fn(
         robot_setup (RobotSetup): RobotSetup instance
         element_from_index ({index: Element}): element dict
         fixed_obstacles ([int]): list of id in pybullet
-        max_attempts (int, 10): attempts to generate transfer motion
+        max_attempts (int, 1): attempts to generate transfer motion
         collisions (bool, True): whether consider collision
         allow_failure (bool, False): yield (None * 2), False: return (None * 2) and raise an error
         verbose (bool, False): whether print debug information

@@ -396,7 +396,7 @@ def compute_place_path(
         fail_flag = False
         robot_joint_conf_last = robot_joint_attach_conf
         pose_last = attach_tool0_pose
-        for pre_tool0_pose in pre_tool0_poses[::-1][1:]:
+        for pre_tool0_pose in pre_tool0_poses[::-1][:]:
             inner_fail_flag = True
             for ik_search_num in range(ik_search_max_attempt):
                 pre_attach_joint_conf = robot_setup.get_relative_ik_solution(

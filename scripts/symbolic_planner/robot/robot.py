@@ -2,7 +2,10 @@ import os
 import sys
 from collections import namedtuple
 from copy import deepcopy
+from functools import partial
 from typing import Dict, List, Tuple
+
+from termcolor import cprint
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -12,23 +15,12 @@ from motion_planner.pick import get_pick_gen_fn
 from motion_planner.place import get_place_gen_fn
 from motion_planner.transfer import get_transfer_gen_fn
 from pybullet_planning import Attachment, Euler, Point, Pose, get_distance, interpolate_poses, invert, multiply
-from robot.robot_setup import RobotSetup, ONBOARD_POSE, ONBOARD_LINK
+from robot.robot_setup import ONBOARD_LINK, ONBOARD_POSE, RobotSetup
 from utils.collision import Element
 from utils.utils import CounterModule, CounterValue, timeit_decorator_counter
+from utils.params import *
 
 ConcretePath = namedtuple("ConcretePath", ["base_path", "manipulator_path"])
-
-PLACE_VERBOSE = False
-PLACE_DIAGNOSIS = False
-PLACE_SHOW = False or PLACE_DIAGNOSIS
-
-PICK_VERBOSE = False
-PICK_DIAGNOSIS = False
-PICK_SHOW = False or PICK_DIAGNOSIS
-
-TRANSFER_VERBOSE = True
-TRANSFER_DIAGNOSIS = False
-TRANSFER_SHOW = False or TRANSFER_DIAGNOSIS
 
 
 class PathItem(object):
@@ -135,7 +127,7 @@ class Robot(object):
         # )
 
         # self.manipulator_planner_fn = self.DefaultPlan
-        self.manipulator_planner_fn = self.ManipulatorMotionPlan
+        self.manipulator_planner_fn = partial(self.ManipulatorMotionPlan, verbose=MNIPULATOR_PLAN_SHOW)
 
     def SaveLog(self, path: str, suffix=""):
         self.counter_handle.save(path, f"r{self.index}{suffix}.json")
@@ -156,51 +148,60 @@ class Robot(object):
         assembled_index_list: List[int],
         unassembled_index_list: List[int],
         attachment_list=List[Attachment],
+        max_attempts: int = 2,
+        verbose: bool = False,
     ) -> bool:
 
-        for assembled_element_index in assembled_index_list:
-            pp.set_pose(
-                self.element_from_index[assembled_element_index].body,
-                self.element_from_index[assembled_element_index].goal_pose,
+        for attempt in range(max_attempts):
+
+            if verbose:
+                cprint(f"Manipulator apttempt: {attempt+1}", "magenta")
+
+            for assembled_element_index in assembled_index_list:
+                pp.set_pose(
+                    self.element_from_index[assembled_element_index].body,
+                    self.element_from_index[assembled_element_index].goal_pose,
+                )
+
+            # -------------------- Place --------------------#
+            place_cmd, place_grasp_mask, grasp_attachment, grasp, pregrasp_pose = self.PlacePathPlan(
+                element_index, assembled_index_list, unassembled_index_list, attachment_list, pp_show=PLACE_SHOW
             )
+            if place_cmd is None:
+                continue
+            path_obj = PathItem(element_index, grasp_attachment)
 
-        # -------------------- Place --------------------#
-        place_cmd, place_grasp_mask, grasp_attachment, grasp, pregrasp_pose = self.PlacePathPlan(
-            element_index, assembled_index_list, unassembled_index_list, attachment_list, pp_show=PLACE_SHOW
-        )
-        if place_cmd is None:
-            return False
-        path_obj = PathItem(element_index, grasp_attachment)
+            # -------------------- Pick --------------------#
+            # self.UpdateElementsRobot(element_index)
+            pick_cmd, pick_grasp_mask = self.PickPathPlan(
+                element_index, assembled_index_list, unassembled_index_list, attachment_list, grasp, pp_show=PICK_SHOW
+            )
+            if pick_cmd is None:
+                continue
 
-        # -------------------- Pick --------------------#
-        # self.UpdateElementsRobot(element_index)
-        pick_cmd, pick_grasp_mask = self.PickPathPlan(
-            element_index, assembled_index_list, unassembled_index_list, attachment_list, grasp, pp_show=PICK_SHOW
-        )
-        if pick_cmd is None:
-            return False
+            # -------------------- Transfer --------------------#
+            transfer_cmd, transfer_grasp_mask = self.TransferPathPlan(
+                element_index,
+                assembled_index_list,
+                unassembled_index_list,
+                attachment_list,
+                grasp_attachment,
+                pick_cmd[-1],
+                place_cmd[0],
+                pp_show=TRANSFER_SHOW,
+            )
+            if transfer_cmd is None:
+                continue
 
-        # -------------------- Transfer --------------------#
-        transfer_cmd, transfer_grasp_mask = self.TransferPathPlan(
-            element_index,
-            assembled_index_list,
-            unassembled_index_list,
-            attachment_list,
-            grasp_attachment,
-            pick_cmd[-1],
-            place_cmd[0],
-            pp_show=TRANSFER_SHOW,
-        )
-        if transfer_cmd is None:
-            return False
+            path_obj.Append(pick_cmd, pick_grasp_mask)
+            path_obj.Append(transfer_cmd, transfer_grasp_mask)
+            path_obj.Append(place_cmd, place_grasp_mask)
 
-        path_obj.Append(pick_cmd, pick_grasp_mask)
-        path_obj.Append(transfer_cmd, transfer_grasp_mask)
-        path_obj.Append(place_cmd, place_grasp_mask)
+            if self.path_storage is not None:
+                self.path_storage.add_manipulator(element_index, path_obj)
+            return True
 
-        if self.path_storage is not None:
-            self.path_storage.add_manipulator(element_index, path_obj)
-        return True
+        return False
 
     # def BaseMotionPlan(self, path: List[List[int]]):
     #     assembled = []

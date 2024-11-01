@@ -1,13 +1,13 @@
 # Structure
-MT_FILE_NAME = "one_tet_MT_contact" # one_tet_MT_contact/box_MT_contact
+MT_FILE_NAME = "one_tet_MT_contact"  # one_tet_MT_contact/box_MT_contact
 GROUNDED_ELEMENTS_INDEX = [0, 1, 2]  # one_tet_MT_contact[0, 1, 2]/box_MT_contact[0, 1, 2]
 
 # Place Module
 
 ## robot pose sampler
 SAMPLE_MAX_DISTANCE = 1.55  # dist in 2d plane
-SAFETY_DISTANCE = 0.90  # safty dist in 2d plane
-REACH_DISTANCE = 1.10  # dist in 3d space
+SAFETY_DISTANCE = 0.95  # safty dist in 2d plane
+REACH_DISTANCE = 1.15  # dist in 3d space
 
 ## grasp sampler
 SAMPLE_RANGE = 0.10
@@ -20,3 +20,24 @@ REDIRECT_METHOD = "robot"  # robot/preview/none(only for cylinder)
 PICK_DIRECTION = "left"  # left/behind
 
 # Transfer Module
+
+
+# -------------------- Switch Config --------------------#
+
+## Place Module
+PLACE_VERBOSE = False
+PLACE_DIAGNOSIS = False
+PLACE_SHOW = False or PLACE_DIAGNOSIS
+
+## Pick Module
+PICK_VERBOSE = False
+PICK_DIAGNOSIS = False
+PICK_SHOW = False or PICK_DIAGNOSIS
+
+## Transfer Module
+TRANSFER_VERBOSE = False
+TRANSFER_DIAGNOSIS = False
+TRANSFER_SHOW = False or TRANSFER_DIAGNOSIS
+
+## Robot
+MNIPULATOR_PLAN_SHOW = True

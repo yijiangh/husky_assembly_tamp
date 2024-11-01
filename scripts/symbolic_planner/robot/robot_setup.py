@@ -82,7 +82,7 @@ class RobotSetup(object):
         # cp_robot = RobotClass(robot_model, semantics=robot_semantics)
 
         robot = pp.load_pybullet(robot_urdf, fixed_base=False, cylinder=False)
-        cloned_b1 = pp.clone_body(robot, links=[7], collision=True, visual=False)
+        # cloned_b1 = pp.clone_body(robot, links=[7], collision=True, visual=False)
 
         if not ik_from_arm_base:
             trac_ik_solver = TracIKSolver(robot_urdf, "world_link", "ur_arm_tool0")
@@ -342,12 +342,13 @@ class RobotSetup(object):
         )
 
 
-        print(frozen_values)
-        if frozen_values == [-0.5360113100861537, 1.0070301411544869, -0.2208000858080496]:
-            transit_collision_fn_debug = partial(transit_collision_fn, diagnosis=True)
-        else:
-            transit_collision_fn_debug = transit_collision_fn
+        # print(frozen_values)
+        # if frozen_values == [-0.5360113100861537, 1.0070301411544869, -0.2208000858080496]:
+        #     transit_collision_fn_debug = partial(transit_collision_fn, diagnosis=False)
+        # else:
+        #     transit_collision_fn_debug = transit_collision_fn
 
+        transit_collision_fn_debug = partial(transit_collision_fn, diagnosis=diagnosis)
 
         transit_path = None
         with pp.WorldSaver():
@@ -361,7 +362,7 @@ class RobotSetup(object):
                     extend_fn,
                     transit_collision_fn_debug,
                     algorithm="birrt",
-                    max_time=20,
+                    max_time=3,
                     max_iterations=30,
                     smooth=20,
                     diagnosis=diagnosis,

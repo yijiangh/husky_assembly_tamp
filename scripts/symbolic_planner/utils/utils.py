@@ -381,7 +381,7 @@ def flatten(nested_list):
     return result
 
 
-def timeit_decorator_counter(counter_name: str = "", output: bool = False):
+def timeit_decorator_counter(counter_name: str = "", verbose: bool = False, output_time: bool = False):
 
     def timeit_decorator(func):
         def wrapper(self, *args, **kwargs):
@@ -389,7 +389,7 @@ def timeit_decorator_counter(counter_name: str = "", output: bool = False):
             result = func(self, *args, **kwargs)
             end_time = time.time()
 
-            if output:
+            if verbose:
                 cprint(
                     f"\n============================================================\nFunction '{func.__name__}' executed in {end_time - start_time:.6f} seconds!\n============================================================\n",
                     "cyan",
@@ -400,7 +400,10 @@ def timeit_decorator_counter(counter_name: str = "", output: bool = False):
                 time_handle: CounterValue = others_handle.add_counter_value("total time")
                 time_handle.increment(end_time - start_time)
 
-            return result
+            if output_time:
+                return result, end_time - start_time
+            else:
+                return result
 
         return wrapper
 

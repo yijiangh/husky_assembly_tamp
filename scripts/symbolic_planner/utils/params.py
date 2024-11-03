@@ -1,6 +1,14 @@
 # Structure
-MT_FILE_NAME = "one_tet_MT_contact"  # one_tet_MT_contact/box_MT_contact
-GROUNDED_ELEMENTS_INDEX = [0, 1, 2]  # one_tet_MT_contact[0, 1, 2]/box_MT_contact[0, 1, 2]
+
+# one_tet_MT_contact/box_MT_contact/triangle_reciprocal_MT_contact
+MT_FILE_NAME = "triangle_reciprocal_MT_contact"
+
+# one_tet_MT_contact[0, 1, 2]/box_MT_contact[0, 1, 2]/triangle_reciprocal_MT_contact[0, 1, 2]
+GROUNDED_ELEMENTS_INDEX = [0, 1, 2]
+
+# -------------------- Motion Plan --------------------#
+
+ROBOT_NUM = 3
 
 # Place Module
 
@@ -20,7 +28,6 @@ REDIRECT_METHOD = "robot"  # robot/preview/none(only for cylinder)
 PICK_DIRECTION = "left"  # left/behind
 
 # Transfer Module
-
 
 # -------------------- Switch Config --------------------#
 

@@ -1,9 +1,10 @@
+import itertools
 import os
 import sys
 from collections import namedtuple
 from copy import deepcopy
 from functools import partial
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Union
 
 from termcolor import cprint
 
@@ -17,8 +18,8 @@ from motion_planner.transfer import get_transfer_gen_fn
 from pybullet_planning import Attachment, Euler, Point, Pose, get_distance, interpolate_poses, invert, multiply
 from robot.robot_setup import ONBOARD_LINK, ONBOARD_POSE, RobotSetup
 from utils.collision import Element
-from utils.utils import CounterModule, CounterValue, timeit_decorator_counter
 from utils.params import *
+from utils.utils import CounterModule, timeit_decorator_counter
 
 ConcretePath = namedtuple("ConcretePath", ["base_path", "manipulator_path"])
 
@@ -70,12 +71,13 @@ class Robot(object):
         index: int,
         robot_setup: RobotSetup,
         element_from_index: Dict[int, Element],
+        counter: CounterModule,
         attachments: List[Attachment] = [],
-        storage: PathWithIndex = None,
+        storage: Union[PathWithIndex, None] = None,
     ) -> None:
         self.index = index
         self.robot_setup = robot_setup
-        self.counter_handle = CounterModule()
+        self.counter_handle = counter
         self.place_counter_handle = self.counter_handle.create_handle("place")
         self.pick_counter_handle = self.counter_handle.create_handle("pick")
         self.transfer_counter_handle = self.counter_handle.create_handle("transfer")
@@ -129,17 +131,25 @@ class Robot(object):
         # self.manipulator_planner_fn = self.DefaultPlan
         self.manipulator_planner_fn = partial(self.ManipulatorMotionPlan, verbose=MNIPULATOR_PLAN_SHOW)
 
-    def SaveLog(self, path: str, suffix=""):
-        self.counter_handle.save(path, f"r{self.index}{suffix}.json")
+    # def SaveLog(self, path: str, suffix=""):
+    #     if self.counter_handle is not None:
+    #         self.counter_handle.save(path, f"r{self.index}{suffix}.json")
 
+    @timeit_decorator_counter("others_counter_handle")
     def DefaultPlan(
         self,
         element_index: int,
         assembled_index_list: List[int],
         unassembled_index_list: List[int],
-        attachment_list=List[Attachment],
-    ) -> bool:
-        return True
+        attachment_list: List[Attachment] = [],
+        max_attempts: int = 2,
+        verbose: bool = False,
+        output_path: bool = False,
+    ) -> Union[bool, Tuple[bool, Union[PathItem, None]]]:
+        if output_path:
+            return True, None
+        else:
+            return True
 
     @timeit_decorator_counter("others_counter_handle")
     def ManipulatorMotionPlan(
@@ -147,15 +157,32 @@ class Robot(object):
         element_index: int,
         assembled_index_list: List[int],
         unassembled_index_list: List[int],
-        attachment_list=List[Attachment],
+        attachment_list: List[Attachment] = [],
         max_attempts: int = 2,
         verbose: bool = False,
-    ) -> bool:
+        output_path: bool = False,
+    ) -> Union[bool, Tuple[bool, Union[PathItem, None]]]:
+        """
+        Plan manipulator motion to assemble an element.
+
+        Params:
+            element_index (int): the index of the element to assemble
+            assembled_index_list (List[int]): indices of assembled elements
+            unassembled_index_list (List[int]): indices of unassembled elements excluding current element
+            attachment_list (List[Attachment], [], [not used]): not used
+            max_attempts (int, 2): max attempts to plan
+            verbose (bool, False): whether print plan information
+            output_path (bool, False): whether return planned manipulator path
+
+        Returns:
+            bool: True if successful, False otherwise
+            PathItem: (optional) planned manipulator path
+        """
 
         for attempt in range(max_attempts):
 
             if verbose:
-                cprint(f"Manipulator apttempt: {attempt+1}", "magenta")
+                cprint(f"Manipulator plan attempt: {attempt+1}", "magenta")
 
             for assembled_element_index in assembled_index_list:
                 pp.set_pose(
@@ -199,9 +226,92 @@ class Robot(object):
 
             if self.path_storage is not None:
                 self.path_storage.add_manipulator(element_index, path_obj)
-            return True
 
-        return False
+            if output_path:
+                return True, path_obj
+            else:
+                return True
+
+        if output_path:
+            return False, None
+        else:
+            return False
+
+    @staticmethod
+    def ManipulatorGroupMotionPlan(
+        robots: List["Robot"],
+        task: List[int],
+        assembled_index_list: List[int],
+        unassembled_index_list: List[int],
+        attachment_list: List[Attachment] = [],
+        max_attempts: int = 2,
+        verbose: bool = False,
+    ) -> Tuple[bool, List[int]]:
+        task_all = list(itertools.permutations(task))
+        task_all = [list(temp) for temp in task_all]
+        mertic_all = [0.0] * len(task_all)
+        plan_path_obj_all = []
+
+        # -------------------- find all solutions --------------------#
+        for current_id, current_task in enumerate(task_all):
+
+            current_assembled_index_list = deepcopy(assembled_index_list)
+            current_unassembled_index_list = deepcopy(unassembled_index_list)
+            current_plan_time = 0.0
+            current_plan_status = True
+            current_plan_path_obj = []
+
+            for element_index, robot in zip(current_task, robots):
+                decorated_plan_func = timeit_decorator_counter(counter_name="others_counter_handle", output_time=True)(
+                    robot.ManipulatorMotionPlan
+                )
+
+                # remove current element from unassembled list
+                if element_index in current_unassembled_index_list:
+                    current_unassembled_index_list.remove(element_index)
+
+                plan_result, plan_time = decorated_plan_func(
+                    element_index,
+                    current_assembled_index_list,
+                    current_unassembled_index_list,
+                    [],
+                    verbose=True,
+                    output_path=True,
+                )
+                plan_status, plan_path_obj = plan_result
+
+                # store path object
+                current_plan_path_obj.append(plan_path_obj)
+
+                # if plan succeed, add current element to assembled list
+                if plan_status and element_index not in current_assembled_index_list:
+                    current_assembled_index_list.append(element_index)
+
+                if plan_status:
+                    # if plan succeed, accumulate total plan time
+                    current_plan_time += plan_time
+                else:
+                    # if plan failed, set current_plan_status to False and break
+                    current_plan_status = False
+                    break
+
+            mertic_all[current_id] = current_plan_time if current_plan_status else np.inf
+
+        # -------------------- return a best solution --------------------#
+        best_index = mertic_all.index(min(mertic_all))
+        best_task = task_all[best_index]
+        best_metric = mertic_all[best_index]
+        best_path_obj_list = plan_path_obj_all[best_index]
+
+        # if best metric equal to inf, motion plan failed
+        if best_metric == np.inf:
+            return False, task
+
+        # store planned path to global path_storage
+        for robot, path_obj, index in zip(robots, best_path_obj_list, best_task):
+            robot.path_storage.add_manipulator(index, path_obj)
+
+        return True, best_task
 
     # def BaseMotionPlan(self, path: List[List[int]]):
     #     assembled = []

@@ -341,13 +341,6 @@ class RobotSetup(object):
             max_distance=0.0,
         )
 
-
-        # print(frozen_values)
-        # if frozen_values == [-0.5360113100861537, 1.0070301411544869, -0.2208000858080496]:
-        #     transit_collision_fn_debug = partial(transit_collision_fn, diagnosis=False)
-        # else:
-        #     transit_collision_fn_debug = transit_collision_fn
-
         transit_collision_fn_debug = partial(transit_collision_fn, diagnosis=diagnosis)
 
         transit_path = None

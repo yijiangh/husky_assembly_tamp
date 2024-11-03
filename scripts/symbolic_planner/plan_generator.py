@@ -19,23 +19,20 @@ from robot.robot_setup import RobotSetup
 from symbolic_planner.element_object import ElementObject, ElementStatus
 from symbolic_planner.planner import Planner
 from utils.collision import Element, create_couplers, init_pb
-from utils.parse import parse_mt_geometric
 from utils.params import *
+from utils.parse import parse_mt_geometric
+from utils.utils import CounterModule
 
 log_dir = os.path.join(cur_dir, f"logs/{MT_FILE_NAME}")
 
 # mt_file_name = "tower_integral_one_len_MT_layer_0"
-# mt_file_name = "triangle_reciprocal_MT_contact"
-# mt_file_name = "box_MT_contact"
-
 # grounded_elements_index = [0, 1, 4, 19]  # tower_integral_one_len_MT_layer_0
-# grounded_elements_index = [0, 1, 2]  # triangle_reciprocal_MT_contact
-# grounded_elements_index = [0, 1, 2]  # box_MT_contact
 
 if __name__ == "__main__":
 
-    random.seed(128363)
-    np.random.seed(98765)
+    # plan_manipulator_path 稳定失败种子
+    # random.seed(128363)
+    # np.random.seed(98765)
 
     with pp.HideOutput():
         parser = argparse.ArgumentParser()
@@ -85,13 +82,16 @@ if __name__ == "__main__":
         # -------------------- Path storage --------------------#
         path_storage = PathWithIndex()
 
+        # -------------------- Counter module --------------------#
+        counter = CounterModule()
+
         # -------------------- Robots Init --------------------#
         with pp.HideOutput():
             robots = []
-            robot_num = 1
+            robot_num = ROBOT_NUM
             for i in range(robot_num):
                 rb = RobotSetup(f"r{i}")
-                robots.append(Robot(i, rb, element_from_index, [], path_storage))
+                robots.append(Robot(i, rb, element_from_index, counter, [], path_storage))
 
         grounded_elements_index = GROUNDED_ELEMENTS_INDEX
 
@@ -102,9 +102,7 @@ if __name__ == "__main__":
 
         # -------------------- save log file --------------------#
         current_time_str = datetime.now().strftime("%y%m%d_%H%M%S")
-        for robot in robots:
-            robot: Robot
-            robot.SaveLog(log_dir, suffix=f"_{current_time_str}")
+        counter.save(log_dir, f"{current_time_str}.json")
 
         # -------------------- Visualization --------------------#
         if args.visualization:

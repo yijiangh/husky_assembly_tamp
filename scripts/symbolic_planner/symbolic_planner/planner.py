@@ -1,11 +1,17 @@
 import operator
+import os
+import sys
 import time
 from collections import deque
 from copy import deepcopy
-from typing import Tuple
+from typing import List, Set, Tuple, Union
 
 import numpy as np
 import pybullet_planning as pp
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
 from robot.robot import PathItem, Robot
 from symbolic_planner.element_object import ElementObject, ElementStatus
 from symbolic_planner.heuristic import (
@@ -32,7 +38,7 @@ class PlanState(object):
             cls._instances[sorted_id] = instance
         return cls._instances[sorted_id]
 
-    def __init__(self, assembled, unassembled, blacklist) -> None:
+    def __init__(self, assembled: List[int], unassembled: List[int], blacklist: List[int]) -> None:
         if not hasattr(self, "initialized"):
             self._assembled = assembled
             self._unassembled = unassembled
@@ -47,7 +53,7 @@ class PlanState(object):
     def __repr__(self):
         return f"PlanState(assembled={self._assembled}, unassembled={self._unassembled}, blacklist={self._blacklist})"
 
-    def UpdateBlacklist(self, index_list: list):
+    def UpdateBlacklist(self, index_list: List[int]):
         for index in index_list:
             if index in self._assembled:
                 self._assembled.remove(index)
@@ -63,7 +69,7 @@ class PlanState(object):
             cur_state.father.UpdateBlacklist(new_blacklist_list)
             cur_state = cur_state.father
 
-    def UnassembledRemove(self, index_list: list):
+    def UnassembledRemove(self, index_list: List[int]):
         rtn = self.unassembled
         for index in index_list:
             if index in rtn:
@@ -98,15 +104,15 @@ class PlanState(object):
         return self.is_deadend
 
     @property
-    def assembled(self) -> list:
+    def assembled(self) -> List[int]:
         return list(deepcopy(self._assembled))
 
     @property
-    def unassembled(self) -> list:
+    def unassembled(self) -> List[int]:
         return list(deepcopy(self._unassembled))
 
     @property
-    def blacklist(self) -> list:
+    def blacklist(self) -> List[int]:
         return list(deepcopy(self._blacklist))
 
     @property
@@ -114,7 +120,7 @@ class PlanState(object):
         return self._father
 
     @staticmethod
-    def GenerateNextState(current_state: "PlanState", index_list: list) -> "PlanState":
+    def GenerateNextState(current_state: "PlanState", index_list: List[int]) -> "PlanState":
         """
         @brief: 产生下一个状态，清空blacklist\n
         """
@@ -140,11 +146,11 @@ class PlanState(object):
         return rtn
 
     @staticmethod
-    def Difference(minuend: list, subtrahend: list):
+    def Difference(minuend: List, subtrahend: List):
         return list(set(minuend) - set(subtrahend))
 
     @staticmethod
-    def GetPath(end_state: "PlanState") -> list:
+    def GetPath(end_state: "PlanState") -> List[int]:
         path_invert = []
         cur_state = end_state
         while cur_state.father != None:
@@ -157,14 +163,28 @@ class PlanState(object):
 class CooperationPlanState(object):
     _instances = {}
 
-    def __new__(cls, assembled, unassembled, blacklist, hold, root=None):
+    def __new__(
+        cls,
+        assembled: List[int],
+        unassembled: List[int],
+        blacklist: List[int],
+        hold: List[int],
+        root: Union[PlanState, None] = None,
+    ):
         sorted_id = (tuple(sorted(assembled)), tuple(sorted(hold)))
         if sorted_id not in cls._instances:
             instance = super().__new__(cls)
             cls._instances[sorted_id] = instance
         return cls._instances[sorted_id]
 
-    def __init__(self, assembled, unassembled, blacklist, hold, root: PlanState = None):
+    def __init__(
+        self,
+        assembled: List[int],
+        unassembled: List[int],
+        blacklist: List[int],
+        hold: List[int],
+        root: Union[PlanState, None] = None,
+    ):
         if not hasattr(self, "initialized"):
             self._assembled = assembled
             self._unassembled = unassembled
@@ -180,7 +200,7 @@ class CooperationPlanState(object):
     def __repr__(self):
         return f"CooperationPlanState(assembled={self._assembled}, unassembled={self._unassembled}, blacklist={self._blacklist}, hold={self._hold})"
 
-    def UpdateBlacklist(self, index_list: list):
+    def UpdateBlacklist(self, index_list: List[int]):
         for index in index_list:
             if index in self._hold:
                 self._hold.remove(index)
@@ -196,7 +216,7 @@ class CooperationPlanState(object):
             cur_state.father.UpdateBlacklist(new_blacklist_list)
             cur_state = cur_state.father
 
-    def UnassembledRemove(self, index_list: list):
+    def UnassembledRemove(self, index_list: List[int]) -> List[int]:
         rtn = self.unassembled
         for index in index_list:
             if index in rtn:
@@ -229,19 +249,19 @@ class CooperationPlanState(object):
         return self.is_deadend
 
     @property
-    def assembled(self) -> list:
+    def assembled(self) -> List[int]:
         return list(deepcopy(self._assembled))
 
     @property
-    def unassembled(self) -> list:
+    def unassembled(self) -> List[int]:
         return list(deepcopy(self._unassembled))
 
     @property
-    def blacklist(self) -> list:
+    def blacklist(self) -> List[int]:
         return list(deepcopy(self._blacklist))
 
     @property
-    def hold(self) -> list:
+    def hold(self) -> List[int]:
         return list(deepcopy(self._hold))
 
     @property
@@ -253,7 +273,7 @@ class CooperationPlanState(object):
         return self._root
 
     @staticmethod
-    def GenerateNextState(current_state: "CooperationPlanState", index_list: list) -> "CooperationPlanState":
+    def GenerateNextState(current_state: "CooperationPlanState", index_list: List[int]) -> "CooperationPlanState":
         """
         @brief: 产生下一个状态，清空blacklist\n
         """
@@ -280,18 +300,18 @@ class CooperationPlanState(object):
         return rtn
 
     @staticmethod
-    def Difference(minuend: list, subtrahend: list):
+    def Difference(minuend: List, subtrahend: List):
         return list(set(minuend) - set(subtrahend))
 
 
 class Planner(object):
-    def __init__(self, robot_num: int, robots: list[Robot]) -> None:
+    def __init__(self, robot_num: int, robots: List[Robot]) -> None:
         self.robot_num = robot_num
         self.robots = robots
 
     def Plan(
-        self, element_from_index: dict[Element], contact_id_pairs: list[list], grounded_elements_index: list
-    ) -> list:
+        self, element_from_index: dict[Element], contact_id_pairs: List[List], grounded_elements_index: List[int]
+    ) -> List[List[int]]:
         # -------------------- Generate element objects --------------------#
         element_object_list = Planner.GetElementObjects(element_from_index, contact_id_pairs, grounded_elements_index)
 
@@ -306,8 +326,8 @@ class Planner(object):
         # self.robots[0].BaseMotionPlan(path_index)
         return path_index
 
-    @timeit_decorator_counter(output=True)
-    def Search(self, element_object_list: list[ElementObject]) -> list:
+    @timeit_decorator_counter(verbose=True)
+    def Search(self, element_object_list: List[ElementObject]) -> List[List[int]]:
         # -------------------- init --------------------#
         current_state = PlanState([], [obj.index for obj in element_object_list], [])
         root_state = current_state
@@ -349,7 +369,7 @@ class Planner(object):
                     element_object_index,
                     current_state.assembled,
                     current_state.UnassembledRemove([element_object_index]),
-                    [],
+                    [],  # TODO: add attachment list
                 )
 
                 if plan_status:
@@ -427,8 +447,8 @@ class Planner(object):
         return []
 
     def SearchRobotCooperation(
-        self, element_object_list: list[ElementObject], cur_state: CooperationPlanState
-    ) -> Tuple[bool, list[ElementObject]]:
+        self, element_object_list: List[ElementObject], cur_state: CooperationPlanState
+    ) -> Tuple[bool, List[int]]:
         current_state = cur_state
         current_root = cur_state
 
@@ -455,22 +475,15 @@ class Planner(object):
                 current_state.UpdateBlacklist([element_object_index])
 
             elif status == ElementStatus.fixed and Planner.ElementsStatusCheck(current_state.hold, element_object_list):
-                plan_status = True
-                planned_index = []
-                for i, hold_element_index in enumerate(current_state.hold + [element_object_index]):
-                    robot = self.robots[i]
-                    plan_status = robot.manipulator_planner_fn(
-                        hold_element_index,
-                        current_state.assembled + planned_index,
-                        current_state.UnassembledRemove(planned_index),
-                        [],
-                    )
-                    if plan_status == False:
-                        break
-                    planned_index.append(hold_element_index)
-
+                plan_status, plan_task = Robot.ManipulatorGroupMotionPlan(
+                    self.robots,
+                    current_state.hold + [element_object_index],
+                    cur_state.assembled,
+                    cur_state.unassembled,
+                    [],  # TODO: add attachment list and consider different robot
+                )
                 if plan_status:
-                    return True, current_state.hold + [element_object_index], path_tuple
+                    return True, plan_task
                 else:
                     # visited_hold_index_list = list(visited_index) + list(hold_index)
                     Planner.Disassemble(
@@ -482,9 +495,9 @@ class Planner(object):
 
             elif status == ElementStatus.rotate:
                 next_state = CooperationPlanState.GenerateNextState(current_state, [element_object_index])
-                solve_status, task, path_tuple = self.SearchRobotCooperation(element_object_list, next_state)
+                solve_status, task = self.SearchRobotCooperation(element_object_list, next_state)
                 if solve_status:
-                    return solve_status, task, path_tuple
+                    return solve_status, task
                 else:
                     Planner.Disassemble(
                         element_object_index, current_state.assembled + current_state.hold, element_object_list
@@ -506,9 +519,9 @@ class Planner(object):
             #     current_state = current_state.TraceBack()
 
         # print("***** Cooperation search not found! *****")
-        return False, current_root.hold, None
+        return False, current_root.hold
 
-    def BackwardSearchWithoutMotionPlan(self, element_object_list: list[ElementObject]) -> list:
+    def BackwardSearchWithoutMotionPlan(self, element_object_list: List[ElementObject]) -> List[List[int]]:
         # -------------------- init --------------------#
         not_visited_index = deque([obj.index for obj in element_object_list])
         visited_index = deque([])
@@ -562,16 +575,9 @@ class Planner(object):
         return list(path_index)[::-1]
 
     @staticmethod
-    def GetBacktrackElementsFromPath(element_index: int, path: deque) -> list:
-        for path_step in path:
-            if element_index in path_step:
-                return list(path_step)
-        return []
-
-    @staticmethod
     def GetElementObjects(
-        element_from_index: dict[Element], contact_id_pairs: list[list], grounded_elements_index: list
-    ) -> list[ElementObject]:
+        element_from_index: dict[Element], contact_id_pairs: List[List[int]], grounded_elements_index: List[int]
+    ) -> List[ElementObject]:
         element_object_list = []
         for index, element in element_from_index.items():
             element: Element
@@ -590,21 +596,23 @@ class Planner(object):
         return element_object_list
 
     @staticmethod
-    def UpdateElements(assembled_list: list, element_object_list: list[ElementObject]):
+    def UpdateElements(assembled_list: List[int], element_object_list: List[ElementObject]):
         for element_object in element_object_list:
             element_object.UpdateConstrain(assembled_list)
         for element_object in element_object_list:
             element_object.UpdateStatus(element_object_list)
 
     @staticmethod
-    def ElementsStatusCheck(index_list: list, element_object_list: list[ElementObject]) -> bool:
+    def ElementsStatusCheck(index_list: List[int], element_object_list: List[ElementObject]) -> bool:
         for index in index_list:
             if element_object_list[index].status != ElementStatus.fixed:
                 return False
         return True
 
     @staticmethod
-    def ElementsStatusCount(index_list: list, element_object_list: list[ElementObject], status: ElementStatus) -> int:
+    def ElementsStatusCount(
+        index_list: List[int], element_object_list: List[ElementObject], status: ElementStatus
+    ) -> int:
         cnt = 0
         for index in index_list:
             if element_object_list[index].status == status:
@@ -613,8 +621,8 @@ class Planner(object):
 
     @staticmethod
     def GetElementIndexBYStatus(
-        index_list: list, element_object_list: list[ElementObject], status: ElementStatus
-    ) -> list:
+        index_list: List[int], element_object_list: List[ElementObject], status: ElementStatus
+    ) -> List[int]:
         index_list_rtn = []
         for index in index_list:
             if element_object_list[index].status == status:
@@ -622,34 +630,36 @@ class Planner(object):
         return index_list_rtn
 
     @staticmethod
-    def Assemble(index: int, visited_index_list: list, element_object_list: list[ElementObject]):
+    def Assemble(index: int, visited_index_list: List[int], element_object_list: List[ElementObject]):
         element_object_list[index].Assemble(visited_index_list)
         visited_index_list.append(index)
         Planner.UpdateElements(visited_index_list, element_object_list)
 
     @staticmethod
-    def Disassemble(index: int, visited_index_list: list, element_object_list: list[ElementObject]):
+    def Disassemble(index: int, visited_index_list: List[int], element_object_list: List[ElementObject]):
         element_object_list[index].Disassemble()
         Planner.UpdateElements(visited_index_list, element_object_list)
 
     @staticmethod
-    def MultiDisassemble(index_list: list, visited_index_list: list, element_object_list: list[ElementObject]):
+    def MultiDisassemble(
+        index_list: List[int], visited_index_list: List[int], element_object_list: List[ElementObject]
+    ):
         for index in index_list:
             Planner.Disassemble(index, visited_index_list, element_object_list)
 
     @staticmethod
-    def MultiAssemble(index_list: list, visited_index_list: list, element_object_list: list[ElementObject]):
+    def MultiAssemble(index_list: List[int], visited_index_list: List[int], element_object_list: List[ElementObject]):
         for index in index_list:
             Planner.Assemble(index, visited_index_list, element_object_list)
 
     @staticmethod
-    def SetHold(index_list: list, element_object_list: list[ElementObject]):
+    def SetHold(index_list: List[int], element_object_list: List[ElementObject]):
         for index in index_list:
             element_object_list[index].status = ElementStatus.fixed
 
     @staticmethod
     def FindMin(
-        index_list: list, element_object_list: list[ElementObject], key: str = "heuristic_value"
+        index_list: List[int], element_object_list: List[ElementObject], key: str = "heuristic_value"
     ) -> Tuple[int, int]:
         """
         @brief: find min in index_list\n
@@ -668,7 +678,7 @@ class Planner(object):
 
     @staticmethod
     def FindMax(
-        index_list: list, element_object_list: list[ElementObject], key: str = "heuristic_value"
+        index_list: List[int], element_object_list: List[ElementObject], key: str = "heuristic_value"
     ) -> Tuple[int, int]:
         """
         @brief: find max in index_list\n

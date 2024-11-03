@@ -1,15 +1,20 @@
 [submodule "data/husky_urdf"]
 	path = data/husky_urdf
 	url = git@gitlab.inf.ethz.ch:crl/husky_urdf.git
+	branch = main
 [submodule "ext/crl-husky"]
 	path = ext/crl-husky
 	url = git@gitlab.inf.ethz.ch:crl/robot-control/crl-husky.git
+	branch = main
 [submodule "ext/tracikpy"]
 	path = ext/tracikpy
 	url = https://github.com/mjd3/tracikpy.git
+	branch = main
 [submodule "ext/pddlstream"]
 	path = ext/pddlstream
 	url = https://github.com/yijiangh/pddlstream.git
+	branch = stable
 [submodule "ext/FrameX"]
 	path = ext/FrameX
 	url = https://github.com/yijiangh/FrameX.git
+	branch = master

@@ -6,14 +6,14 @@ from typing import Callable, Dict, List, Set, Tuple, Union
 import numpy as np
 import pybullet_planning as pp
 from termcolor import cprint
+from utils.params import *
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(HERE)
 
 from pybullet_planning import Attachment, interpolate_poses
 from robot.robot_setup import INIT_ARM_JOINT_ANGLES, RobotSetup
 from utils.collision import Element
 from utils.utils import CounterModule, angles_distance, normalize_angles
-from utils.params import *
 
 # place retreat
 RETREAT_DISTANCE = 0.07

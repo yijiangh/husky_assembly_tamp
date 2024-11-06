@@ -1,4 +1,7 @@
-# Structure
+import os
+import sys
+
+# -------------------- Structure --------------------#
 
 # one_tet_MT_contact/box_MT_contact/triangle_reciprocal_MT_contact
 MT_FILE_NAME = "triangle_reciprocal_MT_contact"
@@ -48,3 +51,8 @@ TRANSFER_SHOW = False or TRANSFER_DIAGNOSIS
 
 ## Robot
 MNIPULATOR_PLAN_SHOW = True
+
+# -------------------- Path --------------------#
+
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # symbolic_planner
+PROJECT_DIR = os.path.dirname(os.path.dirname(HERE))  # husky_assembly

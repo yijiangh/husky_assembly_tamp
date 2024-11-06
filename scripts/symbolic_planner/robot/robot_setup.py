@@ -4,12 +4,11 @@ from functools import partial
 from typing import Dict, List, Set, Tuple, Union
 
 import numpy as np
+from utils.params import *
 
-HERE = os.path.dirname(__file__)
-husky_assembly_path = os.path.abspath(os.path.join(HERE, "..", "..", "..", "src"))
-cur_project_path = os.path.dirname(HERE)
+husky_assembly_path = os.path.join(PROJECT_DIR, "src")
 sys.path.append(husky_assembly_path)
-sys.path.append(cur_project_path)
+sys.path.append(PROJECT_DIR)
 
 import pybullet_planning as pp
 from compas_fab.robots import Robot as RobotClass
@@ -20,7 +19,6 @@ from ik_solver.pinocchio_solver import PinocchioSolver
 from pybullet_planning import Attachment, Euler, Point, Pose, get_distance, interpolate_poses, invert, multiply
 from tracikpy import TracIKSolver
 from utils.utils import HUSKYU_JOINT_NAMES, get_custom_limits
-from utils.params import *
 
 TOOL0_FROM_EE = pp.Pose(point=[0, 0, 0.160])
 CONTROL_JOINT_NAMES = [

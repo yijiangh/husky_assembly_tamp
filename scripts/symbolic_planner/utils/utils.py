@@ -10,16 +10,10 @@ import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 import pybullet_planning as pp
-import utils.load_pddlstream as load_pddlstream
-from pddlstream.algorithms.algorithm import parse_problem
-from pddlstream.algorithms.downward import get_problem, task_from_domain_problem
-from pddlstream.language.constants import Action, DurativeAction, FunctionAction, StreamAction, is_plan
-from pddlstream.language.conversion import obj_from_pddl
-from pddlstream.utils import str_from_object
 from pybullet_planning import Attachment
 from pybullet_planning.utils import CIRCULAR_LIMITS, DEFAULT_RESOLUTION, MAX_DISTANCE
 from termcolor import colored, cprint
-from utils.load_pddlstream import HERE
+from utils.params import PROJECT_DIR
 
 HUSKYU_JOINT_NAMES = [
     "ur_arm_shoulder_pan_joint",
@@ -29,8 +23,6 @@ HUSKYU_JOINT_NAMES = [
     "ur_arm_wrist_2_joint",
     "ur_arm_wrist_3_joint",
 ]
-
-PROJECT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 ###########################################
@@ -69,159 +61,6 @@ def notify(msg):
 
 
 LOGGER = get_logger("robarch_pddl")
-
-###########################################
-
-
-def print_pddl_task_object_names(pddl_problem):
-    evaluations, goal_exp, domain, externals = parse_problem(pddl_problem, unit_costs=True)
-    problem = get_problem(evaluations, goal_exp, domain, unit_costs=True)
-    task = task_from_domain_problem(domain, problem)
-    LOGGER.debug("=" * 10)
-    for task_obj, pddl_object in sorted(
-        zip(task.objects, map(lambda x: obj_from_pddl(x.name), task.objects)),
-        key=lambda x: int(x[0].name.split("v")[1]),
-    ):
-        LOGGER.debug("{} : {}".format(task_obj.name, colored_str_from_object(pddl_object.value)))
-    LOGGER.debug("=" * 10)
-
-
-def contains_number(value):
-    for character in value:
-        if character.isdigit():
-            return True
-    return False
-
-
-def colored_str_from_object(obj, show_details=False):
-    if not show_details:
-        # if isinstance(obj, Frame):
-        #     return '(frm)'
-        # elif isinstance(obj, Transformation):
-        #     return '(tf)'
-        # elif isinstance(obj, Configuration):
-        #     return colored('(conf)', 'yellow')
-        if isinstance(obj, Action):
-            return colored(obj, "yellow")
-
-    str_rep = str_from_object(obj)
-    if contains_number(str_rep):
-        return colored(str_rep, "blue")
-    else:
-        return colored(str_rep, "red")
-
-
-def print_itj_pddl_plan(plan, show_details=False):
-    if not is_plan(plan):
-        return
-    step = 1
-    color_print_fn = partial(colored_str_from_object, show_details=show_details)
-    for action in plan:
-        if isinstance(action, DurativeAction):
-            name, args, start, duration = action
-            LOGGER.info(
-                "{:.2f} - {:.2f}) {} {}".format(start, start + duration, name, " ".join(map(str_from_object, args)))
-            )
-        elif isinstance(action, Action):
-            name, args = action
-            LOGGER.info("{:2}) {} {}".format(step, colored(name, "green"), " ".join(map(color_print_fn, args))))
-            step += 1
-        elif isinstance(action, StreamAction):
-            name, inputs, outputs = action
-            LOGGER.info(
-                "    {}({})->({})".format(
-                    name, ", ".join(map(str_from_object, inputs)), ", ".join(map(str_from_object, outputs))
-                )
-            )
-        elif isinstance(action, FunctionAction):
-            name, inputs = action
-            LOGGER.info("    {}({})".format(name, ", ".join(map(str_from_object, inputs))))
-        else:
-            raise NotImplementedError(action)
-
-
-def pddl_plan_to_string(plan):
-    plan_string_lines = []
-    step = 1
-    for action in plan:
-        if isinstance(action, DurativeAction):
-            name, args, start, duration = action
-            plan_string_lines.append(
-                "{:.2f} - {:.2f}) {} {}".format(start, start + duration, name, " ".join(map(str_from_object, args)))
-            )
-        elif isinstance(action, Action):
-            name, args = action
-            plan_string_lines.append("{:3}: {} {}".format(step, name, " ".join(map(str_from_object, args))))
-            step += 1
-        elif isinstance(action, StreamAction):
-            name, inputs, outputs = action
-            plan_string_lines.append(
-                "    {}({})->({})".format(
-                    name, ", ".join(map(str_from_object, inputs)), ", ".join(map(str_from_object, outputs))
-                )
-            )
-        elif isinstance(action, FunctionAction):
-            name, inputs = action
-            plan_string_lines.append("    {}({})".format(name, ", ".join(map(str_from_object, inputs))))
-        else:
-            raise NotImplementedError(action)
-    return plan_string_lines
-
-
-def pddl_plan_to_dict(plan):
-    seq_n = 0  # Increment after the assembly of each beam
-    act_n = 0  # Increment after every action , resets after new beam
-    actions = []
-    for action in plan:
-        if isinstance(action, Action):
-            action_name, args = action
-            actions.append({"act_n": act_n, "action_name": action_name, "args": args})
-            act_n += 1
-    return actions
-
-    # sequence = {'seq_n': seq_n, 'actions': []}
-    # for action in plan:
-    #     if isinstance(action, Action):
-    #         action_name, args = action
-    #         sequence['actions'].append({'act_n': act_n, 'action_name': action_name, 'args': args})
-    #         act_n += 1
-    #         if action_name.startswith('assemble_beam'):
-    #             seq_n += 1
-    #             act_n = 0
-    #             sequence['beam_id'] = args[0]
-    #             sequences.append(sequence)
-    #             sequence = {'seq_n': seq_n, 'actions': []}
-    # if len(sequence['actions']) > 0:
-    #     sequences[-1]['actions'].extend(sequence['actions'])
-    # return sequences
-
-
-def save_plan_text(plan, pddl_folder, file_name):
-    # Create folder if not exists
-    if not os.path.exists(pddl_folder):
-        os.makedirs(pddl_folder)
-
-    # Save plan to file
-    file_output_path = os.path.join(HERE, pddl_folder, file_name)
-    with open(file_output_path, "w") as f:
-        for line in pddl_plan_to_string(plan):
-            f.write(line + "\n")
-
-
-def save_plan_dict(plan, pddl_folder, file_name):
-    # Create folder if not exists
-    if not os.path.exists(pddl_folder):
-        os.makedirs(pddl_folder)
-
-    # Save plan to file
-    file_output_path = os.path.join(HERE, pddl_folder, file_name)
-    action_dict = pddl_plan_to_dict(plan)
-    import json
-
-    from compas.data import DataEncoder
-
-    with open(file_output_path, "w") as f:
-        json.dump(action_dict, f, indent=4, cls=DataEncoder)
 
 
 ###########################################
@@ -408,3 +247,48 @@ def timeit_decorator_counter(counter_name: str = "", verbose: bool = False, outp
         return wrapper
 
     return timeit_decorator
+
+
+def closest_points_between_segments(
+    seg1: List[Union[List[float], np.ndarray]], seg2: List[Union[List[float], np.ndarray]]
+) -> Tuple[List[float], List[float]]:
+    """
+    Calculate the endpoints of the common perpendicular line between two line segments.
+
+    Params:
+        seg1 ([[x1, y1, z1], [x2, y2, z2]]): segment 1
+        seg2 ([[x1, y1, z1], [x2, y2, z2]]): segment 2
+
+    Returns:
+        [x1, y1, z1]: point on segment 1
+        [x2, y2, z2]: point on segment 1
+
+    """
+    p1, q1 = np.array(seg1[0]), np.array(seg1[1])
+    p2, q2 = np.array(seg2[0]), np.array(seg2[1])
+
+    d1 = q1 - p1
+    d2 = q2 - p2
+
+    r = p1 - p2
+
+    a = np.dot(d1, d1)
+    b = np.dot(d1, d2)
+    c = np.dot(d2, d2)
+    d = np.dot(d1, r)
+    e = np.dot(d2, r)
+
+    denom = a * c - b * b
+    if denom == 0:
+        raise ValueError("Segments are parallel!")
+
+    s = (b * e - c * d) / denom
+    t = (a * e - b * d) / denom
+
+    s = np.clip(s, 0, 1)
+    t = np.clip(t, 0, 1)
+
+    closest_point_on_seg1: np.ndarray = p1 + s * d1
+    closest_point_on_seg2: np.ndarray = p2 + t * d2
+
+    return closest_point_on_seg1.tolist(), closest_point_on_seg2.tolist()

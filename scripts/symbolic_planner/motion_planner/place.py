@@ -1,13 +1,14 @@
 import os
 import sys
 from functools import partial
-from typing import Callable, List, Set, Tuple, Dict, Union
+from typing import Callable, Dict, List, Set, Tuple, Union
 
 import numpy as np
 import pybullet_planning as pp
 from termcolor import cprint
+from utils.params import *
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(HERE)
 
 from pybullet_planning import Attachment, interpolate_poses
 from robot.robot_setup import RobotSetup
@@ -15,7 +16,6 @@ from sampler.grasp_sampler import grasp_sampler
 from sampler.mobile_base_sampler import robot_pose_sampler
 from utils.collision import Element
 from utils.utils import CounterModule, angles_distance, normalize_angles
-from utils.params import *
 
 # place retreat
 RETREAT_DISTANCE = 0.07

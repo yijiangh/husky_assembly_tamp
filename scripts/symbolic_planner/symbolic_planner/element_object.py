@@ -1,31 +1,33 @@
 import operator
 from collections import deque
 from copy import deepcopy
-from enum import Enum
-from typing import Tuple
+from typing import List, Tuple
 
 import pybullet_planning as pp
+from symbolic_planner.element_status import ElementStatus
 
-
-class ElementStatus(Enum):
-    unassembled = 0
-    float = 1
-    rotate = 2
-    fixed = 3
-
-# TODO consider hold
 
 class ElementObject(object):
     def __init__(
         self,
         index: int,
         body: int,
-        init_pose: Tuple[Tuple, Tuple],
-        goal_pose: Tuple[Tuple, Tuple],
-        vertices: list[list, list],
-        coupled_elements: list = [],
+        init_pose: Tuple[Tuple[float], Tuple[float]],
+        goal_pose: Tuple[Tuple[float], Tuple[float]],
+        vertices: List[List[float]],
+        coupled_elements: List = [],
+        checker: str = "default",
         is_grounded=False,
     ) -> None:
+
+        from symbolic_planner.status_checker import (
+            BasicChecker,
+            DefaultChecker,
+            GroundedChecker,
+            TwoFixConstrainChecker,
+            AlgebraicChecker,
+        )
+
         self.index = index
         self.body = body
         self.cur_pose = init_pose
@@ -38,8 +40,13 @@ class ElementObject(object):
         # self.assigned_couplers = []  # installed couplers
         self.assembled_elements = []  # connected elements index
         self.status = ElementStatus.unassembled
-        self.status_checker = TwoFixConstrainChecker()
-        # self.status_checker = DefaultChecker()
+        self.checker = checker
+        if checker == "two-fix":
+            self.status_checker = TwoFixConstrainChecker()
+        elif checker == "algebraic":
+            self.status_checker = AlgebraicChecker()
+        else:
+            self.status_checker = DefaultChecker()
 
     def __str__(self) -> str:
         return f"index: {self.index}, status: {self.status.name}, assembled: {self.assembled_elements}"
@@ -48,7 +55,7 @@ class ElementObject(object):
         # return f"index: {self.index}"
         return f"index: {self.index}, status: {self.status.name}"
 
-    def Assemble(self, assembled_list: list):
+    def Assemble(self, assembled_list: List[int]):
         self.status = ElementStatus.float
         self.UpdateConstrain(assembled_list)
 
@@ -56,14 +63,17 @@ class ElementObject(object):
         self.status = ElementStatus.unassembled
         self.assembled_elements = []
 
-    def UpdateConstrain(self, assembled_list: list):
+    def UpdateConstrain(self, assembled_list: List[int]):
         if self.status != ElementStatus.unassembled:
             for assembled_index in assembled_list:
                 if assembled_index in self.coupled_elements:
                     self.AddAssembleElement(assembled_index)
 
-    def UpdateStatus(self, element_object_list: list):
-        self.status = self.status_checker.Check(self.index, element_object_list)
+    def UpdateStatus(self, assembled: List[int], element_object_list: List["ElementObject"]):
+        if self.checker == "algebraic":
+            self.status = self.status_checker.Check(self.index, assembled, element_object_list)
+        else:
+            self.status = self.status_checker.Check(self.index, element_object_list)
         # print(f"index {self.index}: ", self.status.name)
 
     def AddAssembleElement(self, index: int):
@@ -74,7 +84,7 @@ class ElementObject(object):
         self.heuristic_value = value
 
     @staticmethod
-    def GetCoupledElements(element_index: int, contact_id_pairs: list[list]) -> list:
+    def GetCoupledElements(element_index: int, contact_id_pairs: List[List[int]]) -> List[int]:
         contact_id_pairs = deepcopy(contact_id_pairs)
         coupled_elements = []
         for contact_id_pair in contact_id_pairs:
@@ -83,166 +93,25 @@ class ElementObject(object):
                 coupled_elements.append(contact_id_pair[0])
         return coupled_elements
 
-
-class DefaultChecker(object):
-    def __init__(self) -> None:
-        pass
-
     @staticmethod
-    def Check(index: int, element_object_list: list[ElementObject]) -> ElementStatus:
-        return ElementStatus.fixed
+    def GetCouplers(assembled: List[int], element_object_list: List["ElementObject"]) -> List[Tuple[int]]:
+        """
+        Get couplers of assembled substructure.
 
-class BasicChecker(object):
-    def __init__(self) -> None:
-        pass
+        Params:
+            assembled ([int]): indices of assembled elements
+            element_object_list ([ElementObject]): list of ElementObject
 
-    @staticmethod
-    def Check(index: int, element_object_list: list[ElementObject]) -> ElementStatus:
-        # -------------------- first judge assemble state --------------------#
-        if element_object_list[index].status == ElementStatus.unassembled:
-            return ElementStatus.unassembled
+        Returns:
+            List[Tuple[int]]: [(index_1, index_2), ...] couplers
+        """
+        couplers = []
+        for index in assembled:
+            for next_index in element_object_list[index].assembled_elements:
+                coupler = [index, next_index]
+                coupler.sort()
+                coupler = tuple(coupler)
+                if coupler not in couplers:
+                    couplers.append(coupler)
 
-        # -------------------- second judge ground state --------------------#
-        if element_object_list[index].is_grounded:
-            return ElementStatus.fixed
-
-        if len(element_object_list[index].assembled_elements) == 0:
-            return ElementStatus.float
-        elif len(element_object_list[index].assembled_elements) == 1:
-            return ElementStatus.rotate
-        else:
-            return ElementStatus.fixed
-
-
-class GroundedChecker(object):
-    def __init__(self) -> None:
-        super().__init__()
-
-    @staticmethod
-    def Check(index: int, element_object_list: list[ElementObject]) -> ElementStatus:
-
-        basic_status = BasicChecker.Check(index, element_object_list)
-
-        if basic_status == ElementStatus.fixed or basic_status == ElementStatus.unassembled:
-            return basic_status
-
-        queue = deque([index])
-        visited = set([index])
-        predecessor = {index: None}
-
-        # path = []
-        is_grounded = False
-        while queue:
-            node_index = queue.popleft()
-            if element_object_list[node_index].is_grounded:
-                # while node_index is not None:
-                #     path.append(node_index)
-                #     node_index = predecessor[node_index]
-                is_grounded = True
-                break
-            for neighbor_index in element_object_list[node_index].assembled_elements:
-                if neighbor_index not in visited:
-                    queue.append(neighbor_index)
-                    visited.add(neighbor_index)
-                    predecessor[neighbor_index] = node_index
-        # if len(path) == 0:
-        #     is_grounded = False
-        # else:
-        #     is_grounded = True
-
-        if is_grounded:
-            return basic_status
-        else:
-            return ElementStatus.float
-
-    @staticmethod
-    def CheckGroundNum(index: int, element_object_list: list[ElementObject]) -> int:
-        queue = deque([index])
-        visited = set([index])
-        ground_num = 0
-        while queue:
-            node_index = queue.popleft()
-            if element_object_list[node_index].is_grounded:
-                ground_num += 1
-            for neighbor_index in element_object_list[node_index].assembled_elements:
-                if neighbor_index not in visited:
-                    queue.append(neighbor_index)
-                    visited.add(neighbor_index)
-        return ground_num
-
-    @staticmethod
-    def GetGroundPath(index: int, element_object_list: list[ElementObject]) -> list[ElementObject]:
-        queue = deque([index])
-        visited = set([index])
-        predecessor = {index: None}
-
-        path = []
-        while queue:
-            node_index = queue.popleft()
-            if element_object_list[node_index].is_grounded:
-                while node_index is not None:
-                    path.append(node_index)
-                    node_index = predecessor[node_index]
-                return path[::-1]
-            for neighbor_index in element_object_list[node_index].assembled_elements:
-                if neighbor_index not in visited:
-                    queue.append(neighbor_index)
-                    visited.add(neighbor_index)
-                    predecessor[neighbor_index] = node_index
-        return []
-
-    @staticmethod
-    def GetTrueGroundPath(index: int, element_object_list: list[ElementObject]) -> list[ElementObject]:
-        queue = deque([index])
-        visited = set([index])
-        predecessor = {index: None}
-
-        path = []
-        while queue:
-            node_index = queue.popleft()
-            if element_object_list[node_index].is_grounded:
-                while node_index is not None:
-                    path.append(node_index)
-                    node_index = predecessor[node_index]
-                return path[::-1]
-            for neighbor_index in element_object_list[node_index].coupled_elements:
-                if neighbor_index not in visited:
-                    queue.append(neighbor_index)
-                    visited.add(neighbor_index)
-                    predecessor[neighbor_index] = node_index
-        return []
-
-
-class TwoFixConstrainChecker(object):
-    def __init__(self) -> None:
-        super().__init__()
-
-    @staticmethod
-    def Check(index: int, element_object_list: list[ElementObject], visited=[]) -> ElementStatus:
-        # -------------------- grounded: only fixed is cannot be determined --------------------#
-        grounded_status = GroundedChecker.Check(index, element_object_list)
-        if (
-            grounded_status == ElementStatus.unassembled
-            or grounded_status == ElementStatus.float
-            or grounded_status == ElementStatus.rotate
-        ):
-            return grounded_status
-
-        # -------------------- directly grounded --------------------#
-        if element_object_list[index].is_grounded:
-            return ElementStatus.fixed
-
-        # -------------------- judge the fixed constrain num --------------------#
-        fix_constrain_num = 0
-        element_object = element_object_list[index]
-        for neighbor_index in element_object.assembled_elements:
-            if neighbor_index in visited:
-                continue
-            neighbor_status = TwoFixConstrainChecker.Check(neighbor_index, element_object_list, visited + [index])
-            if neighbor_status == ElementStatus.fixed:
-                fix_constrain_num += 1
-        
-        if fix_constrain_num >= 2:
-            return ElementStatus.fixed
-        else:
-            return ElementStatus.rotate
+        return couplers

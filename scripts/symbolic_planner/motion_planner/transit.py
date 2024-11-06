@@ -5,13 +5,14 @@ from typing import Callable, Dict, List, Set, Tuple, Union
 import numpy as np
 import pybullet_planning as pp
 from termcolor import cprint
+from utils.params import *
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(HERE)
 
 from pybullet_planning import Attachment
 from robot.robot_setup import RobotSetup
 from utils.collision import Element
-from utils.utils import CounterModule, normalize_angles, get_custom_limits
+from utils.utils import CounterModule, get_custom_limits, normalize_angles
 
 # collision check threshold
 MAX_DISTANCE = 0.0

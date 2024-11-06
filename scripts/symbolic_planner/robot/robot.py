@@ -7,8 +7,9 @@ from functools import partial
 from typing import Dict, List, Tuple, Union
 
 from termcolor import cprint
+from utils.params import *
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(PROJECT_DIR)
 
 import numpy as np
 import pybullet_planning as pp
@@ -18,7 +19,6 @@ from motion_planner.transfer import get_transfer_gen_fn
 from pybullet_planning import Attachment, Euler, Point, Pose, get_distance, interpolate_poses, invert, multiply
 from robot.robot_setup import ONBOARD_LINK, ONBOARD_POSE, RobotSetup
 from utils.collision import Element
-from utils.params import *
 from utils.utils import CounterModule, timeit_decorator_counter
 
 ConcretePath = namedtuple("ConcretePath", ["base_path", "manipulator_path"])
@@ -74,6 +74,7 @@ class Robot(object):
         counter: CounterModule,
         attachments: List[Attachment] = [],
         storage: Union[PathWithIndex, None] = None,
+        planner: str = "default",
     ) -> None:
         self.index = index
         self.robot_setup = robot_setup
@@ -128,8 +129,10 @@ class Robot(object):
         #     allow_failure=True,
         # )
 
-        # self.manipulator_planner_fn = self.DefaultPlan
-        self.manipulator_planner_fn = partial(self.ManipulatorMotionPlan, verbose=MNIPULATOR_PLAN_SHOW)
+        if planner == "default":
+            self.manipulator_planner_fn = self.DefaultPlan
+        else:
+            self.manipulator_planner_fn = partial(self.ManipulatorMotionPlan, verbose=MNIPULATOR_PLAN_SHOW)
 
     # def SaveLog(self, path: str, suffix=""):
     #     if self.counter_handle is not None:
@@ -247,71 +250,74 @@ class Robot(object):
         max_attempts: int = 2,
         verbose: bool = False,
     ) -> Tuple[bool, List[int]]:
-        task_all = list(itertools.permutations(task))
-        task_all = [list(temp) for temp in task_all]
-        mertic_all = [0.0] * len(task_all)
-        plan_path_obj_all = []
+        
+        return True, task
 
-        # -------------------- find all solutions --------------------#
-        for current_id, current_task in enumerate(task_all):
+        # task_all = list(itertools.permutations(task))
+        # task_all = [list(temp) for temp in task_all]
+        # mertic_all = [0.0] * len(task_all)
+        # plan_path_obj_all = []
 
-            current_assembled_index_list = deepcopy(assembled_index_list)
-            current_unassembled_index_list = deepcopy(unassembled_index_list)
-            current_plan_time = 0.0
-            current_plan_status = True
-            current_plan_path_obj = []
+        # # -------------------- find all solutions --------------------#
+        # for current_id, current_task in enumerate(task_all):
 
-            for element_index, robot in zip(current_task, robots):
-                decorated_plan_func = timeit_decorator_counter(counter_name="others_counter_handle", output_time=True)(
-                    robot.ManipulatorMotionPlan
-                )
+        #     current_assembled_index_list = deepcopy(assembled_index_list)
+        #     current_unassembled_index_list = deepcopy(unassembled_index_list)
+        #     current_plan_time = 0.0
+        #     current_plan_status = True
+        #     current_plan_path_obj = []
 
-                # remove current element from unassembled list
-                if element_index in current_unassembled_index_list:
-                    current_unassembled_index_list.remove(element_index)
+        #     for element_index, robot in zip(current_task, robots):
+        #         decorated_plan_func = timeit_decorator_counter(counter_name="others_counter_handle", output_time=True)(
+        #             robot.ManipulatorMotionPlan
+        #         )
 
-                plan_result, plan_time = decorated_plan_func(
-                    element_index,
-                    current_assembled_index_list,
-                    current_unassembled_index_list,
-                    [],
-                    verbose=True,
-                    output_path=True,
-                )
-                plan_status, plan_path_obj = plan_result
+        #         # remove current element from unassembled list
+        #         if element_index in current_unassembled_index_list:
+        #             current_unassembled_index_list.remove(element_index)
 
-                # store path object
-                current_plan_path_obj.append(plan_path_obj)
+        #         plan_result, plan_time = decorated_plan_func(
+        #             element_index,
+        #             current_assembled_index_list,
+        #             current_unassembled_index_list,
+        #             [],
+        #             verbose=True,
+        #             output_path=True,
+        #         )
+        #         plan_status, plan_path_obj = plan_result
 
-                # if plan succeed, add current element to assembled list
-                if plan_status and element_index not in current_assembled_index_list:
-                    current_assembled_index_list.append(element_index)
+        #         # store path object
+        #         current_plan_path_obj.append(plan_path_obj)
 
-                if plan_status:
-                    # if plan succeed, accumulate total plan time
-                    current_plan_time += plan_time
-                else:
-                    # if plan failed, set current_plan_status to False and break
-                    current_plan_status = False
-                    break
+        #         # if plan succeed, add current element to assembled list
+        #         if plan_status and element_index not in current_assembled_index_list:
+        #             current_assembled_index_list.append(element_index)
 
-            mertic_all[current_id] = current_plan_time if current_plan_status else np.inf
+        #         if plan_status:
+        #             # if plan succeed, accumulate total plan time
+        #             current_plan_time += plan_time
+        #         else:
+        #             # if plan failed, set current_plan_status to False and break
+        #             current_plan_status = False
+        #             break
 
-        # -------------------- return a best solution --------------------#
-        best_index = mertic_all.index(min(mertic_all))
-        best_task = task_all[best_index]
-        best_metric = mertic_all[best_index]
-        best_path_obj_list = plan_path_obj_all[best_index]
+        #     mertic_all[current_id] = current_plan_time if current_plan_status else np.inf
 
-        # if best metric equal to inf, motion plan failed
-        if best_metric == np.inf:
-            return False, task
+        # # -------------------- return a best solution --------------------#
+        # best_index = mertic_all.index(min(mertic_all))
+        # best_task = task_all[best_index]
+        # best_metric = mertic_all[best_index]
+        # best_path_obj_list = plan_path_obj_all[best_index]
 
-        # store planned path to global path_storage
-        for robot, path_obj, index in zip(robots, best_path_obj_list, best_task):
-            robot.path_storage.add_manipulator(index, path_obj)
+        # # if best metric equal to inf, motion plan failed
+        # if best_metric == np.inf:
+        #     return False, task
 
-        return True, best_task
+        # # store planned path to global path_storage
+        # for robot, path_obj, index in zip(robots, best_path_obj_list, best_task):
+        #     robot.path_storage.add_manipulator(index, path_obj)
+
+        # return True, best_task
 
     # def BaseMotionPlan(self, path: List[List[int]]):
     #     assembled = []

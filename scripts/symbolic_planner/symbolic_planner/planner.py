@@ -13,7 +13,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 from robot.robot import PathItem, Robot
-from symbolic_planner.element_object import ElementObject, ElementStatus
+from symbolic_planner.element_object import ElementObject
+from symbolic_planner.element_status import ElementStatus
 from symbolic_planner.heuristic import (
     BasicHeuristic,
     CenterDistanceHeuristic,
@@ -337,8 +338,6 @@ class Planner(object):
 
             last_time = time.time()
 
-            Planner.UpdateElements([obj.index for obj in element_object_list], element_object_list)
-
             for element_obj in element_object_list:
                 if element_obj.index in current_state.assembled:
                     pp.set_pose(element_obj.body, element_obj.goal_pose)
@@ -403,7 +402,6 @@ class Planner(object):
                 solve_status, task = self.SearchRobotCooperation(element_object_list, current_coop_state)
                 if solve_status:
                     Planner.MultiDisassemble(current_state.blacklist, current_state.assembled, element_object_list)
-                    Planner.MultiAssemble(task, current_state.assembled, element_object_list)
                     cur_time = time.time()
                     cprint(
                         f"========== plan {element_object_index}: {task} success {cur_time-last_time}s ==========",
@@ -589,6 +587,7 @@ class Planner(object):
                     element.goal_pose,
                     element.axis_endpoints,
                     coupled_elements=ElementObject.GetCoupledElements(element.index, contact_id_pairs),
+                    checker="algebraic",
                     is_grounded=True if index in grounded_elements_index else False,
                 )
             )
@@ -600,7 +599,7 @@ class Planner(object):
         for element_object in element_object_list:
             element_object.UpdateConstrain(assembled_list)
         for element_object in element_object_list:
-            element_object.UpdateStatus(element_object_list)
+            element_object.UpdateStatus(assembled_list, element_object_list)
 
     @staticmethod
     def ElementsStatusCheck(index_list: List[int], element_object_list: List[ElementObject]) -> bool:

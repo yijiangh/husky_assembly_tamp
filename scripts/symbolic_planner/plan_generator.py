@@ -1,13 +1,11 @@
 import argparse
 import os
 import random
+from copy import deepcopy
 from datetime import datetime
 
 import numpy as np
 import pybullet as p
-
-cur_dir = os.path.dirname(os.path.abspath(__file__))
-
 import pybullet_planning as pp
 
 # -------------------- self-defined modules --------------------#
@@ -23,7 +21,7 @@ from utils.params import *
 from utils.parse import parse_mt_geometric
 from utils.utils import CounterModule
 
-log_dir = os.path.join(cur_dir, f"logs/{MT_FILE_NAME}")
+log_dir = os.path.join(HERE, f"logs/{MT_FILE_NAME}")
 
 # mt_file_name = "tower_integral_one_len_MT_layer_0"
 # grounded_elements_index = [0, 1, 4, 19]  # tower_integral_one_len_MT_layer_0
@@ -111,7 +109,7 @@ if __name__ == "__main__":
                 for index in index_list:
                     element_object_list[index].Assemble(assembled)
                     assembled.append(index)
-                    Planner.UpdateElements(assembled, element_object_list)
+                    Planner.UpdateElements(deepcopy(assembled), element_object_list)
                 with pp.LockRenderer():
                     for element_obj in element_object_list:
                         if element_obj.status == ElementStatus.float:

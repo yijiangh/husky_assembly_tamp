@@ -116,9 +116,12 @@ class CounterValue:
         self.name = name
         self.parent = parent
         self.value = 0
+        self.last_update = 0
         parent.values[name] = self
 
+
     def increment(self, value=1):
+        self.last_update = value
         self.value += value
 
     def update(self, value):

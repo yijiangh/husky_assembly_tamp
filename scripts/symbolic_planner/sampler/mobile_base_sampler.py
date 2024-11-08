@@ -1,13 +1,16 @@
 import os
 import random
 import sys
-from typing import Tuple, List
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from typing import Callable, List, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.spatial import ConvexHull
+from utils.params import *
+
+sys.path.append(PROJECT_DIR)
+
+from robot.robot_setup import INIT_ARM_JOINT_ANGLES
 
 
 def is_point_in_polygon(point, polygon):
@@ -153,7 +156,16 @@ def sample_points_near_projection(line_start, line_end, d, num_samples):
     return samples
 
 
-def is_valid_pose(candidate_point, target_edge, edges, safety_distance, reach_distance, attach_point=None):
+def is_valid_pose(
+    candidate_point,
+    candidate_orientation,
+    target_edge,
+    edges,
+    safety_distance,
+    reach_distance,
+    collision_fn=None,
+    attach_point=None,
+):
     """
     Check if the candidate pose maintains a safe distance from all edges.
     """
@@ -162,11 +174,20 @@ def is_valid_pose(candidate_point, target_edge, edges, safety_distance, reach_di
             return False
         # if distance_point_to_line(candidate_point[:2], edge[0][:2], edge[1][:2]) < safety_distance:
         #     return False
+
     if distance_point_to_line_3d(candidate_point, target_edge[0], target_edge[1]) > reach_distance:
         return False
+
     # if attach_point is not None:
     #     if np.linalg.norm(candidate_point - attach_point) > reach_distance:
     #         return False
+
+    if collision_fn is not None:
+        conf = np.hstack((candidate_point[:2], np.array([candidate_orientation]), INIT_ARM_JOINT_ANGLES))
+        collision = collision_fn(conf, diagnosis=False)
+        if collision:
+            return False
+
     return True
 
 
@@ -179,6 +200,7 @@ def robot_pose_sampler(
     reach_distance: float,
     sampling_number: int,
     attach_point=None,
+    collision_fn: Union[Callable[[np.ndarray, bool], bool], None] = None,
     max_attempt: int = 10,
 ) -> Tuple[np.ndarray, float]:
     """
@@ -193,6 +215,7 @@ def robot_pose_sampler(
         reach_distance (float): the 3D distance between target edge and sampled points < reach_distance
         sampling_number (int): the max sample numbers
         attach_point (None, not used): grasp point on the elements
+        collision_fn (None | Callable[[np.ndarray, bool], bool], None): collision function to judge config with manipulator init conf, (robot_conf, diagnosis) -> False if no collision found, True otherwise
         max_attempt (int): max attempts to generate sample pose
 
     Returns:
@@ -220,7 +243,14 @@ def robot_pose_sampler(
         for candidate_point, candidate_orientation in candidates:
             projected_point = candidate_point[:2]
             if not is_point_in_polygon(projected_point, projected_polygon) and is_valid_pose(
-                candidate_point, target_edge, edges, safety_distance, reach_distance, attach_point
+                candidate_point,
+                candidate_orientation,
+                target_edge,
+                edges,
+                safety_distance,
+                reach_distance,
+                collision_fn,
+                attach_point,
             ):
                 valid_candidates.append((candidate_point, candidate_orientation))
 

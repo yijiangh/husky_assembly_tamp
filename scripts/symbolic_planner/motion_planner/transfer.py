@@ -12,7 +12,7 @@ sys.path.append(HERE)
 from pybullet_planning import Attachment
 from robot.robot_setup import RobotSetup
 from utils.collision import Element
-from utils.utils import CounterModule, get_custom_limits, normalize_angles
+from utils.utils import CounterModule, TermPrint, get_custom_limits, normalize_angles
 
 # collision check threshold
 MAX_DISTANCE = 0.0
@@ -138,7 +138,7 @@ def get_transfer_gen_fn(
     robot_setup: RobotSetup,
     element_from_index: Dict,
     fixed_obstacles: List[int],
-    max_attempts: int = 1,
+    max_attempts: int = 2,
     collisions: bool = True,
     allow_failure: bool = False,
     verbose: bool = False,
@@ -182,6 +182,7 @@ def get_transfer_gen_fn(
         assembled: List[int] = [],
         unassembled: List[int] = [],
         attachments: List[Attachment] = [],
+        other_obstacles: List[int] = [],
         counter: Union[CounterModule, None] = None,
         diagnosis: bool = False,
     ):
@@ -196,6 +197,7 @@ def get_transfer_gen_fn(
             assembled ([int], []): indices of assembled elements
             unassembled ([int], []): indices of unassembled elements (excluding the current element)
             attachments ([Attachment], []): list of attachments bound to the robot (excluding the current element)
+            other_obstacles ([int], []): other obstacles, e.g. other robots
             counter (CounterModule, None): counter module
             diagnosis (bool, False): whether stop and display it in pybullet if a collision is detected
 
@@ -212,7 +214,7 @@ def get_transfer_gen_fn(
         element_obstacles = set({element_from_index[e].body for e in list(assembled)})
         # unassambled_element_obstacles = set({element_from_index[e].body for e in list(unassembled)})
 
-        obstacles = set(fixed_obstacles) | element_obstacles
+        obstacles = set(fixed_obstacles) | set(other_obstacles) | element_obstacles
         if not collisions:
             obstacles = set()
 
@@ -237,13 +239,13 @@ def get_transfer_gen_fn(
             if command is None:
                 continue
 
-            cprint("Transfer E#{} | Attempts: {} | Command: {}".format(index, attempt, len(command)), "green")
+            TermPrint.print("Transfer E#{} | Attempts: {} | Command: {}".format(index, attempt, len(command)), "green")
 
             yield command, mask
             break
 
         # -------------------- fail --------------------#
-        cprint("Transfer E#{} | Attempts: {} | Max attempts exceeded!".format(index, max_attempts), "red")
+        TermPrint.print("Transfer E#{} | Attempts: {} | Max attempts exceeded!".format(index, max_attempts), "red")
 
         if allow_failure:
             yield None, None

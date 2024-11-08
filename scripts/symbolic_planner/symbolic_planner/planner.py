@@ -23,27 +23,31 @@ from symbolic_planner.heuristic import (
 )
 from termcolor import cprint
 from utils.collision import Element
-from utils.utils import flatten, timeit_decorator_counter
-
-# TODO  * 在多机协同的时候，需要将其他机器人也考虑进来（碰撞）
-# TODO  * 需要考虑多机协同时候的路径存储
+from utils.utils import flatten, timeit_decorator_counter, TermPrint
 
 
 class PlanState(object):
     _instances = {}
 
-    def __new__(cls, assembled, unassembled, blacklist):
+    def __new__(cls, assembled, unassembled, blacklist, last_step=None):
         sorted_id = tuple(sorted(assembled))
         if sorted_id not in cls._instances:
             instance = super().__new__(cls)
             cls._instances[sorted_id] = instance
         return cls._instances[sorted_id]
 
-    def __init__(self, assembled: List[int], unassembled: List[int], blacklist: List[int]) -> None:
+    def __init__(
+        self,
+        assembled: List[int],
+        unassembled: List[int],
+        blacklist: List[int],
+        last_step: Union[List[int], None] = None,
+    ) -> None:
         if not hasattr(self, "initialized"):
             self._assembled = assembled
             self._unassembled = unassembled
             self._blacklist = blacklist
+            self._last_step = last_step
 
             self._father = None
             self.is_deadend = False
@@ -117,6 +121,10 @@ class PlanState(object):
         return list(deepcopy(self._blacklist))
 
     @property
+    def last_step(self) -> List[int]:
+        return list(deepcopy(self._last_step))
+
+    @property
     def father(self) -> "PlanState":
         return self._father
 
@@ -141,7 +149,7 @@ class PlanState(object):
             if index not in unassembled:
                 unassembled.append(index)
 
-        rtn = PlanState(assembled, unassembled, [])
+        rtn = PlanState(assembled, unassembled, [], last_step=index_list)
         rtn.SetFather(current_state)
 
         return rtn
@@ -155,7 +163,8 @@ class PlanState(object):
         path_invert = []
         cur_state = end_state
         while cur_state.father != None:
-            step = PlanState.Difference(cur_state.assembled, cur_state.father.assembled)
+            # step = PlanState.Difference(cur_state.assembled, cur_state.father.assembled)
+            step = cur_state.last_step
             path_invert.append(step)
             cur_state = cur_state.father
         return path_invert[::-1]
@@ -170,6 +179,7 @@ class CooperationPlanState(object):
         unassembled: List[int],
         blacklist: List[int],
         hold: List[int],
+        last_step: Union[List[int], None] = None,
         root: Union[PlanState, None] = None,
     ):
         sorted_id = (tuple(sorted(assembled)), tuple(sorted(hold)))
@@ -184,6 +194,7 @@ class CooperationPlanState(object):
         unassembled: List[int],
         blacklist: List[int],
         hold: List[int],
+        last_step: Union[List[int], None] = None,
         root: Union[PlanState, None] = None,
     ):
         if not hasattr(self, "initialized"):
@@ -196,6 +207,7 @@ class CooperationPlanState(object):
             self.initialized = True
 
             self._hold = hold
+            self._last_step = last_step
             self._root = root
 
     def __repr__(self):
@@ -266,6 +278,10 @@ class CooperationPlanState(object):
         return list(deepcopy(self._hold))
 
     @property
+    def last_step(self) -> List[int]:
+        return list(deepcopy(self._last_step))
+
+    @property
     def father(self) -> "CooperationPlanState":
         return self._father
 
@@ -295,7 +311,7 @@ class CooperationPlanState(object):
             if index not in unassembled:
                 unassembled.append(index)
 
-        rtn = CooperationPlanState(assembled, unassembled, [], hold)
+        rtn = CooperationPlanState(assembled, unassembled, [], hold, last_step=index_list)
         rtn.SetFather(current_state)
 
         return rtn
@@ -323,7 +339,7 @@ class Planner(object):
         path_index = self.Search(element_object_list)
         # path_index = self.BackwardSearchWithoutMotionPlan(element_object_list)
 
-        # TODO: 多机协同
+        # TODO: 多机优化
         # self.robots[0].BaseMotionPlan(path_index)
         return path_index
 
@@ -349,13 +365,15 @@ class Planner(object):
                 Planner.FindMin, element_object_list=element_object_list
             )
 
-            print(
-                f"\n-------------------------------------------------------------------------------------------------------"
+            TermPrint.print(
+                "-------------------------------------------------------------------------------------------------------",
+                blank_f=True,
             )
-            print(f"start plan {element_object_index}: {current_state}")
-            print(f"current path {PlanState.GetPath(current_state)}")
-            print(
-                f"-------------------------------------------------------------------------------------------------------\n"
+            TermPrint.print(f"start plan {element_object_index}: {current_state}")
+            TermPrint.print(f"current path {PlanState.GetPath(current_state)}")
+            TermPrint.print(
+                "-------------------------------------------------------------------------------------------------------",
+                blank_b=True,
             )
 
             # -------------------- assemble --------------------#
@@ -364,7 +382,7 @@ class Planner(object):
 
             # -------------------- decide what to do --------------------#
             if status == ElementStatus.fixed:
-                plan_status = self.robots[0].manipulator_planner_fn(
+                plan_status = self.robots[0].ManipulatorMotionPlan(
                     element_object_index,
                     current_state.assembled,
                     current_state.UnassembledRemove([element_object_index]),
@@ -374,21 +392,33 @@ class Planner(object):
                 if plan_status:
                     Planner.MultiDisassemble(current_state.blacklist, current_state.assembled, element_object_list)
                     cur_time = time.time()
-                    cprint(
+                    TermPrint.print(
                         f"========== plan {element_object_index}: {current_state} success {cur_time-last_time}s ==========",
                         "green",
+                        blank_f=True,
+                        blank_b=True,
                     )
                     last_time = cur_time
                     next_state = PlanState.GenerateNextState(current_state, [element_object_index])
                     current_state = next_state
                 else:
                     Planner.Disassemble(element_object_index, current_state.assembled, element_object_list)
-                    cprint(f"********** plan {element_object_index}: {current_state} failed **********", "red")
+                    TermPrint.print(
+                        f"********** plan {element_object_index}: {current_state} failed **********",
+                        "red",
+                        blank_f=True,
+                        blank_b=True,
+                    )
                     current_state.UpdateBlacklist([element_object_index])
 
             elif status == ElementStatus.float:
                 Planner.Disassemble(element_object_index, current_state.assembled, element_object_list)
-                cprint(f"********** {element_object_index}: {current_state} is float **********", "red")
+                TermPrint.print(
+                    f"********** {element_object_index}: {current_state} is float **********",
+                    "red",
+                    blank_f=True,
+                    blank_b=True,
+                )
                 current_state.UpdateBlacklist([element_object_index])
 
             elif status == ElementStatus.rotate:
@@ -403,9 +433,11 @@ class Planner(object):
                 if solve_status:
                     Planner.MultiDisassemble(current_state.blacklist, current_state.assembled, element_object_list)
                     cur_time = time.time()
-                    cprint(
+                    TermPrint.print(
                         f"========== plan {element_object_index}: {task} success {cur_time-last_time}s ==========",
                         "green",
+                        blank_f=True,
+                        blank_b=True,
                     )
                     last_time = cur_time
                     next_state = PlanState.GenerateNextState(current_state, task)
@@ -413,35 +445,49 @@ class Planner(object):
                 else:
                     Planner.MultiDisassemble(task, current_state.assembled, element_object_list)
                     # Planner.Disassemble(element_object_index, current_state.assembled, element_object_list)
-                    cprint(
+                    TermPrint.print(
                         f"********** cooperation plan {element_object_index}: {current_state} not found **********",
                         "red",
+                        blank_f=True,
+                        blank_b=True,
                     )
-                    current_state.UpdateBlacklist([element_object_index])  # TODO: 这里不考虑把所有task全加到blacklist
+                    current_state.UpdateBlacklist([element_object_index])
 
             else:
                 raise RuntimeError("This status is not possible!")
 
             # -------------------- Check if goal is reached --------------------#
             if current_state.finished:
-                cprint("========== Finished! ==========", "green")
+                TermPrint.print(
+                    "==================== Finished! ====================",
+                    "green",
+                    blank_f=True,
+                    blank_b=True,
+                )
                 return PlanState.GetPath(current_state)
 
             # -------------------- Check if backtracking is necessary --------------------#
             if current_state.deadend:
-                cprint(
-                    "\n****************************** Deadend reached, need to traceback! *********************************",
+                TermPrint.print(
+                    "****************************** Deadend reached, need to traceback! *********************************",
                     "cyan",
+                    blank_f=True,
                 )
-                cprint(f"current state: {current_state}", "cyan")
+                TermPrint.print(f"current state: {current_state}", "cyan")
                 current_state = current_state.TraceBack()
-                cprint(f"traceback state: {current_state}", "cyan")
-                cprint(
+                TermPrint.print(f"traceback state: {current_state}", "cyan")
+                TermPrint.print(
                     "****************************************************************************************************\n",
                     "cyan",
+                    blank_b=True,
                 )
 
-        cprint("********** Plan failed! **********", "red")
+        TermPrint.print(
+            "******************** Plan failed! ********************",
+            "red",
+            blank_f=True,
+            blank_b=True,
+        )
         return []
 
     def SearchRobotCooperation(

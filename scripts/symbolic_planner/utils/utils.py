@@ -119,7 +119,6 @@ class CounterValue:
         self.last_update = 0
         parent.values[name] = self
 
-
     def increment(self, value=1):
         self.last_update = value
         self.value += value
@@ -211,6 +210,24 @@ class CounterModule:
         with open(file_path, "w") as file:
             json.dump(data_to_save, file)
         print(f"Counter values saved to {filename}")
+
+
+class TermPrint(object):
+    last_empty_line = False
+
+    def __init__(self) -> None:
+        pass
+
+    @classmethod
+    def print(cls, text: str, color: str = "white", blank_f: bool = False, blank_b: bool = False):
+        if blank_f and not cls.last_empty_line:
+            print("")
+        cprint(text, color)
+        if blank_b:
+            print("")
+            cls.last_empty_line = True
+        else:
+            cls.last_empty_line = False
 
 
 def flatten(nested_list):

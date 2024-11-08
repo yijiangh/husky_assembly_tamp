@@ -283,7 +283,7 @@ class RobotSetup(object):
             end_conf (np.ndarray): target conf of manipulator and base
             attachments ([Attachment]): Attachments on the robot including base, manipulator and ee_attachment
             obstacles (Set[int]): fixed obstacles + assembled elements
-            disabled_collisions (Dict, {}): disabled collisions, TODO: need to consider
+            disabled_collisions (Dict, {}): disabled collisions
             frozen_joints ([int], []): id of joints need to freeze
             frozen_values ([float], []): value of joints need to freeze
             coarse_waypoints (bool, False): whether generate sparse points
@@ -309,7 +309,7 @@ class RobotSetup(object):
 
         # -------------------- init params --------------------#
         custom_limits = get_custom_limits(self.robot, {})
-        resolutions = np.array(list(map(lambda id: 1.0 if id in frozen_joints else 0.05, self.control_joints)))
+        resolutions = np.array(list(map(lambda id: 1.0 if id in frozen_joints else np.pi / 180.0, self.control_joints)))
         disabled_collisions = disabled_collisions or {}
         extra_disabled_collisions = [
             ((self.robot, pp.link_from_name(self.robot, "ur_arm_wrist_3_link")), (attachments[0].child, pp.BASE_LINK)),
@@ -353,9 +353,9 @@ class RobotSetup(object):
                     extend_fn,
                     transit_collision_fn_debug,
                     algorithm="birrt",
-                    max_time=3,
-                    max_iterations=30,
-                    smooth=20,
+                    max_time=10,
+                    max_iterations=40,
+                    smooth=40,
                     diagnosis=diagnosis,
                     coarse_waypoints=coarse_waypoints,
                 )

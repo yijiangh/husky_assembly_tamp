@@ -12,7 +12,7 @@ import pybullet_planning as pp
 import utils.load_multi_tangent as load_multi_tangent
 from multi_tangent.collision import create_collision_bodies
 from multi_tangent.convert import flatten_list
-from robot.robot import PathItem, PathWithIndex, Robot
+from robot.robot import PathItem, PathWithIndex, Robot, ConcretePath
 from robot.robot_setup import RobotSetup
 from symbolic_planner.element_object import ElementObject, ElementStatus
 from symbolic_planner.planner import Planner
@@ -102,13 +102,13 @@ if __name__ == "__main__":
         current_time_str = datetime.now().strftime("%y%m%d_%H%M%S")
         counter.save(log_dir, f"{current_time_str}.json")
 
-        # -------------------- Visualization --------------------#
+        # -------------------- Sequence Visualization --------------------#
         if args.visualization:
             assembled = []
             for step_num, index_list in enumerate(path_index):
-                for index in index_list:
-                    element_object_list[index].Assemble(assembled)
-                    assembled.append(index)
+                for element_index in index_list:
+                    element_object_list[element_index].Assemble(assembled)
+                    assembled.append(element_index)
                     Planner.UpdateElements(deepcopy(assembled), element_object_list)
                 with pp.LockRenderer():
                     for element_obj in element_object_list:
@@ -121,73 +121,149 @@ if __name__ == "__main__":
                             pp.set_pose(element_obj.body, element_obj.goal_pose)
                         else:
                             pp.set_color(element_obj.body, (1, 0, 0, 0.1))
-                    for index in index_list:
-                        pp.set_color(element_object_list[index].body, pp.GREY)
+                    for element_index in index_list:
+                        pp.set_color(element_object_list[element_index].body, pp.GREY)
 
                 pp.wait_for_user(
                     f"step: {step_num+1}/{len(path_index)} ,cur update index: {index_list}/0~{len(element_bodies)-1}"
                 )
 
-            # -------------------- Path Visualize --------------------#
-            assembled_list = []
-            for element_obj in element_object_list:
-                pp.set_color(element_obj.body, (1, 0, 0, 0.1))
-                pp.set_pose(element_obj.body, pp.Pose(point=(5, 0, 0), euler=pp.Euler(0, 1.5708, 0)))
-            for step_num, index_list in enumerate(path_index):
-                index = index_list[0]  # TODO: 考虑多机器人协作的问题
-                path = path_storage.get(index)
-                base_path_item = path.base_path
-                path_item = path.manipulator_path
-                base_path_item: PathItem
-                path_item: PathItem
+            if MANIPULATOR_PLANNER == "default":
+                pass
+            else:
+                # -------------------- Path Visualize --------------------#
+                assembled_list = []
 
-                p.removeAllUserParameters()
+                # init element far away
+                for element_obj in element_object_list:
+                    pp.set_color(element_obj.body, (1, 0, 0, 0.1))
+                    pp.set_pose(element_obj.body, pp.Pose(point=(5, 0, 0), euler=pp.Euler(0, 1.5708, 0)))
 
-                base_param_slider = p.addUserDebugParameter("base playback", 0.0, 1.0, 0.0)
-                manipulator_param_slider = p.addUserDebugParameter("manipulator playback", 0.0, 1.0, 0.0)
-                continue_button = p.addUserDebugParameter("continue", 1, 0, 0)
-                prev_continue_button_value = p.readUserDebugParameter(continue_button)
+                for step_num, index_list in enumerate(path_index):
 
-                manipulator_traj = path_item.conf
-                manipulator_traj_grasp_mask = path_item.mask
-                grasp_attach = path_item.attach
+                    # **************************************************************************
+                    # 初始化GUI控件
+                    # **************************************************************************
 
-                if base_path_item is not None:
-                    base_traj = base_path_item.conf
-                    base_traj_grasp_mask = base_path_item.mask
+                    p.removeAllUserParameters()
 
-                pp.set_color(path_item.element_index, pp.RED)
+                    base_sliders = []
+                    manipulator_sliders = []
 
-                for i in assembled_list:
-                    pp.set_pose(element_from_index[i].body, element_from_index[i].goal_pose)
+                    for element_index in index_list:
+                        # 获取Path对应的robot index
+                        path = path_storage.get(element_index)
+                        robot_index = path.robot_index
+                        # path_item: PathItem = path.manipulator_path
+                        # base_path_item: PathItem = path.base_path
 
-                is_first = True
+                        base_slider = p.addUserDebugParameter(f"base playback r{robot_index}", 0.0, 1.0, 0.0)
+                        manipulator_slider = p.addUserDebugParameter(
+                            f"manipulator playback r{robot_index}", 0.0, 1.0, 0.0
+                        )
+                        base_sliders.append(base_slider)
+                        manipulator_sliders.append(manipulator_slider)
 
-                while True:
-                    current_continue_button_value = p.readUserDebugParameter(continue_button)
-                    if current_continue_button_value > prev_continue_button_value:
-                        assembled_list.append(index)
-                        prev_continue_button_value = current_continue_button_value
-                        break
+                    continue_button = p.addUserDebugParameter("continue", 1, 0, 0)
+                    prev_continue_button_value = p.readUserDebugParameter(continue_button)
 
-                    manipulator_traj_param_value = p.readUserDebugParameter(manipulator_param_slider)
-                    manipulator_traj_idx = int(manipulator_traj_param_value * (len(manipulator_traj) - 1))
+                    # **************************************************************************
+                    # 获取Path
+                    # **************************************************************************
 
-                    if base_path_item is not None:
-                        base_traj_param_value = p.readUserDebugParameter(base_param_slider)
-                        base_traj_idx = int(base_traj_param_value * (len(base_traj) - 1))
+                    manipulator_traj_list = []
+                    manipulator_traj_mask_list = []
+                    grasp_attach_list = []
+                    robot_index_list = []
+                    base_traj_list = []
+                    base_traj_mask_list = []
 
-                    traj_pose = manipulator_traj[manipulator_traj_idx]
-                    grasp_attach_flag = manipulator_traj_grasp_mask[manipulator_traj_idx]
+                    for index, element_index in enumerate(index_list):
 
-                    if base_path_item != None and manipulator_traj_idx == 0:
-                        traj_pose = base_traj[base_traj_idx]
-                        grasp_attach_flag = base_traj_grasp_mask[base_traj_idx]
-                    robots[0].robot_setup.set_joint_positions(robots[0].robot_setup.control_joints, traj_pose)
+                        path: ConcretePath = path_storage.get(element_index)
 
-                    if is_first:
-                        robots[0].UpdateElementsRobot(path_item.element_index)
+                        robot_index_list.append(path.robot_index)
+
+                        manipulator_path_item: PathItem = path.manipulator_path
+                        base_path_item: PathItem = path.base_path
+
+                        manipulator_traj_list.append(manipulator_path_item.conf)
+                        manipulator_traj_mask_list.append(manipulator_path_item.mask)
+                        grasp_attach_list.append(path.attachment)
+                        pp.set_color(element_index, pp.RED)
+
+                        if base_path_item is not None:
+                            base_traj_list.append(base_path_item.conf)
+                            base_traj_mask_list.append(base_path_item.mask)
+                        else:
+                            base_traj_list.append([])
+                            base_traj_mask_list.append([])
+
+                    # **************************************************************************
+                    # 其他element初始化
+                    # **************************************************************************
+
+                    for i in assembled_list:
+                        pp.set_pose(element_from_index[i].body, element_from_index[i].goal_pose)
+
+                    # **************************************************************************
+                    # 读取slider和button并设置关节角
+                    # **************************************************************************
+
+                    is_first = True
+
+                    while True:
+
+                        # 更新continue
+                        current_continue_button_value = p.readUserDebugParameter(continue_button)
+                        if current_continue_button_value > prev_continue_button_value:
+                            for temp_index in index_list:
+                                if temp_index not in assembled_list:
+                                    assembled_list.append(temp_index)
+                            prev_continue_button_value = current_continue_button_value
+                            break
+
+                        # 更新每个silder对应的轨迹
+                        for (
+                            manipulator_traj,
+                            manipulator_traj_mask,
+                            base_traj,
+                            base_traj_mask,
+                            grasp_attach,
+                            robot_index,
+                            manipulator_slider,
+                            base_slider,
+                            element_index,
+                        ) in zip(
+                            manipulator_traj_list,
+                            manipulator_traj_mask_list,
+                            base_traj_list,
+                            base_traj_mask_list,
+                            grasp_attach_list,
+                            robot_index_list,
+                            manipulator_sliders,
+                            base_sliders,
+                            index_list,
+                        ):
+                            manipulator_traj_param_value = p.readUserDebugParameter(manipulator_slider)
+                            manipulator_traj_idx = int(manipulator_traj_param_value * (len(manipulator_traj) - 1))
+                            traj_pose = manipulator_traj[manipulator_traj_idx]
+                            grasp_attach_flag = manipulator_traj_mask[manipulator_traj_idx]
+
+                            if len(base_traj) != 0 and manipulator_traj_idx == 0:
+                                base_traj_param_value = p.readUserDebugParameter(base_slider)
+                                base_traj_idx = int(base_traj_param_value * (len(base_traj) - 1))
+                                traj_pose = base_traj[base_traj_idx]
+                                grasp_attach_flag = base_traj_mask[base_traj_idx]
+
+                            robots[robot_index].robot_setup.set_joint_positions(
+                                robots[robot_index].robot_setup.control_joints, traj_pose
+                            )
+
+                            if is_first:
+                                robots[robot_index].UpdateElementsRobot(element_index)
+
+                            if grasp_attach_flag:
+                                grasp_attach.assign()
+
                         is_first = False
-
-                    if grasp_attach_flag:
-                        grasp_attach.assign()

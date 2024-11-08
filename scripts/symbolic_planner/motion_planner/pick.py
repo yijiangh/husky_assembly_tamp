@@ -13,7 +13,7 @@ sys.path.append(HERE)
 from pybullet_planning import Attachment, interpolate_poses
 from robot.robot_setup import INIT_ARM_JOINT_ANGLES, RobotSetup
 from utils.collision import Element
-from utils.utils import CounterModule, angles_distance, normalize_angles
+from utils.utils import CounterModule, TermPrint, angles_distance, normalize_angles
 
 # place retreat
 RETREAT_DISTANCE = 0.07
@@ -99,7 +99,7 @@ def compute_pick_path(
     robot_init_conf = pp.get_joint_positions(robot_setup.robot, robot_setup.control_joints)
     robot_base_conf = robot_init_conf[:3]
 
-    #-------------------- init extra_disabled_collisions --------------------#
+    # -------------------- init extra_disabled_collisions --------------------#
     extra_disabled_collisions = [
         (
             (robot_setup.robot, pp.link_from_name(robot_setup.robot, "ur_arm_wrist_3_link")),
@@ -108,7 +108,7 @@ def compute_pick_path(
         (
             (robot_setup.ee_attachment.child, pp.BASE_LINK),
             (cur_element.body, pp.BASE_LINK),
-        )
+        ),
     ]
 
     # **************************************************************************
@@ -306,6 +306,7 @@ def get_pick_gen_fn(
         assembled: List[int] = [],
         unassembled: List[int] = [],
         attachments: List[Attachment] = [],
+        other_obstacles: List[int] = [],
         counter: CounterModule = None,
         diagnosis: bool = False,
     ):
@@ -318,6 +319,7 @@ def get_pick_gen_fn(
             assembled ([int], []): indices of assembled elements
             unassembled ([int], []): indices of unassembled elements (excluding the current element)
             attachments ([Attachment], []): list of attachments bound to the robot (excluding the current element)
+            other_obstacles ([int], []): other obstacles, e.g. other robots
             counter (CounterModule, None): counter module
             diagnosis (bool, False): whether stop and display it in pybullet if a collision is detected
 
@@ -338,7 +340,7 @@ def get_pick_gen_fn(
         element_obstacles = set({element_from_index[e].body for e in list(assembled)})
         unassambled_element_obstacles = set({element_from_index[e].body for e in list(unassembled)})
 
-        obstacles = set(fixed_obstacles) | element_obstacles | unassambled_element_obstacles
+        obstacles = set(fixed_obstacles) | set(other_obstacles) | element_obstacles | unassambled_element_obstacles
         if not collisions:
             obstacles = set()
 
@@ -363,13 +365,13 @@ def get_pick_gen_fn(
             if command is None:
                 continue
 
-            cprint("Pick E#{} | Attempts: {} | Command: {}".format(index, attempt, len(command)), "green")
+            TermPrint.print("Pick E#{} | Attempts: {} | Command: {}".format(index, attempt, len(command)), "green")
 
             yield command, mask
             break
 
         # -------------------- fail --------------------#
-        cprint("Pick E#{} | Attempts: {} | Max attempts exceeded!".format(index, max_attempts), "red")
+        TermPrint.print("Pick E#{} | Attempts: {} | Max attempts exceeded!".format(index, max_attempts), "red")
 
         if allow_failure:
             yield None, None

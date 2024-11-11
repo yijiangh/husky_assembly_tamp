@@ -396,7 +396,7 @@ def compute_place_path(
         fail_flag = False
         robot_joint_conf_last = robot_joint_attach_conf
         pose_last = attach_tool0_pose
-        for pre_tool0_pose in pre_tool0_poses[::-1][:]:
+        for temp_index, pre_tool0_pose in enumerate(pre_tool0_poses[::-1][:]):
             inner_fail_flag = True
             for ik_search_num in range(ik_search_max_attempt):
                 pre_attach_joint_conf = robot_setup.get_relative_ik_solution(
@@ -404,7 +404,7 @@ def compute_place_path(
                 )
                 if pre_attach_joint_conf is None:
                     if verbose:
-                        print("    pre attach ik not found")
+                        print(f"    pre attach ik not found at step {temp_index}/{len(pre_tool0_poses[::-1][:])-1}")
                     continue
                 pre_attach_joint_conf = normalize_angles(pre_attach_joint_conf)
                 if angles_distance(pre_attach_joint_conf, robot_joint_conf_last) >= np.pi / 2:
@@ -476,7 +476,7 @@ def get_place_gen_fn(
     verbose: bool = False,
     teleops: bool = False,
 ) -> Callable[
-    [int, List[int], List[int], List[Attachment], CounterModule, bool],
+    [int, List[int], List[int], List[int], List[Attachment], CounterModule, bool],
     Tuple[
         List[np.ndarray], List[bool], Attachment, Tuple[Tuple[float], Tuple[float]], Tuple[Tuple[float], Tuple[float]]
     ],
@@ -495,7 +495,7 @@ def get_place_gen_fn(
         teleops (bool, False): whether to interpolate the intermediate paths
 
     Returns:
-        Callable: gen_fn(index, assembled, unassembled, attachments, counter, diagnosis)
+        Callable: gen_fn(index, assembled, unassembled, target_assembled, attachments, counter, diagnosis)
     """
 
     # pregrasp sampler
@@ -505,6 +505,7 @@ def get_place_gen_fn(
         index: int,
         assembled: List[int] = [],
         unassembled: List[int] = [],
+        target_assembled: List[int] = [],
         attachments: List[Attachment] = [],
         other_obstacles: List[int] = [],
         counter: CounterModule = None,
@@ -517,6 +518,7 @@ def get_place_gen_fn(
             index (int): the index of element that needs to assemble
             assembled ([int], []): indices of assembled elements
             unassembled ([int], []): indices of unassembled elements (excluding the current element)
+            target_assembled ([int], []): indices of target assembled elements of current step (excluding/including the current element)
             attachments ([Attachment], []): list of attachments bound to the robot (excluding the current element)
             other_obstacles ([int], []): other obstacles, e.g. other robots
             counter (CounterModule, None): counter module
@@ -536,13 +538,16 @@ def get_place_gen_fn(
         robot_arm_init_conf = pp.get_joint_positions(robot_setup.robot, robot_setup.arm_joints)
 
         # -------------------- init current element to goal_pose --------------------#
-        pp.set_pose(cur_element.body, cur_element.goal_pose)
+        for temp_index in [index] + target_assembled:
+            temp_element: Element = element_from_index[temp_index]
+            pp.set_pose(temp_element.body, temp_element.goal_pose)
 
         # -------------------- set obstacles --------------------#
         element_obstacles = set({element_from_index[e].body for e in list(assembled)})
+        target_obstacles = set({element_from_index[e].body for e in list(target_assembled)})
         # unassambled_element_obstacles = set({element_from_index[e].body for e in list(unassembled)})
 
-        obstacles = set(fixed_obstacles) | set(other_obstacles) | element_obstacles
+        obstacles = set(fixed_obstacles) | set(other_obstacles) | element_obstacles | target_obstacles
         if not collisions:
             obstacles = set()
 

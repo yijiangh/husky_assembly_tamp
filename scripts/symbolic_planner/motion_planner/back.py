@@ -18,7 +18,7 @@ from utils.collision import Element
 from utils.utils import CounterModule, TermPrint, angles_distance, normalize_angles
 
 # place retreat
-RETREAT_DISTANCE = 0.07
+RETREAT_DISTANCE = 0.035
 
 # retreat interpolation step
 POS_STEP_SIZE = 0.005
@@ -41,7 +41,7 @@ def compute_back_path(
     obstacles: Set[int],
     counter: Union[CounterModule, None] = None,
     retreat_dist: float = RETREAT_DISTANCE,
-    max_attempt: int = 10,
+    max_attempt: int = 2,
     ik_search_max_attempt: int = 1,
     path_plan_max_attempt: int = 1,
     verbose: bool = False,
@@ -61,7 +61,7 @@ def compute_back_path(
         obstacles (Set[index]): fixed obstacles + assembled elements + current element + other robots
         counter (CounterModule | None, None): counter module to count failures
         retreat_dist (float, RETREAT_DISTANCE): retreat distance after attach_pose (goal_pose)
-        max_attempt (int, 10): number of attempts for current pregrasp_poses and grasp
+        max_attempt (int, 2): number of attempts for current pregrasp_poses and grasp
         ik_search_max_attempt (int, 1): number of attempts for searching ik solution
         path_plan_max_attempt (int, 1): number of attempts for manipulator path planner
         verbose (bool, False): whether print debug information
@@ -81,9 +81,8 @@ def compute_back_path(
     post_attach_val = counter.add_counter_value("post attach failure")
 
     back_plan_val = counter.add_counter_value("back plan failure")
-    back_val = counter.add_counter_value("back failure")
 
-    place_val = counter.add_counter_value("place failure")
+    back_val = counter.add_counter_value("back failure")
 
     # -------------------- init extra_disabled_collisions --------------------#
     extra_disabled_collisions = [
@@ -135,16 +134,30 @@ def compute_back_path(
         post_attach_confs = []
         fail_flag = False
         robot_joint_conf_last = start_conf[3:]
-        for posttool0_pose in post_tool0_poses:
+        for temp_index, posttool0_pose in enumerate(post_tool0_poses):
             inner_fail_flag = True
             for ik_search_num in range(ik_search_max_attempt):
                 post_attach_joint_conf = robot_setup.get_relative_ik_solution(
                     posttool0_pose, robot_joint_conf_last.tolist()
                 )
                 if post_attach_joint_conf is None:
+                    if verbose:
+                        print(f"    pre attach ik not found at step {temp_index}/{len(post_tool0_poses)-1}")
                     continue
                 post_attach_joint_conf = normalize_angles(post_attach_joint_conf)
                 if angles_distance(post_attach_joint_conf, robot_joint_conf_last) >= np.pi / 2:
+                    if verbose:
+                        print(
+                            "    pre attach ik interval too large:\n",
+                            "       next: ",
+                            post_attach_joint_conf,
+                            "\n",
+                            "       last: ",
+                            robot_joint_conf_last,
+                            "\n",
+                            "       diff: ",
+                            angles_distance(post_attach_joint_conf, robot_joint_conf_last),
+                        )
                     continue
                 post_attach_confs.append(np.hstack((start_conf[:3], post_attach_joint_conf)))
                 robot_joint_conf_last = post_attach_joint_conf
@@ -155,7 +168,7 @@ def compute_back_path(
                     cprint("post attach ik failure", "red")
                 post_attach_ik_val.increment()
                 post_attach_val.increment()
-                place_val.increment()
+                back_val.increment()
                 fail_flag = True
                 break
         if fail_flag:
@@ -169,7 +182,7 @@ def compute_back_path(
                     cprint("post attach collision failure", "red")
                 post_attach_collision_val.increment()
                 post_attach_val.increment()
-                place_val.increment()
+                back_val.increment()
                 fail_flag = True
                 break
         if fail_flag:
@@ -213,7 +226,6 @@ def compute_back_path(
                 cprint("back plan failure", "red")
             back_plan_val.increment()
             back_val.increment()
-            place_val.increment()
             continue
 
         # -------------------- return command, mask, grasp_attach, grasp, pregrasp --------------------#

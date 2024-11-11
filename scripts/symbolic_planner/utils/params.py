@@ -25,7 +25,7 @@ REACH_DISTANCE = 1.15  # dist in 3d space
 SAMPLE_RANGE = 0.10
 REACHABLE_MARGIN = 0.20
 GRASP_METHOD = "robot"  # robot/cylinder
-REDIRECT_METHOD = "robot"  # robot/preview/none(only for cylinder)
+REDIRECT_METHOD = "preview"  # robot/preview/none(only for cylinder)
 
 # Pick Module
 
@@ -36,9 +36,9 @@ PICK_DIRECTION = "left"  # left/behind
 # -------------------- Switch Config --------------------#
 
 ## Place Module
-PLACE_VERBOSE = False
+PLACE_VERBOSE = True
 PLACE_DIAGNOSIS = False
-PLACE_SHOW = False or PLACE_DIAGNOSIS
+PLACE_SHOW = True or PLACE_DIAGNOSIS
 
 ## Pick Module
 PICK_VERBOSE = False
@@ -51,8 +51,8 @@ TRANSFER_DIAGNOSIS = False
 TRANSFER_SHOW = False or TRANSFER_DIAGNOSIS
 
 ## Back Module
-BACK_VERBOSE = False
-BACK_DIAGNOSIS = False
+BACK_VERBOSE = True
+BACK_DIAGNOSIS = True
 BACK_SHOW = False or TRANSFER_DIAGNOSIS
 
 ## Robot

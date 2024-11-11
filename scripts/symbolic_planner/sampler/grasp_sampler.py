@@ -76,6 +76,32 @@ def project_point_onto_plane(point, plane_point, normal):
     return projection
 
 
+def random_point_on_plane(p1, p2, distance=0.5):
+    # 计算向量 l
+    l = np.array(p2) - np.array(p1)
+    l_unit = l / np.linalg.norm(l)  # 归一化
+
+    # 找到与 l 不平行的任意向量
+    if l_unit[0] != 0 or l_unit[1] != 0:
+        arbitrary_vector = np.array([0, 0, 1])
+    else:
+        arbitrary_vector = np.array([1, 0, 0])
+
+    # 计算与 l 垂直的向量 u
+    u = np.cross(l_unit, arbitrary_vector)
+    u /= np.linalg.norm(u)  # 归一化
+
+    # 计算与 l 和 u 垂直的向量 v
+    v = np.cross(l_unit, u)
+
+    # 随机角度 theta
+    theta = np.random.uniform(0, 2 * np.pi)
+
+    # 计算随机点
+    random_point = np.array(p1) + distance * (np.cos(theta) * u + np.sin(theta) * v)
+    return random_point
+
+
 def preview_point_calculation(frame: List[int], element_from_index) -> List[float]:
     """
     Calculate preview points based on assembled structure.
@@ -87,15 +113,20 @@ def preview_point_calculation(frame: List[int], element_from_index) -> List[floa
     Returns:
         point (List[float]): [x, y, z], preview point
     """
-    point = None
-    for index in frame:
-        element: Element = element_from_index[index]
-        if point is None:
-            point = element.axis_endpoints[0]
-        else:
-            point = np.vstack((point, element.axis_endpoints[0]))
-        point = np.vstack((point, element.axis_endpoints[1]))
-    return point.mean(axis=0).tolist()
+    if len(frame) != 1:
+        point = None
+        for index in frame:
+            element: Element = element_from_index[index]
+            if point is None:
+                point = element.axis_endpoints[0]
+            else:
+                point = np.vstack((point, element.axis_endpoints[0]))
+            point = np.vstack((point, element.axis_endpoints[1]))
+        point = point.mean(axis=0)
+    else:
+        element: Element = element_from_index[frame[0]]
+        point = random_point_on_plane(element.axis_endpoints[0], element.axis_endpoints[1])
+    return point.tolist()
 
 
 def grasp_redirector_preview(

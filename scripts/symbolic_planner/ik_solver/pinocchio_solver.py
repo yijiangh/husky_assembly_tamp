@@ -86,9 +86,9 @@ class PinocchioSolver(object):
         verbose: bool = False,
         output: str = "array",
         output_flag: bool = False,
-        eps=1e-4,
-        IT_MAX=1000,
-        DT=1e-1,
+        eps=5e-3,
+        IT_MAX=10000,
+        DT=1e-2,
         damp=1e-12,
     ) -> Union[Union[np.ndarray, None], Tuple[Union[np.ndarray, None], bool]]:
         """

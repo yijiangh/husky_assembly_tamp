@@ -92,6 +92,7 @@ class Robot(object):
         self.place_counter_handle = self.counter_handle.create_handle("place")
         self.pick_counter_handle = self.counter_handle.create_handle("pick")
         self.transfer_counter_handle = self.counter_handle.create_handle("transfer")
+        self.back_counter_handle = self.counter_handle.create_handle("back")
         self.others_counter_handle = self.counter_handle.create_handle("others")
 
         self.element_from_index = element_from_index
@@ -157,6 +158,7 @@ class Robot(object):
         element_index: int,
         assembled_index_list: List[int],
         unassembled_index_list: List[int],
+        target_assembled_index_list: List[int] = [],
         attachment_list: List[Attachment] = [],
         other_obstacles: List[int] = [],
         max_attempts: int = 3,
@@ -180,6 +182,7 @@ class Robot(object):
             element_index (int): the index of the element to assemble
             assembled_index_list (List[int]): indices of assembled elements
             unassembled_index_list (List[int]): indices of unassembled elements excluding current element
+            target_assembled_index_list ([int], []): indices of target assembled elements of current step (excluding/including the current element)
             attachment_list (List[Attachment], [], [not used]): not used
             other_obstacles ([int], []): other obstacles, e.g. other robots
             max_attempts (int, 3): max attempts to plan
@@ -215,7 +218,8 @@ class Robot(object):
                     element_index,
                     assembled_index_list,
                     unassembled_index_list,
-                    attachment_list,
+                    target_assembled_index_list=target_assembled_index_list,
+                    attachment_list=attachment_list,
                     other_obstacles=other_obstacles,
                     pp_show=PLACE_SHOW,
                 )
@@ -257,7 +261,7 @@ class Robot(object):
                     element_index,
                     hold_conf,
                     grasp,
-                    assembled_index_list,
+                    assembled_index_list + [element_index],
                     unassembled_index_list,
                     attachment_list,
                     other_obstacles=other_obstacles,
@@ -298,7 +302,7 @@ class Robot(object):
 
         task_all = list(itertools.permutations(task))
         task_all = [list(temp) for temp in task_all]
-        mertic_all = [0.0] * len(task_all)
+        mertic_all = [np.inf] * len(task_all)
         plan_path_obj_all = [[]] * len(task_all)
         plan_attachment_all = [[]] * len(task_all)
         total_plan_time = 0.0
@@ -339,6 +343,7 @@ class Robot(object):
                     element_index,  # element_index
                     current_assembled_index_list,  # assembled_index_list
                     current_unassembled_index_list,  # unassembled_index_list
+                    target_assembled_index_list=current_task,  # target_assembled_index_list
                     attachment_list=[],  # attachment_list
                     other_obstacles=current_plan_obstacles,  # other_obstacles
                     max_attempts=max_attempts,
@@ -440,6 +445,9 @@ class Robot(object):
             plan_path_obj_all[current_id] = current_plan_path_obj
             plan_attachment_all[current_id] = current_plan_attachment
 
+            if current_plan_status:
+                break
+
         # -------------------- return a best solution --------------------#
         best_index = mertic_all.index(min(mertic_all))
         best_task = task_all[best_index]
@@ -503,7 +511,8 @@ class Robot(object):
         element_index: int,
         assembled_index_list: List[int],
         unassembled_index_list: List[int],
-        attachment_list: List[Attachment],
+        target_assembled_index_list: List[int] = [],
+        attachment_list: List[Attachment] = [],
         other_obstacles: List[int] = [],
         pp_show: bool = False,
     ) -> Tuple[
@@ -522,7 +531,8 @@ class Robot(object):
             element_index (int): index of plance element
             assembled_index_list ([int]): indices of assembled elements
             unassembled_index_list ([int]): indices of unassembled elements excluding current element
-            attachment_list ([Attachment]): list of attachments
+            target_assembled_index_list ([int], []): indices of target assembled elements of current step (excluding/including the current element)
+            attachment_list ([Attachment], []): list of attachments
             other_obstacles ([int], []): other obstacles, e.g. other robots
             pp_show (bool, False): whether show in pybullet GUI while planning
 
@@ -542,6 +552,7 @@ class Robot(object):
                         element_index,
                         assembled=assembled_index_list,
                         unassembled=unassembled_index_list,
+                        target_assembled=target_assembled_index_list,
                         attachments=attachment_list,
                         other_obstacles=other_obstacles,
                         counter=self.place_counter_handle,
@@ -555,6 +566,7 @@ class Robot(object):
                             element_index,
                             assembled=assembled_index_list,
                             unassembled=unassembled_index_list,
+                            target_assembled=target_assembled_index_list,
                             attachments=attachment_list,
                             other_obstacles=other_obstacles,
                             counter=self.place_counter_handle,
@@ -737,7 +749,7 @@ class Robot(object):
             element_index (int): index of plance element
             start_conf (np.ndarray): start conf of robot
             grasp (pp.Pose): gripper_from_body
-            assembled_index_list ([int]): indices of assembled elements
+            assembled_index_list ([int]): indices of assembled elements including current element
             unassembled_index_list ([int]): indices of unassembled elements excluding current element
             attachment_list ([Attachment]): list of attachments
             other_obstacles ([int], []): other obstacles, e.g. other robots
@@ -759,7 +771,7 @@ class Robot(object):
                         unassembled=unassembled_index_list,
                         attachments=attachment_list,
                         other_obstacles=other_obstacles,
-                        counter=self.place_counter_handle,
+                        counter=self.back_counter_handle,
                         diagnosis=PLACE_DIAGNOSIS,
                     )
                 )
@@ -774,7 +786,7 @@ class Robot(object):
                             unassembled=unassembled_index_list,
                             attachments=attachment_list,
                             other_obstacles=other_obstacles,
-                            counter=self.place_counter_handle,
+                            counter=self.back_counter_handle,
                             diagnosis=PLACE_DIAGNOSIS,
                         )
                     )

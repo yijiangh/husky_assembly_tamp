@@ -32,8 +32,8 @@ def load_json_logs(folder):
 
 # 计算每个文件夹中的失败计数平均值
 def extract_failures(folder):
-    types_all = [["place failure"], ["pick failure"], ["transfer failure"], ["total time"]]
-    modules_all = ["place", "pick", "transfer", "others"]
+    types_all = [["place failure", "post attach failure", "back failure"], ["pick failure"], ["transfer failure"], ["back failure"], ["total time"]]
+    modules_all = ["place", "pick", "transfer", "back", "others"]
 
     counts = {}
     counts_raw = {}
@@ -75,7 +75,7 @@ def create_plot_title(structure_name, compare_module, algorithms):
 # 主程序
 def main():
     log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
-    log_name = "one_tet_MT_contact-pm"
+    log_name = "triangle_reciprocal_MT_contact-assembled_in_place"
     # 根文件夹路径
     root_folder = os.path.join(log_dir, log_name)
 

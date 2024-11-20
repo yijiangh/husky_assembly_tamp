@@ -1,8 +1,10 @@
 import json
 import logging
 import os
+import sys
 import time
 from collections import defaultdict
+from contextlib import contextmanager
 from functools import partial
 from typing import Dict, List, Set, Tuple, Union
 
@@ -312,3 +314,20 @@ def closest_points_between_segments(
     closest_point_on_seg2: np.ndarray = p2 + t * d2
 
     return closest_point_on_seg1.tolist(), closest_point_on_seg2.tolist()
+
+
+@contextmanager
+def HideOutput():
+    """
+    A context manager to suppress all standard output (stdout) and standard error (stderr).
+    """
+    with open(os.devnull, "w") as fnull:
+        original_stdout = sys.stdout
+        original_stderr = sys.stderr
+        try:
+            sys.stdout = fnull  # 重定向标准输出
+            sys.stderr = fnull  # 重定向标准错误
+            yield
+        finally:
+            sys.stdout = original_stdout  # 恢复标准输出
+            sys.stderr = original_stderr  # 恢复标准错误

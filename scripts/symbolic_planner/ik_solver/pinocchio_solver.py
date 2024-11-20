@@ -4,8 +4,10 @@ from typing import Tuple, Union
 import numpy as np
 import pinocchio
 from pinocchio.robot_wrapper import RobotWrapper
+import casadi as ca
 
 Joint = namedtuple("Joint", ["id", "type", "idx_qs", "idx_qn"])
+DHParam = namedtuple("DHParam", ["theta", "d", "a", "alpha"])
 
 
 class PinocchioSolver(object):
@@ -35,9 +37,10 @@ class PinocchioSolver(object):
         self.whole_model = pinocchio.buildModelFromUrdf(urdf_path)
         self.whole_data = self.whole_model.createData()
 
-        manipulator_base_joint_id = self.whole_model.getJointId(self.MANIPULATOR_JOINT_NAMES[0])
-        manipulator_tip_joint_id = self.whole_model.getJointId(self.MANIPULATOR_JOINT_NAMES[-1])
-        manipulator_joint_ids = list(range(manipulator_base_joint_id, manipulator_tip_joint_id + 1))
+        # self.model = self.whole_model
+        # self.data = self.whole_data
+
+        manipulator_joint_ids = [self.whole_model.getJointId(name) for name in self.MANIPULATOR_JOINT_NAMES]
 
         all_joint_ids = list(range(1, self.whole_model.njoints))
         joints_to_lock = list(set(all_joint_ids) - set(manipulator_joint_ids))
@@ -78,15 +81,13 @@ class PinocchioSolver(object):
     def ik(
         self,
         pose: np.ndarray,
-        base_name: str,
         tip_name: str,
         qinit: Union[np.ndarray, None] = None,
         link: bool = True,
-        relative: bool = True,
         verbose: bool = False,
         output: str = "array",
         output_flag: bool = False,
-        eps=5e-3,
+        eps=1e-4,
         IT_MAX=10000,
         DT=1e-2,
         damp=1e-12,
@@ -96,11 +97,9 @@ class PinocchioSolver(object):
 
         Params:
             pose (np.ndarray, 4x4): SE(3) matrix
-            base_name (str): name of link or joint
             tip_name (str): name of link or joint
             qinit (np.ndarray, None): initial guess of arm joint
             link (bool, True): whether use link name (d) or joint name
-            relative (bool, True): whether use relative pose in base frame
             verbose (bool, False): whether print debug info
             output (str, "array"): output result type
             output_flag (bool, False): whether output includes solve status
@@ -114,39 +113,27 @@ class PinocchioSolver(object):
         else:
             q = pinocchio.neutral(self.model)
 
+        self.Update(q)
+
         if link:
-            base_link_id = self.model.getFrameId(base_name)
             tip_link_id = self.model.getFrameId(tip_name)
-
             tip_joint_id = self.model.frames[tip_link_id].parentJoint
-
-            pinocchio.forwardKinematics(self.model, self.data, q)
-            pinocchio.updateFramePlacements(self.model, self.data)
-
-            world_from_base = self.data.oMf[base_link_id].homogeneous
-
         else:
-            base_joint_id = self.model.getJointId(base_name)
             tip_joint_id = self.model.getJointId(tip_name)
 
-            pinocchio.forwardKinematics(self.model, self.data, q)
-            pinocchio.updateFramePlacements(self.model, self.data)
-
-            world_from_base = self.data.oMi[base_joint_id].homogeneous
-
-        if relative:
-            target_pose_in_world = world_from_base @ pose
-        else:
-            target_pose_in_world = pose
+        world_from_base = self.whole_data.oMf[self.whole_model.getFrameId("ur_arm_base_link")].homogeneous
+        world_from_tip = world_from_base @ pose
 
         i = 0
         success = False
         while i < IT_MAX:
-            pinocchio.forwardKinematics(self.model, self.data, q)
-            pinocchio.updateFramePlacements(self.model, self.data)
+            self.Update(q)
 
-            current_pose = self.data.oMi[tip_joint_id]
-            iMd = current_pose.actInv(pinocchio.SE3(target_pose_in_world[:3, :3], target_pose_in_world[:3, 3]))
+            if link:
+                current_pose = self.data.oMf[tip_link_id]
+            else:
+                current_pose = self.data.oMi[tip_joint_id]
+            iMd = current_pose.actInv(pinocchio.SE3(world_from_tip[:3, :3], world_from_tip[:3, 3]))
 
             err = pinocchio.log(iMd).vector
 
@@ -184,6 +171,24 @@ class PinocchioSolver(object):
         else:
             return rtn1
 
+    def forward(self, q: np.ndarray, tip_name: str, link: bool = True, relative_output: bool = True) -> np.ndarray:
+        q = self.Joints2Pinocchio(q.copy())
+
+        self.Update(q)
+
+        if link:
+            world_from_tip = self.whole_data.oMf[self.whole_model.getFrameId(tip_name)].homogeneous
+        else:
+            world_from_tip = self.whole_data.oMi[self.whole_model.getJointId(tip_name)].homogeneous
+
+        if relative_output:
+            world_from_base_SE3: pinocchio.SE3 = self.whole_data.oMf[self.whole_model.getFrameId("ur_arm_base_link")]
+            base_from_world = world_from_base_SE3.inverse().homogeneous
+            base_from_tip = base_from_world @ world_from_tip
+            return base_from_tip
+        else:
+            return world_from_tip
+
     def InitJointInfo(self):
         self.joint_info = {}
         for i in range(self.model.njoints):
@@ -196,43 +201,94 @@ class PinocchioSolver(object):
 
             self.joint_info[name] = Joint(i, type, idx_qs, nq)
 
-    def Pinocchio2Joints(self, q_pin) -> np.ndarray:
+        self.whole_joint_info = {}
+        for i in range(self.whole_model.njoints):
+            joint = self.whole_model.joints[i]
+
+            name = self.whole_model.names[i]
+            type = joint.shortname()
+            idx_qs = joint.idx_q
+            nq = joint.nq
+
+            self.whole_joint_info[name] = Joint(i, type, idx_qs, nq)
+
+    def Pinocchio2Joints(self, q_pin, is_whole: bool = False) -> np.ndarray:
+
         q_joint = np.zeros(len(self.MANIPULATOR_JOINT_NAMES))
 
-        for key, value in self.joint_info.items():
-            value: Joint
-            if value.idx_qs == -1:
-                continue
+        if not is_whole:
+            for key, value in self.joint_info.items():
+                value: Joint
+                if value.idx_qs == -1:
+                    continue
+                if key in self.MANIPULATOR_JOINT_NAMES:
+                    index = self.MANIPULATOR_JOINT_NAMES.index(key)
+                    if value.idx_qn == 2:
+                        q_joint[index] = np.arctan2(q_pin[value.idx_qs + 1], q_pin[value.idx_qs])
+                    else:
+                        q_joint[index] = q_pin[value.idx_qs]
 
-            if key in self.MANIPULATOR_JOINT_NAMES:
-                index = self.MANIPULATOR_JOINT_NAMES.index(key)
-                if value.idx_qn == 2:
-                    q_joint[index] = np.arctan2(q_pin[value.idx_qs + 1], q_pin[value.idx_qs])
-                else:
-                    q_joint[index] = q_pin[value.idx_qs]
+        else:
+            for key, value in self.whole_joint_info.items():
+                value: Joint
+                if value.idx_qs == -1:
+                    continue
+                if key in self.MANIPULATOR_JOINT_NAMES:
+                    index = self.MANIPULATOR_JOINT_NAMES.index(key)
+                    if value.idx_qn == 2:
+                        q_joint[index] = np.arctan2(q_pin[value.idx_qs + 1], q_pin[value.idx_qs])
+                    else:
+                        q_joint[index] = q_pin[value.idx_qs]
 
         return q_joint
 
-    def Joints2Pinocchio(self, q_joint) -> np.ndarray:
-        q_pin = np.zeros(self.model.nq)
+    def Joints2Pinocchio(self, q_joint, is_whole: bool = False) -> np.ndarray:
 
-        for key, value in self.joint_info.items():
-            value: Joint
-            if value.idx_qs == -1:
-                continue
+        if is_whole:
+            q_pin = np.zeros(self.whole_model.nq)
+            for key, value in self.whole_joint_info.items():
+                value: Joint
+                if value.idx_qs == -1:
+                    continue
+                if key in self.MANIPULATOR_JOINT_NAMES:
+                    joint_value = q_joint[self.MANIPULATOR_JOINT_NAMES.index(key)]
+                else:
+                    joint_value = 0
+                if value.idx_qn == 2:
+                    q_pin[value.idx_qs] = np.cos(joint_value)
+                    q_pin[value.idx_qs + 1] = np.sin(joint_value)
+                else:
+                    q_pin[value.idx_qs] = joint_value
 
-            if key in self.MANIPULATOR_JOINT_NAMES:
-                joint_value = q_joint[self.MANIPULATOR_JOINT_NAMES.index(key)]
-            else:
-                joint_value = 0
-
-            if value.idx_qn == 2:
-                q_pin[value.idx_qs] = np.cos(joint_value)
-                q_pin[value.idx_qs + 1] = np.sin(joint_value)
-            else:
-                q_pin[value.idx_qs] = joint_value
+        else:
+            q_pin = np.zeros(self.model.nq)
+            for key, value in self.joint_info.items():
+                value: Joint
+                if value.idx_qs == -1:
+                    continue
+                if key in self.MANIPULATOR_JOINT_NAMES:
+                    joint_value = q_joint[self.MANIPULATOR_JOINT_NAMES.index(key)]
+                else:
+                    joint_value = 0
+                if value.idx_qn == 2:
+                    q_pin[value.idx_qs] = np.cos(joint_value)
+                    q_pin[value.idx_qs + 1] = np.sin(joint_value)
+                else:
+                    q_pin[value.idx_qs] = joint_value
 
         return q_pin
+
+    def Update(self, q_pin, is_whole: bool = False):
+        q = self.Pinocchio2Joints(q_pin, is_whole)
+
+        q_pin = self.Joints2Pinocchio(q, is_whole=False)
+        q_pin_whole = self.Joints2Pinocchio(q, is_whole=True)
+
+        pinocchio.forwardKinematics(self.model, self.data, q_pin)
+        pinocchio.updateFramePlacements(self.model, self.data)
+
+        pinocchio.forwardKinematics(self.whole_model, self.whole_data, q_pin_whole)
+        pinocchio.updateFramePlacements(self.whole_model, self.whole_data)
 
 
 if __name__ == "__main__":
@@ -249,17 +305,17 @@ if __name__ == "__main__":
     from utils.collision import init_pb
     from robot.robot_setup import RobotSetup
 
+    np.set_printoptions(precision=3, suppress=True)
+
     robot_urdf = (
         "/home/jeong/summer_research/eth/husky_assembly/data/husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf"
     )
 
     pinocchio_solver = PinocchioSolver(robot_urdf)
-    pin_ik_solver = partial(pinocchio_solver.ik, base_name="world_link", tip_name="ur_arm_tool0", relative=False)
-    pin_ik_solver_relative = partial(
-        pinocchio_solver.ik, base_name="ur_arm_base_link", tip_name="ur_arm_tool0", relative=True
-    )
+    # pin_ik_solver = partial(pinocchio_solver.ik, base_name="world_link", tip_name="ur_arm_tool0", relative=False)
+    pin_ik_solver_relative = partial(pinocchio_solver.ik, tip_name="ur_arm_tool0")
 
-    trac_ik_solver = TracIKSolver(robot_urdf, "world_link", "ur_arm_tool0")
+    # trac_ik_solver = TracIKSolver(robot_urdf, "world_link", "ur_arm_tool0")
     trac_ik_solver_relative = TracIKSolver(robot_urdf, "ur_arm_base_link", "ur_arm_tool0")
 
     target_pose = np.array([[0, 0, 1, 0.5], [0, 1, 0, 0.25], [-1, 0, 0, 0.5], [0, 0, 0, 1]])

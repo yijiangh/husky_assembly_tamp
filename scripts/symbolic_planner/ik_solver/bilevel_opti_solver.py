@@ -197,7 +197,7 @@ def TransformMatrix(xyz: List[float], rpy: List[float], axis: List[float], q_val
 def SymbolicForward(
     urdf_path: str,
     joint_name_list: List[str],
-    control_joint_name_list: List[str],
+    manipulator_joint_list: List[str],
     q: Union[ca.MX, None] = None,
     output_type: str = "function",
 ) -> Union[ca.Function, ca.MX]:
@@ -207,7 +207,7 @@ def SymbolicForward(
     Params:
         urdf_path (str): urdf path of robot
         joint_name_list (List[str]): name list of manipulator including all redundant joints
-        control_joint_name_list (List[str]): name list of controlled joints
+        manipulator_joint_list (List[str]): name list of manipulator
         q (ca.MX | None, None): joint variables
         output_type (str, "function"): "function"/"matrix"
 
@@ -215,13 +215,13 @@ def SymbolicForward(
         ca.Function: [q] --> np.ndarray (4x4)
     """
     joints = ParseURDF(urdf_path)
-    if q is None or len(control_joint_name_list) == 0:
-        q = ca.MX.sym("q", len(control_joint_name_list))
+    if q is None:
+        q = ca.MX.sym("q", len(manipulator_joint_list))
     T = ca.MX.eye(4)
     for i, joint_name in enumerate(joint_name_list):
         joint = joints[joint_name]
-        if joint_name in control_joint_name_list:
-            i_q = control_joint_name_list.index(joint_name)
+        if joint_name in manipulator_joint_list:
+            i_q = manipulator_joint_list.index(joint_name)
             joint_T = TransformMatrix(
                 joint["origin"]["xyz"], joint["origin"]["rpy"], joint["axis"], q[i_q], joint["type"]
             )
@@ -506,7 +506,7 @@ class BilevelOptimization(object):
 
 class OptiSolver(object):
 
-    MANIPULATOR_CONTROL_JOINT_NAMES = [
+    MANIPULATOR_JOINT_NAMES = [
         "ur_arm_shoulder_pan_joint",
         "ur_arm_shoulder_lift_joint",
         "ur_arm_elbow_joint",
@@ -515,7 +515,7 @@ class OptiSolver(object):
         "ur_arm_wrist_3_joint",
     ]
 
-    MANIPULATOR_REDUCED_MODEL_JOINT_NAMES = [
+    REDUCED_MODEL_JOINT_NAMES = [
         "ur_arm_base_link-base_fixed_joint",
         "ur_arm_shoulder_pan_joint",
         "ur_arm_shoulder_lift_joint",
@@ -523,49 +523,12 @@ class OptiSolver(object):
         "ur_arm_wrist_1_joint",
         "ur_arm_wrist_2_joint",
         "ur_arm_wrist_3_joint",
-        "ur_arm_wrist_3-flange",
-        "ur_arm_flange-tool0",
-        "tool0-bar_tcp_fixed_joint"
-    ]
-
-    BASE_CONTROL_JOINT_NAMES = []
-
-    BASE_REDUCED_MODEL_JOINT_NAMES = [
-        "base_footprint_joint",
-        "top_plate_joint",
-        "top_plate_front_joint",
-        "arm_mount_joint",
-        # "ur_arm_base_link-base_fixed_joint",
     ]
 
     def __init__(self, urdf_path: str) -> None:
         self.urdf_path = urdf_path
 
         self.SolverInit()
-
-    def eval(
-        self, name: str, obj: ca.MX, sym: List[ca.MX], data: List[np.ndarray], verbose: bool = False
-    ) -> np.ndarray:
-        fn = ca.Function("fn", sym, [obj])
-        if sym != []:
-            fn_result = fn(*data).toarray()
-        else:
-            fn_result = fn()["o0"].toarray()
-        if verbose:
-            print(name, "\n", fn_result)
-        return fn_result
-
-    def GetInvertT(self, T: ca.MX) -> ca.MX:
-        T_rot: ca.MX = T[:3, :3]
-        T_trans: ca.MX = T[:3, 3]
-        T_inv = ca.vertcat(
-            ca.horzcat(
-                T_rot.T,
-                -T_rot.T @ T_trans,
-            ),
-            ca.MX([0, 0, 0, 1]).T,
-        )
-        return T_inv
 
     def IKObjectiveFunction(self, T: ca.MX, T_tar: ca.MX) -> ca.MX:
         """
@@ -584,247 +547,131 @@ class OptiSolver(object):
                 err += (T[i, j] - T_tar[i, j]) ** 2
         return err
 
-    def GraspIKObjectiveFunction(self, q: ca.MX, p: ca.MX, base: ca.MX, world_from_element: ca.MX) -> ca.MX:
-
-        # **************************************************************************
-        # compute pose of gripper
-        # **************************************************************************
-
-        # world_from_base
-        world_from_base: ca.MX = ca.MX.eye(4)
-        world_from_base[0, 3] = base[0]
-        world_from_base[1, 3] = base[1]
-        yaw = base[2]
-        R_z = ca.vertcat(
-            ca.horzcat(ca.cos(yaw), -ca.sin(yaw), 0),
-            ca.horzcat(ca.sin(yaw), ca.cos(yaw), 0),
-            ca.horzcat(0, 0, 1)
+    def LowerObjectiveFunction(self, q: ca.MX, p: ca.MX, T_element: ca.MX) -> ca.MX:
+        # base_from_gripper, T
+        T_gripper = SymbolicForward(
+            self.urdf_path, self.REDUCED_MODEL_JOINT_NAMES, self.MANIPULATOR_JOINT_NAMES, q=q, output_type="matrix"
         )
-        world_from_base[:3, :3] = R_z
-
-        # connect_from_gripper
-        connect_from_gripper = SymbolicForward(
-            self.urdf_path,
-            self.MANIPULATOR_REDUCED_MODEL_JOINT_NAMES,
-            self.MANIPULATOR_CONTROL_JOINT_NAMES,
-            q=q,
-            output_type="matrix",
-        )
-
-        T_gripper = world_from_base @ self.base_from_connect @ connect_from_gripper
-
-        # **************************************************************************
-        # compute pose of gripper, target
-        # **************************************************************************
 
         # element_from_gripper
-        element_from_gripper = ca.MX.eye(4)
-        element_from_gripper[0, 3] = p[0]
-        element_from_gripper[1, 3] = p[1]
+        T_delta = ca.MX.eye(4)
+        T_delta[0, 3] = p[0]
+        T_delta[1, 3] = p[1]
 
-        pitch = p[2]
-        R_y = ca.vertcat(
-            ca.horzcat(ca.cos(pitch), 0, ca.sin(pitch)),
-            ca.horzcat(0, 1, 0),
-            ca.horzcat(-ca.sin(pitch), 0, ca.cos(pitch))
-        )
-        element_from_gripper[:3, :3] = R_y
-
-        # world_from_gripper, T_tar
-        T_gripper_tar = world_from_element @ element_from_gripper
+        # base_from_gripper, T_tar
+        T_gripper_tar = T_element @ T_delta
 
         obj = self.IKObjectiveFunction(T_gripper, T_gripper_tar)
         return obj
 
-    def GraspObjectiveFunction(self, p: ca.MX, c: ca.MX) -> ca.MX:
+    def UpperObjectiveFunction(self, p: ca.MX, c: ca.MX) -> ca.MX:
         x = p[0]
         t = x - c
         obj = ca.if_else(t > 0, t**2, 0)
         return obj
 
-    def GroundParallelObjectiveFunction(self, world_from_base) -> ca.MX:
-        err = 0
-        T_tar = ca.MX.eye(4)
-        for i in range(3):
-            for j in range(3):
-                err += (world_from_base[i, j] - T_tar[i, j]) ** 2
-        return err
-
     def SolverInit(self):
 
         # **************************************************************************
-        # params init
+        # solver for IK, lower solver
         # **************************************************************************
 
-        self.Nq = len(self.MANIPULATOR_CONTROL_JOINT_NAMES)
-        self.Np = 3
-        self.Nb = 3
-
-        self.connect_from_gripper_fn = SymbolicForward(
-            self.urdf_path, self.MANIPULATOR_REDUCED_MODEL_JOINT_NAMES, self.MANIPULATOR_CONTROL_JOINT_NAMES
-        )
-
-        base_from_connect_sym = SymbolicForward(
-            self.urdf_path, self.BASE_REDUCED_MODEL_JOINT_NAMES, self.BASE_CONTROL_JOINT_NAMES, output_type="matrix"
-        )
-        self.base_from_connect = self.eval("base_from_connect", base_from_connect_sym, [], [])
-
-        # **************************************************************************
-        # solver for IK
-        # **************************************************************************
-
-        # self.ik_solver = ca.Opti()
-
-        # # -------------------- set parameters --------------------#
-        # self.ik_var_q = self.ik_solver.variable(self.Nq)
-        # self.ik_param_T_tar = self.ik_solver.parameter(4, 4)  # world(arm base)_from_target
-
-        # # -------------------- get matrix --------------------#
-        # self.ik_connect_from_gripper = SymbolicForward(
-        #     self.urdf_path,
-        #     self.MANIPULATOR_REDUCED_MODEL_JOINT_NAMES,
-        #     self.MANIPULATOR_CONTROL_JOINT_NAMES,
-        #     q=self.ik_var_q,
-        #     output_type="matrix",
-        # )  # world(arm base)_from_gripper
-
-        # # -------------------- objective function --------------------#
-        # self.ik_obj = self.IKObjectiveFunction(self.ik_connect_from_gripper, self.ik_param_T_tar)
-
-        # # -------------------- constrains, geq 0 --------------------#
-        # var_q_lb = np.pi + ca.vec(self.ik_var_q)
-        # var_q_ub = np.pi - ca.vec(self.ik_var_q)
-
-        # # -------------------- set solver objective function and constrains --------------------#
-        # self.ik_solver.minimize(self.ik_obj)
-        # self.ik_solver.subject_to(var_q_lb >= 0)
-        # self.ik_solver.subject_to(var_q_ub >= 0)
-
-        # # -------------------- set solver options --------------------#
-        # p_opts = {"expand": True, "print_time": 0}
-        # s_opts = {"max_iter": 100, "print_level": 0}
-        # self.ik_solver.solver("ipopt", p_opts, s_opts)
-
-        # **************************************************************************
-        # solver for grasp
-        # **************************************************************************
-
-        self.grasp_solver = ca.Opti()
-
-        # -------------------- set variables --------------------#
-        self.grasp_var_q = self.grasp_solver.variable(self.Nq)
-        self.grasp_var_p = self.grasp_solver.variable(self.Np)
-        self.grasp_var_base = self.grasp_solver.variable(self.Nb)
+        self.ik_solver = ca.Opti()
 
         # -------------------- set parameters --------------------#
-        self.grasp_param_T_element = self.grasp_solver.parameter(4, 4)  # world_from_element
-        self.grasp_param_c = self.grasp_solver.parameter(1)
+        self.Nq = len(self.MANIPULATOR_JOINT_NAMES)
+        self.q = self.ik_solver.variable(self.Nq)
+        self.T_tar = self.ik_solver.parameter(4, 4)  # world(arm base)_from_element
 
-        # -------------------- get matrix --------------------#
-        self.grasp_connect_from_gripper = SymbolicForward(
-            self.urdf_path,
-            self.MANIPULATOR_REDUCED_MODEL_JOINT_NAMES,
-            self.MANIPULATOR_CONTROL_JOINT_NAMES,
-            q=self.grasp_var_q,
-            output_type="matrix",
-        )
-        self.grasp_gripper_from_connect = self.GetInvertT(self.grasp_connect_from_gripper)
-
-        # -------------------- ik obj: grasp_var_q, grasp_var_p, grasp_var_base, grasp_param_T_element --------------------#
-        ik_obj = self.GraspIKObjectiveFunction(self.grasp_var_q, self.grasp_var_p, self.grasp_var_base, self.grasp_param_T_element)
-
-        # -------------------- grasp obj: grasp_var_p, grasp_param_c --------------------#
-        grasp_obj = self.GraspObjectiveFunction(self.grasp_var_p, self.grasp_param_c)
-
-        # -------------------- parallel obj: grasp_var_p, grasp_var_q, grasp_param_c, grasp_param_T_element --------------------#
-        # element_from_gripper = ca.MX.eye(4)
-        # element_from_gripper[0, 3] = self.grasp_var_p[0]
-        # element_from_gripper[1, 3] = self.grasp_var_p[1]
-        # world_from_gripper = self.grasp_param_T_element @ element_from_gripper
-        # world_from_connect = world_from_gripper @ self.grasp_gripper_from_connect
-        # world_from_base = world_from_connect @ np.linalg.inv(self.base_from_connect)
-        # parallel_obj = self.GroundParallelObjectiveFunction(world_from_base)
-
-        # -------------------- set obj --------------------#
-        self.grasp_obj = ik_obj + grasp_obj
-
-        # -------------------- constrains ≥0 --------------------#
-
-        # 关节角约束
-        var_q_lb = np.pi + ca.vec(self.grasp_var_q)
-        var_q_ub = np.pi - ca.vec(self.grasp_var_q)
-
-        # p := (x, y, theta) 的约束
-        var_p_x_lb = 0.001 + self.grasp_var_p[0]
-        var_p_x_ub = 0.001 - self.grasp_var_p[0]
-        var_p_y_lb = self.grasp_param_c + self.grasp_var_p[1]
-        var_p_y_ub = self.grasp_param_c - self.grasp_var_p[1]
-        var_p_theta_lb = np.pi + self.grasp_var_p[2]
-        var_p_theta_ub = np.pi - self.grasp_var_p[2]
-
-        # base := (x, y, yaw) 的约束
-        var_base_yaw_lb = np.pi + self.grasp_var_base[2]
-        var_base_yaw_ub = np.pi - self.grasp_var_base[2]
-
-        # TODO: 底盘平行constrain
-        # element_from_gripper = ca.MX.eye(4)
-        # element_from_gripper[0, 3] = self.grasp_var_p[0]
-        # element_from_gripper[1, 3] = self.grasp_var_p[1]
-        # world_from_gripper = self.grasp_param_T_element @ element_from_gripper
-        # world_from_connect = world_from_gripper @ self.grasp_gripper_from_connect
-        # world_from_base = world_from_connect @ np.linalg.inv(self.base_from_connect)
-
-        # world_from_base_z_axis = world_from_base[:3, 2]
-        # world_from_base_z = world_from_base[2, 3]
-
-        # base_rot_lb = -ca.MX([0, 0, 1]) * 0.9999 + world_from_base_z_axis
-        # base_rot_ub = ca.MX([0, 0, 1]) * 1.0001 - world_from_base_z_axis
-        # base_z_lb = 0.001 + world_from_base_z
-        # base_z_ub = 0.001 - world_from_base_z
-
-        # TODO: 底盘在外面的constrain
-        # TODO: collision constrain
+        # -------------------- get matrix and objective function --------------------#
+        self.fk_function = SymbolicForward(self.urdf_path, self.REDUCED_MODEL_JOINT_NAMES, self.MANIPULATOR_JOINT_NAMES)
+        self.fk_matrix = SymbolicForward(
+            self.urdf_path, self.REDUCED_MODEL_JOINT_NAMES, self.MANIPULATOR_JOINT_NAMES, q=self.q, output_type="matrix"
+        )  # world(arm base)_from_gripper
+        self.ik_obj = self.IKObjectiveFunction(self.fk_matrix, self.T_tar)
 
         # -------------------- set solver objective function and constrains --------------------#
-        self.grasp_solver.minimize(self.grasp_obj)
-
-        self.grasp_solver.subject_to(var_q_lb >= 0)
-        self.grasp_solver.subject_to(var_q_ub >= 0)
-
-        self.grasp_solver.subject_to(var_p_x_lb >= 0)
-        self.grasp_solver.subject_to(var_p_x_ub >= 0)
-        self.grasp_solver.subject_to(var_p_y_lb >= 0)
-        self.grasp_solver.subject_to(var_p_y_ub >= 0)
-        self.grasp_solver.subject_to(var_p_theta_lb >= 0)
-        self.grasp_solver.subject_to(var_p_theta_ub >= 0)
-
-        self.grasp_solver.subject_to(var_base_yaw_lb >= 0)
-        self.grasp_solver.subject_to(var_base_yaw_ub >= 0)
-
-        # self.grasp_solver.subject_to(base_rot_lb >= 0)
-        # self.grasp_solver.subject_to(base_rot_ub >= 0)
-        # self.grasp_solver.subject_to(base_z_lb >= 0)
-        # self.grasp_solver.subject_to(base_z_ub >= 0)
+        self.ik_solver.minimize(self.ik_obj)
+        self.ik_solver.subject_to(ca.vec(self.q) <= np.pi)
+        self.ik_solver.subject_to(ca.vec(self.q) >= -np.pi)
 
         # -------------------- set solver options --------------------#
         p_opts = {"expand": True, "print_time": 0}
-        s_opts = {"max_iter": 10000, "print_level": 0}
-        # s_opts = {"max_iter": 10000}
-        self.grasp_solver.solver("ipopt", p_opts, s_opts)
+        s_opts = {"max_iter": 100, "print_level": 0}
+        self.ik_solver.solver("ipopt", p_opts, s_opts)
+
+        # **************************************************************************
+        # solver for Bi-level optimization:
+        #   O_{U} --> O_{grasp}
+        #   O_{L} --> IK objective function
+        # **************************************************************************
+
+        self.lower_solver = ca.Opti()
+        self.upper_solver = ca.Opti()
+
+        # -------------------- set variables --------------------#
+        self.lower_var_q = self.lower_solver.variable(self.Nq)  # q
+        self.upper_var_p = self.upper_solver.variable(2)  # p: (x, y, theta)
+
+        # -------------------- set cross parameters --------------------#
+        self.lower_var_upper_param_q = self.upper_solver.parameter(self.Nq)
+        self.upper_var_lower_param_p = self.lower_solver.parameter(2)  # p: (x, y, theta)
+
+        # -------------------- set parameters --------------------#
+        self.lower_param_T_element = self.lower_solver.parameter(4, 4)
+
+        self.upper_param_c = self.upper_solver.parameter(1)
+        self.upper_param_T_element = self.upper_solver.parameter(4, 4)
+
+        # -------------------- set objective functions --------------------#
+        self.lower_obj = self.LowerObjectiveFunction(
+            self.lower_var_q, self.upper_var_lower_param_p, self.lower_param_T_element
+        )
+        # self.upper_obj = self.UpperObjectiveFunction(
+        #     self.upper_var_p, self.upper_param_c
+        # ) + self.LowerObjectiveFunction(self.lower_var_upper_param_q, self.upper_var_p, self.upper_param_T_element)
+        # self.upper_obj = self.UpperObjectiveFunction(self.upper_var_p, self.upper_param_c)
+        self.upper_obj = self.LowerObjectiveFunction(
+            self.lower_var_upper_param_q, self.upper_var_p, self.upper_param_T_element
+        )
+
+        self.lower_solver.minimize(self.lower_obj)
+        self.upper_solver.minimize(self.upper_obj)
+
+        self.lower_solver.subject_to(ca.vec(self.lower_var_q) <= np.pi)
+        self.lower_solver.subject_to(ca.vec(self.lower_var_q) >= -np.pi)
+
+        # -------------------- set solver options --------------------#
+        p_opts = {"expand": True, "print_time": 0}
+        s_opts = {"max_iter": 100, "print_level": 0}
+        self.lower_solver.solver("ipopt", p_opts, s_opts)
+
+        self.bilevel_solver = BilevelOptimization(
+            self.upper_obj,
+            self.lower_obj,
+            self.upper_var_p,
+            self.lower_var_q,
+            None,
+            self.lower_solver,
+            upper_var_lower_param=self.upper_var_lower_param_p,
+            lower_var_upper_param=self.lower_var_upper_param_q,
+            upper_params=[self.upper_param_c, self.upper_param_T_element],
+            lower_params=[self.lower_param_T_element],
+        )
 
     def forward(self, q: Union[np.ndarray, List[float]]) -> np.ndarray:
 
         if isinstance(q, np.ndarray):
             q = q.tolist()
 
-        T = np.array(self.connect_from_gripper_fn(q))
+        T = np.array(self.fk_function(q))
 
         return T
 
     def ik(
         self,
         pose: np.ndarray,
-        q_init: Union[np.ndarray, None] = None,
+        qinit: Union[np.ndarray, None] = None,
         output: str = "array",
         output_flag: bool = False,
     ) -> Union[Union[np.ndarray, List[float], None], Tuple[Union[np.ndarray, List[float], None], bool]]:
@@ -833,7 +680,7 @@ class OptiSolver(object):
 
         Params:
             pose (np.ndarray, 4x4): SE(3) matrix
-            q_init (np.ndarray, None): initial guess of arm joint
+            qinit (np.ndarray, None): initial guess of arm joint
             output (str, "array"): array/list, output result type
             output_flag (bool, False, [not used]): whether output includes solve status
 
@@ -842,51 +689,15 @@ class OptiSolver(object):
             success (bool, [optional]): solve status
         """
 
-        # self.ik_solver.set_value(self.ik_param_T_tar, pose)
+        self.ik_solver.set_value(self.T_tar, pose)
+        self.ik_solver.set_initial(self.q, qinit)
+        with HideOutput():
+            solution = self.ik_solver.solve()
 
-        # self.ik_solver.set_initial(self.ik_var_q, qinit)
-        # with HideOutput():
-        #     solution = np.array(self.ik_solver.solve().value(self.ik_var_q))
+        pinit = np.array([1.0, 0])
 
-        # **************************************************************************
-        # grasp
-        # **************************************************************************
-
-        p_init = np.array([0, 0, 0])
-        base_init = np.array([0, 0, 0])
-
-        self.grasp_solver.set_value(self.grasp_param_c, 0.5)
-        self.grasp_solver.set_value(self.grasp_param_T_element, pose)
-
-        self.grasp_solver.set_initial(self.grasp_var_q, q_init)
-        self.grasp_solver.set_initial(self.grasp_var_p, p_init)
-        self.grasp_solver.set_initial(self.grasp_var_base, base_init)
-
-        grasp_solution = self.grasp_solver.solve()
-
-        # **************************************************************************
-        # verbose
-        # **************************************************************************
-
-        # print("q solution\n", grasp_solution.value(self.grasp_var_q))
-        # print("p solution\n", grasp_solution.value(self.grasp_var_p))
-
-        # element_from_gripper = ca.MX.eye(4)
-        # element_from_gripper[0, 3] = self.grasp_var_p[0]
-        # element_from_gripper[1, 3] = self.grasp_var_p[1]
-        # world_from_gripper = self.grasp_param_T_element @ element_from_gripper
-        # world_from_connect = world_from_gripper @ self.grasp_gripper_from_connect
-        # world_from_base = world_from_connect @ np.linalg.inv(self.base_from_connect)
-
-        # self.eval(
-        #     "element_from_gripper",
-        #     element_from_gripper,
-        #     [self.grasp_var_p, self.grasp_var_q, self.grasp_param_T_element],
-        #     [grasp_solution.value(self.grasp_var_p), grasp_solution.value(self.grasp_var_q), pose],
-        #     verbose=True,
-        # )
-
-        return grasp_solution.value(self.grasp_var_q), grasp_solution.value(self.grasp_var_base)
+        self.bilevel_solver.solve(pinit, qinit, 0.1, upper_params_init=[0.5, pose], lower_params_init=[pose])
+        return np.array(solution.value(self.q))
 
 
 if __name__ == "__main__":
@@ -894,21 +705,13 @@ if __name__ == "__main__":
     import sys
     from functools import partial
 
-    import casadi as ca
-    import numpy as np
-    import pybullet as p
-    import pybullet_planning as pp
-    import time
-
     HERE = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
     sys.path.append(HERE)
 
-    import utils.load_multi_tangent as load_multi_tangent
+    import casadi as ca
+    import numpy as np
     from ik_solver.opti_solver import OptiSolver
     from ik_solver.pinocchio_solver import PinocchioSolver
-    from multi_tangent.collision import create_collision_bodies
-    from robot.robot_setup import RobotSetup
-    from utils.collision import init_pb
 
     np.set_printoptions(precision=3, suppress=True)
 
@@ -922,145 +725,89 @@ if __name__ == "__main__":
     # link forward
     # **************************************************************************
 
-    # print("\n==================== link forward ====================\n")
+    print("\n==================== link forward ====================\n")
 
-    # pin_ik_solver_relative = partial(solver.ik, tip_name="ur_arm_tool0", link=True)
+    pin_ik_solver_relative = partial(solver.ik, tip_name="ur_arm_tool0", link=True)
 
-    # target_pose = np.array([[0, 0, 1, 0.7], [0, 1, 0, 0.25], [-1, 0, 0, 0.5], [0, 0, 0, 1]])
+    target_pose = np.array([[0, 0, 1, 0.7], [0, 1, 0, 0.25], [-1, 0, 0, 0.5], [0, 0, 0, 1]])
 
-    # q_pin = pin_ik_solver_relative(
-    #     target_pose, qinit=np.array([-1.29891436, 0.3618943, -1.79107962, -1.71236292, -1.84276683, 1.57065429])
-    # )
+    q_pin = pin_ik_solver_relative(
+        target_pose, qinit=np.array([-1.29891436, 0.3618943, -1.79107962, -1.71236292, -1.84276683, 1.57065429])
+    )
 
-    # print("> ik solver: q_pin")
-    # print(q_pin)
-    # print()
+    print("> ik solver: q_pin")
+    print(q_pin)
+    print()
 
-    # print("> forward: pose real")
-    # print(target_pose)
-    # print()
+    print("> forward: pose real")
+    print(target_pose)
+    print()
 
-    # pose = solver.forward(q_pin, "ur_arm_tool0", link=True, relative_output=True)
-    # print("> forward: pose pinocchio")
-    # print(pose)
-    # print()
+    pose = solver.forward(q_pin, "ur_arm_tool0", link=True, relative_output=True)
+    print("> forward: pose pinocchio")
+    print(pose)
+    print()
 
-    # pose = opti_ik_solver.forward(q_pin)
-    # print("> forward: pose opti")
-    # print(pose)
-    # print()
+    pose = opti_ik_solver.forward(q_pin)
+    print("> forward: pose opti")
+    print(pose)
+    print()
 
     # **************************************************************************
     # joint forward
     # **************************************************************************
 
-    # print("\n==================== joint forward ====================\n")
+    print("\n==================== joint forward ====================\n")
 
-    # pin_ik_solver_relative = partial(solver.ik, tip_name="ur_arm_wrist_3_joint", link=False)
+    pin_ik_solver_relative = partial(solver.ik, tip_name="ur_arm_wrist_3_joint", link=False)
 
-    # base_from_tip = np.array([[0, 0, 1, 0.5], [0, 1, 0, 0.25], [-1, 0, 0, 0.5], [0, 0, 0, 1]])
+    base_from_tip = np.array([[0, 0, 1, 0.5], [0, 1, 0, 0.25], [-1, 0, 0, 0.5], [0, 0, 0, 1]])
 
-    # q_pin = pin_ik_solver_relative(base_from_tip, qinit=np.array([0, 0, 0, 0, 0, 0]))
+    q_pin = pin_ik_solver_relative(
+        base_from_tip, qinit=np.array([0, 0, 0, 0, 0, 0])
+    )
 
-    # print("> ik solver: q_pin")
-    # print(q_pin)
-    # print()
+    print("> ik solver: q_pin")
+    print(q_pin)
+    print()
 
-    # print("> forward: pose real")
-    # print(base_from_tip)
-    # print()
+    print("> forward: pose real")
+    print(base_from_tip)
+    print()
 
-    # pose = solver.forward(q_pin, "ur_arm_wrist_3_joint", link=False, relative_output=True)
-    # print("> forward: pose pinocchio")
-    # print(pose)
-    # print()
+    pose = solver.forward(q_pin, "ur_arm_wrist_3_joint", link=False, relative_output=True)
+    print("> forward: pose pinocchio")
+    print(pose)
+    print()
 
-    # pose = opti_ik_solver.forward(q_pin)
-    # print("> forward: pose opti")
-    # print(pose)
-    # print()
+    pose = opti_ik_solver.forward(q_pin)
+    print("> forward: pose opti")
+    print(pose)
+    print()
 
     # **************************************************************************
     # link ik
     # **************************************************************************
 
-    # print("\n==================== link ik ====================\n")
+    print("\n==================== link ik ====================\n")
 
-    # q_zero = np.array([0, 0, 0, 0, 0, 0])
+    pin_ik_solver_relative = partial(solver.ik, tip_name="ur_arm_tool0", link=True)
 
-    # pin_ik_solver_relative = partial(solver.ik, tip_name="ur_arm_tool0", link=True)
+    target_pose = np.array([[0, 0, 1, 0.7], [0, 1, 0, 0.25], [-1, 0, 0, 0.5], [0, 0, 0, 1]])
 
-    # target_pose = np.array([[0, 0, 1, 0.7], [0, 1, 0, 0.25], [-1, 0, 0, 0.5], [0, 0, 0, 1]])
+    q_pin = pin_ik_solver_relative(
+        target_pose, qinit=np.array([-1.29891436, 0.3618943, -1.79107962, -1.71236292, -1.84276683, 1.57065429])
+    )
+    print("> ik solver: q_pin")
+    print(q_pin)
+    print()
 
-    # q_pin = pin_ik_solver_relative(target_pose, qinit=q_zero)
-    # print("> ik solver: q_pin")
-    # print(q_pin)
-    # print()
+    q_opti = opti_ik_solver.ik(target_pose, qinit=q_pin)
+    print("> ik solver: q_opti")
+    print(q_opti)
+    print()
 
-    # q_opti = opti_ik_solver.ik(target_pose, qinit=q_zero)
-    # print("> ik solver: q_opti")
-    # print(q_opti)
-    # print()
-
-    # pose = solver.forward(q_opti, "ur_arm_tool0", link=True, relative_output=True)
-    # print("> forward: q_opti")
-    # print(pose)
-    # print()
-
-    # **************************************************************************
-    # visualization
-    # **************************************************************************
-
-    # -------------------- init --------------------#
-    init_pb()
-    rb = RobotSetup("r0")
-    line_pts_flattened = [np.array([-0.25, 0.5, 1]), np.array([0.75, 0.5, 1])]
-    radius_per_edge = [0.01]
-    element_body = create_collision_bodies(line_pts_flattened, radius_per_edge, viewer=True)[0]
-    q_zero = np.array([0, 0, 0, 0, 0, 0])
-
-    # -------------------- init slider --------------------#
-    x_slider = p.addUserDebugParameter(f"x", 0.0, 1.0, 0.25)
-    y_slider = p.addUserDebugParameter(f"y", -1.0, 1.0, 0.5)
-    z_slider = p.addUserDebugParameter(f"z", 0.0, 2.0, 1.0)
-
-    # -------------------- loop --------------------#
-    while True:
-        x_value = p.readUserDebugParameter(x_slider)
-        y_value = p.readUserDebugParameter(y_slider)
-        z_value = p.readUserDebugParameter(z_slider)
-
-        pp.set_point(element_body, [x_value, y_value, z_value])
-
-        element_pose = pp.multiply(pp.multiply(
-            pp.get_pose(element_body), pp.Pose(point=[0, 0, 0], euler=pp.Euler(1.5708, 1.5708, 1.5708))
-        ), pp.Pose(point=[0, 0, 0], euler=pp.Euler(0, 0, 1.5708)))
-
-        element_plot_handle = pp.draw_pose(element_pose, length=0.2, lifetime=1.0)
-        ee_plot_handle = pp.draw_pose(pp.get_link_pose(rb.robot, pp.link_from_name(rb.robot, "bar_tcp")), length=0.2, lifetime=1.0)
-
-        element_pose_relative = rb.get_relative_pose(element_pose)
-        connect_from_element = pp.pose_transformation.tform_from_pose(element_pose_relative)
-
-        world_from_element = pp.pose_transformation.tform_from_pose(element_pose)
-
-        q_opti, base_opti = opti_ik_solver.ik(world_from_element, q_init=q_zero)
-        rb.set_joint_positions(rb.arm_joints, q_opti)
-        rb.set_joint_positions(rb.base_joints, base_opti)
-
-        # pp.wait_for_user()
-
-        time.sleep(0.05)
-
-    # element_pose_mat = np.array([[1, 0, 0, 0.25], [0, 1, 0, 0.1], [0, 0, 1, 1], [0, 0, 0, 1]])
-
-    # element_pose = pp.Pose(point=[0.25, 0.1, 1], euler=pp.Euler(0, 0, 0))
-    # pp.draw_pose(element_pose)
-
-    # # pp.wait_for_user()
-
-    # q_zero = np.array([0, 0, 0, 0, 0, 0])
-    # q_opti = opti_ik_solver.ik(element_pose_mat, qinit=q_zero)
-    # rb.set_joint_positions(rb.arm_joints, q_opti)
-
-    # pp.wait_for_user()
+    pose = solver.forward(q_opti, "ur_arm_tool0", link=True, relative_output=True)
+    print("> forward: q_opti")
+    print(pose)
+    print()

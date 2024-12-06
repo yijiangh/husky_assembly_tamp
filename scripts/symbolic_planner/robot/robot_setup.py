@@ -139,7 +139,7 @@ class RobotSetup(object):
         limits = {pp.joint_from_name(robot, joint): limits for joint, limits in custom_limits.items()}
         return limits
 
-    def get_relative_pose(self, pose_world, link_name="ur_arm_base_link"):
+    def get_relative_pose(self, pose_world, link_name="ur_arm_base_link") -> Tuple[Tuple[float], Tuple[float]]:
         link_pose = pp.get_link_pose(self.robot, pp.link_from_name(self.robot, link_name))
         return pp.multiply(pp.invert(link_pose), pose_world)
 

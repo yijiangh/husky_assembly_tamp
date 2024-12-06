@@ -123,6 +123,7 @@ if __name__ == "__main__":
                             pp.set_color(element_obj.body, (1, 0, 0, 0.1))
                     for element_index in index_list:
                         pp.set_color(element_object_list[element_index].body, pp.GREY)
+                        pp.draw_pose(pp.get_pose(element_object_list[element_index].body), length=0.5)
 
                 pp.wait_for_user(
                     f"step: {step_num+1}/{len(path_index)} ,cur update index: {index_list}/0~{len(element_bodies)-1}"

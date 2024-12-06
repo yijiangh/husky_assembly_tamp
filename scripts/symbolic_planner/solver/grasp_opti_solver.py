@@ -504,7 +504,7 @@ class BilevelOptimization(object):
             break
 
 
-class OptiSolver(object):
+class GraspOptiSolver(object):
 
     MANIPULATOR_CONTROL_JOINT_NAMES = [
         "ur_arm_shoulder_pan_joint",
@@ -904,8 +904,8 @@ if __name__ == "__main__":
     sys.path.append(HERE)
 
     import utils.load_multi_tangent as load_multi_tangent
-    from ik_solver.opti_solver import OptiSolver
-    from ik_solver.pinocchio_solver import PinocchioSolver
+    from eth.husky_assembly.scripts.symbolic_planner.solver.grasp_opti_solver import GraspOptiSolver
+    from eth.husky_assembly.scripts.symbolic_planner.solver.ik_pinocchio_solver import PinocchioSolver
     from multi_tangent.collision import create_collision_bodies
     from robot.robot_setup import RobotSetup
     from utils.collision import init_pb
@@ -916,7 +916,7 @@ if __name__ == "__main__":
         "/home/jeong/summer_research/eth/husky_assembly/data/husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf"
     )
     solver = PinocchioSolver(urdf_path)
-    opti_ik_solver = OptiSolver(urdf_path)
+    opti_ik_solver = GraspOptiSolver(urdf_path)
 
     # **************************************************************************
     # link forward
@@ -1048,19 +1048,4 @@ if __name__ == "__main__":
         rb.set_joint_positions(rb.arm_joints, q_opti)
         rb.set_joint_positions(rb.base_joints, base_opti)
 
-        # pp.wait_for_user()
-
         time.sleep(0.05)
-
-    # element_pose_mat = np.array([[1, 0, 0, 0.25], [0, 1, 0, 0.1], [0, 0, 1, 1], [0, 0, 0, 1]])
-
-    # element_pose = pp.Pose(point=[0.25, 0.1, 1], euler=pp.Euler(0, 0, 0))
-    # pp.draw_pose(element_pose)
-
-    # # pp.wait_for_user()
-
-    # q_zero = np.array([0, 0, 0, 0, 0, 0])
-    # q_opti = opti_ik_solver.ik(element_pose_mat, qinit=q_zero)
-    # rb.set_joint_positions(rb.arm_joints, q_opti)
-
-    # pp.wait_for_user()

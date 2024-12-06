@@ -15,7 +15,7 @@ from compas_fab.robots import Robot as RobotClass
 from compas_fab.robots import RobotSemantics
 from compas_fab.robots.robot import RobotModel
 from husky_assembly import DATA_DIRECTORY
-from ik_solver.pinocchio_solver import PinocchioSolver
+from eth.husky_assembly.scripts.symbolic_planner.solver.ik_pinocchio_solver import PinocchioSolver
 from pybullet_planning import Attachment, Euler, Point, Pose, get_distance, interpolate_poses, invert, multiply
 from tracikpy import TracIKSolver
 from utils.utils import HUSKYU_JOINT_NAMES, get_custom_limits

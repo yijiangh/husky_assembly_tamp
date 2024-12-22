@@ -1,7 +1,10 @@
+import itertools
 import os
 import sys
 import xml.etree.ElementTree as ET
 from typing import Dict, List, Tuple, Union
+
+import pybullet_planning as pp
 
 HERE = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(HERE)
@@ -9,6 +12,7 @@ sys.path.append(HERE)
 import casadi as ca
 import numpy as np
 from acados_template import AcadosModel, AcadosOcp, AcadosOcpSolver
+from robot.robot_setup import RobotSetup
 from utils.utils import HideOutput
 
 
@@ -239,269 +243,20 @@ def SymbolicForward(
         return fk_function
 
 
-class BilevelOptimization(object):
-    def __init__(
-        self,
-        upper_obj: ca.MX,
-        lower_obj: ca.MX,
-        upper_var: ca.MX,
-        lower_var: ca.MX,
-        lower_constrains,
-        lower_solver: ca.Opti,
-        upper_var_lower_param: Union[ca.MX, None] = None,
-        lower_var_upper_param: Union[ca.MX, None] = None,
-        upper_params: Union[List[ca.MX], None] = None,
-        lower_params: Union[List[ca.MX], None] = None,
-    ) -> None:
-        self.upper_obj = upper_obj
-        self.lower_obj = lower_obj
+def Point2Segment(p: ca.MX, start: np.ndarray, end: np.ndarray) -> ca.MX:
+    A = start
+    B = end
+    P = p
 
-        self.upper_var = upper_var
-        self.lower_var = lower_var
+    AB = B - A
+    AP = P - A
 
-        self.lower_constrains = lower_constrains
-        self.lower_solver = lower_solver
+    t = ca.dot(AP, AB) / ca.dot(AB, AB)
+    t_clamped = ca.fmax(0, ca.fmin(1, t))
+    Q = A + t_clamped * AB
+    distance = ca.norm_2(P - Q)
 
-        self.upper_var_lower_param = upper_var_lower_param
-        self.lower_var_upper_param = lower_var_upper_param
-
-        self.upper_params = upper_params
-        self.lower_params = lower_params
-
-    def eval(self, name: str, obj: ca.MX, sym: List[ca.MX], data: List[np.ndarray]) -> np.ndarray:
-        fn = ca.Function("fn", sym, [obj])
-        fn_result = fn(*data).toarray()
-        print(name, "\n", fn_result)
-        return fn_result
-
-    def solve(
-        self,
-        upper_var_init: np.ndarray,
-        lower_var_init: np.ndarray,
-        criteria: float,
-        upper_params_init: Union[List[np.ndarray], None] = None,
-        lower_params_init: Union[List[np.ndarray], None] = None,
-    ) -> Tuple[np.ndarray, np.ndarray]:
-
-        upper_val = upper_var_init
-        lower_val = lower_var_init
-        last_upper_val = np.ones(upper_var_init.shape) * np.inf
-        last_lower_val = np.ones(lower_var_init.shape) * np.inf
-
-        # **************************************************************************
-        # Loop
-        # **************************************************************************
-
-        while (
-            np.linalg.norm(upper_val - last_upper_val) > criteria
-            and np.linalg.norm(lower_val - last_lower_val) > criteria
-        ):
-            # **************************************************************************
-            # step 1: solve lower problem
-            # **************************************************************************
-
-            # -------------------- set param --------------------#
-            if self.lower_params is not None and lower_params_init is not None:
-                for lower_param, lower_param_init in zip(self.lower_params, lower_params_init):
-                    self.lower_solver.set_value(lower_param, lower_param_init)
-
-            # -------------------- set cross param --------------------#
-            if self.upper_var_lower_param is not None:
-                self.lower_solver.set_value(self.upper_var_lower_param, upper_var_init)
-
-            # -------------------- set init --------------------#
-            self.lower_solver.set_initial(self.lower_var, lower_var_init)
-            with HideOutput():
-                lower_solution = self.lower_solver.solve()
-                lower_var_sol_k = lower_solution.value(self.lower_var)
-
-            # **************************************************************************
-            # step 2: compute derivatives of upper obj
-            # upper_var --> upper_val
-            # lower_var --> lower_var_sol_k
-            # upper_var_lower_param --> upper_val
-            # lower_var_upper_param --> lower_var_sol_k
-            # **************************************************************************
-
-            # **************************************************************************
-            # step 2.1: compute first derivative
-            # **************************************************************************
-
-            # # TODO: 这里需要去掉，但目前去掉会出现奇异矩阵
-            # upper_params_init[1] = np.array([[0, 0, 1, 0.5], [0, 1, 0, 0.25], [-1, 0, 0, 0.5], [0, 0, 0, 1]])
-            # lower_params_init[0] = np.array([[0, 0, 1, 0.5], [0, 1, 0, 0.25], [-1, 0, 0, 0.5], [0, 0, 0, 1]])
-
-            pou_pu = ca.jacobian(self.upper_obj, self.upper_var) + ca.jacobian(
-                self.upper_obj, self.upper_var_lower_param
-            )
-            pou_pl = ca.jacobian(self.upper_obj, self.lower_var_upper_param)  # TODO: 这里好像有问题
-
-            pou_pu_res = self.eval(
-                "pou_pu",
-                pou_pu,
-                [self.upper_var, self.lower_var_upper_param] + self.upper_params,
-                [upper_val, lower_var_sol_k] + upper_params_init,
-            )
-            pou_pl_res = self.eval(
-                "pou_pl",
-                pou_pl,
-                [self.upper_var, self.lower_var_upper_param] + self.upper_params,
-                [upper_val, lower_var_sol_k] + upper_params_init,
-            )
-
-            g = ca.jacobian(self.lower_obj, self.lower_var)
-            pg_pl = ca.jacobian(g, self.lower_var)
-            pg_pu = ca.jacobian(g, self.upper_var_lower_param)
-            S: ca.MX = -ca.inv(pg_pl) @ pg_pu  # dl_du
-
-            S_res = self.eval(
-                "S",
-                S,
-                [self.upper_var, self.lower_var_upper_param, self.lower_var, self.upper_var_lower_param]
-                + self.upper_params
-                + self.lower_params,
-                [upper_val, lower_var_sol_k, lower_var_sol_k, upper_val] + upper_params_init + lower_params_init,
-            )
-
-            dou_du: ca.MX = pou_pu + pou_pl @ S
-
-            dou_du_res = self.eval(
-                "dou_du",
-                dou_du,
-                [self.upper_var, self.lower_var_upper_param, self.lower_var, self.upper_var_lower_param]
-                + self.upper_params
-                + self.lower_params,
-                [upper_val, lower_var_sol_k, lower_var_sol_k, upper_val] + upper_params_init + lower_params_init,
-            )
-
-            # **************************************************************************
-            # step 2.2: compute second derivative
-            # **************************************************************************
-
-            # -------------------- part 1 --------------------#
-            ppou_pupu = ca.jacobian(pou_pu, self.upper_var)
-            ppou_pupl = ca.jacobian(pou_pu, self.lower_var_upper_param)
-            part_1 = ppou_pupu + ppou_pupl @ S  # part 1
-
-            ppou_pupu_res = self.eval(
-                "ppou_pupu",
-                ppou_pupu,
-                [self.upper_var, self.lower_var_upper_param, self.lower_var, self.upper_var_lower_param]
-                + self.upper_params
-                + self.lower_params,
-                [upper_val, lower_var_sol_k, lower_var_sol_k, upper_val] + upper_params_init + lower_params_init,
-            )
-
-            ppou_pupl_res = self.eval(
-                "ppou_pupl",
-                ppou_pupl,
-                [self.upper_var, self.lower_var_upper_param, self.lower_var, self.upper_var_lower_param]
-                + self.upper_params
-                + self.lower_params,
-                [upper_val, lower_var_sol_k, lower_var_sol_k, upper_val] + upper_params_init + lower_params_init,
-            )
-
-            part_1_res = self.eval(
-                "part_1",
-                part_1,
-                [self.upper_var, self.lower_var_upper_param, self.lower_var, self.upper_var_lower_param]
-                + self.upper_params
-                + self.lower_params,
-                [upper_val, lower_var_sol_k, lower_var_sol_k, upper_val] + upper_params_init + lower_params_init,
-            )
-
-            # -------------------- part 2 --------------------#
-
-            # -------------------- part 2.1 --------------------#
-            ppou_plpl = ca.jacobian(pou_pl, self.lower_var_upper_param)
-            ppou_plpu = ca.jacobian(pou_pl, self.upper_var)
-            part_2_1 = S.T @ (ppou_plpl @ S + ppou_plpu)
-
-            ppou_plpl_res = self.eval(
-                "ppou_plpl",
-                ppou_plpl,
-                [self.upper_var, self.lower_var_upper_param, self.lower_var, self.upper_var_lower_param]
-                + self.upper_params
-                + self.lower_params,
-                [upper_val, lower_var_sol_k, lower_var_sol_k, upper_val] + upper_params_init + lower_params_init,
-            )
-
-            ppou_plpu_res = self.eval(
-                "ppou_plpu",
-                ppou_plpu,
-                [self.upper_var, self.lower_var_upper_param, self.lower_var, self.upper_var_lower_param]
-                + self.upper_params
-                + self.lower_params,
-                [upper_val, lower_var_sol_k, lower_var_sol_k, upper_val] + upper_params_init + lower_params_init,
-            )
-
-            part_2_1_res = self.eval(
-                "part_2_1",
-                part_2_1,
-                [self.upper_var, self.lower_var_upper_param, self.lower_var, self.upper_var_lower_param]
-                + self.upper_params
-                + self.lower_params,
-                [upper_val, lower_var_sol_k, lower_var_sol_k, upper_val] + upper_params_init + lower_params_init,
-            )
-
-            # -------------------- part 2.2 --------------------#
-            n = S.shape[0]
-            m = S.shape[1]
-            G = None
-            for i in range(n):
-                block = ca.MX.eye(m) * pou_pl[i]
-                if G is None:
-                    G = block
-                else:
-                    G = ca.horzcat(G, block)
-
-            pS_pu = ca.jacobian(S, self.upper_var)
-            pS_pl = ca.jacobian(S, self.lower_var)
-            dS_du = pS_pu + pS_pl @ S
-            part_2_2 = G @ dS_du
-
-            part_2_2_res = self.eval(
-                "part_2_2",
-                part_2_2,
-                [self.upper_var, self.lower_var_upper_param, self.lower_var, self.upper_var_lower_param]
-                + self.upper_params
-                + self.lower_params,
-                [upper_val, lower_var_sol_k, lower_var_sol_k, upper_val] + upper_params_init + lower_params_init,
-            )
-
-            ddou_dudu = part_1 + part_2_1 + part_2_2
-
-            ddou_dudu_res = self.eval(
-                "ddou_dudu",
-                ddou_dudu,
-                [self.upper_var, self.lower_var_upper_param, self.lower_var, self.upper_var_lower_param]
-                + self.upper_params
-                + self.lower_params,
-                [upper_val, lower_var_sol_k, lower_var_sol_k, upper_val] + upper_params_init + lower_params_init,
-            )
-
-            # **************************************************************************
-            # step 3: compute direction of Newton's method
-            # **************************************************************************
-
-            d = -ca.inv(ddou_dudu) @ dou_du.T
-            d_res = self.eval(
-                "d",
-                d,
-                [self.upper_var, self.lower_var_upper_param, self.lower_var, self.upper_var_lower_param]
-                + self.upper_params
-                + self.lower_params,
-                [upper_val, lower_var_sol_k, lower_var_sol_k, upper_val] + upper_params_init + lower_params_init,
-            )
-
-            # **************************************************************************
-            # step 4: backtracking search
-            # **************************************************************************
-
-            # **************************************************************************
-            # step 5: iteration
-            # **************************************************************************
-            break
+    return distance
 
 
 class GraspOptiSolver(object):
@@ -525,7 +280,7 @@ class GraspOptiSolver(object):
         "ur_arm_wrist_3_joint",
         "ur_arm_wrist_3-flange",
         "ur_arm_flange-tool0",
-        "tool0-bar_tcp_fixed_joint"
+        "tool0-bar_tcp_fixed_joint",
     ]
 
     BASE_CONTROL_JOINT_NAMES = []
@@ -538,9 +293,10 @@ class GraspOptiSolver(object):
         # "ur_arm_base_link-base_fixed_joint",
     ]
 
-    def __init__(self, urdf_path: str) -> None:
+    def __init__(self, urdf_path: str, robot: RobotSetup) -> None:
         self.urdf_path = urdf_path
-
+        self.robot = robot
+        self.CollisionInit()
         self.SolverInit()
 
     def eval(
@@ -567,6 +323,39 @@ class GraspOptiSolver(object):
         )
         return T_inv
 
+    def GetJointPose(
+        self,
+        pose_2d: Union[List[float], np.ndarray, None],
+        q: Union[List[float], np.ndarray],
+        joint_name: str,
+        frame: str = "world",
+    ) -> np.ndarray:
+        if joint_name == "base_joint":
+            world_from_base: np.ndarray = np.eye(4)
+            world_from_base[0, 3] = pose_2d[0]
+            world_from_base[1, 3] = pose_2d[1]
+            yaw = pose_2d[2]
+            R_z = np.array([[np.cos(yaw), -np.sin(yaw), 0], [np.sin(yaw), np.cos(yaw), 0], [0, 0, 1]])
+            world_from_base[:3, :3] = R_z
+            world_from_joint: np.ndarray = world_from_base
+        else:
+            connect_from_joint: np.ndarray = self.connect_from_joint_dict[joint_name][0](
+                q[: self.connect_from_joint_dict[joint_name][2]]
+            ).toarray()
+            base_from_joint: np.ndarray = self.base_from_connect @ connect_from_joint
+            if frame == "local":
+                return base_from_joint
+
+            world_from_base: np.ndarray = np.eye(4)
+            world_from_base[0, 3] = pose_2d[0]
+            world_from_base[1, 3] = pose_2d[1]
+            yaw = pose_2d[2]
+            R_z = np.array([[np.cos(yaw), -np.sin(yaw), 0], [np.sin(yaw), np.cos(yaw), 0], [0, 0, 1]])
+            world_from_base[:3, :3] = R_z
+            world_from_joint: np.ndarray = world_from_base @ base_from_joint
+
+        return world_from_joint
+
     def IKObjectiveFunction(self, T: ca.MX, T_tar: ca.MX) -> ca.MX:
         """
         Generate objective function seperately.
@@ -584,7 +373,7 @@ class GraspOptiSolver(object):
                 err += (T[i, j] - T_tar[i, j]) ** 2
         return err
 
-    def GraspIKObjectiveFunction(self, q: ca.MX, p: ca.MX, base: ca.MX, world_from_element: ca.MX) -> ca.MX:
+    def GraspIKObjectiveFunction(self, q: ca.MX, p: ca.MX, b: ca.MX, world_from_element: ca.MX) -> ca.MX:
 
         # **************************************************************************
         # compute pose of gripper
@@ -592,13 +381,11 @@ class GraspOptiSolver(object):
 
         # world_from_base
         world_from_base: ca.MX = ca.MX.eye(4)
-        world_from_base[0, 3] = base[0]
-        world_from_base[1, 3] = base[1]
-        yaw = base[2]
+        world_from_base[0, 3] = b[0]
+        world_from_base[1, 3] = b[1]
+        yaw = b[2]
         R_z = ca.vertcat(
-            ca.horzcat(ca.cos(yaw), -ca.sin(yaw), 0),
-            ca.horzcat(ca.sin(yaw), ca.cos(yaw), 0),
-            ca.horzcat(0, 0, 1)
+            ca.horzcat(ca.cos(yaw), -ca.sin(yaw), 0), ca.horzcat(ca.sin(yaw), ca.cos(yaw), 0), ca.horzcat(0, 0, 1)
         )
         world_from_base[:3, :3] = R_z
 
@@ -626,7 +413,7 @@ class GraspOptiSolver(object):
         R_y = ca.vertcat(
             ca.horzcat(ca.cos(pitch), 0, ca.sin(pitch)),
             ca.horzcat(0, 1, 0),
-            ca.horzcat(-ca.sin(pitch), 0, ca.cos(pitch))
+            ca.horzcat(-ca.sin(pitch), 0, ca.cos(pitch)),
         )
         element_from_gripper[:3, :3] = R_y
 
@@ -650,6 +437,447 @@ class GraspOptiSolver(object):
                 err += (world_from_base[i, j] - T_tar[i, j]) ** 2
         return err
 
+    def CollisionVisualize(self, enable: bool = True):
+        q_val = pp.get_joint_positions(self.robot.robot, self.robot.arm_joints)
+        b_val = pp.get_joint_positions(self.robot.robot, self.robot.base_joints)
+
+        # **************************************************************************
+        # compute collisions between robot and obstacles
+        # **************************************************************************
+
+        # world_from_base
+        world_from_base: ca.MX = ca.MX.eye(4)
+        world_from_base[0, 3] = self.grasp_var_base[0]
+        world_from_base[1, 3] = self.grasp_var_base[1]
+        yaw = self.grasp_var_base[2]
+        R_z = ca.vertcat(
+            ca.horzcat(ca.cos(yaw), -ca.sin(yaw), 0), ca.horzcat(ca.sin(yaw), ca.cos(yaw), 0), ca.horzcat(0, 0, 1)
+        )
+        world_from_base[:3, :3] = R_z
+
+        with pp.LockRenderer():
+
+            # -------------------- loop: 遍历碰撞体 --------------------#
+            for link_name in self.collision_info:
+                infos = self.collision_info[link_name][0]
+                mnt_joint = self.collision_info[link_name][1]
+                radius = self.collision_info[link_name][2]
+
+                if enable:
+                    # -------------------- 获取joint位置 --------------------#
+                    if mnt_joint == "base_joint":
+                        world_from_joint = world_from_base
+                    else:
+                        base_from_joint = self.base_from_connect @ self.connect_from_joint_dict[mnt_joint][1]
+                        world_from_joint = world_from_base @ base_from_joint
+                    for info_id, info in enumerate(infos):
+                        offset = info[0]
+                        radius = info[1]
+                        visual_id = info[2]
+                        joint_from_sphere = np.eye(4)
+                        joint_from_sphere[0, 3] = offset[0]
+                        joint_from_sphere[1, 3] = offset[1]
+                        joint_from_sphere[2, 3] = offset[2]
+                        world_from_sphere = world_from_joint @ joint_from_sphere
+                        p = ca.vertcat(world_from_sphere[0, 3], world_from_sphere[1, 3], world_from_sphere[2, 3])
+                        center = self.eval("", p, [self.grasp_var_q, self.grasp_var_base], [q_val, b_val])
+                        if visual_id == -1:
+                            new_id = pp.create_sphere(radius, color=(1, 0, 0, 0.5))
+                            pp.set_point(new_id, center)
+                            self.collision_info[link_name][0][info_id][2] = new_id
+                        else:
+                            pp.set_point(visual_id, center)
+                else:
+                    for info_id, info in enumerate(infos):
+                        visual_id = info[2]
+                        if visual_id == -1:
+                            pass
+                        else:
+                            pp.remove_body(visual_id)
+                            self.collision_info[link_name][0][info_id][2] = -1
+
+    def CollisionObjectiveFunction(
+        self,
+        index: int,
+        assembled: List[int],
+        element_from_index: dict,
+    ) -> ca.MX:
+
+        # **************************************************************************
+        # compute collisions between robot and obstacles
+        # **************************************************************************
+
+        # world_from_base
+        world_from_base: ca.MX = ca.MX.eye(4)
+        world_from_base[0, 3] = self.grasp_var_base[0]
+        world_from_base[1, 3] = self.grasp_var_base[1]
+        yaw = self.grasp_var_base[2]
+        R_z = ca.vertcat(
+            ca.horzcat(ca.cos(yaw), -ca.sin(yaw), 0), ca.horzcat(ca.sin(yaw), ca.cos(yaw), 0), ca.horzcat(0, 0, 1)
+        )
+        world_from_base[:3, :3] = R_z
+
+        # -------------------- loop: 遍历碰撞体 --------------------#
+        indices = [index] + assembled
+        total_obj = 0
+        for link_name in self.collision_info:
+            infos = self.collision_info[link_name][0]
+            mnt_joint = self.collision_info[link_name][1]
+            weight = self.collision_info[link_name][2]
+            # -------------------- 获取joint位置 --------------------#
+            if mnt_joint == "base_joint":
+                world_from_joint = world_from_base
+            else:
+                base_from_joint = self.base_from_connect @ self.connect_from_joint_dict[mnt_joint][1]
+                world_from_joint = world_from_base @ base_from_joint
+            for info in infos:
+                offset = info[0]
+                radius = info[1]
+                eps = 0.01
+                joint_from_sphere = np.eye(4)
+                joint_from_sphere[0, 3] = offset[0]
+                joint_from_sphere[1, 3] = offset[1]
+                joint_from_sphere[2, 3] = offset[2]
+                world_from_sphere = world_from_joint @ joint_from_sphere
+                p = ca.vertcat(world_from_sphere[0, 3], world_from_sphere[1, 3], world_from_sphere[2, 3])
+                elements = []
+                if link_name == "gripper_link":
+                    for element_index in assembled:
+                        element: Element = element_from_index[element_index]
+                        dist = Point2Segment(
+                            p, np.array(element.axis_endpoints[0]), np.array(element.axis_endpoints[1])
+                        )
+                        obj = ca.if_else(dist - radius > eps, 1.0 / (dist - radius), 1.0 / eps)
+                        total_obj += weight * obj
+                        elements.append(element_index)
+                else:
+                    for element_index in indices:
+                        element: Element = element_from_index[element_index]
+                        dist = Point2Segment(
+                            p, np.array(element.axis_endpoints[0]), np.array(element.axis_endpoints[1])
+                        )
+                        obj = ca.if_else(dist - radius > eps, 1.0 / (dist - radius), 1.0 / eps)
+                        total_obj += weight * obj
+                        elements.append(element_index)
+        return total_obj
+
+    def CollisionConstrain(
+        self,
+        index: int,
+        assembled: List[int],
+        element_from_index: dict,
+    ) -> ca.MX:
+
+        # **************************************************************************
+        # compute collisions between robot and obstacles
+        # **************************************************************************
+
+        # world_from_base
+        world_from_base: ca.MX = ca.MX.eye(4)
+        world_from_base[0, 3] = self.grasp_var_base[0]
+        world_from_base[1, 3] = self.grasp_var_base[1]
+        yaw = self.grasp_var_base[2]
+        R_z = ca.vertcat(
+            ca.horzcat(ca.cos(yaw), -ca.sin(yaw), 0), ca.horzcat(ca.sin(yaw), ca.cos(yaw), 0), ca.horzcat(0, 0, 1)
+        )
+        world_from_base[:3, :3] = R_z
+
+        # -------------------- loop: 遍历碰撞体 --------------------#
+        indices = [index] + assembled
+        total_constrain = 0
+        for link_name in self.collision_info:
+            infos = self.collision_info[link_name][0]
+            mnt_joint = self.collision_info[link_name][1]
+            # -------------------- 获取joint位置 --------------------#
+            if mnt_joint == "base_joint":
+                world_from_joint = world_from_base
+            else:
+                base_from_joint = self.base_from_connect @ self.connect_from_joint_dict[mnt_joint][1]
+                world_from_joint = world_from_base @ base_from_joint
+            for info in infos:
+                offset = info[0]
+                radius = info[1]
+                eps = 0.01
+                joint_from_sphere = np.eye(4)
+                joint_from_sphere[0, 3] = offset[0]
+                joint_from_sphere[1, 3] = offset[1]
+                joint_from_sphere[2, 3] = offset[2]
+                world_from_sphere = world_from_joint @ joint_from_sphere
+                p = ca.vertcat(world_from_sphere[0, 3], world_from_sphere[1, 3], world_from_sphere[2, 3])
+                elements = []
+                if link_name == "gripper_link":
+                    for element_index in assembled:
+                        element: Element = element_from_index[element_index]
+                        dist = Point2Segment(
+                            p, np.array(element.axis_endpoints[0]), np.array(element.axis_endpoints[1])
+                        )
+                        constrain = ca.if_else(dist - radius > eps, 0, -1)
+                        total_constrain += constrain
+                        elements.append(element_index)
+                else:
+                    for element_index in indices:
+                        element: Element = element_from_index[element_index]
+                        dist = Point2Segment(
+                            p, np.array(element.axis_endpoints[0]), np.array(element.axis_endpoints[1])
+                        )
+                        constrain = ca.if_else(dist - radius > eps, 0, -1)
+                        total_constrain += constrain
+                        elements.append(element_index)
+        return total_constrain
+
+    def SelfCollisionObjectiveFunction(self) -> ca.MX:
+
+        # **************************************************************************
+        # compute collisions between robot links
+        # **************************************************************************
+
+        # world_from_base
+        world_from_base: ca.MX = ca.MX.eye(4)
+        world_from_base[0, 3] = self.grasp_var_base[0]
+        world_from_base[1, 3] = self.grasp_var_base[1]
+        yaw = self.grasp_var_base[2]
+        R_z = ca.vertcat(
+            ca.horzcat(ca.cos(yaw), -ca.sin(yaw), 0), ca.horzcat(ca.sin(yaw), ca.cos(yaw), 0), ca.horzcat(0, 0, 1)
+        )
+        world_from_base[:3, :3] = R_z
+
+        # -------------------- loop: 遍历碰撞对 --------------------#
+        total_obj = 0
+        eps = 0.01
+        for collision_pair in self.self_collision_pairs:
+            link_1_name, link_2_name = collision_pair
+
+            # -------------------- 获取 link 1 碰撞体信息 --------------------#
+            link_1_infos = self.collision_info[link_1_name][0]
+            link_1_mnt_joint = self.collision_info[link_1_name][1]
+            link_1_weight = self.collision_info[link_1_name][2]
+
+            # -------------------- 获取 link 2 碰撞体信息 --------------------#
+            link_2_infos = self.collision_info[link_2_name][0]
+            link_2_mnt_joint = self.collision_info[link_2_name][1]
+            link_2_weight = self.collision_info[link_2_name][2]
+
+            # -------------------- 获取 joint 1 位置 --------------------#
+            if link_1_mnt_joint == "base_joint":
+                world_from_joint_1 = world_from_base
+            else:
+                base_from_joint_1 = self.base_from_connect @ self.connect_from_joint_dict[link_1_mnt_joint][1]
+                world_from_joint_1 = world_from_base @ base_from_joint_1
+
+            # -------------------- 获取 joint 2 位置 --------------------#
+            if link_2_mnt_joint == "base_joint":
+                world_from_joint_2 = world_from_base
+            else:
+                base_from_joint_2 = self.base_from_connect @ self.connect_from_joint_dict[link_2_mnt_joint][1]
+                world_from_joint_2 = world_from_base @ base_from_joint_2
+
+            # -------------------- 遍历碰撞体 --------------------#
+            for info_pair in list(itertools.product(link_1_infos, link_2_infos)):
+                info_1, info_2 = info_pair
+
+                # -------------------- sphere 1 --------------------#
+                offset_1 = info_1[0]
+                radius_1 = info_1[1]
+                joint_from_sphere_1 = np.eye(4)
+                joint_from_sphere_1[0, 3] = offset_1[0]
+                joint_from_sphere_1[1, 3] = offset_1[1]
+                joint_from_sphere_1[2, 3] = offset_1[2]
+                world_from_sphere_1 = world_from_joint_1 @ joint_from_sphere_1
+                p_1 = ca.vertcat(world_from_sphere_1[0, 3], world_from_sphere_1[1, 3], world_from_sphere_1[2, 3])
+
+                # -------------------- sphere 2 --------------------#
+                offset_2 = info_2[0]
+                radius_2 = info_2[1]
+                joint_from_sphere_2 = np.eye(4)
+                joint_from_sphere_2[0, 3] = offset_2[0]
+                joint_from_sphere_2[1, 3] = offset_2[1]
+                joint_from_sphere_2[2, 3] = offset_2[2]
+                world_from_sphere_2 = world_from_joint_2 @ joint_from_sphere_2
+                p_2 = ca.vertcat(world_from_sphere_2[0, 3], world_from_sphere_2[1, 3], world_from_sphere_2[2, 3])
+
+                # -------------------- 计算 objective function --------------------#
+                dist = ca.norm_2(p_1 - p_2)
+                sum_radius = radius_1 + radius_2
+                obj = ca.if_else(dist - sum_radius > eps, 1.0 / (dist - sum_radius), 1.0 / eps)
+                total_obj += min(link_1_weight, link_2_weight) * obj
+
+        return total_obj
+
+    def SelfCollisionConstrain(self) -> ca.MX:
+
+        # **************************************************************************
+        # compute collisions between robot links
+        # **************************************************************************
+
+        # world_from_base
+        world_from_base: ca.MX = ca.MX.eye(4)
+        world_from_base[0, 3] = self.grasp_var_base[0]
+        world_from_base[1, 3] = self.grasp_var_base[1]
+        yaw = self.grasp_var_base[2]
+        R_z = ca.vertcat(
+            ca.horzcat(ca.cos(yaw), -ca.sin(yaw), 0), ca.horzcat(ca.sin(yaw), ca.cos(yaw), 0), ca.horzcat(0, 0, 1)
+        )
+        world_from_base[:3, :3] = R_z
+
+        # -------------------- loop: 遍历碰撞对 --------------------#
+        total_constrain = 0
+        eps = 0.01
+        for collision_pair in self.self_collision_pairs:
+            link_1_name, link_2_name = collision_pair
+
+            # -------------------- 获取 link 1 碰撞体信息 --------------------#
+            link_1_infos = self.collision_info[link_1_name][0]
+            link_1_mnt_joint = self.collision_info[link_1_name][1]
+            link_1_weight = self.collision_info[link_1_name][2]
+
+            # -------------------- 获取 link 2 碰撞体信息 --------------------#
+            link_2_infos = self.collision_info[link_2_name][0]
+            link_2_mnt_joint = self.collision_info[link_2_name][1]
+            link_2_weight = self.collision_info[link_2_name][2]
+
+            # -------------------- 获取 joint 1 位置 --------------------#
+            if link_1_mnt_joint == "base_joint":
+                world_from_joint_1 = world_from_base
+            else:
+                base_from_joint_1 = self.base_from_connect @ self.connect_from_joint_dict[link_1_mnt_joint][1]
+                world_from_joint_1 = world_from_base @ base_from_joint_1
+
+            # -------------------- 获取 joint 2 位置 --------------------#
+            if link_2_mnt_joint == "base_joint":
+                world_from_joint_2 = world_from_base
+            else:
+                base_from_joint_2 = self.base_from_connect @ self.connect_from_joint_dict[link_2_mnt_joint][1]
+                world_from_joint_2 = world_from_base @ base_from_joint_2
+
+            # -------------------- 遍历碰撞体 --------------------#
+            for info_pair in list(itertools.product(link_1_infos, link_2_infos)):
+                info_1, info_2 = info_pair
+
+                # -------------------- sphere 1 --------------------#
+                offset_1 = info_1[0]
+                radius_1 = info_1[1]
+                joint_from_sphere_1 = np.eye(4)
+                joint_from_sphere_1[0, 3] = offset_1[0]
+                joint_from_sphere_1[1, 3] = offset_1[1]
+                joint_from_sphere_1[2, 3] = offset_1[2]
+                world_from_sphere_1 = world_from_joint_1 @ joint_from_sphere_1
+                p_1 = ca.vertcat(world_from_sphere_1[0, 3], world_from_sphere_1[1, 3], world_from_sphere_1[2, 3])
+
+                # -------------------- sphere 2 --------------------#
+                offset_2 = info_2[0]
+                radius_2 = info_2[1]
+                joint_from_sphere_2 = np.eye(4)
+                joint_from_sphere_2[0, 3] = offset_2[0]
+                joint_from_sphere_2[1, 3] = offset_2[1]
+                joint_from_sphere_2[2, 3] = offset_2[2]
+                world_from_sphere_2 = world_from_joint_2 @ joint_from_sphere_2
+                p_2 = ca.vertcat(world_from_sphere_2[0, 3], world_from_sphere_2[1, 3], world_from_sphere_2[2, 3])
+
+                # -------------------- 计算 objective function --------------------#
+                dist = ca.norm_2(p_1 - p_2)
+                sum_radius = radius_1 + radius_2
+                constrain = ca.if_else(dist - sum_radius > eps, 0, -1)
+                total_constrain += min(link_1_weight, link_2_weight) * constrain
+
+        return total_constrain
+
+    def CollisionInit(self):
+        # {link_name: [infos: [offset, radius, visual_id], joint_name, weight]}
+        self.collision_info = {
+            "base_link": [
+                [
+                    [(0.3160000145435333, 0.2529999911785126, 0.20000000298023224), 0.2, -1],
+                    [(0.3160000145435333, 0.0, 0.20000000298023224), 0.2, -1],
+                    [(0.3160000145435333, -0.2529999911785126, 0.20000000298023224), 0.2, -1],
+                    [(-0.3160000145435333, 0.2529999911785126, 0.20000000298023224), 0.2, -1],
+                    [(-0.3160000145435333, 0.0, 0.20000000298023224), 0.2, -1],
+                    [(-0.3160000145435333, -0.2529999911785126, 0.20000000298023224), 0.2, -1],
+                    [(0.0, 0.2529999911785126, 0.20000000298023224), 0.2, -1],
+                    [(0.0, 0.0, 0.20000000298023224), 0.2, -1],
+                    [(0.0, -0.2529999911785126, 0.20000000298023224), 0.2, -1],
+                ],
+                "base_joint",
+                10.0,
+            ],
+            "ur_arm_base_link_inertia": [
+                [[(0.3889999985694885, 0.0, 0.4099999964237213), 0.075, -1]],
+                "base_joint",
+                5.0,
+            ],
+            "ur_arm_shoulder_link": [
+                [[(0.0, -0.000299990177154541, -0.010500013828277588), 0.075, -1]],
+                "ur_arm_shoulder_pan_joint",
+                5.0,
+            ],
+            "ur_arm_upper_arm_link": [
+                [
+                    [(0.010500013828277588, -6.3721117271597905e-09, 0.1373000144958496), 0.075, -1],
+                    [(-0.08950001001358032, -6.3721117271597905e-09, 0.1373000144958496), 0.05, -1],
+                    [(-0.18950003385543823, -6.3721117271597905e-09, 0.1373000144958496), 0.05, -1],
+                    [(-0.28949999809265137, -6.3721117271597905e-09, 0.1373000144958496), 0.05, -1],
+                    [(-0.40950000286102295, -6.3721117271597905e-09, 0.1373000144958496), 0.075, -1],
+                ],
+                "ur_arm_shoulder_lift_joint",
+                3.0,
+            ],
+            "ur_arm_forearm_link": [
+                [
+                    [(0.015500009059906006, -5.244373824098147e-10, 0.011299997568130493), 0.05, -1],
+                    [(-0.0845000147819519, -5.244373824098147e-10, 0.011299997568130493), 0.05, -1],
+                    [(-0.18450003862380981, -5.244373824098147e-10, 0.011299997568130493), 0.05, -1],
+                    [(-0.2844999432563782, -5.244373824098147e-10, 0.011299997568130493), 0.05, -1],
+                    [(-0.3844999670982361, -5.244373824098147e-10, 0.011299997568130493), 0.05, -1],
+                    [(-0.3844999670982361, 1.796069071247075e-09, -0.03870001435279846), 0.05, -1],
+                ],
+                "ur_arm_elbow_joint",
+                1.0,
+            ],
+            "ur_arm_wrist_1_link": [
+                [[(0.007700085639953613, -6.325699075659941e-09, 0.0029999613761901855), 0.05, -1]],
+                "ur_arm_wrist_1_joint",
+                1.0,
+            ],
+            "ur_arm_wrist_2_link": [
+                [[(0.007700085639953613, 0.0029999613761901855, 0.00030000507831573486), 0.05, -1]],
+                "ur_arm_wrist_2_joint",
+                1.0,
+            ],
+            "ur_arm_wrist_3_link": [
+                [[(0.0, 0.0, 0.0), 0.05, -1]],
+                "ur_arm_wrist_3_joint",
+                1.0,
+            ],
+            "gripper_link": [
+                [[(0.0, 0.0, 0.1), 0.075, -1]],
+                "ur_arm_wrist_3_joint",
+                1.0,
+            ],
+        }
+        keys = list(self.collision_info.keys())
+        keys_combinations = list(itertools.combinations(keys, 2))
+        for collision_pair in self.robot.disabled_collisions:
+            link_1_name = pp.get_link_name(self.robot.robot, collision_pair[0])
+            link_2_name = pp.get_link_name(self.robot.robot, collision_pair[1])
+            pair = (link_1_name, link_2_name)
+            idx = self.FindCollisionPair(keys_combinations, pair)
+            if idx != -1:
+                keys_combinations.remove(keys_combinations[idx])
+        pair = ("ur_arm_wrist_3_link", "gripper_link")
+        idx = self.FindCollisionPair(keys_combinations, pair)
+        if idx != -1:
+            keys_combinations.remove(keys_combinations[idx])
+
+        self.self_collision_pairs = keys_combinations
+
+    def FindCollisionPair(self, collision_list: List[Tuple[str]], collision_pair: Tuple[str]) -> int:
+        sorted_pair = tuple(sorted(collision_pair))
+        sorted_pair_list = [tuple(sorted(pair)) for pair in collision_list]
+        if sorted_pair in sorted_pair_list:
+            idx = sorted_pair_list.index(sorted_pair)
+        else:
+            idx = -1
+        return idx
+
     def SolverInit(self):
 
         # **************************************************************************
@@ -659,15 +887,6 @@ class GraspOptiSolver(object):
         self.Nq = len(self.MANIPULATOR_CONTROL_JOINT_NAMES)
         self.Np = 3
         self.Nb = 3
-
-        self.connect_from_gripper_fn = SymbolicForward(
-            self.urdf_path, self.MANIPULATOR_REDUCED_MODEL_JOINT_NAMES, self.MANIPULATOR_CONTROL_JOINT_NAMES
-        )
-
-        base_from_connect_sym = SymbolicForward(
-            self.urdf_path, self.BASE_REDUCED_MODEL_JOINT_NAMES, self.BASE_CONTROL_JOINT_NAMES, output_type="matrix"
-        )
-        self.base_from_connect = self.eval("base_from_connect", base_from_connect_sym, [], [])
 
         # **************************************************************************
         # solver for IK
@@ -720,6 +939,33 @@ class GraspOptiSolver(object):
         self.grasp_param_T_element = self.grasp_solver.parameter(4, 4)  # world_from_element
         self.grasp_param_c = self.grasp_solver.parameter(1)
 
+        # -------------------- get transformation matices --------------------#
+        self.connect_from_j6_fn = SymbolicForward(
+            self.urdf_path, self.MANIPULATOR_REDUCED_MODEL_JOINT_NAMES, self.MANIPULATOR_CONTROL_JOINT_NAMES
+        )
+        self.connect_from_joint_dict = {}
+        for joint_idx, joint_name in enumerate(self.MANIPULATOR_CONTROL_JOINT_NAMES):
+            end_idx = self.MANIPULATOR_REDUCED_MODEL_JOINT_NAMES.index(joint_name) + 1
+            fk_fn = SymbolicForward(
+                self.urdf_path,
+                self.MANIPULATOR_REDUCED_MODEL_JOINT_NAMES[:end_idx],
+                self.MANIPULATOR_CONTROL_JOINT_NAMES[: joint_idx + 1],
+                q=self.grasp_var_q,
+            )
+            fk_mat = SymbolicForward(
+                self.urdf_path,
+                self.MANIPULATOR_REDUCED_MODEL_JOINT_NAMES[:end_idx],
+                self.MANIPULATOR_CONTROL_JOINT_NAMES[: joint_idx + 1],
+                q=self.grasp_var_q,
+                output_type="matrix",
+            )
+            self.connect_from_joint_dict[joint_name] = (fk_fn, fk_mat, joint_idx + 1)
+
+        base_from_connect_sym = SymbolicForward(
+            self.urdf_path, self.BASE_REDUCED_MODEL_JOINT_NAMES, self.BASE_CONTROL_JOINT_NAMES, output_type="matrix"
+        )
+        self.base_from_connect = self.eval("base_from_connect", base_from_connect_sym, [], [])
+
         # -------------------- get matrix --------------------#
         self.grasp_connect_from_gripper = SymbolicForward(
             self.urdf_path,
@@ -731,25 +977,20 @@ class GraspOptiSolver(object):
         self.grasp_gripper_from_connect = self.GetInvertT(self.grasp_connect_from_gripper)
 
         # -------------------- ik obj: grasp_var_q, grasp_var_p, grasp_var_base, grasp_param_T_element --------------------#
-        ik_obj = self.GraspIKObjectiveFunction(self.grasp_var_q, self.grasp_var_p, self.grasp_var_base, self.grasp_param_T_element)
+        ik_obj = self.GraspIKObjectiveFunction(
+            self.grasp_var_q, self.grasp_var_p, self.grasp_var_base, self.grasp_param_T_element
+        )
 
         # -------------------- grasp obj: grasp_var_p, grasp_param_c --------------------#
         grasp_obj = self.GraspObjectiveFunction(self.grasp_var_p, self.grasp_param_c)
 
-        # -------------------- parallel obj: grasp_var_p, grasp_var_q, grasp_param_c, grasp_param_T_element --------------------#
-        # element_from_gripper = ca.MX.eye(4)
-        # element_from_gripper[0, 3] = self.grasp_var_p[0]
-        # element_from_gripper[1, 3] = self.grasp_var_p[1]
-        # world_from_gripper = self.grasp_param_T_element @ element_from_gripper
-        # world_from_connect = world_from_gripper @ self.grasp_gripper_from_connect
-        # world_from_base = world_from_connect @ np.linalg.inv(self.base_from_connect)
-        # parallel_obj = self.GroundParallelObjectiveFunction(world_from_base)
+        #-------------------- self collision obj: grasp_var_q, grasp_var_base --------------------#
+        self_collision_obj = self.SelfCollisionObjectiveFunction()
 
         # -------------------- set obj --------------------#
-        self.grasp_obj = ik_obj + grasp_obj
+        self.grasp_obj = ik_obj + grasp_obj + self_collision_obj
 
         # -------------------- constrains ≥0 --------------------#
-
         # 关节角约束
         var_q_lb = np.pi + ca.vec(self.grasp_var_q)
         var_q_ub = np.pi - ca.vec(self.grasp_var_q)
@@ -766,28 +1007,14 @@ class GraspOptiSolver(object):
         var_base_yaw_lb = np.pi + self.grasp_var_base[2]
         var_base_yaw_ub = np.pi - self.grasp_var_base[2]
 
-        # TODO: 底盘平行constrain
-        # element_from_gripper = ca.MX.eye(4)
-        # element_from_gripper[0, 3] = self.grasp_var_p[0]
-        # element_from_gripper[1, 3] = self.grasp_var_p[1]
-        # world_from_gripper = self.grasp_param_T_element @ element_from_gripper
-        # world_from_connect = world_from_gripper @ self.grasp_gripper_from_connect
-        # world_from_base = world_from_connect @ np.linalg.inv(self.base_from_connect)
+        # grasp 约束
+        ik_lb = 0.000001 + ik_obj
+        ik_ub = 0.000001 - ik_obj
 
-        # world_from_base_z_axis = world_from_base[:3, 2]
-        # world_from_base_z = world_from_base[2, 3]
-
-        # base_rot_lb = -ca.MX([0, 0, 1]) * 0.9999 + world_from_base_z_axis
-        # base_rot_ub = ca.MX([0, 0, 1]) * 1.0001 - world_from_base_z_axis
-        # base_z_lb = 0.001 + world_from_base_z
-        # base_z_ub = 0.001 - world_from_base_z
-
-        # TODO: 底盘在外面的constrain
-        # TODO: collision constrain
+        # self collision 约束
+        self_collision_constrain = self.SelfCollisionConstrain()
 
         # -------------------- set solver objective function and constrains --------------------#
-        self.grasp_solver.minimize(self.grasp_obj)
-
         self.grasp_solver.subject_to(var_q_lb >= 0)
         self.grasp_solver.subject_to(var_q_ub >= 0)
 
@@ -801,15 +1028,15 @@ class GraspOptiSolver(object):
         self.grasp_solver.subject_to(var_base_yaw_lb >= 0)
         self.grasp_solver.subject_to(var_base_yaw_ub >= 0)
 
-        # self.grasp_solver.subject_to(base_rot_lb >= 0)
-        # self.grasp_solver.subject_to(base_rot_ub >= 0)
-        # self.grasp_solver.subject_to(base_z_lb >= 0)
-        # self.grasp_solver.subject_to(base_z_ub >= 0)
+        self.grasp_solver.subject_to(ik_lb >= 0)
+        self.grasp_solver.subject_to(ik_ub >= 0)
+
+        self.grasp_solver.subject_to(self_collision_constrain >= 0)
 
         # -------------------- set solver options --------------------#
         p_opts = {"expand": True, "print_time": 0}
         s_opts = {"max_iter": 10000, "print_level": 0}
-        # s_opts = {"max_iter": 10000}
+        s_opts = {"max_iter": 10000}
         self.grasp_solver.solver("ipopt", p_opts, s_opts)
 
     def forward(self, q: Union[np.ndarray, List[float]]) -> np.ndarray:
@@ -817,23 +1044,31 @@ class GraspOptiSolver(object):
         if isinstance(q, np.ndarray):
             q = q.tolist()
 
-        T = np.array(self.connect_from_gripper_fn(q))
+        T = np.array(self.connect_from_j6_fn(q))
 
         return T
 
-    def ik(
+    def solve(
         self,
-        pose: np.ndarray,
+        index: int,
+        element_from_index: dict,
+        assembled: Union[List[int], None] = None,
         q_init: Union[np.ndarray, None] = None,
+        p_init: Union[np.ndarray, None] = None,
+        base_init: Union[np.ndarray, None] = None,
         output: str = "array",
         output_flag: bool = False,
     ) -> Union[Union[np.ndarray, List[float], None], Tuple[Union[np.ndarray, List[float], None], bool]]:
         """
-        Calculate IK solution.
+        Calculate grasp solution.
 
         Params:
-            pose (np.ndarray, 4x4): SE(3) matrix
+            index (int): index of current element
+            element_from_index ({index: Element}): dict of elements
+            assembled ([index], None): indices of assembled elements
             q_init (np.ndarray, None): initial guess of arm joint
+            p_init (np.ndarray, None): initial guess of grasp point (x, y, theta)
+            base_init (np.ndarray, None): initial guess of base pose (x, y, yaw)
             output (str, "array"): array/list, output result type
             output_flag (bool, False, [not used]): whether output includes solve status
 
@@ -841,82 +1076,91 @@ class GraspOptiSolver(object):
             q (np.ndarray | [float] | None): joint conf to the target pose
             success (bool, [optional]): solve status
         """
+        element: Element = element_from_index[index]
+        world_form_element = pp.pose_transformation.tform_from_pose(element.goal_pose)
 
-        # self.ik_solver.set_value(self.ik_param_T_tar, pose)
+        # the y axis needs to be along the direction of the element
+        rotate_pose = world_form_element @ pp.pose_transformation.tform_from_pose(
+            pp.Pose(point=[0, 0, 0], euler=pp.Euler(np.pi / 2, 0, 0))
+        )
 
-        # self.ik_solver.set_initial(self.ik_var_q, qinit)
-        # with HideOutput():
-        #     solution = np.array(self.ik_solver.solve().value(self.ik_var_q))
+        if q_init is None:
+            q_init = np.array([0] * self.Nq)
+        if p_init is None:
+            p_init = np.array([0] * self.Np)
+        if base_init is None:
+            base_init = np.array([0] * self.Nb)
 
-        # **************************************************************************
-        # grasp
-        # **************************************************************************
+        temp_grasp_solver = self.grasp_solver
 
-        p_init = np.array([0, 0, 0])
-        base_init = np.array([0, 0, 0])
+        if index is None or assembled is None:
+            temp_grasp_solver.minimize(self.grasp_obj)
+        else:
+            # -------------------- 设置目标函数 --------------------#
+            # 优化目标函数中必须有collision的部分，否则优化时间和优化方向难以确定，并且优化结果不一定满足约束
+            # 设置了gripper的collision，gripper只需要考虑与其他element的碰撞
+            obj = self.CollisionObjectiveFunction(index, assembled, element_from_index)
+            temp_grasp_solver.minimize(self.grasp_obj + obj)
+            # temp_grasp_solver.minimize(self.grasp_obj)
 
-        self.grasp_solver.set_value(self.grasp_param_c, 0.5)
-        self.grasp_solver.set_value(self.grasp_param_T_element, pose)
+            # -------------------- 设置约束 --------------------#
+            # 优化约束中必须有collision的部分，否则可能会发生碰撞
+            collision_constrain = self.CollisionConstrain(index, assembled, element_from_index)
+            temp_grasp_solver.subject_to(collision_constrain >= 0)
 
-        self.grasp_solver.set_initial(self.grasp_var_q, q_init)
-        self.grasp_solver.set_initial(self.grasp_var_p, p_init)
-        self.grasp_solver.set_initial(self.grasp_var_base, base_init)
+        temp_grasp_solver.set_value(self.grasp_param_c, 0.35)
+        temp_grasp_solver.set_value(self.grasp_param_T_element, rotate_pose)
 
-        grasp_solution = self.grasp_solver.solve()
+        attempts = 0
+        while True:
+            try:
+                q_init = np.random.uniform(-np.pi, np.pi, self.Nq)
+                p_init = np.concatenate([np.random.uniform(-0.35, 0.35, 2), np.random.uniform(-np.pi, np.pi, 1)])
+                base_init = np.concatenate([np.random.uniform(10, 10, 2), np.random.uniform(-np.pi, np.pi, 1)])
+                temp_grasp_solver.set_initial(self.grasp_var_q, q_init)
+                temp_grasp_solver.set_initial(self.grasp_var_p, p_init)
+                temp_grasp_solver.set_initial(self.grasp_var_base, base_init)
+                grasp_solution = temp_grasp_solver.solve()
+                return grasp_solution.value(self.grasp_var_q), grasp_solution.value(self.grasp_var_base)
+            except Exception as e:
+                attempts += 1
+                if attempts >= 20:
+                    print("Max attempts reached. Exiting.")
+                    break  # 达到最大重试次数时退出
 
-        # **************************************************************************
-        # verbose
-        # **************************************************************************
-
-        # print("q solution\n", grasp_solution.value(self.grasp_var_q))
-        # print("p solution\n", grasp_solution.value(self.grasp_var_p))
-
-        # element_from_gripper = ca.MX.eye(4)
-        # element_from_gripper[0, 3] = self.grasp_var_p[0]
-        # element_from_gripper[1, 3] = self.grasp_var_p[1]
-        # world_from_gripper = self.grasp_param_T_element @ element_from_gripper
-        # world_from_connect = world_from_gripper @ self.grasp_gripper_from_connect
-        # world_from_base = world_from_connect @ np.linalg.inv(self.base_from_connect)
-
-        # self.eval(
-        #     "element_from_gripper",
-        #     element_from_gripper,
-        #     [self.grasp_var_p, self.grasp_var_q, self.grasp_param_T_element],
-        #     [grasp_solution.value(self.grasp_var_p), grasp_solution.value(self.grasp_var_q), pose],
-        #     verbose=True,
-        # )
-
-        return grasp_solution.value(self.grasp_var_q), grasp_solution.value(self.grasp_var_base)
+        return None, None
 
 
 if __name__ == "__main__":
     import os
     import sys
+    import time
     from functools import partial
 
     import casadi as ca
     import numpy as np
     import pybullet as p
     import pybullet_planning as pp
-    import time
 
     HERE = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
     sys.path.append(HERE)
 
     import utils.load_multi_tangent as load_multi_tangent
-    from eth.husky_assembly.scripts.symbolic_planner.solver.grasp_opti_solver import GraspOptiSolver
-    from eth.husky_assembly.scripts.symbolic_planner.solver.ik_pinocchio_solver import PinocchioSolver
     from multi_tangent.collision import create_collision_bodies
-    from robot.robot_setup import RobotSetup
-    from utils.collision import init_pb
+    from multi_tangent.convert import flatten_list
+    from solver.grasp_opti_solver import GraspOptiSolver
+    from solver.ik_pinocchio_solver import PinocchioSolver
+    from utils.collision import Element, create_couplers, init_pb
+    from utils.params import *
+    from utils.parse import parse_mt_geometric
 
     np.set_printoptions(precision=3, suppress=True)
 
     urdf_path = (
         "/home/jeong/summer_research/eth/husky_assembly/data/husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf"
     )
-    solver = PinocchioSolver(urdf_path)
-    opti_ik_solver = GraspOptiSolver(urdf_path)
+    # solver = PinocchioSolver(urdf_path)
+    # opti_ik_solver = GraspOptiSolver(urdf_path)
 
     # **************************************************************************
     # link forward
@@ -1008,44 +1252,395 @@ if __name__ == "__main__":
     # print()
 
     # **************************************************************************
-    # visualization
+    # slider visualization
     # **************************************************************************
 
-    # -------------------- init --------------------#
+    # # -------------------- init --------------------#
+    # init_pb()
+    # rb = RobotSetup("r0")
+    # line_pts_flattened = [np.array([-0.25, 0.5, 1]), np.array([0.75, 0.5, 1])]
+    # radius_per_edge = [0.01]
+    # element_body = create_collision_bodies(line_pts_flattened, radius_per_edge, viewer=True)[0]
+    # q_zero = np.array([0, 0, 0, 0, 0, 0])
+
+    # # -------------------- init slider --------------------#
+    # x_slider = p.addUserDebugParameter(f"x", 0.0, 1.0, 0.25)
+    # y_slider = p.addUserDebugParameter(f"y", -1.0, 1.0, 0.5)
+    # z_slider = p.addUserDebugParameter(f"z", 0.0, 2.0, 1.0)
+
+    # # -------------------- loop --------------------#
+    # while True:
+    #     x_value = p.readUserDebugParameter(x_slider)
+    #     y_value = p.readUserDebugParameter(y_slider)
+    #     z_value = p.readUserDebugParameter(z_slider)
+
+    #     pp.set_point(element_body, [x_value, y_value, z_value])
+
+    #     element_pose = pp.multiply(pp.multiply(
+    #         pp.get_pose(element_body), pp.Pose(point=[0, 0, 0], euler=pp.Euler(1.5708, 1.5708, 1.5708))
+    #     ), pp.Pose(point=[0, 0, 0], euler=pp.Euler(0, 0, 1.5708)))
+
+    #     element_plot_handle = pp.draw_pose(element_pose, length=0.2, lifetime=1.0)
+    #     ee_plot_handle = pp.draw_pose(pp.get_link_pose(rb.robot, pp.link_from_name(rb.robot, "bar_tcp")), length=0.2, lifetime=1.0)
+
+    #     element_pose_relative = rb.get_relative_pose(element_pose)
+    #     connect_from_element = pp.pose_transformation.tform_from_pose(element_pose_relative)
+
+    #     world_from_element = pp.pose_transformation.tform_from_pose(element_pose)
+
+    #     q_opti, base_opti = opti_ik_solver.ik(world_from_element, q_init=q_zero)
+    #     rb.set_joint_positions(rb.arm_joints, q_opti)
+    #     rb.set_joint_positions(rb.base_joints, base_opti)
+
+    #     time.sleep(0.05)
+
+    # **************************************************************************
+    # sequence visualization
+    # **************************************************************************
+
+    # -------------------- Load process file --------------------#
+    mt_file_name = MT_FILE_NAME + ".json"
+    line_pt_pairs, contact_id_pairs, bar_radius = parse_mt_geometric(mt_file_name)
+    line_pt_pairs: List[List[List[float]]]  # bar list
+    contact_id_pairs: List[List[float]]  # contact pairs
+    bar_radius: float
+    line_pts_flattened: List[np.ndarray] = flatten_list(np.array(line_pt_pairs))  # numpy points list
+    vertices: List[List] = flatten_list(line_pt_pairs)  # points list
+
+    # -------------------- Eliminate Z-axis deviation --------------------#
+    min_z = np.min(line_pts_flattened, axis=0)[2]
+    line_pts_flattened = [np.array([0, 0, -min_z]) + point for point in line_pts_flattened]
+
+    radius_per_edge = [bar_radius] * int(len(line_pts_flattened) / 2)
+
+    # -------------------- Elements Init --------------------#
     init_pb()
+    goal_poses = []
+    with pp.LockRenderer():
+        element_bodies = create_collision_bodies(line_pts_flattened, radius_per_edge, viewer=True)
+        half_coupler_from_contact_pair = create_couplers(line_pts_flattened, contact_id_pairs)
+        for i, e in enumerate(element_bodies):
+            pp.add_text(str(i), pp.get_point(e))
+            goal_poses.append(pp.get_pose(e))
+            pp.set_pose(e, pp.Pose(point=(5, 0, 0), euler=pp.Euler(0, 1.5708, 0)))
+    element_from_index = {
+        i: Element(i, e, pp.get_pose(e), goal_poses[i], [line_pts_flattened[2 * i], line_pts_flattened[2 * i + 1]])
+        for i, e in enumerate(element_bodies)
+    }
+
+    # -------------------- robot init --------------------#
     rb = RobotSetup("r0")
-    line_pts_flattened = [np.array([-0.25, 0.5, 1]), np.array([0.75, 0.5, 1])]
-    radius_per_edge = [0.01]
-    element_body = create_collision_bodies(line_pts_flattened, radius_per_edge, viewer=True)[0]
     q_zero = np.array([0, 0, 0, 0, 0, 0])
+    opti_ik_solver = GraspOptiSolver(urdf_path, rb)
 
-    # -------------------- init slider --------------------#
-    x_slider = p.addUserDebugParameter(f"x", 0.0, 1.0, 0.25)
-    y_slider = p.addUserDebugParameter(f"y", -1.0, 1.0, 0.5)
-    z_slider = p.addUserDebugParameter(f"z", 0.0, 2.0, 1.0)
+    # -------------------- debugger --------------------#
+    continue_button = p.addUserDebugParameter("continue", 1, 0, 0)
+    collision_show_button = p.addUserDebugParameter("collision show", 1, 0, 0)
 
-    # -------------------- loop --------------------#
-    while True:
-        x_value = p.readUserDebugParameter(x_slider)
-        y_value = p.readUserDebugParameter(y_slider)
-        z_value = p.readUserDebugParameter(z_slider)
+    # -------------------- visualization --------------------#
+    assembled = []
+    collision_show = True
+    for i in element_from_index.keys():
+        pp.set_pose(element_from_index[i].body, element_from_index[i].goal_pose)
+        pp.set_color(element_from_index[i].body, pp.RED)
+        pp.draw_pose(element_from_index[i].goal_pose, length=0.25)
 
-        pp.set_point(element_body, [x_value, y_value, z_value])
+        # world_from_element = pp.pose_transformation.tform_from_pose(element_from_index[i].goal_pose)
+        q_opti, base_opti = opti_ik_solver.solve(i, element_from_index, assembled=assembled, q_init=q_zero)
 
-        element_pose = pp.multiply(pp.multiply(
-            pp.get_pose(element_body), pp.Pose(point=[0, 0, 0], euler=pp.Euler(1.5708, 1.5708, 1.5708))
-        ), pp.Pose(point=[0, 0, 0], euler=pp.Euler(0, 0, 1.5708)))
+        if q_opti is None or base_opti is None:
+            pp.wait_for_user("Solve failed!")
+            continue
 
-        element_plot_handle = pp.draw_pose(element_pose, length=0.2, lifetime=1.0)
-        ee_plot_handle = pp.draw_pose(pp.get_link_pose(rb.robot, pp.link_from_name(rb.robot, "bar_tcp")), length=0.2, lifetime=1.0)
-
-        element_pose_relative = rb.get_relative_pose(element_pose)
-        connect_from_element = pp.pose_transformation.tform_from_pose(element_pose_relative)
-
-        world_from_element = pp.pose_transformation.tform_from_pose(element_pose)
-
-        q_opti, base_opti = opti_ik_solver.ik(world_from_element, q_init=q_zero)
         rb.set_joint_positions(rb.arm_joints, q_opti)
         rb.set_joint_positions(rb.base_joints, base_opti)
 
-        time.sleep(0.05)
+        prev_continue_button_value = p.readUserDebugParameter(continue_button)
+        prev_collision_show_button_value = p.readUserDebugParameter(collision_show_button)
+
+        while True:
+            current_continue_button_value = p.readUserDebugParameter(continue_button)
+            if current_continue_button_value > prev_continue_button_value:
+                prev_continue_button_value = current_continue_button_value
+                assembled.append(i)
+                break
+
+            current_collision_show_button_value = p.readUserDebugParameter(collision_show_button)
+            if current_collision_show_button_value > prev_collision_show_button_value:
+                prev_collision_show_button_value = current_collision_show_button_value
+                opti_ik_solver.CollisionVisualize(collision_show)
+                collision_show = not collision_show
+
+            time.sleep(0.02)
+
+    # **************************************************************************
+    # 碰撞体测试
+    # **************************************************************************
+
+    # init_pb()
+
+    # # -------------------- robot init --------------------#
+    # rb = RobotSetup("r0")
+    # q = np.array(pp.get_joint_positions(rb.robot, rb.arm_joints))
+
+    # # -------------------- 绑定碰撞信息 --------------------#
+    # link_names = [
+    #     "base_link",
+    #     "front_left_wheel_link",
+    #     "front_right_wheel_link",
+    #     "rear_left_wheel_link",
+    #     "rear_right_wheel_link",
+    #     "top_chassis_link",
+    #     "front_bumper_link",
+    #     "rear_bumper_link",
+    #     "top_plate_link",
+    #     "ur_arm_base_link_inertia",
+    #     "ur_arm_shoulder_link",
+    #     "ur_arm_upper_arm_link",
+    #     "ur_arm_forearm_link",
+    #     "ur_arm_wrist_1_link",
+    #     "ur_arm_wrist_2_link",
+    #     "ur_arm_wrist_3_link",
+    #     "ipad_rack_link",
+    # ]
+
+    # # with pp.LockRenderer():
+    # #     for link_name in link_names:
+    # #         pp.set_color(rb.robot, (0, 0, 1, 0.2), pp.link_from_name(rb.robot, link_name))
+    # #         # pp.wait_for_user(link_name)
+
+    # collision_infos = {
+    #     "base_link": [
+    #         [
+    #             ((0.316, 0.253, 0.2), 0.2),
+    #             ((0.316, 0, 0.2), 0.2),
+    #             ((0.316, -0.253, 0.2), 0.2),
+    #             ((-0.316, 0.253, 0.2), 0.2),
+    #             ((-0.316, 0, 0.2), 0.2),
+    #             ((-0.316, -0.253, 0.2), 0.2),
+    #             ((0, 0.253, 0.2), 0.2),
+    #             ((0, 0, 0.2), 0.2),
+    #             ((0, -0.253, 0.2), 0.2),
+    #         ],
+    #         "base_joint",
+    #     ],
+    #     "ur_arm_base_link_inertia": [
+    #         [
+    #             ((0.389, 0, 0.41), 0.075),
+    #         ],
+    #         "base_joint",
+    #     ],
+    #     "ur_arm_shoulder_link": [
+    #         [
+    #             ((0.389, 0, 0.516), 0.075),
+    #         ],
+    #         "ur_arm_shoulder_pan_joint",
+    #     ],
+    #     "ur_arm_upper_arm_link": [
+    #         [
+    #             ((0.526, 0, 0.516), 0.075),
+    #             ((0.526, 0, 0.616), 0.05),
+    #             ((0.526, 0, 0.716), 0.05),
+    #             ((0.526, 0, 0.816), 0.05),
+    #             ((0.526, 0, 0.936), 0.075),
+    #         ],
+    #         "ur_arm_shoulder_lift_joint",
+    #     ],
+    #     "ur_arm_forearm_link": [
+    #         [
+    #             ((0.4, 0, 0.936), 0.05),
+    #             ((0.4, 0, 1.036), 0.05),
+    #             ((0.4, 0, 1.136), 0.05),
+    #             ((0.4, 0, 1.236), 0.05),
+    #             ((0.4, 0, 1.336), 0.05),
+    #             ((0.35, 0, 1.336), 0.05),
+    #         ],
+    #         "ur_arm_elbow_joint",
+    #     ],
+    #     "ur_arm_wrist_1_link": [
+    #         [
+    #             ((0.525, 0, 1.336), 0.05),
+    #         ],
+    #         "ur_arm_wrist_1_joint",
+    #     ],
+    #     "ur_arm_wrist_2_link": [
+    #         [
+    #             ((0.525, -0.1, 1.336), 0.05),
+    #         ],
+    #         "ur_arm_wrist_2_joint",
+    #     ],
+    #     "ur_arm_wrist_3_link": [
+    #         [
+    #             ((0.625, -0.1, 1.336), 0.05),
+    #         ],
+    #         "ur_arm_wrist_3_joint",
+    #     ],
+    # }
+
+    # # -------------------- init collision --------------------#
+    # sphere_attachments = {}
+
+    # with pp.LockRenderer():
+    #     for link_name in collision_infos.keys():
+    #         attachments = []
+    #         for sphere_data in collision_infos[link_name][0]:
+    #             sphere = pp.create_sphere(sphere_data[1], color=(1, 0, 0, 0.5))
+    #             pp.set_point(sphere, sphere_data[0])
+    #             attachment = pp.create_attachment(rb.robot, pp.link_from_name(rb.robot, link_name), sphere)
+    #             attachments.append(attachment)
+    #         sphere_attachments[link_name] = attachments
+
+    # # -------------------- init collision offsets --------------------#
+    # collision_offsets = {}
+    # for link_name in collision_infos.keys():
+    #     sphere_datas = collision_infos[link_name][0]
+    #     sphere_mnt_joint = collision_infos[link_name][1]
+    #     sphere_offsets = []
+    #     for sphere_data in sphere_datas:
+    #         # world_from_joint
+    #         joint_pose = opti_ik_solver.GetJointPose(np.array([0, 0, 0]), q, sphere_mnt_joint)
+    #         world_from_joint = pp.pose_transformation.pose_from_tform(joint_pose)
+    #         # world_from_sphere
+    #         sphere_pose = np.eye(4)
+    #         sphere_pose[0, 3] = sphere_data[0][0]
+    #         sphere_pose[1, 3] = sphere_data[0][1]
+    #         sphere_pose[2, 3] = sphere_data[0][2]
+    #         world_from_sphere = pp.pose_transformation.pose_from_tform(sphere_pose)
+    #         # joint_from_sphere
+    #         joint_from_sphere = pp.multiply(pp.invert(world_from_joint), world_from_sphere)
+    #         offset_mat = pp.pose_transformation.tform_from_pose(joint_from_sphere)
+    #         offset_data = ((offset_mat[0, 3], offset_mat[1, 3], offset_mat[2, 3]), sphere_data[1])
+    #         sphere_offsets.append(offset_data)
+    #     collision_offsets[link_name] = [sphere_offsets, sphere_mnt_joint]
+
+    # sphere = pp.create_sphere(0.075)
+
+    # # -------------------- init slider --------------------#
+    # x_slider = p.addUserDebugParameter(f"x", -1.0, 1.0, 0)
+    # y_slider = p.addUserDebugParameter(f"y", -1.0, 1.0, 0)
+    # yaw_slider = p.addUserDebugParameter(f"yaw", -np.pi, np.pi, 0)
+
+    # x_sphere_slider = p.addUserDebugParameter(f"x_sphere", -1.0, 1.0, 0)
+    # y_sphere_slider = p.addUserDebugParameter(f"y_sphere", -1.0, 1.0, 0)
+    # z_sphere_slider = p.addUserDebugParameter(f"z_sphere", -1.0, 1.0, 0)
+
+    # j1_slider = p.addUserDebugParameter(f"j1", -np.pi, np.pi, 0)
+    # j2_slider = p.addUserDebugParameter(f"j2", -np.pi, np.pi, 0)
+    # j3_slider = p.addUserDebugParameter(f"j3", -np.pi, np.pi, 0)
+    # j4_slider = p.addUserDebugParameter(f"j4", -np.pi, np.pi, 0)
+    # j5_slider = p.addUserDebugParameter(f"j5", -np.pi, np.pi, 0)
+    # j6_slider = p.addUserDebugParameter(f"j6", -np.pi, np.pi, 0)
+
+    # # -------------------- loop --------------------#
+    # while True:
+    #     x_value = p.readUserDebugParameter(x_slider)
+    #     y_value = p.readUserDebugParameter(y_slider)
+    #     yaw_value = p.readUserDebugParameter(yaw_slider)
+
+    #     x_sphere_value = p.readUserDebugParameter(x_sphere_slider)
+    #     y_sphere_value = p.readUserDebugParameter(y_sphere_slider)
+    #     z_sphere_value = p.readUserDebugParameter(z_sphere_slider)
+
+    #     rb.set_joint_positions(rb.base_joints, np.array([x_value, y_value, yaw_value]))
+    #     for link_name in sphere_attachments.keys():
+    #         for attachment in sphere_attachments[link_name]:
+    #             attachment: pp.Attachment
+    #             attachment.assign()
+
+    #     pp.set_point(sphere, np.array([x_sphere_value, y_sphere_value, z_sphere_value]))
+    #     # print(np.array([x_sphere_value, y_sphere_value, z_sphere_value]))
+
+    #     j1_value = p.readUserDebugParameter(j1_slider)
+    #     j2_value = p.readUserDebugParameter(j2_slider)
+    #     j3_value = p.readUserDebugParameter(j3_slider)
+    #     j4_value = p.readUserDebugParameter(j4_slider)
+    #     j5_value = p.readUserDebugParameter(j5_slider)
+    #     j6_value = p.readUserDebugParameter(j6_slider)
+    #     rb.set_joint_positions(rb.arm_joints, np.array([j1_value, j2_value, j3_value, j4_value, j5_value, j6_value]))
+
+    # **************************************************************************
+    # 关节位置测试
+    # **************************************************************************
+
+    # init_pb()
+
+    # # -------------------- robot init --------------------#
+    # rb = RobotSetup("r0")
+    # q = np.array(pp.get_joint_positions(rb.robot, rb.arm_joints))
+
+    # # -------------------- init slider --------------------#
+    # x_slider = p.addUserDebugParameter(f"x", -1.0, 1.0, 0)
+    # y_slider = p.addUserDebugParameter(f"y", -1.0, 1.0, 0)
+    # yaw_slider = p.addUserDebugParameter(f"yaw", -np.pi, np.pi, 0)
+
+    # j1_slider = p.addUserDebugParameter(f"j1", -np.pi, np.pi, 0)
+    # j2_slider = p.addUserDebugParameter(f"j2", -np.pi, np.pi, 0)
+    # j3_slider = p.addUserDebugParameter(f"j3", -np.pi, np.pi, 0)
+    # j4_slider = p.addUserDebugParameter(f"j4", -np.pi, np.pi, 0)
+    # j5_slider = p.addUserDebugParameter(f"j5", -np.pi, np.pi, 0)
+    # j6_slider = p.addUserDebugParameter(f"j6", -np.pi, np.pi, 0)
+
+    # # -------------------- loop --------------------#
+    # while True:
+    #     x_value = p.readUserDebugParameter(x_slider)
+    #     y_value = p.readUserDebugParameter(y_slider)
+    #     yaw_value = p.readUserDebugParameter(yaw_slider)
+    #     rb.set_joint_positions(rb.base_joints, np.array([x_value, y_value, yaw_value]))
+
+    #     j1_value = p.readUserDebugParameter(j1_slider)
+    #     j2_value = p.readUserDebugParameter(j2_slider)
+    #     j3_value = p.readUserDebugParameter(j3_slider)
+    #     j4_value = p.readUserDebugParameter(j4_slider)
+    #     j5_value = p.readUserDebugParameter(j5_slider)
+    #     j6_value = p.readUserDebugParameter(j6_slider)
+    #     q = np.array([j1_value, j2_value, j3_value, j4_value, j5_value, j6_value])
+
+    #     rb.set_joint_positions(rb.arm_joints, q)
+
+    #     for joint_name in opti_ik_solver.MANIPULATOR_CONTROL_JOINT_NAMES:
+    #         pose_mat = opti_ik_solver.GetJointPose(np.array([x_value, y_value, yaw_value]), q, joint_name)
+    #         pp.draw_pose(pp.pose_transformation.pose_from_tform(pose_mat), length=0.15, lifetime=1.0)
+
+    # **************************************************************************
+    # disabled collisions visualization
+    # **************************************************************************
+
+    # # -------------------- init --------------------#
+    # init_pb()
+    # rb = RobotSetup("r0")
+    # q_zero = np.array([0, 0, 0, 0, 0, 0])
+
+    # pp.wait_for_user()
+
+    # keys = list(opti_ik_solver.collision_info.keys())
+    # keys_combinations = list(itertools.combinations(keys, 2))
+
+    # print("======================================== opti ik combinations")
+    # print(keys_combinations)
+
+    # # -------------------- loop --------------------#
+    # for collision_pair in rb.disabled_collisions:
+    #     link_1_name = pp.get_link_name(rb.robot, collision_pair[0])
+    #     link_2_name = pp.get_link_name(rb.robot, collision_pair[1])
+    #     pair = (link_1_name, link_2_name)
+    #     idx = opti_ik_solver.FindCollisionPair(keys_combinations, pair)
+    #     # print(
+    #     #     f"collision_pair: {collision_pair}, link 1: {link_1_name}, link 2: {link_2_name}, idx: {idx}"
+    #     # )
+    #     if idx != -1:
+    #         keys_combinations.remove(keys_combinations[idx])
+
+    # print("======================================== new opti ik combinations")
+    # print(keys_combinations)
+
+    # for collision_pair in keys_combinations:
+    #     link_1_idx = pp.link_from_name(rb.robot, collision_pair[0])
+    #     link_2_idx = pp.link_from_name(rb.robot, collision_pair[1])
+
+    #     pp.set_color(rb.robot, (0, 0, 1, 0.4), link_1_idx)
+    #     pp.set_color(rb.robot, (0, 0, 1, 0.4), link_2_idx)
+
+    #     pp.wait_for_user(f"{collision_pair[0], collision_pair[1]}")
+
+    #     pp.set_color(rb.robot, pp.GREY, link_1_idx)
+    #     pp.set_color(rb.robot, pp.GREY, link_2_idx)

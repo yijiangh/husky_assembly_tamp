@@ -293,9 +293,10 @@ class GraspOptiSolver(object):
         # "ur_arm_base_link-base_fixed_joint",
     ]
 
-    def __init__(self, urdf_path: str, robot: RobotSetup) -> None:
+    def __init__(self, urdf_path: str, robots: List[RobotSetup]) -> None:
         self.urdf_path = urdf_path
-        self.robot = robot
+        self.robots = robots
+        self.num_robots = len(robots)
         self.CollisionInit()
         self.SolverInit()
 
@@ -339,7 +340,7 @@ class GraspOptiSolver(object):
             world_from_base[:3, :3] = R_z
             world_from_joint: np.ndarray = world_from_base
         else:
-            connect_from_joint: np.ndarray = self.connect_from_joint_dict[joint_name][0](
+            connect_from_joint: np.ndarray = self.connect_from_joint_dict[joint_name][0][0](
                 q[: self.connect_from_joint_dict[joint_name][2]]
             ).toarray()
             base_from_joint: np.ndarray = self.base_from_connect @ connect_from_joint
@@ -373,7 +374,12 @@ class GraspOptiSolver(object):
                 err += (T[i, j] - T_tar[i, j]) ** 2
         return err
 
-    def GraspIKObjectiveFunction(self, q: ca.MX, p: ca.MX, b: ca.MX, world_from_element: ca.MX) -> ca.MX:
+    def GraspIKObjectiveFunction(self, robot_idx: int) -> ca.MX:
+
+        q = self.grasp_var_q_list[robot_idx]
+        p = self.grasp_var_p_list[robot_idx]
+        b = self.grasp_var_b_list[robot_idx]
+        world_from_element = self.grasp_param_T_element_list[robot_idx]
 
         # **************************************************************************
         # compute pose of gripper
@@ -423,19 +429,12 @@ class GraspOptiSolver(object):
         obj = self.IKObjectiveFunction(T_gripper, T_gripper_tar)
         return obj
 
-    def GraspObjectiveFunction(self, p: ca.MX, c: ca.MX) -> ca.MX:
+    def GraspObjectiveFunction(self, robot_idx: int, c: ca.MX) -> ca.MX:
+        p = self.grasp_var_p_list[robot_idx]
         x = p[0]
         t = x - c
         obj = ca.if_else(t > 0, t**2, 0)
         return obj
-
-    def GroundParallelObjectiveFunction(self, world_from_base) -> ca.MX:
-        err = 0
-        T_tar = ca.MX.eye(4)
-        for i in range(3):
-            for j in range(3):
-                err += (world_from_base[i, j] - T_tar[i, j]) ** 2
-        return err
 
     def CollisionVisualize(self, enable: bool = True):
         q_val = pp.get_joint_positions(self.robot.robot, self.robot.arm_joints)
@@ -499,9 +498,12 @@ class GraspOptiSolver(object):
     def CollisionObjectiveFunction(
         self,
         index: int,
+        robot_idx: int,
         assembled: List[int],
         element_from_index: dict,
     ) -> ca.MX:
+
+        b = self.grasp_var_b_list[robot_idx]
 
         # **************************************************************************
         # compute collisions between robot and obstacles
@@ -509,9 +511,9 @@ class GraspOptiSolver(object):
 
         # world_from_base
         world_from_base: ca.MX = ca.MX.eye(4)
-        world_from_base[0, 3] = self.grasp_var_base[0]
-        world_from_base[1, 3] = self.grasp_var_base[1]
-        yaw = self.grasp_var_base[2]
+        world_from_base[0, 3] = b[0]
+        world_from_base[1, 3] = b[1]
+        yaw = b[2]
         R_z = ca.vertcat(
             ca.horzcat(ca.cos(yaw), -ca.sin(yaw), 0), ca.horzcat(ca.sin(yaw), ca.cos(yaw), 0), ca.horzcat(0, 0, 1)
         )
@@ -528,7 +530,7 @@ class GraspOptiSolver(object):
             if mnt_joint == "base_joint":
                 world_from_joint = world_from_base
             else:
-                base_from_joint = self.base_from_connect @ self.connect_from_joint_dict[mnt_joint][1]
+                base_from_joint = self.base_from_connect @ self.connect_from_joint_dict[mnt_joint][1][robot_idx]
                 world_from_joint = world_from_base @ base_from_joint
             for info in infos:
                 offset = info[0]
@@ -564,9 +566,12 @@ class GraspOptiSolver(object):
     def CollisionConstrain(
         self,
         index: int,
+        robot_idx: int,
         assembled: List[int],
         element_from_index: dict,
     ) -> ca.MX:
+
+        b = self.grasp_var_b_list[robot_idx]
 
         # **************************************************************************
         # compute collisions between robot and obstacles
@@ -574,9 +579,9 @@ class GraspOptiSolver(object):
 
         # world_from_base
         world_from_base: ca.MX = ca.MX.eye(4)
-        world_from_base[0, 3] = self.grasp_var_base[0]
-        world_from_base[1, 3] = self.grasp_var_base[1]
-        yaw = self.grasp_var_base[2]
+        world_from_base[0, 3] = b[0]
+        world_from_base[1, 3] = b[1]
+        yaw = b[2]
         R_z = ca.vertcat(
             ca.horzcat(ca.cos(yaw), -ca.sin(yaw), 0), ca.horzcat(ca.sin(yaw), ca.cos(yaw), 0), ca.horzcat(0, 0, 1)
         )
@@ -592,7 +597,7 @@ class GraspOptiSolver(object):
             if mnt_joint == "base_joint":
                 world_from_joint = world_from_base
             else:
-                base_from_joint = self.base_from_connect @ self.connect_from_joint_dict[mnt_joint][1]
+                base_from_joint = self.base_from_connect @ self.connect_from_joint_dict[mnt_joint][1][robot_idx]
                 world_from_joint = world_from_base @ base_from_joint
             for info in infos:
                 offset = info[0]
@@ -625,7 +630,9 @@ class GraspOptiSolver(object):
                         elements.append(element_index)
         return total_constrain
 
-    def SelfCollisionObjectiveFunction(self) -> ca.MX:
+    def SelfCollisionObjectiveFunction(self, robot_idx: int) -> ca.MX:
+
+        b = self.grasp_var_b_list[robot_idx]
 
         # **************************************************************************
         # compute collisions between robot links
@@ -633,9 +640,9 @@ class GraspOptiSolver(object):
 
         # world_from_base
         world_from_base: ca.MX = ca.MX.eye(4)
-        world_from_base[0, 3] = self.grasp_var_base[0]
-        world_from_base[1, 3] = self.grasp_var_base[1]
-        yaw = self.grasp_var_base[2]
+        world_from_base[0, 3] = b[0]
+        world_from_base[1, 3] = b[1]
+        yaw = b[2]
         R_z = ca.vertcat(
             ca.horzcat(ca.cos(yaw), -ca.sin(yaw), 0), ca.horzcat(ca.sin(yaw), ca.cos(yaw), 0), ca.horzcat(0, 0, 1)
         )
@@ -661,14 +668,18 @@ class GraspOptiSolver(object):
             if link_1_mnt_joint == "base_joint":
                 world_from_joint_1 = world_from_base
             else:
-                base_from_joint_1 = self.base_from_connect @ self.connect_from_joint_dict[link_1_mnt_joint][1]
+                base_from_joint_1 = (
+                    self.base_from_connect @ self.connect_from_joint_dict[link_1_mnt_joint][1][robot_idx]
+                )
                 world_from_joint_1 = world_from_base @ base_from_joint_1
 
             # -------------------- 获取 joint 2 位置 --------------------#
             if link_2_mnt_joint == "base_joint":
                 world_from_joint_2 = world_from_base
             else:
-                base_from_joint_2 = self.base_from_connect @ self.connect_from_joint_dict[link_2_mnt_joint][1]
+                base_from_joint_2 = (
+                    self.base_from_connect @ self.connect_from_joint_dict[link_2_mnt_joint][1][robot_idx]
+                )
                 world_from_joint_2 = world_from_base @ base_from_joint_2
 
             # -------------------- 遍历碰撞体 --------------------#
@@ -703,7 +714,9 @@ class GraspOptiSolver(object):
 
         return total_obj
 
-    def SelfCollisionConstrain(self) -> ca.MX:
+    def SelfCollisionConstrain(self, robot_idx: int) -> ca.MX:
+
+        b = self.grasp_var_b_list[robot_idx]
 
         # **************************************************************************
         # compute collisions between robot links
@@ -711,9 +724,9 @@ class GraspOptiSolver(object):
 
         # world_from_base
         world_from_base: ca.MX = ca.MX.eye(4)
-        world_from_base[0, 3] = self.grasp_var_base[0]
-        world_from_base[1, 3] = self.grasp_var_base[1]
-        yaw = self.grasp_var_base[2]
+        world_from_base[0, 3] = b[0]
+        world_from_base[1, 3] = b[1]
+        yaw = b[2]
         R_z = ca.vertcat(
             ca.horzcat(ca.cos(yaw), -ca.sin(yaw), 0), ca.horzcat(ca.sin(yaw), ca.cos(yaw), 0), ca.horzcat(0, 0, 1)
         )
@@ -739,15 +752,215 @@ class GraspOptiSolver(object):
             if link_1_mnt_joint == "base_joint":
                 world_from_joint_1 = world_from_base
             else:
-                base_from_joint_1 = self.base_from_connect @ self.connect_from_joint_dict[link_1_mnt_joint][1]
+                base_from_joint_1 = (
+                    self.base_from_connect @ self.connect_from_joint_dict[link_1_mnt_joint][1][robot_idx]
+                )
                 world_from_joint_1 = world_from_base @ base_from_joint_1
 
             # -------------------- 获取 joint 2 位置 --------------------#
             if link_2_mnt_joint == "base_joint":
                 world_from_joint_2 = world_from_base
             else:
-                base_from_joint_2 = self.base_from_connect @ self.connect_from_joint_dict[link_2_mnt_joint][1]
+                base_from_joint_2 = (
+                    self.base_from_connect @ self.connect_from_joint_dict[link_2_mnt_joint][1][robot_idx]
+                )
                 world_from_joint_2 = world_from_base @ base_from_joint_2
+
+            # -------------------- 遍历碰撞体 --------------------#
+            for info_pair in list(itertools.product(link_1_infos, link_2_infos)):
+                info_1, info_2 = info_pair
+
+                # -------------------- sphere 1 --------------------#
+                offset_1 = info_1[0]
+                radius_1 = info_1[1]
+                joint_from_sphere_1 = np.eye(4)
+                joint_from_sphere_1[0, 3] = offset_1[0]
+                joint_from_sphere_1[1, 3] = offset_1[1]
+                joint_from_sphere_1[2, 3] = offset_1[2]
+                world_from_sphere_1 = world_from_joint_1 @ joint_from_sphere_1
+                p_1 = ca.vertcat(world_from_sphere_1[0, 3], world_from_sphere_1[1, 3], world_from_sphere_1[2, 3])
+
+                # -------------------- sphere 2 --------------------#
+                offset_2 = info_2[0]
+                radius_2 = info_2[1]
+                joint_from_sphere_2 = np.eye(4)
+                joint_from_sphere_2[0, 3] = offset_2[0]
+                joint_from_sphere_2[1, 3] = offset_2[1]
+                joint_from_sphere_2[2, 3] = offset_2[2]
+                world_from_sphere_2 = world_from_joint_2 @ joint_from_sphere_2
+                p_2 = ca.vertcat(world_from_sphere_2[0, 3], world_from_sphere_2[1, 3], world_from_sphere_2[2, 3])
+
+                # -------------------- 计算 objective function --------------------#
+                dist = ca.norm_2(p_1 - p_2)
+                sum_radius = radius_1 + radius_2
+                constrain = ca.if_else(dist - sum_radius > eps, 0, -1)
+                total_constrain += min(link_1_weight, link_2_weight) * constrain
+
+        return total_constrain
+
+    def RobotCollisionObjectiveFunction(self, robot_idx_1: int, robot_idx_2: int) -> ca.MX:
+
+        b_1 = self.grasp_var_b_list[robot_idx_1]
+        b_2 = self.grasp_var_b_list[robot_idx_2]
+
+        # **************************************************************************
+        # compute collisions between robot links
+        # **************************************************************************
+
+        # world_from_base
+        world_from_base_1: ca.MX = ca.MX.eye(4)
+        world_from_base_1[0, 3] = b_1[0]
+        world_from_base_1[1, 3] = b_1[1]
+        yaw_1 = b_1[2]
+        R_z_1 = ca.vertcat(
+            ca.horzcat(ca.cos(yaw_1), -ca.sin(yaw_1), 0),
+            ca.horzcat(ca.sin(yaw_1), ca.cos(yaw_1), 0),
+            ca.horzcat(0, 0, 1),
+        )
+        world_from_base_1[:3, :3] = R_z_1
+
+        world_from_base_2: ca.MX = ca.MX.eye(4)
+        world_from_base_2[0, 3] = b_2[0]
+        world_from_base_2[1, 3] = b_2[1]
+        yaw_2 = b_2[2]
+        R_z_2 = ca.vertcat(
+            ca.horzcat(ca.cos(yaw_2), -ca.sin(yaw_2), 0),
+            ca.horzcat(ca.sin(yaw_2), ca.cos(yaw_2), 0),
+            ca.horzcat(0, 0, 1),
+        )
+        world_from_base_2[:3, :3] = R_z_2
+
+        # -------------------- loop: 遍历碰撞对 --------------------#
+        total_obj = 0
+        eps = 0.01
+        for collision_pair in self.robot_collision_pairs:
+            link_1_name, link_2_name = collision_pair
+
+            # -------------------- 获取 link 1 碰撞体信息 --------------------#
+            link_1_infos = self.collision_info[link_1_name][0]
+            link_1_mnt_joint = self.collision_info[link_1_name][1]
+            link_1_weight = self.collision_info[link_1_name][2]
+
+            # -------------------- 获取 link 2 碰撞体信息 --------------------#
+            link_2_infos = self.collision_info[link_2_name][0]
+            link_2_mnt_joint = self.collision_info[link_2_name][1]
+            link_2_weight = self.collision_info[link_2_name][2]
+
+            # -------------------- 获取 joint 1 位置 --------------------#
+            if link_1_mnt_joint == "base_joint":
+                world_from_joint_1 = world_from_base_1
+            else:
+                base_from_joint_1 = (
+                    self.base_from_connect @ self.connect_from_joint_dict[link_1_mnt_joint][1][robot_idx_1]
+                )
+                world_from_joint_1 = world_from_base_1 @ base_from_joint_1
+
+            # -------------------- 获取 joint 2 位置 --------------------#
+            if link_2_mnt_joint == "base_joint":
+                world_from_joint_2 = world_from_base_2
+            else:
+                base_from_joint_2 = (
+                    self.base_from_connect @ self.connect_from_joint_dict[link_2_mnt_joint][1][robot_idx_2]
+                )
+                world_from_joint_2 = world_from_base_2 @ base_from_joint_2
+
+            # -------------------- 遍历碰撞体 --------------------#
+            for info_pair in list(itertools.product(link_1_infos, link_2_infos)):
+                info_1, info_2 = info_pair
+
+                # -------------------- sphere 1 --------------------#
+                offset_1 = info_1[0]
+                radius_1 = info_1[1]
+                joint_from_sphere_1 = np.eye(4)
+                joint_from_sphere_1[0, 3] = offset_1[0]
+                joint_from_sphere_1[1, 3] = offset_1[1]
+                joint_from_sphere_1[2, 3] = offset_1[2]
+                world_from_sphere_1 = world_from_joint_1 @ joint_from_sphere_1
+                p_1 = ca.vertcat(world_from_sphere_1[0, 3], world_from_sphere_1[1, 3], world_from_sphere_1[2, 3])
+
+                # -------------------- sphere 2 --------------------#
+                offset_2 = info_2[0]
+                radius_2 = info_2[1]
+                joint_from_sphere_2 = np.eye(4)
+                joint_from_sphere_2[0, 3] = offset_2[0]
+                joint_from_sphere_2[1, 3] = offset_2[1]
+                joint_from_sphere_2[2, 3] = offset_2[2]
+                world_from_sphere_2 = world_from_joint_2 @ joint_from_sphere_2
+                p_2 = ca.vertcat(world_from_sphere_2[0, 3], world_from_sphere_2[1, 3], world_from_sphere_2[2, 3])
+
+                # -------------------- 计算 objective function --------------------#
+                dist = ca.norm_2(p_1 - p_2)
+                sum_radius = radius_1 + radius_2
+                obj = ca.if_else(dist - sum_radius > eps, 1.0 / (dist - sum_radius), 1.0 / eps)
+                total_obj += min(link_1_weight, link_2_weight) * obj
+
+        return total_obj
+
+    def RobotCollisionConstrain(self, robot_idx_1: int, robot_idx_2: int) -> ca.MX:
+
+        b_1 = self.grasp_var_b_list[robot_idx_1]
+        b_2 = self.grasp_var_b_list[robot_idx_2]
+
+        # **************************************************************************
+        # compute collisions between robot links
+        # **************************************************************************
+
+        # world_from_base
+        world_from_base_1: ca.MX = ca.MX.eye(4)
+        world_from_base_1[0, 3] = b_1[0]
+        world_from_base_1[1, 3] = b_1[1]
+        yaw_1 = b_1[2]
+        R_z_1 = ca.vertcat(
+            ca.horzcat(ca.cos(yaw_1), -ca.sin(yaw_1), 0),
+            ca.horzcat(ca.sin(yaw_1), ca.cos(yaw_1), 0),
+            ca.horzcat(0, 0, 1),
+        )
+        world_from_base_1[:3, :3] = R_z_1
+
+        world_from_base_2: ca.MX = ca.MX.eye(4)
+        world_from_base_2[0, 3] = b_2[0]
+        world_from_base_2[1, 3] = b_2[1]
+        yaw_2 = b_2[2]
+        R_z_2 = ca.vertcat(
+            ca.horzcat(ca.cos(yaw_2), -ca.sin(yaw_2), 0),
+            ca.horzcat(ca.sin(yaw_2), ca.cos(yaw_2), 0),
+            ca.horzcat(0, 0, 1),
+        )
+        world_from_base_2[:3, :3] = R_z_2
+
+        # -------------------- loop: 遍历碰撞对 --------------------#
+        total_constrain = 0
+        eps = 0.01
+        for collision_pair in self.robot_collision_pairs:
+            link_1_name, link_2_name = collision_pair
+
+            # -------------------- 获取 link 1 碰撞体信息 --------------------#
+            link_1_infos = self.collision_info[link_1_name][0]
+            link_1_mnt_joint = self.collision_info[link_1_name][1]
+            link_1_weight = self.collision_info[link_1_name][2]
+
+            # -------------------- 获取 link 2 碰撞体信息 --------------------#
+            link_2_infos = self.collision_info[link_2_name][0]
+            link_2_mnt_joint = self.collision_info[link_2_name][1]
+            link_2_weight = self.collision_info[link_2_name][2]
+
+            # -------------------- 获取 joint 1 位置 --------------------#
+            if link_1_mnt_joint == "base_joint":
+                world_from_joint_1 = world_from_base_1
+            else:
+                base_from_joint_1 = (
+                    self.base_from_connect @ self.connect_from_joint_dict[link_1_mnt_joint][1][robot_idx_1]
+                )
+                world_from_joint_1 = world_from_base_1 @ base_from_joint_1
+
+            # -------------------- 获取 joint 2 位置 --------------------#
+            if link_2_mnt_joint == "base_joint":
+                world_from_joint_2 = world_from_base_2
+            else:
+                base_from_joint_2 = (
+                    self.base_from_connect @ self.connect_from_joint_dict[link_2_mnt_joint][1][robot_idx_2]
+                )
+                world_from_joint_2 = world_from_base_2 @ base_from_joint_2
 
             # -------------------- 遍历碰撞体 --------------------#
             for info_pair in list(itertools.product(link_1_infos, link_2_infos)):
@@ -855,9 +1068,9 @@ class GraspOptiSolver(object):
         }
         keys = list(self.collision_info.keys())
         keys_combinations = list(itertools.combinations(keys, 2))
-        for collision_pair in self.robot.disabled_collisions:
-            link_1_name = pp.get_link_name(self.robot.robot, collision_pair[0])
-            link_2_name = pp.get_link_name(self.robot.robot, collision_pair[1])
+        for collision_pair in self.robots[0].disabled_collisions:
+            link_1_name = pp.get_link_name(self.robots[0].robot, collision_pair[0])
+            link_2_name = pp.get_link_name(self.robots[0].robot, collision_pair[1])
             pair = (link_1_name, link_2_name)
             idx = self.FindCollisionPair(keys_combinations, pair)
             if idx != -1:
@@ -868,6 +1081,9 @@ class GraspOptiSolver(object):
             keys_combinations.remove(keys_combinations[idx])
 
         self.self_collision_pairs = keys_combinations
+
+        self.robot_collision_pairs = list(itertools.product(keys, keys))
+        self.robot_collision_pairs = [("base_link", "base_link")]
 
     def FindCollisionPair(self, collision_list: List[Tuple[str]], collision_pair: Tuple[str]) -> int:
         sorted_pair = tuple(sorted(collision_pair))
@@ -889,54 +1105,20 @@ class GraspOptiSolver(object):
         self.Nb = 3
 
         # **************************************************************************
-        # solver for IK
-        # **************************************************************************
-
-        # self.ik_solver = ca.Opti()
-
-        # # -------------------- set parameters --------------------#
-        # self.ik_var_q = self.ik_solver.variable(self.Nq)
-        # self.ik_param_T_tar = self.ik_solver.parameter(4, 4)  # world(arm base)_from_target
-
-        # # -------------------- get matrix --------------------#
-        # self.ik_connect_from_gripper = SymbolicForward(
-        #     self.urdf_path,
-        #     self.MANIPULATOR_REDUCED_MODEL_JOINT_NAMES,
-        #     self.MANIPULATOR_CONTROL_JOINT_NAMES,
-        #     q=self.ik_var_q,
-        #     output_type="matrix",
-        # )  # world(arm base)_from_gripper
-
-        # # -------------------- objective function --------------------#
-        # self.ik_obj = self.IKObjectiveFunction(self.ik_connect_from_gripper, self.ik_param_T_tar)
-
-        # # -------------------- constrains, geq 0 --------------------#
-        # var_q_lb = np.pi + ca.vec(self.ik_var_q)
-        # var_q_ub = np.pi - ca.vec(self.ik_var_q)
-
-        # # -------------------- set solver objective function and constrains --------------------#
-        # self.ik_solver.minimize(self.ik_obj)
-        # self.ik_solver.subject_to(var_q_lb >= 0)
-        # self.ik_solver.subject_to(var_q_ub >= 0)
-
-        # # -------------------- set solver options --------------------#
-        # p_opts = {"expand": True, "print_time": 0}
-        # s_opts = {"max_iter": 100, "print_level": 0}
-        # self.ik_solver.solver("ipopt", p_opts, s_opts)
-
-        # **************************************************************************
         # solver for grasp
         # **************************************************************************
 
         self.grasp_solver = ca.Opti()
 
         # -------------------- set variables --------------------#
-        self.grasp_var_q = self.grasp_solver.variable(self.Nq)
-        self.grasp_var_p = self.grasp_solver.variable(self.Np)
-        self.grasp_var_base = self.grasp_solver.variable(self.Nb)
+        self.grasp_var_q_list = [self.grasp_solver.variable(self.Nq) for _ in range(self.num_robots)]
+        self.grasp_var_p_list = [self.grasp_solver.variable(self.Np) for _ in range(self.num_robots)]
+        self.grasp_var_b_list = [self.grasp_solver.variable(self.Nb) for _ in range(self.num_robots)]
 
         # -------------------- set parameters --------------------#
-        self.grasp_param_T_element = self.grasp_solver.parameter(4, 4)  # world_from_element
+        self.grasp_param_T_element_list = [
+            self.grasp_solver.parameter(4, 4) for _ in range(self.num_robots)
+        ]  # world_from_element
         self.grasp_param_c = self.grasp_solver.parameter(1)
 
         # -------------------- get transformation matices --------------------#
@@ -946,20 +1128,26 @@ class GraspOptiSolver(object):
         self.connect_from_joint_dict = {}
         for joint_idx, joint_name in enumerate(self.MANIPULATOR_CONTROL_JOINT_NAMES):
             end_idx = self.MANIPULATOR_REDUCED_MODEL_JOINT_NAMES.index(joint_name) + 1
-            fk_fn = SymbolicForward(
-                self.urdf_path,
-                self.MANIPULATOR_REDUCED_MODEL_JOINT_NAMES[:end_idx],
-                self.MANIPULATOR_CONTROL_JOINT_NAMES[: joint_idx + 1],
-                q=self.grasp_var_q,
-            )
-            fk_mat = SymbolicForward(
-                self.urdf_path,
-                self.MANIPULATOR_REDUCED_MODEL_JOINT_NAMES[:end_idx],
-                self.MANIPULATOR_CONTROL_JOINT_NAMES[: joint_idx + 1],
-                q=self.grasp_var_q,
-                output_type="matrix",
-            )
-            self.connect_from_joint_dict[joint_name] = (fk_fn, fk_mat, joint_idx + 1)
+            fk_fn_list = [
+                SymbolicForward(
+                    self.urdf_path,
+                    self.MANIPULATOR_REDUCED_MODEL_JOINT_NAMES[:end_idx],
+                    self.MANIPULATOR_CONTROL_JOINT_NAMES[: joint_idx + 1],
+                    q=q,
+                )
+                for q in self.grasp_var_q_list
+            ]
+            fk_mat_list = [
+                SymbolicForward(
+                    self.urdf_path,
+                    self.MANIPULATOR_REDUCED_MODEL_JOINT_NAMES[:end_idx],
+                    self.MANIPULATOR_CONTROL_JOINT_NAMES[: joint_idx + 1],
+                    q=q,
+                    output_type="matrix",
+                )
+                for q in self.grasp_var_q_list
+            ]
+            self.connect_from_joint_dict[joint_name] = (fk_fn_list, fk_mat_list, joint_idx + 1)
 
         base_from_connect_sym = SymbolicForward(
             self.urdf_path, self.BASE_REDUCED_MODEL_JOINT_NAMES, self.BASE_CONTROL_JOINT_NAMES, output_type="matrix"
@@ -967,71 +1155,35 @@ class GraspOptiSolver(object):
         self.base_from_connect = self.eval("base_from_connect", base_from_connect_sym, [], [])
 
         # -------------------- get matrix --------------------#
-        self.grasp_connect_from_gripper = SymbolicForward(
-            self.urdf_path,
-            self.MANIPULATOR_REDUCED_MODEL_JOINT_NAMES,
-            self.MANIPULATOR_CONTROL_JOINT_NAMES,
-            q=self.grasp_var_q,
-            output_type="matrix",
-        )
-        self.grasp_gripper_from_connect = self.GetInvertT(self.grasp_connect_from_gripper)
+        self.grasp_connect_from_gripper_list = [
+            SymbolicForward(
+                self.urdf_path,
+                self.MANIPULATOR_REDUCED_MODEL_JOINT_NAMES,
+                self.MANIPULATOR_CONTROL_JOINT_NAMES,
+                q=q,
+                output_type="matrix",
+            )
+            for q in self.grasp_var_q_list
+        ]
+        self.grasp_gripper_from_connect_list = [self.GetInvertT(mat) for mat in self.grasp_connect_from_gripper_list]
 
         # -------------------- ik obj: grasp_var_q, grasp_var_p, grasp_var_base, grasp_param_T_element --------------------#
-        ik_obj = self.GraspIKObjectiveFunction(
-            self.grasp_var_q, self.grasp_var_p, self.grasp_var_base, self.grasp_param_T_element
-        )
+        self.ik_obj_list = [self.GraspIKObjectiveFunction(robot_idx) for robot_idx in range(self.num_robots)]
 
         # -------------------- grasp obj: grasp_var_p, grasp_param_c --------------------#
-        grasp_obj = self.GraspObjectiveFunction(self.grasp_var_p, self.grasp_param_c)
+        self.grasp_obj_list = [
+            self.GraspObjectiveFunction(robot_idx, self.grasp_param_c) for robot_idx in range(self.num_robots)
+        ]
 
-        #-------------------- self collision obj: grasp_var_q, grasp_var_base --------------------#
-        self_collision_obj = self.SelfCollisionObjectiveFunction()
+        # -------------------- self collision obj: grasp_var_q, grasp_var_base --------------------#
+        self.self_collision_obj_list = [
+            self.SelfCollisionObjectiveFunction(robot_idx) for robot_idx in range(self.num_robots)
+        ]
 
-        # -------------------- set obj --------------------#
-        self.grasp_obj = ik_obj + grasp_obj + self_collision_obj
-
-        # -------------------- constrains ≥0 --------------------#
-        # 关节角约束
-        var_q_lb = np.pi + ca.vec(self.grasp_var_q)
-        var_q_ub = np.pi - ca.vec(self.grasp_var_q)
-
-        # p := (x, y, theta) 的约束
-        var_p_x_lb = 0.001 + self.grasp_var_p[0]
-        var_p_x_ub = 0.001 - self.grasp_var_p[0]
-        var_p_y_lb = self.grasp_param_c + self.grasp_var_p[1]
-        var_p_y_ub = self.grasp_param_c - self.grasp_var_p[1]
-        var_p_theta_lb = np.pi + self.grasp_var_p[2]
-        var_p_theta_ub = np.pi - self.grasp_var_p[2]
-
-        # base := (x, y, yaw) 的约束
-        var_base_yaw_lb = np.pi + self.grasp_var_base[2]
-        var_base_yaw_ub = np.pi - self.grasp_var_base[2]
-
-        # grasp 约束
-        ik_lb = 0.000001 + ik_obj
-        ik_ub = 0.000001 - ik_obj
-
-        # self collision 约束
-        self_collision_constrain = self.SelfCollisionConstrain()
-
-        # -------------------- set solver objective function and constrains --------------------#
-        self.grasp_solver.subject_to(var_q_lb >= 0)
-        self.grasp_solver.subject_to(var_q_ub >= 0)
-
-        self.grasp_solver.subject_to(var_p_x_lb >= 0)
-        self.grasp_solver.subject_to(var_p_x_ub >= 0)
-        self.grasp_solver.subject_to(var_p_y_lb >= 0)
-        self.grasp_solver.subject_to(var_p_y_ub >= 0)
-        self.grasp_solver.subject_to(var_p_theta_lb >= 0)
-        self.grasp_solver.subject_to(var_p_theta_ub >= 0)
-
-        self.grasp_solver.subject_to(var_base_yaw_lb >= 0)
-        self.grasp_solver.subject_to(var_base_yaw_ub >= 0)
-
-        self.grasp_solver.subject_to(ik_lb >= 0)
-        self.grasp_solver.subject_to(ik_ub >= 0)
-
-        self.grasp_solver.subject_to(self_collision_constrain >= 0)
+        # -------------------- self collision constrain >= 0 --------------------#
+        self.self_collision_constrain_list = [
+            self.SelfCollisionConstrain(robot_idx) for robot_idx in range(self.num_robots)
+        ]
 
         # -------------------- set solver options --------------------#
         p_opts = {"expand": True, "print_time": 0}
@@ -1050,12 +1202,12 @@ class GraspOptiSolver(object):
 
     def solve(
         self,
-        index: int,
+        indices: List[int],
         element_from_index: dict,
         assembled: Union[List[int], None] = None,
-        q_init: Union[np.ndarray, None] = None,
-        p_init: Union[np.ndarray, None] = None,
-        base_init: Union[np.ndarray, None] = None,
+        q_init_list: Union[List[np.ndarray], None] = None,
+        p_init_list: Union[List[np.ndarray], None] = None,
+        b_init_list: Union[List[np.ndarray], None] = None,
         output: str = "array",
         output_flag: bool = False,
     ) -> Union[Union[np.ndarray, List[float], None], Tuple[Union[np.ndarray, List[float], None], bool]]:
@@ -1063,12 +1215,12 @@ class GraspOptiSolver(object):
         Calculate grasp solution.
 
         Params:
-            index (int): index of current element
+            indices ([int]): indices of elements
             element_from_index ({index: Element}): dict of elements
             assembled ([index], None): indices of assembled elements
-            q_init (np.ndarray, None): initial guess of arm joint
-            p_init (np.ndarray, None): initial guess of grasp point (x, y, theta)
-            base_init (np.ndarray, None): initial guess of base pose (x, y, yaw)
+            q_init_list ([np.ndarray], None): initial guess of arm joint
+            p_init_list ([np.ndarray], None): initial guess of grasp point (x, y, theta)
+            b_init_list ([np.ndarray], None): initial guess of base pose (x, y, yaw)
             output (str, "array"): array/list, output result type
             output_flag (bool, False, [not used]): whether output includes solve status
 
@@ -1076,53 +1228,171 @@ class GraspOptiSolver(object):
             q (np.ndarray | [float] | None): joint conf to the target pose
             success (bool, [optional]): solve status
         """
-        element: Element = element_from_index[index]
-        world_form_element = pp.pose_transformation.tform_from_pose(element.goal_pose)
+        elements: List[Element] = [element_from_index[index] for index in indices]
+        world_form_element_list = [pp.pose_transformation.tform_from_pose(element.goal_pose) for element in elements]
 
         # the y axis needs to be along the direction of the element
-        rotate_pose = world_form_element @ pp.pose_transformation.tform_from_pose(
-            pp.Pose(point=[0, 0, 0], euler=pp.Euler(np.pi / 2, 0, 0))
-        )
-
-        if q_init is None:
-            q_init = np.array([0] * self.Nq)
-        if p_init is None:
-            p_init = np.array([0] * self.Np)
-        if base_init is None:
-            base_init = np.array([0] * self.Nb)
+        rotate_pose_list = [
+            world_form_element
+            @ pp.pose_transformation.tform_from_pose(pp.Pose(point=[0, 0, 0], euler=pp.Euler(np.pi / 2, 0, 0)))
+            for world_form_element in world_form_element_list
+        ]
 
         temp_grasp_solver = self.grasp_solver
 
-        if index is None or assembled is None:
-            temp_grasp_solver.minimize(self.grasp_obj)
-        else:
-            # -------------------- 设置目标函数 --------------------#
+        # **************************************************************************
+        # 设置目标函数
+        # **************************************************************************
+
+        obj = 0
+        for robot_idx, index in enumerate(indices):
             # 优化目标函数中必须有collision的部分，否则优化时间和优化方向难以确定，并且优化结果不一定满足约束
             # 设置了gripper的collision，gripper只需要考虑与其他element的碰撞
-            obj = self.CollisionObjectiveFunction(index, assembled, element_from_index)
-            temp_grasp_solver.minimize(self.grasp_obj + obj)
-            # temp_grasp_solver.minimize(self.grasp_obj)
+            # obj = self.CollisionObjectiveFunction(index, assembled, element_from_index)
+            temp_indices = indices.copy()
+            temp_indices.remove(index)
+            temp_assembled = assembled + temp_indices
+            obj += (
+                0.1 * self.ik_obj_list[robot_idx]
+                + 0.1 * self.grasp_obj_list[robot_idx]
+                + 0.1 * self.self_collision_obj_list[robot_idx]
+                + 5 * self.CollisionObjectiveFunction(index, robot_idx, temp_assembled, element_from_index)
+            )
 
-            # -------------------- 设置约束 --------------------#
+        for robot_pair in itertools.combinations(range(self.num_robots), 2):
+            obj += 10 * self.RobotCollisionObjectiveFunction(robot_pair[0], robot_pair[1])
+
+        temp_grasp_solver.minimize(obj)
+
+        # **************************************************************************
+        # 设置约束
+        # **************************************************************************
+
+        for robot_idx, index in enumerate(indices):
+            temp_indices = indices.copy()
+            temp_indices.remove(index)
+            temp_assembled = assembled + temp_indices
+
+            q = self.grasp_var_q_list[robot_idx]
+            p = self.grasp_var_p_list[robot_idx]
+            b = self.grasp_var_b_list[robot_idx]
+            ik_obj = self.ik_obj_list[robot_idx]
+            self_collision_constrain = self.self_collision_constrain_list[robot_idx]
+
+            # 关节角约束
+            var_q_lb = np.pi + ca.vec(q)
+            var_q_ub = np.pi - ca.vec(q)
+
+            # p := (x, y, theta) 的约束
+            var_p_x_lb = 0.001 + p[0]
+            var_p_x_ub = 0.001 - p[0]
+            var_p_y_lb = self.grasp_param_c + p[1]
+            var_p_y_ub = self.grasp_param_c - p[1]
+            var_p_theta_lb = np.pi + p[2]
+            var_p_theta_ub = np.pi - p[2]
+
+            # base := (x, y, yaw) 的约束
+            var_base_yaw_lb = np.pi + b[2]
+            var_base_yaw_ub = np.pi - b[2]
+
+            # grasp 约束
+            ik_lb = 0.000001 + ik_obj
+            ik_ub = 0.000001 - ik_obj
+
+            temp_grasp_solver.subject_to(var_q_lb >= 0)
+            temp_grasp_solver.subject_to(var_q_ub >= 0)
+
+            temp_grasp_solver.subject_to(var_p_x_lb >= 0)
+            temp_grasp_solver.subject_to(var_p_x_ub >= 0)
+            temp_grasp_solver.subject_to(var_p_y_lb >= 0)
+            temp_grasp_solver.subject_to(var_p_y_ub >= 0)
+            temp_grasp_solver.subject_to(var_p_theta_lb >= 0)
+            temp_grasp_solver.subject_to(var_p_theta_ub >= 0)
+
+            temp_grasp_solver.subject_to(var_base_yaw_lb >= 0)
+            temp_grasp_solver.subject_to(var_base_yaw_ub >= 0)
+
+            temp_grasp_solver.subject_to(ik_lb >= 0)
+            temp_grasp_solver.subject_to(ik_ub >= 0)
+
+            temp_grasp_solver.subject_to(self_collision_constrain >= 0)
+
+            # -------------------- collision约束 --------------------#
             # 优化约束中必须有collision的部分，否则可能会发生碰撞
-            collision_constrain = self.CollisionConstrain(index, assembled, element_from_index)
+            collision_constrain = self.CollisionConstrain(index, robot_idx, temp_assembled, element_from_index)
             temp_grasp_solver.subject_to(collision_constrain >= 0)
 
+        for robot_pair in itertools.combinations(range(self.num_robots), 2):
+            constrain = self.RobotCollisionConstrain(robot_pair[0], robot_pair[1])
+            temp_grasp_solver.subject_to(constrain >= 0)
+
+        # **************************************************************************
+        # 设置参数值
+        # **************************************************************************
+
         temp_grasp_solver.set_value(self.grasp_param_c, 0.35)
-        temp_grasp_solver.set_value(self.grasp_param_T_element, rotate_pose)
+        for robot_idx, index in enumerate(indices):
+            temp_grasp_solver.set_value(self.grasp_param_T_element_list[robot_idx], rotate_pose_list[robot_idx])
 
         attempts = 0
         while True:
             try:
-                q_init = np.random.uniform(-np.pi, np.pi, self.Nq)
-                p_init = np.concatenate([np.random.uniform(-0.35, 0.35, 2), np.random.uniform(-np.pi, np.pi, 1)])
-                base_init = np.concatenate([np.random.uniform(10, 10, 2), np.random.uniform(-np.pi, np.pi, 1)])
-                temp_grasp_solver.set_initial(self.grasp_var_q, q_init)
-                temp_grasp_solver.set_initial(self.grasp_var_p, p_init)
-                temp_grasp_solver.set_initial(self.grasp_var_base, base_init)
+                # **************************************************************************
+                # 设置初始值
+                # **************************************************************************
+
+                for robot_idx, index in enumerate(indices):
+                    q_init = np.random.uniform(-np.pi, np.pi, self.Nq)
+                    p_init = np.concatenate([np.random.uniform(-0.35, 0.35, 2), np.random.uniform(-np.pi, np.pi, 1)])
+                    base_init = np.concatenate([np.random.uniform(10, 10, 2), np.random.uniform(-np.pi, np.pi, 1)])
+                    temp_grasp_solver.set_initial(self.grasp_var_q_list[robot_idx], q_init)
+                    temp_grasp_solver.set_initial(self.grasp_var_p_list[robot_idx], p_init)
+                    temp_grasp_solver.set_initial(self.grasp_var_b_list[robot_idx], base_init)
+
                 grasp_solution = temp_grasp_solver.solve()
-                return grasp_solution.value(self.grasp_var_q), grasp_solution.value(self.grasp_var_base)
+
+                for robot_idx, index in enumerate(indices):
+                    temp_indices = indices.copy()
+                    temp_indices.remove(index)
+                    temp_assembled = assembled + temp_indices
+                    collision_constrain = self.CollisionConstrain(index, robot_idx, temp_assembled, element_from_index)
+                    self.eval(
+                        "collision_constrain",
+                        collision_constrain,
+                        [self.grasp_var_b_list[robot_idx], self.grasp_var_q_list[robot_idx]],
+                        [
+                            grasp_solution.value(self.grasp_var_b_list[robot_idx]),
+                            grasp_solution.value(self.grasp_var_q_list[robot_idx]),
+                        ],
+                        verbose=True,
+                    )
+
+                for robot_pair in itertools.combinations(range(self.num_robots), 2):
+                    constrain = self.RobotCollisionConstrain(robot_pair[0], robot_pair[1])
+                    self.eval(
+                        "robot_collision_constrain",
+                        constrain,
+                        [
+                            self.grasp_var_b_list[robot_pair[0]],
+                            self.grasp_var_b_list[robot_pair[1]],
+                            self.grasp_var_q_list[robot_pair[0]],
+                            self.grasp_var_q_list[robot_pair[1]],
+                        ],
+                        [
+                            grasp_solution.value(self.grasp_var_b_list[robot_pair[0]]),
+                            grasp_solution.value(self.grasp_var_b_list[robot_pair[1]]),
+                            grasp_solution.value(self.grasp_var_q_list[robot_pair[0]]),
+                            grasp_solution.value(self.grasp_var_q_list[robot_pair[1]]),
+                        ],
+                        verbose=True,
+                    )
+
+                return [
+                    grasp_solution.value(self.grasp_var_q_list[robot_idx]) for robot_idx in range(self.num_robots)
+                ], [grasp_solution.value(self.grasp_var_b_list[robot_idx]) for robot_idx in range(self.num_robots)]
+
             except Exception as e:
+                print(e)
                 attempts += 1
                 if attempts >= 20:
                     print("Max attempts reached. Exiting.")
@@ -1329,31 +1599,37 @@ if __name__ == "__main__":
     }
 
     # -------------------- robot init --------------------#
-    rb = RobotSetup("r0")
+    rb_0 = RobotSetup("r0")
+    rb_1 = RobotSetup("r1")
+    robot_list = [rb_0, rb_1]
     q_zero = np.array([0, 0, 0, 0, 0, 0])
-    opti_ik_solver = GraspOptiSolver(urdf_path, rb)
+    opti_ik_solver = GraspOptiSolver(urdf_path, robot_list)
 
     # -------------------- debugger --------------------#
     continue_button = p.addUserDebugParameter("continue", 1, 0, 0)
     collision_show_button = p.addUserDebugParameter("collision show", 1, 0, 0)
 
     # -------------------- visualization --------------------#
+    sequence = [[0, 1], [2, 3], [4, 5]]
     assembled = []
     collision_show = True
-    for i in element_from_index.keys():
-        pp.set_pose(element_from_index[i].body, element_from_index[i].goal_pose)
-        pp.set_color(element_from_index[i].body, pp.RED)
-        pp.draw_pose(element_from_index[i].goal_pose, length=0.25)
+    for step in sequence:
+        for i in step:
+            pp.set_pose(element_from_index[i].body, element_from_index[i].goal_pose)
+            pp.set_color(element_from_index[i].body, pp.RED)
+            pp.draw_pose(element_from_index[i].goal_pose, length=0.25)
 
         # world_from_element = pp.pose_transformation.tform_from_pose(element_from_index[i].goal_pose)
-        q_opti, base_opti = opti_ik_solver.solve(i, element_from_index, assembled=assembled, q_init=q_zero)
+        q_opti_list, base_opti_list = opti_ik_solver.solve(step, element_from_index, assembled=assembled)
 
-        if q_opti is None or base_opti is None:
+        if q_opti_list is None or base_opti_list is None:
             pp.wait_for_user("Solve failed!")
             continue
 
-        rb.set_joint_positions(rb.arm_joints, q_opti)
-        rb.set_joint_positions(rb.base_joints, base_opti)
+        for temp_rb, q_opti, b_opti in zip(robot_list, q_opti_list, base_opti_list):
+            temp_rb: RobotSetup
+            temp_rb.set_joint_positions(temp_rb.arm_joints, q_opti)
+            temp_rb.set_joint_positions(temp_rb.base_joints, b_opti)
 
         prev_continue_button_value = p.readUserDebugParameter(continue_button)
         prev_collision_show_button_value = p.readUserDebugParameter(collision_show_button)
@@ -1362,7 +1638,8 @@ if __name__ == "__main__":
             current_continue_button_value = p.readUserDebugParameter(continue_button)
             if current_continue_button_value > prev_continue_button_value:
                 prev_continue_button_value = current_continue_button_value
-                assembled.append(i)
+                for i in step:
+                    assembled.append(i)
                 break
 
             current_collision_show_button_value = p.readUserDebugParameter(collision_show_button)

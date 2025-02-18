@@ -432,7 +432,7 @@ class GraspOptiSolver(object):
     def GraspObjectiveFunction(self, robot_idx: int, c: ca.MX) -> ca.MX:
         p = self.grasp_var_p_list[robot_idx]
         x = p[0]
-        t = x - c
+        t = x - c # TODO
         obj = ca.if_else(t > 0, t**2, 0)
         return obj
 
@@ -1185,12 +1185,6 @@ class GraspOptiSolver(object):
             self.SelfCollisionConstrain(robot_idx) for robot_idx in range(self.num_robots)
         ]
 
-        # -------------------- set solver options --------------------#
-        p_opts = {"expand": True, "print_time": 0}
-        s_opts = {"max_iter": 10000, "print_level": 0}
-        s_opts = {"max_iter": 10000}
-        self.grasp_solver.solver("ipopt", p_opts, s_opts)
-
     def forward(self, q: Union[np.ndarray, List[float]]) -> np.ndarray:
 
         if isinstance(q, np.ndarray):
@@ -1205,11 +1199,7 @@ class GraspOptiSolver(object):
         indices: List[int],
         element_from_index: dict,
         assembled: Union[List[int], None] = None,
-        q_init_list: Union[List[np.ndarray], None] = None,
-        p_init_list: Union[List[np.ndarray], None] = None,
-        b_init_list: Union[List[np.ndarray], None] = None,
-        output: str = "array",
-        output_flag: bool = False,
+        verbose: bool = False,
     ) -> Union[Union[np.ndarray, List[float], None], Tuple[Union[np.ndarray, List[float], None], bool]]:
         """
         Calculate grasp solution.
@@ -1218,11 +1208,7 @@ class GraspOptiSolver(object):
             indices ([int]): indices of elements
             element_from_index ({index: Element}): dict of elements
             assembled ([index], None): indices of assembled elements
-            q_init_list ([np.ndarray], None): initial guess of arm joint
-            p_init_list ([np.ndarray], None): initial guess of grasp point (x, y, theta)
-            b_init_list ([np.ndarray], None): initial guess of base pose (x, y, yaw)
-            output (str, "array"): array/list, output result type
-            output_flag (bool, False, [not used]): whether output includes solve status
+            verbose (bool, False): whether to print the solve status
 
         Returns:
             q (np.ndarray | [float] | None): joint conf to the target pose
@@ -1334,6 +1320,16 @@ class GraspOptiSolver(object):
         for robot_idx, index in enumerate(indices):
             temp_grasp_solver.set_value(self.grasp_param_T_element_list[robot_idx], rotate_pose_list[robot_idx])
 
+        # **************************************************************************
+        # 设置求解器参数
+        # **************************************************************************
+        p_opts = {"expand": True, "print_time": 0}
+        if verbose:
+            s_opts = {"max_iter": 10000}
+        else:
+            s_opts = {"max_iter": 10000, "print_level": 0}
+        self.grasp_solver.solver("ipopt", p_opts, s_opts)
+
         attempts = 0
         while True:
             try:
@@ -1349,53 +1345,60 @@ class GraspOptiSolver(object):
                     temp_grasp_solver.set_initial(self.grasp_var_p_list[robot_idx], p_init)
                     temp_grasp_solver.set_initial(self.grasp_var_b_list[robot_idx], base_init)
 
-                grasp_solution = temp_grasp_solver.solve()
+                if verbose:
+                    grasp_solution = temp_grasp_solver.solve()
+                else:
+                    with HideOutput():
+                        grasp_solution = temp_grasp_solver.solve()
 
-                for robot_idx, index in enumerate(indices):
-                    temp_indices = indices.copy()
-                    temp_indices.remove(index)
-                    temp_assembled = assembled + temp_indices
-                    collision_constrain = self.CollisionConstrain(index, robot_idx, temp_assembled, element_from_index)
-                    self.eval(
-                        "collision_constrain",
-                        collision_constrain,
-                        [self.grasp_var_b_list[robot_idx], self.grasp_var_q_list[robot_idx]],
-                        [
-                            grasp_solution.value(self.grasp_var_b_list[robot_idx]),
-                            grasp_solution.value(self.grasp_var_q_list[robot_idx]),
-                        ],
-                        verbose=True,
-                    )
+                # for robot_idx, index in enumerate(indices):
+                #     temp_indices = indices.copy()
+                #     temp_indices.remove(index)
+                #     temp_assembled = assembled + temp_indices
+                #     collision_constrain = self.CollisionConstrain(index, robot_idx, temp_assembled, element_from_index)
+                #     # self.eval(
+                #     #     "collision_constrain",
+                #     #     collision_constrain,
+                #     #     [self.grasp_var_b_list[robot_idx], self.grasp_var_q_list[robot_idx]],
+                #     #     [
+                #     #         grasp_solution.value(self.grasp_var_b_list[robot_idx]),
+                #     #         grasp_solution.value(self.grasp_var_q_list[robot_idx]),
+                #     #     ],
+                #     #     verbose=True,
+                #     # )
 
-                for robot_pair in itertools.combinations(range(self.num_robots), 2):
-                    constrain = self.RobotCollisionConstrain(robot_pair[0], robot_pair[1])
-                    self.eval(
-                        "robot_collision_constrain",
-                        constrain,
-                        [
-                            self.grasp_var_b_list[robot_pair[0]],
-                            self.grasp_var_b_list[robot_pair[1]],
-                            self.grasp_var_q_list[robot_pair[0]],
-                            self.grasp_var_q_list[robot_pair[1]],
-                        ],
-                        [
-                            grasp_solution.value(self.grasp_var_b_list[robot_pair[0]]),
-                            grasp_solution.value(self.grasp_var_b_list[robot_pair[1]]),
-                            grasp_solution.value(self.grasp_var_q_list[robot_pair[0]]),
-                            grasp_solution.value(self.grasp_var_q_list[robot_pair[1]]),
-                        ],
-                        verbose=True,
-                    )
-
+                # for robot_pair in itertools.combinations(range(self.num_robots), 2):
+                #     constrain = self.RobotCollisionConstrain(robot_pair[0], robot_pair[1])
+                #     # self.eval(
+                #     #     "robot_collision_constrain",
+                #     #     constrain,
+                #     #     [
+                #     #         self.grasp_var_b_list[robot_pair[0]],
+                #     #         self.grasp_var_b_list[robot_pair[1]],
+                #     #         self.grasp_var_q_list[robot_pair[0]],
+                #     #         self.grasp_var_q_list[robot_pair[1]],
+                #     #     ],
+                #     #     [
+                #     #         grasp_solution.value(self.grasp_var_b_list[robot_pair[0]]),
+                #     #         grasp_solution.value(self.grasp_var_b_list[robot_pair[1]]),
+                #     #         grasp_solution.value(self.grasp_var_q_list[robot_pair[0]]),
+                #     #         grasp_solution.value(self.grasp_var_q_list[robot_pair[1]]),
+                #     #     ],
+                #     #     verbose=True,
+                #     # )
+                
+                # TODO
                 return [
                     grasp_solution.value(self.grasp_var_q_list[robot_idx]) for robot_idx in range(self.num_robots)
                 ], [grasp_solution.value(self.grasp_var_b_list[robot_idx]) for robot_idx in range(self.num_robots)]
 
             except Exception as e:
-                print(e)
+                if verbose:
+                    print(e)
                 attempts += 1
                 if attempts >= 20:
-                    print("Max attempts reached. Exiting.")
+                    if verbose:
+                        print("Max attempts reached. Exiting.")
                     break  # 达到最大重试次数时退出
 
         return None, None

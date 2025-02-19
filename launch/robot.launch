@@ -1,0 +1,13 @@
+<launch>
+    <param name="robot_description" textfile="$(find husky_assembly)/data/husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e_no_base_joint.urdf" />
+ 
+    <!-- 运行joint_state_publisher节点，发布机器人的关节状态  -->
+	<node name="joint_state_publisher" pkg="joint_state_publisher" type="joint_state_publisher" />
+	
+	<!-- 运行robot_state_publisher节点，发布tf  -->
+	<node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" />
+
+    <!-- 启动 rviz -->
+    <node pkg="rviz" type="rviz" name="rviz" args="-d $(find husky_assembly)/config/robot.rviz" required="true" />
+ 
+</launch>

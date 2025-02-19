@@ -1,8 +1,0 @@
-__title__ = 'husky_assembly'
-__description__ = '...'
-__url__ = 'https://github.com/yijiangh/husky_assembly'
-__version__ = '0.0.1'
-__author__ = 'Yijiang Huang'
-__author_email__ = 'huang@hey.com'
-__license__ = 'MIT'
-__copyright__ = 'Copyright 2023 Yijiang Huang'

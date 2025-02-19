@@ -134,6 +134,5 @@ visualizations
 
 .idea
 
-scripts/pddl_experiments/test*.py
-scripts/symbolic_planner/logs/**/*.json
-scripts/symbolic_planner/*test*.py
+scripts/logs/**/*.json
+scripts/*test*.py

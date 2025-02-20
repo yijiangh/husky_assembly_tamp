@@ -1,0 +1,242 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<!-- <robot name="robotiq_gripper">
+    <link name="base_link">
+        <visual>
+            <origin rpy="0 0 0" xyz="0 0 0" />
+            <geometry>
+                <mesh filename="package://husky_assembly/data/husky_urdf/robotiq_85/meshes/static/robotiq_85_open.obj" />
+            </geometry>
+        </visual>
+        <collision>
+            <origin rpy="1.570795 0 0" xyz="0 0 0" />
+            <geometry>
+                <cylinder length="0.1143" radius="0.1651" />
+            </geometry>
+        </collision>
+    </link>
+</robot> -->
+
+<robot name="robotiq_85_gripper">
+    <!-- control -->
+    <!-- <joint name="dummy_center_fixed_joint" type="fixed">
+    <parent link="dummy_center_indicator_link"/>
+    <child link="robotiq_85_base_link"/>
+    <origin xyz="-0.137 0 0" />
+  </joint> -->
+
+    <!-- robot -->
+    <link name="robotiq_85_base_link">
+        <visual>
+            <geometry>
+                <mesh filename="package://husky_assembly/data/husky_urdf/robotiq_85/meshes/visual/robotiq_85_base_link.stl" />
+            </geometry>
+        </visual>
+        <collision>
+            <geometry>
+                <mesh filename="package://husky_assembly/data/husky_urdf/robotiq_85/meshes/collision/robotiq_85_base_link.stl" />
+                <!-- <mesh filename="package://husky_assembly/data/husky_urdf/robotiq_85/meshes/collision/robotiq_85_base_link.stl"/> -->
+            </geometry>
+        </collision>
+    </link>
+
+    <joint name="robotiq_85_left_knuckle_joint" type="revolute">
+        <parent link="robotiq_85_base_link" />
+        <child link="robotiq_85_left_knuckle_link" />
+        <axis xyz="0 0 1" />
+        <origin rpy="3.14 0.0 0.0" xyz="0.05490451627 0.03060114443 0.0" />
+        <limit lower="0.0" upper="0.80285" velocity="3.14" effort="1000" />
+    </joint>
+
+    <joint name="robotiq_85_right_knuckle_joint" type="revolute">
+        <parent link="robotiq_85_base_link" />
+        <child link="robotiq_85_right_knuckle_link" />
+        <axis xyz="0 0 1" />
+        <origin rpy="0.0 0.0 0.0" xyz="0.05490451627 -0.03060114443 0.0" />
+        <limit lower="-3.14" upper="3.14" velocity="3.14" effort="1000" />
+        <mimic joint="robotiq_85_left_knuckle_joint" />
+    </joint>
+
+    <link name="robotiq_85_left_knuckle_link">
+        <visual>
+            <geometry>
+                <mesh filename="package://husky_assembly/data/husky_urdf/robotiq_85/meshes/visual/robotiq_85_knuckle_link.obj" />
+            </geometry>
+        </visual>
+        <collision>
+            <geometry>
+                <mesh filename="package://husky_assembly/data/husky_urdf/robotiq_85/meshes/collision/robotiq_85_knuckle_link.stl" />
+            </geometry>
+        </collision>
+    </link>
+
+    <link name="robotiq_85_right_knuckle_link">
+        <visual>
+            <geometry>
+                <mesh filename="package://husky_assembly/data/husky_urdf/robotiq_85/meshes/visual/robotiq_85_knuckle_link.obj" />
+            </geometry>
+        </visual>
+        <collision>
+            <geometry>
+                <mesh filename="package://husky_assembly/data/husky_urdf/robotiq_85/meshes/collision/robotiq_85_knuckle_link.stl" />
+            </geometry>
+        </collision>
+    </link>
+
+    <joint name="robotiq_85_left_finger_joint" type="fixed">
+        <parent link="robotiq_85_left_knuckle_link" />
+        <child link="robotiq_85_left_finger_link" />
+        <origin xyz="-0.00408552455 -0.03148604435 0.0" rpy="0 0 0" />
+    </joint>
+
+    <joint name="robotiq_85_right_finger_joint" type="fixed">
+        <parent link="robotiq_85_right_knuckle_link" />
+        <child link="robotiq_85_right_finger_link" />
+        <origin xyz="-0.00408552455 -0.03148604435 0.0" rpy="0 0 0" />
+    </joint>
+
+    <link name="robotiq_85_left_finger_link">
+        <visual>
+            <geometry>
+                <mesh filename="package://husky_assembly/data/husky_urdf/robotiq_85/meshes/visual/robotiq_85_finger_link.obj" />
+            </geometry>
+        </visual>
+        <collision>
+            <geometry>
+                <mesh filename="package://husky_assembly/data/husky_urdf/robotiq_85/meshes/collision/robotiq_85_finger_link.stl" />
+            </geometry>
+        </collision>
+    </link>
+
+    <link name="robotiq_85_right_finger_link">
+        <visual>
+            <geometry>
+                <mesh filename="package://husky_assembly/data/husky_urdf/robotiq_85/meshes/visual/robotiq_85_finger_link.obj" />
+            </geometry>
+        </visual>
+        <collision>
+            <geometry>
+                <mesh filename="package://husky_assembly/data/husky_urdf/robotiq_85/meshes/collision/robotiq_85_finger_link.stl" />
+            </geometry>
+        </collision>
+    </link>
+
+    <joint name="robotiq_85_left_inner_knuckle_joint" type="revolute">
+        <parent link="robotiq_85_base_link" />
+        <child link="robotiq_85_left_inner_knuckle_link" />
+        <axis xyz="0 0 1" />
+        <origin xyz="0.06142 0.0127 0" rpy="3.14 0.0 0.0" />
+        <limit lower="-3.14" upper="3.14" velocity="3.14" effort="0.1" />
+        <mimic joint="robotiq_85_left_knuckle_joint" offset="0" />
+    </joint>
+
+    <joint name="robotiq_85_right_inner_knuckle_joint" type="revolute">
+        <parent link="robotiq_85_base_link" />
+        <child link="robotiq_85_right_inner_knuckle_link" />
+        <axis xyz="0 0 1" />
+        <origin xyz="0.06142 -0.0127 0" rpy="0 0 0" />
+        <limit lower="-3.14" upper="3.14" velocity="3.14" effort="0.1" />
+        <mimic joint="robotiq_85_left_knuckle_joint" offset="0" />
+    </joint>
+
+    <link name="robotiq_85_left_inner_knuckle_link">
+        <visual>
+            <geometry>
+                <mesh filename="package://husky_assembly/data/husky_urdf/robotiq_85/meshes/visual/robotiq_85_inner_knuckle_link.obj" />
+            </geometry>
+        </visual>
+        <collision>
+            <geometry>
+                <mesh filename="package://husky_assembly/data/husky_urdf/robotiq_85/meshes/collision/robotiq_85_inner_knuckle_link.stl" />
+            </geometry>
+        </collision>
+    </link>
+    <link name="robotiq_85_right_inner_knuckle_link">
+        <visual>
+            <geometry>
+                <mesh filename="package://husky_assembly/data/husky_urdf/robotiq_85/meshes/visual/robotiq_85_inner_knuckle_link.obj" />
+            </geometry>
+        </visual>
+        <collision>
+            <geometry>
+                <mesh filename="package://husky_assembly/data/husky_urdf/robotiq_85/meshes/collision/robotiq_85_inner_knuckle_link.stl" />
+            </geometry>
+        </collision>
+    </link>
+
+    <joint name="robotiq_85_left_finger_tip_joint" type="revolute">
+        <parent link="robotiq_85_left_inner_knuckle_link" />
+        <child link="robotiq_85_left_finger_tip_link" />
+        <axis xyz="0 0 1" />
+        <origin xyz="0.04303959807 -0.03759940821 0.0" rpy="0.0 0.0 0.0" />
+        <limit lower="-3.14" upper="3.14" velocity="3.14" effort="0.1" />
+        <mimic joint="robotiq_85_left_knuckle_joint" multiplier="-1" />
+    </joint>
+
+    <joint name="robotiq_85_right_finger_tip_joint" type="revolute">
+        <parent link="robotiq_85_right_inner_knuckle_link" />
+        <child link="robotiq_85_right_finger_tip_link" />
+        <axis xyz="0 0 1" />
+        <origin rpy="0.0 0.0 0.0" xyz="0.04303959807 -0.03759940821  0.0" />
+        <limit lower="-3.14" upper="3.14" velocity="3.14" effort="0.1" />
+        <mimic joint="robotiq_85_left_knuckle_joint" multiplier="-1" />
+    </joint>
+
+    <link name="robotiq_85_left_finger_tip_link">
+        <visual>
+            <geometry>
+                <mesh filename="package://husky_assembly/data/husky_urdf/robotiq_85/meshes/visual/robotiq_85_finger_tip_link.obj" />
+            </geometry>
+        </visual>
+        <collision>
+            <geometry>
+                <mesh filename="package://husky_assembly/data/husky_urdf/robotiq_85/meshes/collision/robotiq_85_finger_tip_link.stl" />
+            </geometry>
+        </collision>
+    </link>
+
+    <link name="robotiq_85_right_finger_tip_link">
+        <visual>
+            <geometry>
+                <mesh filename="package://husky_assembly/data/husky_urdf/robotiq_85/meshes/visual/robotiq_85_finger_tip_link.obj" />
+            </geometry>
+        </visual>
+        <collision>
+            <geometry>
+                <mesh filename="package://husky_assembly/data/husky_urdf/robotiq_85/meshes/collision/robotiq_85_finger_tip_link.stl" />
+            </geometry>
+        </collision>
+    </link>
+
+    <link name="robotiq_85_left_finger_center_link" />
+    <joint name="robotiq_85_left_finger_center_joint" type="fixed">
+        <origin rpy="0 0 0" xyz="0.02325 0.0078 0" />
+        <parent link="robotiq_85_right_finger_tip_link" />
+        <child link="robotiq_85_left_finger_center_link" />
+    </joint>
+
+    <!-- * bar grasp TCP -->
+    <link name="robotiq_85_mount" />
+    <joint name="mount" type="fixed">
+        <parent link="robotiq_85_mount" />
+        <child link="robotiq_85_base_link" />
+        <origin rpy="0.0 0.0 0" xyz="0.0 0.0 0.0" />
+        <!-- <origin rpy="0.0 0.0 1.5707963267948966" xyz="0.0 0.0 0.0"/> -->
+        <!-- <origin rpy="0.0 -1.5707963267948966 1.5707963267948966" xyz="0.0 0.0 0.0"/> -->
+    </joint>
+
+    <link name="central_tcp" />
+    <joint name="tool0-central_tcp_fixed_joint" type="fixed">
+        <origin rpy="0 0 0.0" xyz="0.138 0 0" />
+        <parent link="robotiq_85_mount" />
+        <child link="central_tcp" />
+    </joint>
+
+    <!-- <link name="world"/>
+   <joint name="world_joint" type="fixed">
+     <parent link="world"/>
+     <child link="robotiq_85_mount"/>
+     <origin rpy="0.0 0.0 0" xyz="0.0 0.0 0.0"/>
+   </joint> -->
+
+</robot>

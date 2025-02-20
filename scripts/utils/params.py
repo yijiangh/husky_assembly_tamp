@@ -60,5 +60,6 @@ MNIPULATOR_PLAN_SHOW = True
 
 # -------------------- Path --------------------#
 
-HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # symbolic_planner
-PROJECT_DIR = os.path.dirname(os.path.dirname(HERE))  # husky_assembly
+HERE = os.path.dirname(os.path.dirname(__file__))  # scripts
+PROJECT_DIR = os.path.dirname(HERE)  # husky_assembly
+DATA_DIRECTORY = os.path.join(PROJECT_DIR, "data")

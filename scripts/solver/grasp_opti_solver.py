@@ -11,7 +11,6 @@ sys.path.append(HERE)
 
 import casadi as ca
 import numpy as np
-from acados_template import AcadosModel, AcadosOcp, AcadosOcpSolver
 from robot.robot_setup import RobotSetup
 from utils.utils import HideOutput
 
@@ -1430,7 +1429,7 @@ if __name__ == "__main__":
     np.set_printoptions(precision=3, suppress=True)
 
     urdf_path = (
-        "/home/jeong/summer_research/eth/husky_assembly/data/husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf"
+        "/home/jeong/summer_research/eth_ws/src/husky_assembly/data/husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf"
     )
     # solver = PinocchioSolver(urdf_path)
     # opti_ik_solver = GraspOptiSolver(urdf_path)

@@ -3,31 +3,36 @@
     <env name="ROS_PACKAGE_PATH" value="$(env ROS_PACKAGE_PATH):$(find husky_assembly)/data/husky_urdf" />
 
     <!-- 处理WSL Rviz不能显示模型 -->
-    <env name="LIBGL_ALWAYS_SOFTWARE" value="1" />
-
-    <!-- <param name="robot_description" textfile="$(find husky_assembly)/data/husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf" /> -->
-
-    <!-- <param name="gripper" textfile="$(find husky_assembly)/urdf/robotiq_gripper.urdf" /> -->
+    <!-- <env name="LIBGL_ALWAYS_SOFTWARE" value="1" /> -->
 
     <!-- 加载Robot -->
-    <group ns="husky">
-        <param name="robot_description" textfile="$(find husky_assembly)/data/husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf" />
-        <node name="joint_state_publisher" pkg="joint_state_publisher" type="joint_state_publisher" />
-        <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" />
-    </group>
+    <param name="robot_description" textfile="$(find husky_assembly)/data/husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf" />
+    <node name="joint_state_publisher" pkg="joint_state_publisher" type="joint_state_publisher">
+        <rosparam param="source_list">[move_group/fake_controller_joint_states]</rosparam>
+    </node>
+    <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" />
 
     <!-- 加载Gripper -->
-    <group ns="gripper">
+    <!-- <group ns="gripper">
         <param name="robot_description" textfile="$(find husky_assembly)/urdf/robotiq_gripper.urdf" />
         <node name="joint_state_publisher" pkg="joint_state_publisher" type="joint_state_publisher" />
         <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" />
-    </group>
+    </group> -->
 
     <!-- 发布 robot1_base 到 robot2_base 的静态 tf 变换 -->
-    <!-- 这里假设你知道 robot2_base 相对于 robot1_base 的平移 (x, y, z) 以及旋转 (qx, qy, qz, qw) -->
-    <node pkg="tf" type="static_transform_publisher" name="tool0_to_gripper" args="0 0 0 0 -1.5708 1.5708 ur_arm_tool0 robotiq_85_base_link 100" />
+    <!-- <node pkg="tf" type="static_transform_publisher" name="tool0_to_gripper" args="0 0 0 0 -1.5708 1.5708 ur_arm_tool0 robotiq_85_base_link 100" /> -->
+
+    <include file="$(find husky_ur_moveit_config)/launch/move_group.launch">
+        <arg name="allow_trajectory_execution" value="true" />
+        <arg name="moveit_controller_manager" value="fake" />
+        <arg name="fake_execution_type" value="interpolate" />
+        <arg name="info" value="true" />
+        <arg name="debug" value="false" />
+        <arg name="pipeline" value="ompl" />
+        <arg name="load_robot_description" value="true" />
+    </include>
 
     <!-- 启动 rviz -->
-    <node pkg="rviz" type="rviz" name="rviz" args="-d $(find husky_assembly)/config/robot.rviz" required="true" />
+    <node pkg="rviz" type="rviz" name="rviz" args="-d $(find husky_assembly)/config/moveit.rviz" required="true" />
 
 </launch>

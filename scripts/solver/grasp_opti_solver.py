@@ -13,233 +13,7 @@ import casadi as ca
 import numpy as np
 from robot.robot_setup import RobotSetup
 from utils.utils import HideOutput
-
-
-def ParseURDF(urdf_path: str) -> Dict:
-    """
-    Parse URDF file and extract joint info.
-
-    Params:
-        urdf_path (str): path of urdf file
-
-    Returns:
-        Dict: joint info
-    """
-    tree = ET.parse(urdf_path)
-    root = tree.getroot()
-
-    joints = {}
-    for joint in root.findall("joint"):
-        name = joint.get("name")
-        joint_type = joint.get("type")
-
-        origin = joint.find("origin")
-        if origin is not None:
-            xyz = [float(x) for x in origin.get("xyz", "0 0 0").split()]
-            rpy = [float(r) for r in origin.get("rpy", "0 0 0").split()]
-        else:
-            xyz, rpy = [0, 0, 0], [0, 0, 0]
-
-        axis = joint.find("axis")
-        if axis is not None:
-            axis = [float(a) for a in axis.get("xyz", "1 0 0").split()]
-        else:
-            axis = [1, 0, 0]
-
-        joints[name] = {"type": joint_type, "origin": {"xyz": xyz, "rpy": rpy}, "axis": axis}
-
-    return joints
-
-
-def RPY2Matrix(roll: float, pitch: float, yaw: float) -> np.ndarray:
-    """
-    Compute matrix given by rpy.
-
-    Params:
-        roll (float): roll
-        pitch (float): pitch
-        yaw (float): yaw
-
-    Returns:
-        np.ndarray: 3x3 matrix
-    """
-    Rx = np.zeros((3, 3))
-
-    Rx[0, 0] = 1
-    Rx[0, 1] = 0
-    Rx[0, 2] = 0
-
-    Rx[1, 0] = 0
-    Rx[1, 1] = np.cos(roll)
-    Rx[1, 2] = -np.sin(roll)
-
-    Rx[2, 0] = 0
-    Rx[2, 1] = np.sin(roll)
-    Rx[2, 2] = np.cos(roll)
-
-    Ry = np.zeros((3, 3))
-
-    Ry[0, 0] = np.cos(pitch)
-    Ry[0, 1] = 0
-    Ry[0, 2] = np.sin(pitch)
-
-    Ry[1, 0] = 0
-    Ry[1, 1] = 1
-    Ry[1, 2] = 0
-
-    Ry[2, 0] = -np.sin(pitch)
-    Ry[2, 1] = 0
-    Ry[2, 2] = np.cos(pitch)
-
-    Rz = np.zeros((3, 3))
-
-    Rz[0, 0] = np.cos(yaw)
-    Rz[0, 1] = -np.sin(yaw)
-    Rz[0, 2] = 0
-
-    Rz[1, 0] = np.sin(yaw)
-    Rz[1, 1] = np.cos(yaw)
-    Rz[1, 2] = 0
-
-    Rz[2, 0] = 0
-    Rz[2, 1] = 0
-    Rz[2, 2] = 1
-
-    return Rz @ Ry @ Rx
-
-
-def Skew(v: ca.MX) -> ca.MX:
-    """
-    Generate skew-symmetric matrix given by axis.
-
-    Params:
-        v (ca.MX): vector of axis
-
-    Returns:
-        ca.MX: skew-symmetric matrix
-    """
-    assert v.size1() == 3, "输入向量必须是三维的"
-
-    x = v[0]
-    y = v[1]
-    z = v[2]
-
-    skew_matrix = ca.MX(3, 3)
-
-    skew_matrix[0, 0] = 0
-    skew_matrix[0, 1] = -z
-    skew_matrix[0, 2] = y
-
-    skew_matrix[1, 0] = z
-    skew_matrix[1, 1] = 0
-    skew_matrix[1, 2] = -x
-
-    skew_matrix[2, 0] = -y
-    skew_matrix[2, 1] = x
-    skew_matrix[2, 2] = 0
-
-    return skew_matrix
-
-
-def Expm(A: ca.MX, n_terms: int = 20) -> ca.MX:
-    """
-    Compute the exponential exp(A) of the matrix A using Taylor series expansion.
-
-    Params:
-        A (ca.MX): matrix
-        n_terms (int, 20): number of expanded items
-
-    Returns:
-        ca.MX: matrix exp(A)
-    """
-    if A.size1() != A.size2():
-        raise ValueError("矩阵必须是方阵")
-
-    exp_A = ca.MX.eye(A.size1())
-    A_power = ca.MX.eye(A.size1())
-    factorial = 1
-
-    for n in range(1, n_terms + 1):
-        A_power = A_power @ A
-        factorial *= n
-        exp_A += A_power / factorial
-
-    return exp_A
-
-
-def TransformMatrix(xyz: List[float], rpy: List[float], axis: List[float], q_val: ca.MX, joint_type: str) -> ca.MX:
-    """
-    Construct transformation matrix according to joint type.
-
-    Params:
-        xyz (List[float]): xyz
-        rpy (List[float]): rpy
-        axis (List[float]): axis
-        q_val (ca.MX): symbolic joint angle
-        joint_type (str): revolute/prismatic
-
-    Returns:
-        ca.MX: 4x4 matrix
-    """
-    T = ca.MX.eye(4)
-    T[:3, :3] = RPY2Matrix(*rpy)
-    T[:3, 3] = xyz
-
-    if joint_type == "revolute":
-        R_joint = ca.MX.eye(4)
-        R_joint[:3, :3] = Expm(q_val * Skew(ca.MX(axis)))
-        return T @ R_joint
-    elif joint_type == "prismatic":
-        P_joint = ca.MX.eye(4)
-        P_joint[:3, 3] = ca.MX(axis) * q_val
-        return T @ P_joint
-    else:
-        return T
-
-
-def SymbolicForward(
-    urdf_path: str,
-    joint_name_list: List[str],
-    control_joint_name_list: List[str],
-    q: Union[ca.MX, None] = None,
-    output_type: str = "function",
-) -> Union[ca.Function, ca.MX]:
-    """
-    Creates symbolic forward kinematics equations given a URDF file path and a list of joint names.
-
-    Params:
-        urdf_path (str): urdf path of robot
-        joint_name_list (List[str]): name list of manipulator including all redundant joints
-        control_joint_name_list (List[str]): name list of controlled joints
-        q (ca.MX | None, None): joint variables
-        output_type (str, "function"): "function"/"matrix"
-
-    Returns:
-        ca.Function: [q] --> np.ndarray (4x4)
-    """
-    joints = ParseURDF(urdf_path)
-    if q is None or len(control_joint_name_list) == 0:
-        q = ca.MX.sym("q", len(control_joint_name_list))
-    T = ca.MX.eye(4)
-    for i, joint_name in enumerate(joint_name_list):
-        joint = joints[joint_name]
-        if joint_name in control_joint_name_list:
-            i_q = control_joint_name_list.index(joint_name)
-            joint_T = TransformMatrix(
-                joint["origin"]["xyz"], joint["origin"]["rpy"], joint["axis"], q[i_q], joint["type"]
-            )
-        else:
-            joint_T = TransformMatrix(joint["origin"]["xyz"], joint["origin"]["rpy"], joint["axis"], 0, joint["type"])
-        T = T @ joint_T
-
-    if output_type == "function":
-        fk_function = ca.Function("forward_kinematics", [q], [T])
-        return fk_function
-    elif output_type == "matrix":
-        return T
-    else:
-        fk_function = ca.Function("forward_kinematics", [q], [T])
-        return fk_function
+from utils.collision import collision_info
 
 
 def Point2Segment(p: ca.MX, start: np.ndarray, end: np.ndarray) -> ca.MX:
@@ -395,7 +169,7 @@ class GraspOptiSolver(object):
         world_from_base[:3, :3] = R_z
 
         # connect_from_gripper
-        connect_from_gripper = SymbolicForward(
+        connect_from_gripper = RobotSetup.symbolic_forward(
             self.urdf_path,
             self.MANIPULATOR_REDUCED_MODEL_JOINT_NAMES,
             self.MANIPULATOR_CONTROL_JOINT_NAMES,
@@ -431,7 +205,7 @@ class GraspOptiSolver(object):
     def GraspObjectiveFunction(self, robot_idx: int, c: ca.MX) -> ca.MX:
         p = self.grasp_var_p_list[robot_idx]
         x = p[0]
-        t = x - c # TODO
+        t = x - c  # TODO
         obj = ca.if_else(t > 0, t**2, 0)
         return obj
 
@@ -995,76 +769,7 @@ class GraspOptiSolver(object):
 
     def CollisionInit(self):
         # {link_name: [infos: [offset, radius, visual_id], joint_name, weight]}
-        self.collision_info = {
-            "base_link": [
-                [
-                    [(0.3160000145435333, 0.2529999911785126, 0.20000000298023224), 0.2, -1],
-                    [(0.3160000145435333, 0.0, 0.20000000298023224), 0.2, -1],
-                    [(0.3160000145435333, -0.2529999911785126, 0.20000000298023224), 0.2, -1],
-                    [(-0.3160000145435333, 0.2529999911785126, 0.20000000298023224), 0.2, -1],
-                    [(-0.3160000145435333, 0.0, 0.20000000298023224), 0.2, -1],
-                    [(-0.3160000145435333, -0.2529999911785126, 0.20000000298023224), 0.2, -1],
-                    [(0.0, 0.2529999911785126, 0.20000000298023224), 0.2, -1],
-                    [(0.0, 0.0, 0.20000000298023224), 0.2, -1],
-                    [(0.0, -0.2529999911785126, 0.20000000298023224), 0.2, -1],
-                ],
-                "base_joint",
-                10.0,
-            ],
-            "ur_arm_base_link_inertia": [
-                [[(0.3889999985694885, 0.0, 0.4099999964237213), 0.075, -1]],
-                "base_joint",
-                5.0,
-            ],
-            "ur_arm_shoulder_link": [
-                [[(0.0, -0.000299990177154541, -0.010500013828277588), 0.075, -1]],
-                "ur_arm_shoulder_pan_joint",
-                5.0,
-            ],
-            "ur_arm_upper_arm_link": [
-                [
-                    [(0.010500013828277588, -6.3721117271597905e-09, 0.1373000144958496), 0.075, -1],
-                    [(-0.08950001001358032, -6.3721117271597905e-09, 0.1373000144958496), 0.05, -1],
-                    [(-0.18950003385543823, -6.3721117271597905e-09, 0.1373000144958496), 0.05, -1],
-                    [(-0.28949999809265137, -6.3721117271597905e-09, 0.1373000144958496), 0.05, -1],
-                    [(-0.40950000286102295, -6.3721117271597905e-09, 0.1373000144958496), 0.075, -1],
-                ],
-                "ur_arm_shoulder_lift_joint",
-                3.0,
-            ],
-            "ur_arm_forearm_link": [
-                [
-                    [(0.015500009059906006, -5.244373824098147e-10, 0.011299997568130493), 0.05, -1],
-                    [(-0.0845000147819519, -5.244373824098147e-10, 0.011299997568130493), 0.05, -1],
-                    [(-0.18450003862380981, -5.244373824098147e-10, 0.011299997568130493), 0.05, -1],
-                    [(-0.2844999432563782, -5.244373824098147e-10, 0.011299997568130493), 0.05, -1],
-                    [(-0.3844999670982361, -5.244373824098147e-10, 0.011299997568130493), 0.05, -1],
-                    [(-0.3844999670982361, 1.796069071247075e-09, -0.03870001435279846), 0.05, -1],
-                ],
-                "ur_arm_elbow_joint",
-                1.0,
-            ],
-            "ur_arm_wrist_1_link": [
-                [[(0.007700085639953613, -6.325699075659941e-09, 0.0029999613761901855), 0.05, -1]],
-                "ur_arm_wrist_1_joint",
-                1.0,
-            ],
-            "ur_arm_wrist_2_link": [
-                [[(0.007700085639953613, 0.0029999613761901855, 0.00030000507831573486), 0.05, -1]],
-                "ur_arm_wrist_2_joint",
-                1.0,
-            ],
-            "ur_arm_wrist_3_link": [
-                [[(0.0, 0.0, 0.0), 0.05, -1]],
-                "ur_arm_wrist_3_joint",
-                1.0,
-            ],
-            "gripper_link": [
-                [[(0.0, 0.0, 0.1), 0.075, -1]],
-                "ur_arm_wrist_3_joint",
-                1.0,
-            ],
-        }
+        self.collision_info = collision_info
         keys = list(self.collision_info.keys())
         keys_combinations = list(itertools.combinations(keys, 2))
         for collision_pair in self.robots[0].disabled_collisions:
@@ -1121,14 +826,14 @@ class GraspOptiSolver(object):
         self.grasp_param_c = self.grasp_solver.parameter(1)
 
         # -------------------- get transformation matices --------------------#
-        self.connect_from_j6_fn = SymbolicForward(
+        self.connect_from_j6_fn = RobotSetup.symbolic_forward(
             self.urdf_path, self.MANIPULATOR_REDUCED_MODEL_JOINT_NAMES, self.MANIPULATOR_CONTROL_JOINT_NAMES
         )
         self.connect_from_joint_dict = {}
         for joint_idx, joint_name in enumerate(self.MANIPULATOR_CONTROL_JOINT_NAMES):
             end_idx = self.MANIPULATOR_REDUCED_MODEL_JOINT_NAMES.index(joint_name) + 1
             fk_fn_list = [
-                SymbolicForward(
+                RobotSetup.symbolic_forward(
                     self.urdf_path,
                     self.MANIPULATOR_REDUCED_MODEL_JOINT_NAMES[:end_idx],
                     self.MANIPULATOR_CONTROL_JOINT_NAMES[: joint_idx + 1],
@@ -1137,7 +842,7 @@ class GraspOptiSolver(object):
                 for q in self.grasp_var_q_list
             ]
             fk_mat_list = [
-                SymbolicForward(
+                RobotSetup.symbolic_forward(
                     self.urdf_path,
                     self.MANIPULATOR_REDUCED_MODEL_JOINT_NAMES[:end_idx],
                     self.MANIPULATOR_CONTROL_JOINT_NAMES[: joint_idx + 1],
@@ -1148,14 +853,14 @@ class GraspOptiSolver(object):
             ]
             self.connect_from_joint_dict[joint_name] = (fk_fn_list, fk_mat_list, joint_idx + 1)
 
-        base_from_connect_sym = SymbolicForward(
+        base_from_connect_sym = RobotSetup.symbolic_forward(
             self.urdf_path, self.BASE_REDUCED_MODEL_JOINT_NAMES, self.BASE_CONTROL_JOINT_NAMES, output_type="matrix"
         )
         self.base_from_connect = self.eval("base_from_connect", base_from_connect_sym, [], [])
 
         # -------------------- get matrix --------------------#
         self.grasp_connect_from_gripper_list = [
-            SymbolicForward(
+            RobotSetup.symbolic_forward(
                 self.urdf_path,
                 self.MANIPULATOR_REDUCED_MODEL_JOINT_NAMES,
                 self.MANIPULATOR_CONTROL_JOINT_NAMES,
@@ -1385,7 +1090,7 @@ class GraspOptiSolver(object):
                 #     #     ],
                 #     #     verbose=True,
                 #     # )
-                
+
                 # TODO
                 return [
                     grasp_solution.value(self.grasp_var_q_list[robot_idx]) for robot_idx in range(self.num_robots)
@@ -1428,9 +1133,7 @@ if __name__ == "__main__":
 
     np.set_printoptions(precision=3, suppress=True)
 
-    urdf_path = (
-        "/home/jeong/summer_research/eth_ws/src/husky_assembly/data/husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf"
-    )
+    urdf_path = "/home/jeong/summer_research/eth_ws/src/husky_assembly/data/husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf"
     # solver = PinocchioSolver(urdf_path)
     # opti_ik_solver = GraspOptiSolver(urdf_path)
 

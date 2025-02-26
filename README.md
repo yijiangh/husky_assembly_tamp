@@ -1,5 +1,28 @@
 # husky-assembly
 
+## How to Run?
+
+### simple svsdf visualizer
+
+```bash
+cd <workspace_folder>
+source devel/setup.bash
+bash src/husky_assembly/bash/moveit_launch.sh
+```
+
+```bash
+cd <workspace_folder>
+source devel/setup.bash
+rosrun husky_assembly svsdf_visualizer.py
+```
+
+### simple sdf visualizer
+
+```bash
+cd <workspace_folder>/src/husky_assembly/scripts
+python motion_planner/svsdf.py
+```
+
 ## Note
 
 * 如果使用WSL，在Rviz中不能正常显示mesh，可以采取下面的方案：

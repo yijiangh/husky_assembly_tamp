@@ -201,6 +201,8 @@ class SDF(object):
             radius = info[1]
             visual_id = info[2]
 
+            print(f"link_name: {link_name}, mnt_joint: {mnt_joint} ", info)
+
             joint_from_sphere = np.eye(4)
             joint_from_sphere[0, 3] = offset[0]
             joint_from_sphere[1, 3] = offset[1]
@@ -210,6 +212,9 @@ class SDF(object):
             c = self.eval("", sphere_center, [self.q], [q])
 
             if self.debug_sphere_visual_id == -1:
+                self.debug_sphere_visual_id = pp.create_sphere(radius, color=(1, 0, 0, 0.5))
+            else:
+                pp.remove_body(self.debug_sphere_visual_id)
                 self.debug_sphere_visual_id = pp.create_sphere(radius, color=(1, 0, 0, 0.5))
             pp.set_point(self.debug_sphere_visual_id, c)
 

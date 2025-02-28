@@ -164,7 +164,7 @@ class SDF(object):
             min_index = np.argmin(sdf_values)
             min_metadata = metadata_list[min_index]
         else:
-            sdf = sdf_vec
+            sdf = ca.vertcat(*sdf_list)
             min_metadata = {"link_name": "unknown", "mnt_joint": "unknown", "info_idx": -1}
 
         return sdf, min_metadata
@@ -280,6 +280,10 @@ if __name__ == "__main__":
     y = p.addUserDebugParameter("y", -2, 2, 0)
     z = p.addUserDebugParameter("z", -2, 2, 0)
 
+    x_sym = ca.MX.sym("x", 3)
+    p_sym = ca.MX.sym("p", 3)
+    q_sym = ca.MX.sym("q", 6)
+
     point_id = pp.create_sphere(0.05, color=pp.BLACK)
 
     while True:
@@ -288,6 +292,12 @@ if __name__ == "__main__":
         z_value = p.readUserDebugParameter(z)
         pp.set_point(point_id, [x_value, y_value, z_value])
 
-        sdf_calculator([0, 0, 0], rb.arm_init_angles, [x_value, y_value, z_value], visualize=True)
+        #-------------------- sphere：数值计算 --------------------#
+        print("sphere numerical: ", sdf_calculator([0, 0, 0], rb.arm_init_angles, [x_value, y_value, z_value]))
+
+        #-------------------- sphere：解析计算 --------------------#
+        sdf_vec = sdf_calculator(x_sym, q_sym, p_sym)
+        sdf_values = sdf_calculator.eval("", sdf_vec, [x_sym, p_sym, sdf_calculator.q], [[x_value, y_value, z_value], [0, 0, 0], rb.arm_init_angles])
+        print("sphere analytical: ", sdf_values.min())
 
         time.sleep(1.0 / 60)

@@ -12,16 +12,78 @@ from robot.robot_setup import RobotSetup
 from utils.collision import collision_info
 from utils.utils import HideOutput
 
+Trajectory = List[  # for different joints
+    List[  # trajectory
+        Tuple[  # episode coeffs
+            Union[float, ca.MX],  # start_time
+            Union[float, ca.MX],  # end_time
+            Union[List[float], ca.MX],  # coeff
+        ]
+    ]
+]
 
-def eval(name: str, obj: ca.MX, sym: List[ca.MX], data: List[np.ndarray], verbose: bool = False) -> np.ndarray:
-    fn = ca.Function("fn", sym, [obj])
-    if sym != []:
-        fn_result = fn(*data).toarray()
+
+def eval(
+    name: str,
+    obj: ca.MX,
+    sym: List[ca.MX],
+    data: List[np.ndarray],
+    verbose: bool = False,
+    full: bool = True,
+) -> np.ndarray:
+    obj_cur = obj
+    for sym_cur, data_cur in zip(sym, data):
+        obj_cur = ca.substitute(obj_cur, sym_cur, data_cur)
+
+    if full:
+        val = ca.evalf(obj_cur).toarray()
     else:
-        fn_result = fn()["o0"].toarray()
+        val = obj_cur
+
     if verbose:
-        print(name, "\n", fn_result)
-    return fn_result
+        print(name, "\n", val)
+
+    return val
+
+
+def Traj2Arr(traj: Trajectory, num_joints: int, symbolic: bool = False) -> Union[np.ndarray, ca.MX]:
+    opt_vars = []
+
+    # 遍历每个关节的每个时间段
+    for j in range(num_joints):
+        for seg_idx, seg in enumerate(traj[j]):
+            delta_t = seg[1] - seg[0]  # 时间间隔变量
+            opt_vars.append(delta_t)
+
+            # 多项式系数变量
+            for k, c in enumerate(seg[2]):
+                opt_vars.append(c)
+    if symbolic:
+        opt_var = ca.vertcat(*opt_vars)
+    else:
+        opt_var = np.array(opt_vars)
+    return opt_var
+
+
+def Arr2Traj(opt_var: Union[np.ndarray, ca.MX], num_joints: int, num_segments: int) -> Trajectory:
+    traj = []
+    idx = 0  # 当前处理的数组索引
+    for j in range(num_joints):
+        # 获取当前关节的段数和多项式系数数量
+        n_coeff = 6
+        segments = []
+        current_time = 0.0  # 初始化当前时间为0
+        for _ in range(num_segments):
+            delta_t = opt_var[idx]
+            idx += 1
+            coeffs = [opt_var[idx + k] for k in range(n_coeff)]
+            idx += n_coeff
+            seg_start = current_time
+            seg_end = current_time + delta_t
+            segments.append((seg_start, seg_end, coeffs))
+            current_time = seg_end  # 更新时间
+        traj.append(segments)
+    return traj
 
 
 def generate_trajectory(
@@ -56,12 +118,12 @@ def generate_trajectory(
             # 构建方程组 AX = B
             A = np.array(
                 [
-                    [1, t_start, t_start**2, t_start**3, t_start**4, t_start**5],
-                    [0, 1, 2 * t_start, 3 * t_start**2, 4 * t_start**3, 5 * t_start**4],
-                    [0, 0, 2, 6 * t_start, 12 * t_start**2, 20 * t_start**3],
-                    [1, t_end, t_end**2, t_end**3, t_end**4, t_end**5],
-                    [0, 1, 2 * t_end, 3 * t_end**2, 4 * t_end**3, 5 * t_end**4],
-                    [0, 0, 2, 6 * t_end, 12 * t_end**2, 20 * t_end**3],
+                    [1, 0, 0**2, 0**3, 0**4, 0**5],
+                    [0, 1, 2 * 0, 3 * 0**2, 4 * 0**3, 5 * 0**4],
+                    [0, 0, 2, 6 * 0, 12 * 0**2, 20 * 0**3],
+                    [1, duration, duration**2, duration**3, duration**4, duration**5],
+                    [0, 1, 2 * duration, 3 * duration**2, 4 * duration**3, 5 * duration**4],
+                    [0, 0, 2, 6 * duration, 12 * duration**2, 20 * duration**3],
                 ]
             )
 
@@ -227,61 +289,61 @@ class SDF(object):
 
         return sdf, min_metadata
 
-    def SphereSDFVisualize(
-        self,
-        meta_data: Dict,
-        p: Union[List[float], np.ndarray],
-        q: Union[List[float], np.ndarray],
-        x: Union[List[float], np.ndarray],
-    ):
-        link_name = meta_data["link_name"]
-        mnt_joint = meta_data["mnt_joint"]
-        info_idx = meta_data["info_idx"]
+    # def SphereSDFVisualize(
+    #     self,
+    #     meta_data: Dict,
+    #     p: Union[List[float], np.ndarray],
+    #     q: Union[List[float], np.ndarray],
+    #     x: Union[List[float], np.ndarray],
+    # ):
+    #     link_name = meta_data["link_name"]
+    #     mnt_joint = meta_data["mnt_joint"]
+    #     info_idx = meta_data["info_idx"]
 
-        world_from_base: ca.MX = ca.MX.eye(4)
-        world_from_base[0, 3] = p[0]
-        world_from_base[1, 3] = p[1]
-        yaw = p[2]
-        R_z = ca.vertcat(
-            ca.horzcat(ca.cos(yaw), -ca.sin(yaw), 0), ca.horzcat(ca.sin(yaw), ca.cos(yaw), 0), ca.horzcat(0, 0, 1)
-        )
-        world_from_base[:3, :3] = R_z
+    #     world_from_base: ca.MX = ca.MX.eye(4)
+    #     world_from_base[0, 3] = p[0]
+    #     world_from_base[1, 3] = p[1]
+    #     yaw = p[2]
+    #     R_z = ca.vertcat(
+    #         ca.horzcat(ca.cos(yaw), -ca.sin(yaw), 0), ca.horzcat(ca.sin(yaw), ca.cos(yaw), 0), ca.horzcat(0, 0, 1)
+    #     )
+    #     world_from_base[:3, :3] = R_z
 
-        if mnt_joint == "base_joint":
-            world_from_joint = world_from_base
-        else:
-            base_from_joint = self.base_from_connect @ self.connect_from_joint_dict[mnt_joint][0]
-            world_from_joint = world_from_base @ base_from_joint
+    #     if mnt_joint == "base_joint":
+    #         world_from_joint = world_from_base
+    #     else:
+    #         base_from_joint = self.base_from_connect @ self.connect_from_joint_dict[mnt_joint][0]
+    #         world_from_joint = world_from_base @ base_from_joint
 
-        if link_name != "unknown":
-            info = self.collision_info[link_name][0][info_idx]
-            offset = info[0]
-            radius = info[1]
-            visual_id = info[2]
+    #     if link_name != "unknown":
+    #         info = self.collision_info[link_name][0][info_idx]
+    #         offset = info[0]
+    #         radius = info[1]
+    #         visual_id = info[2]
 
-            # print(f"link_name: {link_name}, mnt_joint: {mnt_joint} ", info)
+    #         # print(f"link_name: {link_name}, mnt_joint: {mnt_joint} ", info)
 
-            joint_from_sphere = np.eye(4)
-            joint_from_sphere[0, 3] = offset[0]
-            joint_from_sphere[1, 3] = offset[1]
-            joint_from_sphere[2, 3] = offset[2]
-            world_from_sphere = world_from_joint @ joint_from_sphere
-            sphere_center = ca.vertcat(world_from_sphere[0, 3], world_from_sphere[1, 3], world_from_sphere[2, 3])
-            c = eval("", sphere_center, [self.q], [q])
+    #         joint_from_sphere = np.eye(4)
+    #         joint_from_sphere[0, 3] = offset[0]
+    #         joint_from_sphere[1, 3] = offset[1]
+    #         joint_from_sphere[2, 3] = offset[2]
+    #         world_from_sphere = world_from_joint @ joint_from_sphere
+    #         sphere_center = ca.vertcat(world_from_sphere[0, 3], world_from_sphere[1, 3], world_from_sphere[2, 3])
+    #         c = eval("", sphere_center, [self.q], [q])
 
-            with pp.LockRenderer():
-                if self.debug_sphere_visual_id == -1:
-                    self.debug_sphere_visual_id = pp.create_sphere(radius, color=(1, 0, 0, 0.5))
-                else:
-                    pp.remove_body(self.debug_sphere_visual_id)
-                    self.debug_sphere_visual_id = pp.create_sphere(radius, color=(1, 0, 0, 0.5))
-                pp.set_point(self.debug_sphere_visual_id, c)
+    #         with pp.LockRenderer():
+    #             if self.debug_sphere_visual_id == -1:
+    #                 self.debug_sphere_visual_id = pp.create_sphere(radius, color=(1, 0, 0, 0.5))
+    #             else:
+    #                 pp.remove_body(self.debug_sphere_visual_id)
+    #                 self.debug_sphere_visual_id = pp.create_sphere(radius, color=(1, 0, 0, 0.5))
+    #             pp.set_point(self.debug_sphere_visual_id, c)
 
-                if self.debug_line_visual_id == -1:
-                    self.debug_line_visual_id = pp.add_line(x, c)
-                else:
-                    pp.remove_debug(self.debug_line_visual_id)
-                    self.debug_line_visual_id = pp.add_line(x, c)
+    #             if self.debug_line_visual_id == -1:
+    #                 self.debug_line_visual_id = pp.add_line(x, c)
+    #             else:
+    #                 pp.remove_debug(self.debug_line_visual_id)
+    #                 self.debug_line_visual_id = pp.add_line(x, c)
 
     def __call__(
         self,
@@ -289,7 +351,6 @@ class SDF(object):
         q: Union[List[float], np.ndarray, ca.MX],
         x: Union[List[float], np.ndarray, ca.MX],
         method: str = "sphere",
-        visualize: bool = False,
     ) -> Union[float, np.ndarray, ca.MX]:
         """
         Calculate SDF(p, q, x).
@@ -308,9 +369,6 @@ class SDF(object):
         else:
             raise NotImplementedError(f"Method {method} is not implemented.")
 
-        if visualize:
-            self.SphereSDFVisualize(meta_info, p, q, x)
-
         return sdf
 
 
@@ -321,42 +379,82 @@ class SVSDF(object):
 
     def __init__(
         self,
+        urdf_path: str,
         robot_setup: RobotSetup,
-        joint_trajectory: List[List[Tuple[float, float, List[float]]]],
-        max_iter: int = 100,
-        lr: float = 0.1,
-        tol: float = 1e-4,
+        joint_trajectory: Trajectory,
+        traj_var: Union[ca.MX, None] = None,
+        symbolic_traj: bool = False,
     ):
         """
         初始化 SVSDF 计算类。
 
         Params:
+            urdf_path (str): urdf路径
+            robot_setup (RobotSetup): 机器人设置
             joint_trajectory (List[trajectory]):
-                - trajectory (List[Tuple[float, float, List[float]]]): 机器人关节轨迹，由一系列关节轨迹片段组成，每个片段是一个元组 (start_time, end_time, coefficients)
-                - start_time: 片段的起始时间 (float)
-                - end_time: 片段的终止时间 (float)
-                - coefficients: 5次多项式的系数，列表形式，长度为6，按照 t^0, t^1, t^2, t^3, t^4, t^5 的顺序排列 (List[float])
+                - trajectory: 机器人关节轨迹，由一系列关节轨迹片段组成，每个片段是一个元组 (start_time, end_time, coefficients)
+                - start_time: 片段的起始时间 (ca.MX)
+                - end_time: 片段的终止时间 (ca.MX)
+                - coefficients: 5次多项式的系数，列表形式，长度为6，按照 t^0, t^1, t^2, t^3, t^4, t^5 的顺序排列 (ca.MX)
+            traj_var (Union[ca.MX, None], (default) None): 如果传入符号化的轨迹，这里需要传入一个完整的变量,
+            symbolic_traj (bool, (default) False): 是否使用符号化的关节轨迹
         """
-        self.joint_trajectory = joint_trajectory
+        self.traj_sym = joint_trajectory
         self.num_joints = len(joint_trajectory)
-        self.max_iter = max_iter
-        self.lr = lr
-        self.tol = tol
-
-        # -------------------- 获取轨迹总时间范围 --------------------#
-        self.t_min = min(seg[0] for traj in joint_trajectory for seg in traj)
-        self.t_max = max(seg[1] for traj in joint_trajectory for seg in traj)
+        self.num_segments = len(joint_trajectory[0])
+        self.symbolic_traj = symbolic_traj
+        self.traj_sym_var = traj_var
 
         # -------------------- 构建符号化计算系统 --------------------#
         self.t_sym = ca.MX.sym("t", 1)
-        self.q_sym = self._BuildSymbolicQ(self.t_sym)
-        self.x_sym = ca.MX.sym("x", 3)
+        self.p_sym = ca.MX.sym("p", 3)  # [x, y, yaw]
+        self.q_sym = self._BuildSymbolicQ(self.t_sym)  # joint positions
+        self.x_sym = ca.MX.sym("x", 3)  # [x, y, z]
 
-        urdf_path = "/home/jeong/summer_research/eth_ws/src/husky_assembly/data/husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf"
-        self.sdf = SDF(urdf_path, robot_setup, self.q_sym)
+        # urdf_path = "/home/jeong/summer_research/eth_ws/src/husky_assembly/data/husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf"
+        self.sdf_solver = SDF(urdf_path, robot_setup, self.q_sym)
 
-        self.sdf_sym = self.sdf(ca.MX([0, 0, 0]), self.q_sym, self.x_sym)
+        # SDF(p, q(t, c, T), x)
+        self.sdf_sym = self.sdf_solver(self.p_sym, self.q_sym, self.x_sym)
         self.jac_sym = ca.gradient(self.sdf_sym, self.t_sym)
+
+    def _Traj2Arr(self, traj: Trajectory, symbolic: bool = False) -> Union[np.ndarray, ca.MX]:
+        opt_vars = []
+
+        # 遍历每个关节的每个时间段
+        for j in range(self.num_joints):
+            for seg_idx, seg in enumerate(traj[j]):
+                delta_t = seg[1] - seg[0]  # 时间间隔变量
+                opt_vars.append(delta_t)
+
+                # 多项式系数变量
+                for k, c in enumerate(seg[2]):
+                    opt_vars.append(c)
+        if symbolic:
+            opt_var = ca.vertcat(*opt_vars)
+        else:
+            opt_var = np.array(opt_vars)
+        return opt_var
+
+    def _Arr2Traj(self, opt_var: Union[np.ndarray, ca.MX]) -> Trajectory:
+        traj = []
+        idx = 0  # 当前处理的数组索引
+        for j in range(self.num_joints):
+            # 获取当前关节的段数和多项式系数数量
+            n_coeff = 6
+            segments = []
+            current_time = 0.0  # 初始化当前时间为0
+            for _ in range(self.num_segments):
+                delta_t = opt_var[idx]
+                idx += 1
+                coeffs = [opt_var[idx + k] for k in range(n_coeff)]
+                idx += n_coeff
+                seg_start = current_time
+                seg_end = current_time + delta_t
+                segments.append((seg_start, seg_end, coeffs))
+                current_time = seg_end  # 更新时间
+            traj.append(segments)
+        return traj
 
     def _BuildSymbolicQ(self, t: ca.MX) -> ca.MX:
         """
@@ -369,31 +467,41 @@ class SVSDF(object):
             ca.MX: q(t)
         """
         q = ca.MX.zeros(6)
-        for joint_idx in range(len(self.joint_trajectory)):
-            traj = self.joint_trajectory[joint_idx]
+        for joint_idx in range(len(self.traj_sym)):
+            traj = self.traj_sym[joint_idx]
             for start, end, coeffs in traj:
                 cond = ca.logic_and(t >= start, t <= end)
-                t_rel = t
+                delta_t = t - start
                 poly = (
                     coeffs[0]
-                    + coeffs[1] * t_rel
-                    + coeffs[2] * (t_rel**2)
-                    + coeffs[3] * (t_rel**3)
-                    + coeffs[4] * (t_rel**4)
-                    + coeffs[5] * (t_rel**5)
+                    + coeffs[1] * delta_t
+                    + coeffs[2] * (delta_t**2)
+                    + coeffs[3] * (delta_t**3)
+                    + coeffs[4] * (delta_t**4)
+                    + coeffs[5] * (delta_t**5)
                 )
                 q[joint_idx] = ca.if_else(cond, poly, q[joint_idx])
         return q
 
     def _GradientDescent(
-        self, x: np.ndarray, t_init: float, lr: float = 0.1, max_iter: int = 100
+        self,
+        p: np.ndarray,
+        x: np.ndarray,
+        traj: Union[Trajectory, None],
+        t_init: float,
+        t_max: float,
+        lr: float = 0.1,
+        max_iter: int = 100,
     ) -> Tuple[float, float]:
         """
         带自适应学习率的梯度下降
 
         Params:
+            p (np.ndarray): robot 2D pose
             x (np.ndarray): point in 3D space
+            traj (Trajectory | None): trajectory
             t_init (float): initial time
+            t_max (float): max time
             lr (float, 0.1): learning rate
             max_iter (int, 100): maximum number of iterations
 
@@ -405,8 +513,15 @@ class SVSDF(object):
         momentum = 0.9
         velocity = 0
 
+        if self.symbolic_traj:
+            jac_sym_sim = eval(
+                "", self.jac_sym, [self.traj_sym_var, self.x_sym, self.p_sym], [self._Traj2Arr(traj), x, p], full=False
+            )
+        else:
+            jac_sym_sim = eval("", self.jac_sym, [self.x_sym, self.p_sym], [x, p], full=False)
+
         for _ in range(max_iter):
-            grad = eval("", self.jac_sym, [self.t_sym, self.x_sym], [t_curr, x]).item()
+            grad = eval("", jac_sym_sim, [self.t_sym], [t_curr]).item()
 
             # -------------------- 动量加速 --------------------#
             velocity = momentum * velocity + (1 - momentum) * grad
@@ -417,35 +532,48 @@ class SVSDF(object):
                 lr *= 0.5
 
             t_new = t_curr + delta_t
-            t_new = np.clip(t_new, self.t_min, self.t_max)
+            t_new = np.clip(t_new, 0, t_max)
 
             # -------------------- 收敛判断 --------------------#
-            if abs(t_new - t_curr) < 1e-6:
+            if abs(t_new - t_curr) < 1e-4:
                 break
             t_curr = t_new
             prev_grad = grad
 
-        return t_curr, eval("", self.sdf_sym, [self.t_sym, self.x_sym], [t_curr, x]).item()
+        return (
+            t_curr,
+            (
+                eval(
+                    "",
+                    self.sdf_sym,
+                    [self.t_sym, self.x_sym, self.p_sym, self.traj_sym_var],
+                    [t_curr, x, p, self._Traj2Arr(traj)],
+                ).item()
+                if self.symbolic_traj
+                else eval("", self.sdf_sym, [self.t_sym, self.x_sym, self.p_sym], [t_curr, x, p]).item()
+            ),
+        )
 
-    def EvaluateJointPosition(self, time: float) -> np.ndarray:
+    def EvaluateJointPosition(self, time: float, traj: Trajectory) -> np.ndarray:
         """
         计算在给定时间和关节轨迹片段索引下的关节位置。
 
         Params:
             time (float): 目标时间点 (float)
+            traj (Trajectory): 关节轨迹
 
         Returns:
             np.ndarray: 关节角度
         """
         joint_angles = []
         for joint_index in range(self.num_joints):
-            joint_trajectory = self.joint_trajectory[joint_index]
+            joint_trajectory = traj[joint_index]
             joint_angle = None
 
             out_range = True
             for start_time, end_time, coefficients in joint_trajectory:
                 if start_time <= time <= end_time:
-                    t = time
+                    t = time - start_time
                     joint_angle = (
                         coefficients[0]
                         + coefficients[1] * t
@@ -458,7 +586,7 @@ class SVSDF(object):
                     break
             if out_range:
                 start_time, end_time, coefficients = joint_trajectory[-1]
-                t = end_time
+                t = end_time - start_time
                 joint_angle = (
                     coefficients[0]
                     + coefficients[1] * t
@@ -474,28 +602,56 @@ class SVSDF(object):
 
         return np.array(joint_angles)
 
-    def __call__(self, x: np.ndarray) -> Tuple[float, float]:
+    def EvaluateSDF(self, time: float, p: np.ndarray, x: np.ndarray) -> float:
+        return (
+            eval(
+                "",
+                self.sdf_sym,
+                [self.t_sym, self.x_sym, self.p_sym, self.traj_sym_var],
+                [time, x, p, self._Traj2Arr(self.traj_sym)],
+            ).item()
+            if self.symbolic_traj
+            else eval("", self.sdf_sym, [self.t_sym, self.x_sym, self.p_sym], [time, x, p]).item()
+        )
+
+    def __call__(
+        self,
+        p: np.ndarray,
+        x: np.ndarray,
+        t_max: float,
+        traj: Union[None, Trajectory] = None,
+        symbolic_output: bool = False,
+    ) -> Tuple[float, Union[float, ca.MX]]:
         """
         计算点 x 到 SV 的最短距离。
 
         Params:
+            p (np.ndarray): robot 2D pose
             x (float): point in 3D space
+            t_max (float): max time
+            traj (Trajectory | None, (default) None): trajectory
+            symbolic_output (bool, (default) False): whether return symbolic output
 
         Returns:
-            (float, float): optimal time, svsdf value
+            ((float, float) | ca.MX): optimal time, svsdf SDF(p, q(t, c, T), x)
         """
+        if symbolic_output:
+            return self.sdf_sym
+
         min_sdf = float("inf")
         best_t = 0.0
 
-        init_points = np.linspace(self.t_min, self.t_max, 20)
+        init_points = np.linspace(0, t_max, 5)
 
         for t_init in init_points:
-            t_curr, sdf_val = self._GradientDescent(x, t_init)
+            print(f"Running at time {t_init}")
+            t_curr, sdf_val = self._GradientDescent(p, x, traj, t_init, t_max)
             if sdf_val < min_sdf:
                 min_sdf = sdf_val
                 best_t = t_curr
 
-        refined_t, refined_sdf = self._GradientDescent(x, best_t, lr=0.01, max_iter=50)
+        refined_t, refined_sdf = self._GradientDescent(p, x, traj, best_t, t_max, lr=0.01, max_iter=50)
+
         return refined_t, refined_sdf
 
 
@@ -570,11 +726,14 @@ if __name__ == "__main__":
     trajectory = generate_trajectory(start_pos, end_pos, v_max)
 
     # 创建 SVSDF 实例
-    svsdf = SVSDF(rb, trajectory)
+    urdf_path = "/home/jeong/summer_research/eth_ws/src/husky_assembly/data/husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf"
+    svsdf = SVSDF(urdf_path, rb, trajectory)
 
     # 计算点到轨迹的最小距离
-    target_point = np.array([0.5, 0.5, 0.75])
-    svsdf_tup = svsdf(target_point)
+    robot_pose = np.array([0, 0, 0])
+    target_point = np.array([0.5, -0.35, 0.75])
+    # target_point = np.array([0, 0, 0.2])
+    svsdf_tup = svsdf(robot_pose, target_point, 3.0)
 
     print("")
     print("")
@@ -590,7 +749,7 @@ if __name__ == "__main__":
     # test_times = np.linspace(0, 3.0, 30)
 
     # # 创建可视化
-    # test_point = [0.5, 0.5, 0.75]
+    # test_point = [0.5, -0.35, 0.75]
     # sphere_id = pp.create_sphere(0.05, color=pp.BLACK)
     # pp.set_point(sphere_id, test_point)
 
@@ -599,15 +758,15 @@ if __name__ == "__main__":
     #     # if button_value > prev_button_value:
     #     #     prev_button_value = button_value
     #     #     for t in test_times:
-    #     #         pos = svsdf.evaluate_joint_position(t)
+    #     #         pos = svsdf.EvaluateJointPosition(t)
     #     #         rb.set_joint_positions(rb.arm_joints, pos)
-    #     #         sdf([0, 0, 0], pos, [0.5, 0.5, 0.75])
-    #     #         time.sleep(1.0 / 240)
+    #     #         time.sleep(3.0 / 30)
 
     #     slider_value = p.readUserDebugParameter(slider)
     #     time_idx = int(slider_value * (test_times.shape[0] - 1))
     #     t = test_times[time_idx]
     #     pos = svsdf.EvaluateJointPosition(t)
     #     rb.set_joint_positions(rb.arm_joints, pos)
-    #     sdf([0, 0, 0], pos, test_point, visualize=True)
+    #     # svsdf.sdf_solver([0, 0, 0], pos, test_point, visualize=True)
+    #     print(f"SVSDF Value at point {test_point} and time {t}: {svsdf.EvaluateSDF(t, [0, 0, 0], test_point)}")
     #     time.sleep(1.0 / 60)

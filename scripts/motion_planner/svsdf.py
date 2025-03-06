@@ -641,11 +641,14 @@ class SVSDF(object):
         min_sdf = float("inf")
         best_t = 0.0
 
-        init_points = np.linspace(0, t_max, 5)
+        # init_points = np.linspace(0, t_max, 5)
+        init_points = t_max * np.random.random(20)
+        init_points.sort()
 
         for t_init in init_points:
             print(f"Running at time {t_init}")
             t_curr, sdf_val = self._GradientDescent(p, x, traj, t_init, t_max)
+            print(f"Optimal time {t_curr} and value {sdf_val}")
             if sdf_val < min_sdf:
                 min_sdf = sdf_val
                 best_t = t_curr

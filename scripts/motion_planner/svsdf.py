@@ -1,5 +1,6 @@
 import os
 import sys
+from copy import deepcopy
 from typing import Dict, List, Tuple, Union
 
 import casadi as ca
@@ -11,6 +12,7 @@ sys.path.append(HERE)
 from robot.robot_setup import RobotSetup
 from utils.collision import collision_info
 from utils.utils import HideOutput
+from utils.utils_casadi import eval
 
 Trajectory = List[  # for different joints
     List[  # trajectory
@@ -22,28 +24,16 @@ Trajectory = List[  # for different joints
     ]
 ]
 
-
-def eval(
-    name: str,
-    obj: ca.MX,
-    sym: List[ca.MX],
-    data: List[np.ndarray],
-    verbose: bool = False,
-    full: bool = True,
-) -> np.ndarray:
-    obj_cur = obj
-    for sym_cur, data_cur in zip(sym, data):
-        obj_cur = ca.substitute(obj_cur, sym_cur, data_cur)
-
-    if full:
-        val = ca.evalf(obj_cur).toarray()
-    else:
-        val = obj_cur
-
-    if verbose:
-        print(name, "\n", val)
-
-    return val
+NodeTrajectory = List[  # trajectories of different joints
+    List[  # trajectory
+        Tuple[
+            Union[np.ndarray, ca.MX],  # q
+            Union[np.ndarray, ca.MX],  # dq
+            Union[np.ndarray, ca.MX],  # ddq
+            Union[np.ndarray, ca.MX],  # t
+        ]
+    ]
+]
 
 
 def Traj2Arr(traj: Trajectory, num_joints: int, symbolic: bool = False) -> Union[np.ndarray, ca.MX]:
@@ -84,6 +74,191 @@ def Arr2Traj(opt_var: Union[np.ndarray, ca.MX], num_joints: int, num_segments: i
             current_time = seg_end  # 更新时间
         traj.append(segments)
     return traj
+
+
+def NodeTraj2Arr(traj: NodeTrajectory, num_joints: int, symbolic: bool = False) -> Union[np.ndarray, ca.MX]:
+    opt_vars = []
+
+    for j in range(num_joints):
+        for node_idx, node in enumerate(traj[j]):
+            opt_vars.append(node[0])
+            opt_vars.append(node[1])
+            opt_vars.append(node[2])
+            opt_vars.append(node[3])
+    if symbolic:
+        opt_var = ca.vertcat(*opt_vars)
+    else:
+        opt_var = np.array(opt_vars)
+    return opt_var
+
+
+def Arr2NodeTraj(opt_var: Union[np.ndarray, ca.MX], num_joints: int, num_segments: int) -> NodeTrajectory:
+    traj = []
+    idx = 0  # 当前处理的数组索引
+    for j in range(num_joints):
+        joint_traj = []
+        for _ in range(num_segments - 1):
+            q = opt_var[idx]
+            idx += 1
+            dq = opt_var[idx]
+            idx += 1
+            ddq = opt_var[idx]
+            idx += 1
+            t = opt_var[idx]
+            idx += 1
+            if isinstance(q, np.ndarray):
+                joint_traj.append((q.item(), dq.item(), ddq.item(), t.item()))
+            else:
+                joint_traj.append((q, dq, ddq, t))
+        traj.append(joint_traj)
+    return traj
+
+
+def NodeTraj2Traj(
+    node_traj: NodeTrajectory,
+    num_joints: int,
+    q_init: np.ndarray,
+    dq_init: np.ndarray,
+    ddq_init: np.ndarray,
+    q_target: np.ndarray,
+    dq_target: np.ndarray,
+    ddq_target: np.ndarray,
+    max_total_time: float,
+    is_symbolic: bool,
+) -> Trajectory:
+    traj = []
+
+    for joint_idx in range(num_joints):
+        node_traj_cur = node_traj[joint_idx].copy()
+        node_traj_cur.append((q_target[joint_idx], dq_target[joint_idx], ddq_target[joint_idx], max_total_time))
+
+        start_time = 0
+        start_q = q_init[joint_idx]
+        start_dq = dq_init[joint_idx]
+        start_ddq = ddq_init[joint_idx]
+
+        traj_cur = []
+        for node_idx in range(len(node_traj_cur)):
+            node_cur = node_traj_cur[node_idx]
+            q = node_cur[0]
+            dq = node_cur[1]
+            ddq = node_cur[2]
+            t = node_cur[3]
+
+            duration = t - start_time
+
+            # A_temp = np.array(
+            #     [
+            #         [1, 0, 0, 0, 0, 0],
+            #         [0, 1, 0, 0, 0, 0],
+            #         [0, 0, 2, 0, 0, 0],
+            #         [1, duration, duration**2, duration**3, duration**4, duration**5],
+            #         [0, 1, 2 * duration, 3 * duration**2, 4 * duration**3, 5 * duration**4],
+            #         [0, 0, 2, 6 * duration, 12 * duration**2, 20 * duration**3],
+            #     ]
+            # )
+            A_inv_temp = np.array(
+                [
+                    [1, 0, 0, 0, 0, 0],
+                    [0, 1, 0, 0, 0, 0],
+                    [0, 0, 0.5, 0, 0, 0],
+                    [
+                        -10 / duration**3,
+                        -6 / duration**2,
+                        -3 / (2 * duration),
+                        10 / duration**3,
+                        -4 / duration**2,
+                        1 / (2 * duration),
+                    ],
+                    [
+                        15 / duration**4,
+                        8 / duration**3,
+                        3 / (2 * duration**2),
+                        -15 / duration**4,
+                        7 / duration**3,
+                        -1 / duration**2,
+                    ],
+                    [
+                        -6 / duration**5,
+                        -3 / duration**4,
+                        -1 / (2 * duration**3),
+                        6 / duration**5,
+                        -3 / duration**4,
+                        1 / (2 * duration**3),
+                    ],
+                ]
+            )
+            Q_temp = np.array([start_q, start_dq, start_ddq, q, dq, ddq])
+
+            if is_symbolic:
+                # A_inv = ca.MX.zeros(6, 6)
+                # for i in range(6):
+                #     for j in range(6):
+                #         A_inv[i, j] = A_inv_temp[i, j]
+                # Q = ca.MX.zeros(6)
+                # for i in range(6):
+                #     Q[i] = Q_temp[i]
+                coeffs = []
+                for i in range(6):
+                    vec = A_inv_temp[i, :]
+                    val = 0
+                    for j in range(6):
+                        val += vec[j] * Q_temp[j]
+                    coeffs.append(val)
+                coeffs = ca.vertcat(*coeffs)
+            else:
+                A_inv = A_inv_temp
+                Q = Q_temp
+                coeffs = A_inv @ Q
+
+            traj_cur.append((start_time, t, coeffs))
+
+            start_q = q
+            start_dq = dq
+            start_ddq = ddq
+            start_time = t
+
+        traj.append(traj_cur)
+
+    return traj
+
+
+def Traj2NodeTraj(
+    traj: Trajectory,
+    num_joints: int,
+) -> Trajectory:
+    node_traj = []
+
+    for joint_idx in range(num_joints):
+        traj_cur = traj[joint_idx]
+
+        node_traj_cur = []
+        for seg_idx in range(len(traj_cur) - 1):
+            start_time, end_time, coeffs = traj_cur[seg_idx]
+            duration = end_time - start_time
+            t = end_time
+            q = (
+                coeffs[0]
+                + duration * coeffs[1]
+                + duration**2 * coeffs[2]
+                + duration**3 * coeffs[3]
+                + duration**4 * coeffs[4]
+                + duration**5 * coeffs[5]
+            )
+            dq = (
+                coeffs[1]
+                + 2 * duration * coeffs[2]
+                + 3 * duration**2 * coeffs[3]
+                + 4 * duration**3 * coeffs[4]
+                + 5 * duration**4 * coeffs[5]
+            )
+            ddq = 2 * coeffs[2] + 6 * duration * coeffs[3] + 12 * duration**2 * coeffs[4] + 20 * duration**3 * coeffs[5]
+
+            node_traj_cur.append((q, dq, ddq, t))
+
+        node_traj.append(node_traj_cur)
+
+    return node_traj
 
 
 def generate_trajectory(
@@ -384,6 +559,7 @@ class SVSDF(object):
         joint_trajectory: Trajectory,
         traj_var: Union[ca.MX, None] = None,
         symbolic_traj: bool = False,
+        node_traj: bool = False,
     ):
         """
         初始化 SVSDF 计算类。
@@ -398,12 +574,14 @@ class SVSDF(object):
                 - coefficients: 5次多项式的系数，列表形式，长度为6，按照 t^0, t^1, t^2, t^3, t^4, t^5 的顺序排列 (ca.MX)
             traj_var (Union[ca.MX, None], (default) None): 如果传入符号化的轨迹，这里需要传入一个完整的变量,
             symbolic_traj (bool, (default) False): 是否使用符号化的关节轨迹
+            node_traj (bool, (default) False): 是否使用节点化的关节轨迹
         """
         self.traj_sym = joint_trajectory
         self.num_joints = len(joint_trajectory)
         self.num_segments = len(joint_trajectory[0])
         self.symbolic_traj = symbolic_traj
         self.traj_sym_var = traj_var
+        self.node_traj = node_traj
 
         # -------------------- 构建符号化计算系统 --------------------#
         self.t_sym = ca.MX.sym("t", 1)
@@ -417,44 +595,6 @@ class SVSDF(object):
         # SDF(p, q(t, c, T), x)
         self.sdf_sym = self.sdf_solver(self.p_sym, self.q_sym, self.x_sym)
         self.jac_sym = ca.gradient(self.sdf_sym, self.t_sym)
-
-    def _Traj2Arr(self, traj: Trajectory, symbolic: bool = False) -> Union[np.ndarray, ca.MX]:
-        opt_vars = []
-
-        # 遍历每个关节的每个时间段
-        for j in range(self.num_joints):
-            for seg_idx, seg in enumerate(traj[j]):
-                delta_t = seg[1] - seg[0]  # 时间间隔变量
-                opt_vars.append(delta_t)
-
-                # 多项式系数变量
-                for k, c in enumerate(seg[2]):
-                    opt_vars.append(c)
-        if symbolic:
-            opt_var = ca.vertcat(*opt_vars)
-        else:
-            opt_var = np.array(opt_vars)
-        return opt_var
-
-    def _Arr2Traj(self, opt_var: Union[np.ndarray, ca.MX]) -> Trajectory:
-        traj = []
-        idx = 0  # 当前处理的数组索引
-        for j in range(self.num_joints):
-            # 获取当前关节的段数和多项式系数数量
-            n_coeff = 6
-            segments = []
-            current_time = 0.0  # 初始化当前时间为0
-            for _ in range(self.num_segments):
-                delta_t = opt_var[idx]
-                idx += 1
-                coeffs = [opt_var[idx + k] for k in range(n_coeff)]
-                idx += n_coeff
-                seg_start = current_time
-                seg_end = current_time + delta_t
-                segments.append((seg_start, seg_end, coeffs))
-                current_time = seg_end  # 更新时间
-            traj.append(segments)
-        return traj
 
     def _BuildSymbolicQ(self, t: ca.MX) -> ca.MX:
         """
@@ -487,7 +627,7 @@ class SVSDF(object):
         self,
         p: np.ndarray,
         x: np.ndarray,
-        traj: Union[Trajectory, None],
+        traj: Union[NodeTrajectory, Trajectory, None],
         t_init: float,
         t_max: float,
         lr: float = 0.1,
@@ -499,7 +639,7 @@ class SVSDF(object):
         Params:
             p (np.ndarray): robot 2D pose
             x (np.ndarray): point in 3D space
-            traj (Trajectory | None): trajectory
+            traj (NodeTrajectory | Trajectory | None): trajectory
             t_init (float): initial time
             t_max (float): max time
             lr (float, 0.1): learning rate
@@ -514,9 +654,22 @@ class SVSDF(object):
         velocity = 0
 
         if self.symbolic_traj:
-            jac_sym_sim = eval(
-                "", self.jac_sym, [self.traj_sym_var, self.x_sym, self.p_sym], [self._Traj2Arr(traj), x, p], full=False
-            )
+            if self.node_traj:
+                jac_sym_sim = eval(
+                    "",
+                    self.jac_sym,
+                    [self.traj_sym_var, self.x_sym, self.p_sym],
+                    [NodeTraj2Arr(traj, self.num_joints), x, p],
+                    full=False,
+                )
+            else:
+                jac_sym_sim = eval(
+                    "",
+                    self.jac_sym,
+                    [self.traj_sym_var, self.x_sym, self.p_sym],
+                    [Traj2Arr(traj, self.num_joints), x, p],
+                    full=False,
+                )
         else:
             jac_sym_sim = eval("", self.jac_sym, [self.x_sym, self.p_sym], [x, p], full=False)
 
@@ -540,19 +693,25 @@ class SVSDF(object):
             t_curr = t_new
             prev_grad = grad
 
-        return (
-            t_curr,
-            (
-                eval(
+        if self.symbolic_traj:
+            if self.node_traj:
+                svsdf_curr = eval(
                     "",
                     self.sdf_sym,
                     [self.t_sym, self.x_sym, self.p_sym, self.traj_sym_var],
-                    [t_curr, x, p, self._Traj2Arr(traj)],
+                    [t_curr, x, p, NodeTraj2Arr(traj, self.num_joints)],
                 ).item()
-                if self.symbolic_traj
-                else eval("", self.sdf_sym, [self.t_sym, self.x_sym, self.p_sym], [t_curr, x, p]).item()
-            ),
-        )
+            else:
+                svsdf_curr = eval(
+                    "",
+                    self.sdf_sym,
+                    [self.t_sym, self.x_sym, self.p_sym, self.traj_sym_var],
+                    [t_curr, x, p, Traj2Arr(traj, self.num_joints)],
+                ).item()
+        else:
+            svsdf_curr = eval("", self.sdf_sym, [self.t_sym, self.x_sym, self.p_sym], [t_curr, x, p]).item()
+
+        return t_curr, svsdf_curr
 
     def EvaluateJointPosition(self, time: float, traj: Trajectory) -> np.ndarray:
         """
@@ -602,24 +761,13 @@ class SVSDF(object):
 
         return np.array(joint_angles)
 
-    def EvaluateSDF(self, time: float, p: np.ndarray, x: np.ndarray) -> float:
-        return (
-            eval(
-                "",
-                self.sdf_sym,
-                [self.t_sym, self.x_sym, self.p_sym, self.traj_sym_var],
-                [time, x, p, self._Traj2Arr(self.traj_sym)],
-            ).item()
-            if self.symbolic_traj
-            else eval("", self.sdf_sym, [self.t_sym, self.x_sym, self.p_sym], [time, x, p]).item()
-        )
-
     def __call__(
         self,
         p: np.ndarray,
         x: np.ndarray,
         t_max: float,
-        traj: Union[None, Trajectory] = None,
+        t_seed: Union[float, None] = None,
+        traj: Union[None, Trajectory, NodeTrajectory] = None,
         symbolic_output: bool = False,
     ) -> Tuple[float, Union[float, ca.MX]]:
         """
@@ -629,7 +777,7 @@ class SVSDF(object):
             p (np.ndarray): robot 2D pose
             x (float): point in 3D space
             t_max (float): max time
-            traj (Trajectory | None, (default) None): trajectory
+            traj (Trajectory | NodeTrajectory | None, (default) None): trajectory
             symbolic_output (bool, (default) False): whether return symbolic output
 
         Returns:
@@ -642,8 +790,11 @@ class SVSDF(object):
         best_t = 0.0
 
         # init_points = np.linspace(0, t_max, 5)
-        init_points = t_max * np.random.random(20)
-        init_points.sort()
+        if t_seed is None:
+            init_points = t_max * np.random.random(20)
+            init_points.sort()
+        else:
+            init_points = [t_seed]
 
         for t_init in init_points:
             print(f"Running at time {t_init}")
@@ -709,10 +860,11 @@ if __name__ == "__main__":
     # SVSDF test
     # **************************************************************************
 
+    import time
+
+    import pybullet as p
     import pybullet_planning as pp
     from utils.collision import Element, create_couplers, init_pb
-    import pybullet as p
-    import time
 
     np.set_printoptions(precision=3)
 

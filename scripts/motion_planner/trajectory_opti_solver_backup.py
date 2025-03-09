@@ -47,6 +47,7 @@ class TrajectoryOptimizer:
         """
         self.urdf_path = urdf_path
         self.robot = robot
+
         self.num_segments = num_segments
         self.num_joints = num_joints
         self.max_total_time = max_total_time
@@ -56,11 +57,14 @@ class TrajectoryOptimizer:
         self.max_accel = np.pi  # 最大关节加速度 (rad/s²)
         self.x_target = x_target  # 目标点坐标
         self.q_init = q_init
-        self.q_final = q_final
+        self.q_target = q_final
 
         # -------------------- 优化器 --------------------#
-        self.opti = ca.Opti()
-        self.X = self.opti.variable(self.num_vars)
+        # self.opti = ca.Opti()
+        # self.X = self.opti.variable(self.num_vars)
+
+        #-------------------- 新优化变量 --------------------#
+        self.X = ca.MX.sym("X", self.num_vars)
 
         # -------------------- 轨迹提取 --------------------#
         self.symbolic_traj = Arr2Traj(self.X, self.num_joints, self.num_segments)
@@ -123,7 +127,7 @@ class TrajectoryOptimizer:
                 + coeffs_last[4] * (delta_t_last**4)
                 + coeffs_last[5] * (delta_t_last**5)
             )
-            self.constraints.append((f"end pos of j{joint_idx}", q_T == self.q_final[joint_idx]))
+            self.constraints.append((f"end pos of j{joint_idx}", q_T == self.q_target[joint_idx]))
 
             # dq/dt(T) = 0 的计算
             dq_T = (

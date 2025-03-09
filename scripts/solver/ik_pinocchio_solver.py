@@ -307,9 +307,7 @@ if __name__ == "__main__":
 
     np.set_printoptions(precision=3, suppress=True)
 
-    robot_urdf = (
-        "/home/jeong/summer_research/eth/husky_assembly/data/husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf"
-    )
+    robot_urdf = "/home/jeong/summer_research/eth_ws/src/husky_assembly/data/husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf"
 
     pinocchio_solver = PinocchioSolver(robot_urdf)
     # pin_ik_solver = partial(pinocchio_solver.ik, base_name="world_link", tip_name="ur_arm_tool0", relative=False)

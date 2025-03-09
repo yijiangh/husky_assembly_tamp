@@ -4,7 +4,7 @@ import sys
 import time
 from collections import deque
 from copy import deepcopy
-from typing import List, Set, Tuple, Union
+from typing import Dict, List, Set, Tuple, Union
 
 import numpy as np
 import pybullet_planning as pp
@@ -23,7 +23,7 @@ from symbolic_planner.heuristic import (
 )
 from termcolor import cprint
 from utils.collision import Element
-from utils.utils import flatten, timeit_decorator_counter, TermPrint
+from utils.utils import TermPrint, flatten, timeit_decorator_counter
 
 
 class PlanState(object):
@@ -327,7 +327,7 @@ class Planner(object):
         self.robots = robots
 
     def Plan(
-        self, element_from_index: dict[Element], contact_id_pairs: List[List], grounded_elements_index: List[int]
+        self, element_from_index: Dict[int, Element], contact_id_pairs: List[List], grounded_elements_index: List[int]
     ) -> List[List[int]]:
         # -------------------- Generate element objects --------------------#
         element_object_list = Planner.GetElementObjects(element_from_index, contact_id_pairs, grounded_elements_index)
@@ -620,7 +620,7 @@ class Planner(object):
 
     @staticmethod
     def GetElementObjects(
-        element_from_index: dict[Element], contact_id_pairs: List[List[int]], grounded_elements_index: List[int]
+        element_from_index: Dict[int, Element], contact_id_pairs: List[List[int]], grounded_elements_index: List[int]
     ) -> List[ElementObject]:
         element_object_list = []
         for index, element in element_from_index.items():

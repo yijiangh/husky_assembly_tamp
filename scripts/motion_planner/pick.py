@@ -131,7 +131,7 @@ def compute_pick_path(
     fail_flag = True
     robot_joint_conf_last = INIT_ARM_JOINT_ANGLES.tolist()
     for ik_search_num in range(ik_search_max_attempt):
-        pick_joint_conf = robot_setup.get_relative_ik_solution(pick_tool0_pose, robot_joint_conf_last, solver="tracik")
+        pick_joint_conf = robot_setup.get_relative_ik_solution(pick_tool0_pose, robot_joint_conf_last)
         if pick_joint_conf is None:
             if verbose:
                 print("    pick ik not found")

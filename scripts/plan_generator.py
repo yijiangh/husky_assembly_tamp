@@ -3,6 +3,7 @@ import os
 import random
 from copy import deepcopy
 from datetime import datetime
+from typing import Dict, List, Set, Tuple, Union
 
 import numpy as np
 import pybullet as p
@@ -12,7 +13,7 @@ import pybullet_planning as pp
 import utils.load_multi_tangent as load_multi_tangent
 from multi_tangent.collision import create_collision_bodies
 from multi_tangent.convert import flatten_list
-from robot.robot import PathItem, PathWithIndex, Robot, ConcretePath
+from robot.robot import ConcretePath, PathItem, PathWithIndex, Robot
 from robot.robot_setup import RobotSetup
 from symbolic_planner.element_object import ElementObject, ElementStatus
 from symbolic_planner.planner import Planner
@@ -50,11 +51,8 @@ if __name__ == "__main__":
         # -------------------- Load process file --------------------#
         mt_file_name = args.mt_file_name
         line_pt_pairs, contact_id_pairs, bar_radius = parse_mt_geometric(mt_file_name)
-        line_pt_pairs: list[list[list]]  # bar list
-        contact_id_pairs: list[list]  # contact pairs
-        bar_radius: float
-        line_pts_flattened: list[np.ndarray] = flatten_list(np.array(line_pt_pairs))  # numpy points list
-        vertices: list[list] = flatten_list(line_pt_pairs)  # points list
+        line_pts_flattened: List[np.ndarray] = flatten_list(np.array(line_pt_pairs))  # numpy points list
+        vertices: List[List[float]] = flatten_list(line_pt_pairs)  # points list
 
         # -------------------- Eliminate Z-axis deviation --------------------#
         min_z = np.min(line_pts_flattened, axis=0)[2]

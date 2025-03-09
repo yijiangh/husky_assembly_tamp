@@ -11,7 +11,7 @@ GROUNDED_ELEMENTS_INDEX = [0, 1, 2]
 
 # -------------------- Motion Plan --------------------#
 
-ROBOT_NUM = 3
+ROBOT_NUM = 1
 MANIPULATOR_PLANNER = "normal"  # normal/default
 
 # Place Module

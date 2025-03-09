@@ -1,3 +1,5 @@
+from typing import List
+
 import numpy as np
 from symbolic_planner.element_object import ElementObject, ElementStatus
 from symbolic_planner.element_status import ElementStatus
@@ -9,7 +11,7 @@ class BasicHeuristic(object):
         pass
 
     @staticmethod
-    def Update(element_object_list: list[ElementObject]):
+    def Update(element_object_list: List[ElementObject]):
         for element_object in element_object_list:
             heuristic_val = element_object.index
             element_object.SetHeuristicValue(heuristic_val)
@@ -20,7 +22,7 @@ class GroundedChainHeuristic(object):
         pass
 
     @staticmethod
-    def Update(element_object_list: list[ElementObject]):
+    def Update(element_object_list: List[ElementObject]):
         for element_object in element_object_list:
             grounded_path = GroundedChecker.GetTrueGroundPath(element_object.index, element_object_list)
             if len(grounded_path) != 0:
@@ -35,7 +37,7 @@ class GroundedHeightHeuristic(object):
         pass
 
     @staticmethod
-    def Update(element_object_list: list[ElementObject]):
+    def Update(element_object_list: List[ElementObject]):
         for element_object in element_object_list:
             vertices = np.array(element_object.vertices)
             heuristic_val = vertices.mean(axis=0)[-1]  # height
@@ -47,7 +49,7 @@ class CenterDistanceHeuristic(object):
         pass
 
     @staticmethod
-    def Update(element_object_list: list[ElementObject]):
+    def Update(element_object_list: List[ElementObject]):
         center = CenterDistanceHeuristic.CalculateCenter(element_object_list)
         for element_object in element_object_list:
             vertices = np.array(element_object.vertices)
@@ -55,7 +57,7 @@ class CenterDistanceHeuristic(object):
             element_object.SetHeuristicValue(heuristic_val)
 
     @staticmethod
-    def CalculateCenter(element_object_list: list[ElementObject]) -> np.ndarray:
+    def CalculateCenter(element_object_list: List[ElementObject]) -> np.ndarray:
         all_vertices = []
         for element_object in element_object_list:
             all_vertices.extend(element_object.vertices)

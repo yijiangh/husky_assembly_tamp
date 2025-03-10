@@ -1,8 +1,10 @@
 import os
 import sys
+import xml.etree.ElementTree as ET
 from functools import partial
 from typing import Dict, List, Set, Tuple, Union
 
+import casadi as ca
 import numpy as np
 from utils.params import DATA_DIRECTORY, PICK_DIRECTION, PROJECT_DIR
 
@@ -45,7 +47,7 @@ class RobotSetup:
     def __init__(self, robot_name: str = "r0", attachments: List[Attachment] = None):
         """Initialize the RobotSetup instance.
 
-        Args:
+        Params:
             robot_name: Name of the robot (default: "r0").
             attachments: List of attachments (default: None).
         """
@@ -109,7 +111,7 @@ class RobotSetup:
     def set_joint_positions(self, control_joints: List[int], conf: np.ndarray) -> None:
         """Set joint positions and update attachments.
 
-        Args:
+        Params:
             control_joints: List of joint indices.
             conf: Joint configuration array.
         """
@@ -123,7 +125,7 @@ class RobotSetup:
     ) -> Set[Tuple[int, int]]:
         """Get link pairs disabled from collision checking.
 
-        Args:
+        Params:
             robot: PyBullet robot ID.
             link_names: Set of link name pairs to disable.
 
@@ -137,7 +139,7 @@ class RobotSetup:
     def get_relative_pose(self, pose_world: Tuple, link_name: str = "ur_arm_base_link") -> Tuple:
         """Calculate pose relative to a specified link.
 
-        Args:
+        Params:
             pose_world: World frame pose as (position, orientation).
             link_name: Name of the reference link (default: "ur_arm_base_link").
 
@@ -150,7 +152,7 @@ class RobotSetup:
     def get_relative_ik_solution(self, tool_pose_world: Tuple, q_init: List[float] = None) -> np.ndarray:
         """Calculate inverse kinematics solution relative to base using Pinocchio.
 
-        Args:
+        Params:
             tool_pose_world: Tool pose in world frame.
             q_init: Initial joint configuration guess (default: None).
 
@@ -164,11 +166,11 @@ class RobotSetup:
         return conf
 
     def plan_manipulator_path(
-        self, init_q: np.ndarray, target_q: np.ndarray, attachments: List[Attachment], obstacles: Set[int]
+        self, init_q: np.ndarray, target_q: np.ndarray, attachments: List[Attachment], obstacles: Set[int], **kwargs
     ) -> List[np.ndarray]:
         """Plan a manipulator path from initial to target configuration.
 
-        Args:
+        Params:
             init_q: Initial joint configuration.
             target_q: Target joint configuration.
             attachments: List of attachments excluding ee_attachment.
@@ -195,13 +197,14 @@ class RobotSetup:
             disabled_collisions=self.disabled_collisions,
             frozen_joints=frozen_joints,
             frozen_values=frozen_values,
+            **kwargs,
         )
         return [np.array(conf)[3:] for conf in path] if path else None
 
     def set_base_pose(self, pose: Pose) -> None:
         """Set the robot's base pose and update attachments.
 
-        Args:
+        Params:
             pose: Base pose to set.
         """
         pp.set_pose(self.robot, pose)
@@ -212,7 +215,7 @@ class RobotSetup:
     def set_base_pose_2d(self, x: float, y: float, yaw: float = 0.0) -> None:
         """Set the robot's base pose in 2D and update attachments.
 
-        Args:
+        Params:
             x: X-coordinate.
             y: Y-coordinate.
             yaw: Yaw angle in radians (default: 0.0).
@@ -223,7 +226,7 @@ class RobotSetup:
     def update_attachments(self, attachments: List[Attachment]) -> None:
         """Update the list of attachments.
 
-        Args:
+        Params:
             attachments: New list of attachments.
         """
         self.attachments = attachments
@@ -231,7 +234,7 @@ class RobotSetup:
     def create_aboard_attachment(self, body: int) -> Attachment:
         """Create an attachment on the robot at the onboard link.
 
-        Args:
+        Params:
             body: PyBullet body ID to attach.
 
         Returns:
@@ -248,7 +251,7 @@ class RobotSetup:
     ) -> Union[List[Tuple[float]], None]:
         """Plan a motion path for the manipulator.
 
-        Args:
+        Params:
             start_conf: Starting configuration.
             end_conf: Target configuration.
             attachments: List of attachments.
@@ -263,6 +266,9 @@ class RobotSetup:
         frozen_values = kwargs.get("frozen_values", [])
         coarse_waypoints = kwargs.get("coarse_waypoints", False)
         diagnosis = kwargs.get("diagnosis", False)
+        max_time = kwargs.get("max_time", 10)
+        max_iterations = kwargs.get("max_iterations", 40)
+        smooth = kwargs.get("smooth", 40)
 
         def get_sample_fn():
             lower, upper = pp.get_custom_limits(self.robot, self.control_joints, circular_limits=pp.CIRCULAR_LIMITS)
@@ -305,11 +311,240 @@ class RobotSetup:
                     extend_fn,
                     partial(collision_fn, diagnosis=diagnosis),
                     algorithm="birrt",
-                    max_time=10,
-                    max_iterations=40,
-                    smooth=40,
+                    max_time=max_time,
+                    max_iterations=max_iterations,
+                    smooth=smooth,
                     diagnosis=diagnosis,
                     coarse_waypoints=coarse_waypoints,
                 )
             print("End configuration in collision.")
             return None
+
+    @staticmethod
+    def parse_urdf(urdf_path: str) -> Dict:
+        """
+        Parse URDF file and extract joint info.
+
+        Params:
+            urdf_path (str): path of urdf file
+
+        Returns:
+            Dict: joint info
+        """
+        tree = ET.parse(urdf_path)
+        root = tree.getroot()
+
+        joints = {}
+        for joint in root.findall("joint"):
+            name = joint.get("name")
+            joint_type = joint.get("type")
+
+            origin = joint.find("origin")
+            if origin is not None:
+                xyz = [float(x) for x in origin.get("xyz", "0 0 0").split()]
+                rpy = [float(r) for r in origin.get("rpy", "0 0 0").split()]
+            else:
+                xyz, rpy = [0, 0, 0], [0, 0, 0]
+
+            axis = joint.find("axis")
+            if axis is not None:
+                axis = [float(a) for a in axis.get("xyz", "1 0 0").split()]
+            else:
+                axis = [1, 0, 0]
+
+            joints[name] = {"type": joint_type, "origin": {"xyz": xyz, "rpy": rpy}, "axis": axis}
+
+        return joints
+
+    @staticmethod
+    def rpy_2_matrix(roll: float, pitch: float, yaw: float) -> np.ndarray:
+        """
+        Compute matrix given by rpy.
+
+        Params:
+            roll (float): roll
+            pitch (float): pitch
+            yaw (float): yaw
+
+        Returns:
+            np.ndarray: 3x3 matrix
+        """
+        Rx = np.zeros((3, 3))
+
+        Rx[0, 0] = 1
+        Rx[0, 1] = 0
+        Rx[0, 2] = 0
+
+        Rx[1, 0] = 0
+        Rx[1, 1] = np.cos(roll)
+        Rx[1, 2] = -np.sin(roll)
+
+        Rx[2, 0] = 0
+        Rx[2, 1] = np.sin(roll)
+        Rx[2, 2] = np.cos(roll)
+
+        Ry = np.zeros((3, 3))
+
+        Ry[0, 0] = np.cos(pitch)
+        Ry[0, 1] = 0
+        Ry[0, 2] = np.sin(pitch)
+
+        Ry[1, 0] = 0
+        Ry[1, 1] = 1
+        Ry[1, 2] = 0
+
+        Ry[2, 0] = -np.sin(pitch)
+        Ry[2, 1] = 0
+        Ry[2, 2] = np.cos(pitch)
+
+        Rz = np.zeros((3, 3))
+
+        Rz[0, 0] = np.cos(yaw)
+        Rz[0, 1] = -np.sin(yaw)
+        Rz[0, 2] = 0
+
+        Rz[1, 0] = np.sin(yaw)
+        Rz[1, 1] = np.cos(yaw)
+        Rz[1, 2] = 0
+
+        Rz[2, 0] = 0
+        Rz[2, 1] = 0
+        Rz[2, 2] = 1
+
+        return Rz @ Ry @ Rx
+
+    @staticmethod
+    def skew(v: ca.MX) -> ca.MX:
+        """
+        Generate skew-symmetric matrix given by axis.
+
+        Params:
+            v (ca.MX): vector of axis
+
+        Returns:
+            ca.MX: skew-symmetric matrix
+        """
+        assert v.size1() == 3, "输入向量必须是三维的"
+
+        x = v[0]
+        y = v[1]
+        z = v[2]
+
+        skew_matrix = ca.MX(3, 3)
+
+        skew_matrix[0, 0] = 0
+        skew_matrix[0, 1] = -z
+        skew_matrix[0, 2] = y
+
+        skew_matrix[1, 0] = z
+        skew_matrix[1, 1] = 0
+        skew_matrix[1, 2] = -x
+
+        skew_matrix[2, 0] = -y
+        skew_matrix[2, 1] = x
+        skew_matrix[2, 2] = 0
+
+        return skew_matrix
+
+    @staticmethod
+    def expm(A: ca.MX, n_terms: int = 20) -> ca.MX:
+        """
+        Compute the exponential exp(A) of the matrix A using Taylor series expansion.
+
+        Params:
+            A (ca.MX): matrix
+            n_terms (int, 20): number of expanded items
+
+        Returns:
+            ca.MX: matrix exp(A)
+        """
+        if A.size1() != A.size2():
+            raise ValueError("矩阵必须是方阵")
+
+        exp_A = ca.MX.eye(A.size1())
+        A_power = ca.MX.eye(A.size1())
+        factorial = 1
+
+        for n in range(1, n_terms + 1):
+            A_power = A_power @ A
+            factorial *= n
+            exp_A += A_power / factorial
+
+        return exp_A
+
+    @staticmethod
+    def transform_matrix(xyz: List[float], rpy: List[float], axis: List[float], q_val: ca.MX, joint_type: str) -> ca.MX:
+        """
+        Construct transformation matrix according to joint type.
+
+        Params:
+            xyz (List[float]): xyz
+            rpy (List[float]): rpy
+            axis (List[float]): axis
+            q_val (ca.MX): symbolic joint angle
+            joint_type (str): revolute/prismatic
+
+        Returns:
+            ca.MX: 4x4 matrix
+        """
+        T = ca.MX.eye(4)
+        T[:3, :3] = RobotSetup.rpy_2_matrix(*rpy)
+        T[:3, 3] = xyz
+
+        if joint_type == "revolute":
+            R_joint = ca.MX.eye(4)
+            R_joint[:3, :3] = RobotSetup.expm(q_val * RobotSetup.skew(ca.MX(axis)))
+            return T @ R_joint
+        elif joint_type == "prismatic":
+            P_joint = ca.MX.eye(4)
+            P_joint[:3, 3] = ca.MX(axis) * q_val
+            return T @ P_joint
+        else:
+            return T
+
+    @staticmethod
+    def symbolic_forward(
+        urdf_path: str,
+        joint_name_list: List[str],
+        control_joint_name_list: List[str],
+        q: Union[ca.MX, None] = None,
+        output_type: str = "function",
+    ):
+        """
+        Creates symbolic forward kinematics equations given a URDF file path and a list of joint names.
+
+        Params:
+            urdf_path (str): urdf path of robot
+            joint_name_list (List[str]): name list of manipulator including all redundant joints
+            control_joint_name_list (List[str]): name list of controlled joints
+            q (ca.MX | None, None): joint variables
+            output_type (str, "function"): "function"/"matrix"
+
+        Returns:
+            ca.Function: [q] --> np.ndarray (4x4)
+        """
+        joints = RobotSetup.parse_urdf(urdf_path)
+        if q is None or len(control_joint_name_list) == 0:
+            q = ca.MX.sym("q", len(control_joint_name_list))
+        T = ca.MX.eye(4)
+        for i, joint_name in enumerate(joint_name_list):
+            joint = joints[joint_name]
+            if joint_name in control_joint_name_list:
+                i_q = control_joint_name_list.index(joint_name)
+                joint_T = RobotSetup.transform_matrix(
+                    joint["origin"]["xyz"], joint["origin"]["rpy"], joint["axis"], q[i_q], joint["type"]
+                )
+            else:
+                joint_T = RobotSetup.transform_matrix(
+                    joint["origin"]["xyz"], joint["origin"]["rpy"], joint["axis"], 0, joint["type"]
+                )
+            T = T @ joint_T
+
+        if output_type == "function":
+            fk_function = ca.Function("forward_kinematics", [q], [T])
+            return fk_function
+        elif output_type == "matrix":
+            return T
+        else:
+            fk_function = ca.Function("forward_kinematics", [q], [T])
+            return fk_function

@@ -2,8 +2,7 @@ import argparse
 import json
 import os
 
-from termcolor import colored
-from utils.utils import LOGGER, PROJECT_DIR
+from utils.utils import PROJECT_DIR
 
 MT_DATA_PATH = os.path.join(PROJECT_DIR, "ext", "FrameX", "data", "mt_results")
 

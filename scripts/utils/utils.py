@@ -7,6 +7,7 @@ from collections import defaultdict
 from contextlib import contextmanager
 from functools import partial
 from typing import Dict, List, Set, Tuple, Union
+import random
 
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
@@ -25,44 +26,6 @@ HUSKYU_JOINT_NAMES = [
     "ur_arm_wrist_2_joint",
     "ur_arm_wrist_3_joint",
 ]
-
-
-###########################################
-# borrowed from: https://github.com/compas-dev/compas_fab/blob/3efe608c07dc5b08653ee4132a780a3be9fb93af/src/compas_fab/backends/pybullet/utils.py#L83
-def get_logger(name):
-    logger = logging.getLogger(name)
-
-    try:
-        from colorlog import ColoredFormatter
-
-        formatter = ColoredFormatter(
-            "%(log_color)s%(levelname)-8s%(reset)s %(white)s%(message)s",
-            datefmt=None,
-            reset=True,
-            log_colors={
-                "DEBUG": "cyan",
-                "INFO": "green",
-                "WARNING": "yellow",
-                "ERROR": "red",
-                "CRITICAL": "red",
-            },
-        )
-    except ImportError:
-        formatter = logging.Formatter("%(asctime)s | %(name)s | %(levelname)s | %(message)s")
-
-    handler = logging.StreamHandler()
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
-
-    return logger
-
-
-def notify(msg):
-    print(msg)
-
-
-LOGGER = get_logger("robarch_pddl")
 
 
 ###########################################
@@ -331,3 +294,8 @@ def HideOutput():
         finally:
             sys.stdout = original_stdout  # 恢复标准输出
             sys.stderr = original_stderr  # 恢复标准错误
+
+
+def SetSeeds(seed=24):
+    random.seed(seed)
+    np.random.seed(seed)

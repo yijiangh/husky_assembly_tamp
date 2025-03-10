@@ -142,13 +142,13 @@ def compute_back_path(
                 )
                 if post_attach_joint_conf is None:
                     if verbose:
-                        print(f"    pre attach ik not found at step {temp_index}/{len(post_tool0_poses)-1}")
+                        print(f"    post attach ik not found at step {temp_index}/{len(post_tool0_poses)-1}")
                     continue
                 post_attach_joint_conf = normalize_angles(post_attach_joint_conf)
                 if angles_distance(post_attach_joint_conf, robot_joint_conf_last) >= np.pi / 2:
                     if verbose:
                         print(
-                            "    pre attach ik interval too large:\n",
+                            "    post attach ik interval too large:\n",
                             "       next: ",
                             post_attach_joint_conf,
                             "\n",

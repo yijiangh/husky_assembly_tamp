@@ -205,7 +205,7 @@ class TrajectoryOptimizer:
         fn_obj = ca.Function("fn_obj", [self.svsdf.t_sym, self.X], [obj])
 
         # 预处理梯度信息: (t, X = (q, dq, ddq, T)) -> grad
-        grad_obj_X = ca.gradient(obj, self.X)
+        grad_obj_X = ca.gradient(obj, self.X)  # TODO: sensitivity
         # grad_obj_X_X = ca.jacobian(grad_obj_X, self.X)
         fn_grad_obj_X = ca.Function("fn_grad_obj_X", [self.svsdf.t_sym, self.X], [grad_obj_X])
         # fn_grad_obj_X_X = ca.Function("fn_grad_obj_X_X", [self.svsdf.t_sym, self.X], [grad_obj_X_X])

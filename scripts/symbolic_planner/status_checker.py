@@ -268,15 +268,17 @@ class AlgebraicChecker(object):
             coupler_vertex_1: Vertex
             coupler_vertex_2: Vertex
 
-            segment_vertex = elements_dict[coupler_vertex_1.element_index][0]
-            mid_vertex = coupler_vertex_1
-            end_vertex = coupler_vertex_2
-            rotation_constrains_vertex.append([segment_vertex, mid_vertex, end_vertex])
+            if coupler_vertex_1.element_index in elements_dict.keys():
+                segment_vertex = elements_dict[coupler_vertex_1.element_index][0]
+                mid_vertex = coupler_vertex_1
+                end_vertex = coupler_vertex_2
+                rotation_constrains_vertex.append([segment_vertex, mid_vertex, end_vertex])
 
-            segment_vertex = elements_dict[coupler_vertex_2.element_index][0]
-            mid_vertex = coupler_vertex_2
-            end_vertex = coupler_vertex_1
-            rotation_constrains_vertex.append([segment_vertex, mid_vertex, end_vertex])
+            if coupler_vertex_2.element_index in elements_dict.keys():
+                segment_vertex = elements_dict[coupler_vertex_2.element_index][0]
+                mid_vertex = coupler_vertex_2
+                end_vertex = coupler_vertex_1
+                rotation_constrains_vertex.append([segment_vertex, mid_vertex, end_vertex])
 
         K_rotation = AlgebraicChecker.CreateRotationConstrains(rotation_constrains_vertex, vertex_num)
 
@@ -291,15 +293,17 @@ class AlgebraicChecker(object):
             coupler_vertex_1: Vertex
             coupler_vertex_2: Vertex
 
-            vertex_start: Vertex = elements_dict[coupler_vertex_1.element_index][0]
-            vertex_end: Vertex = elements_dict[coupler_vertex_1.element_index][1]
-            vertex_mid = coupler_vertex_1
-            collinear_constrains_vertex.append([vertex_start, vertex_mid, vertex_end])
+            if coupler_vertex_1.element_index in elements_dict.keys():
+                vertex_start: Vertex = elements_dict[coupler_vertex_1.element_index][0]
+                vertex_end: Vertex = elements_dict[coupler_vertex_1.element_index][1]
+                vertex_mid = coupler_vertex_1
+                collinear_constrains_vertex.append([vertex_start, vertex_mid, vertex_end])
 
-            vertex_start: Vertex = elements_dict[coupler_vertex_2.element_index][0]
-            vertex_end: Vertex = elements_dict[coupler_vertex_2.element_index][1]
-            vertex_mid = coupler_vertex_2
-            collinear_constrains_vertex.append([vertex_start, vertex_mid, vertex_end])
+            if coupler_vertex_2.element_index in elements_dict.keys():
+                vertex_start: Vertex = elements_dict[coupler_vertex_2.element_index][0]
+                vertex_end: Vertex = elements_dict[coupler_vertex_2.element_index][1]
+                vertex_mid = coupler_vertex_2
+                collinear_constrains_vertex.append([vertex_start, vertex_mid, vertex_end])
 
         K_collinear = AlgebraicChecker.CreateCollinearConstrains(collinear_constrains_vertex, vertex_num)
 

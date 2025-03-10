@@ -20,7 +20,7 @@ from symbolic_planner.planner import Planner
 from utils.collision import Element, create_couplers, init_pb
 from utils.params import *
 from utils.parse import parse_mt_geometric
-from utils.utils import CounterModule
+from utils.utils import CounterModule, SetSeeds
 
 log_dir = os.path.join(HERE, f"logs/{MT_FILE_NAME}")
 
@@ -29,9 +29,9 @@ log_dir = os.path.join(HERE, f"logs/{MT_FILE_NAME}")
 
 if __name__ == "__main__":
 
-    # plan_manipulator_path 稳定失败种子
-    # random.seed(128363)
-    # np.random.seed(98765)
+    # TODO: box_MT_contact seed=128363 这里似乎在稳定性判断方面有BUG
+    seed = 128363
+    SetSeeds(seed)
 
     with pp.HideOutput():
         parser = argparse.ArgumentParser()
@@ -98,7 +98,7 @@ if __name__ == "__main__":
 
         # -------------------- save log file --------------------#
         current_time_str = datetime.now().strftime("%y%m%d_%H%M%S")
-        counter.save(log_dir, f"{current_time_str}.json")
+        counter.save(log_dir, f"{current_time_str}_seed{seed}.json")
 
         # -------------------- Sequence Visualization --------------------#
         if args.visualization:

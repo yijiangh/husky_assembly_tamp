@@ -464,61 +464,61 @@ class SDF(object):
 
         return sdf, min_metadata
 
-    # def SphereSDFVisualize(
-    #     self,
-    #     meta_data: Dict,
-    #     p: Union[List[float], np.ndarray],
-    #     q: Union[List[float], np.ndarray],
-    #     x: Union[List[float], np.ndarray],
-    # ):
-    #     link_name = meta_data["link_name"]
-    #     mnt_joint = meta_data["mnt_joint"]
-    #     info_idx = meta_data["info_idx"]
+    def SphereSDFVisualize(
+        self,
+        meta_data: Dict,
+        p: Union[List[float], np.ndarray],
+        q: Union[List[float], np.ndarray],
+        x: Union[List[float], np.ndarray],
+    ):
+        link_name = meta_data["link_name"]
+        mnt_joint = meta_data["mnt_joint"]
+        info_idx = meta_data["info_idx"]
 
-    #     world_from_base: ca.MX = ca.MX.eye(4)
-    #     world_from_base[0, 3] = p[0]
-    #     world_from_base[1, 3] = p[1]
-    #     yaw = p[2]
-    #     R_z = ca.vertcat(
-    #         ca.horzcat(ca.cos(yaw), -ca.sin(yaw), 0), ca.horzcat(ca.sin(yaw), ca.cos(yaw), 0), ca.horzcat(0, 0, 1)
-    #     )
-    #     world_from_base[:3, :3] = R_z
+        world_from_base: ca.MX = ca.MX.eye(4)
+        world_from_base[0, 3] = p[0]
+        world_from_base[1, 3] = p[1]
+        yaw = p[2]
+        R_z = ca.vertcat(
+            ca.horzcat(ca.cos(yaw), -ca.sin(yaw), 0), ca.horzcat(ca.sin(yaw), ca.cos(yaw), 0), ca.horzcat(0, 0, 1)
+        )
+        world_from_base[:3, :3] = R_z
 
-    #     if mnt_joint == "base_joint":
-    #         world_from_joint = world_from_base
-    #     else:
-    #         base_from_joint = self.base_from_connect @ self.connect_from_joint_dict[mnt_joint][0]
-    #         world_from_joint = world_from_base @ base_from_joint
+        if mnt_joint == "base_joint":
+            world_from_joint = world_from_base
+        else:
+            base_from_joint = self.base_from_connect @ self.connect_from_joint_dict[mnt_joint][0]
+            world_from_joint = world_from_base @ base_from_joint
 
-    #     if link_name != "unknown":
-    #         info = self.collision_info[link_name][0][info_idx]
-    #         offset = info[0]
-    #         radius = info[1]
-    #         visual_id = info[2]
+        if link_name != "unknown":
+            info = self.collision_info[link_name][0][info_idx]
+            offset = info[0]
+            radius = info[1]
+            visual_id = info[2]
 
-    #         # print(f"link_name: {link_name}, mnt_joint: {mnt_joint} ", info)
+            # print(f"link_name: {link_name}, mnt_joint: {mnt_joint} ", info)
 
-    #         joint_from_sphere = np.eye(4)
-    #         joint_from_sphere[0, 3] = offset[0]
-    #         joint_from_sphere[1, 3] = offset[1]
-    #         joint_from_sphere[2, 3] = offset[2]
-    #         world_from_sphere = world_from_joint @ joint_from_sphere
-    #         sphere_center = ca.vertcat(world_from_sphere[0, 3], world_from_sphere[1, 3], world_from_sphere[2, 3])
-    #         c = eval("", sphere_center, [self.q], [q])
+            joint_from_sphere = np.eye(4)
+            joint_from_sphere[0, 3] = offset[0]
+            joint_from_sphere[1, 3] = offset[1]
+            joint_from_sphere[2, 3] = offset[2]
+            world_from_sphere = world_from_joint @ joint_from_sphere
+            sphere_center = ca.vertcat(world_from_sphere[0, 3], world_from_sphere[1, 3], world_from_sphere[2, 3])
+            c = eval("", sphere_center, [self.q], [q])
 
-    #         with pp.LockRenderer():
-    #             if self.debug_sphere_visual_id == -1:
-    #                 self.debug_sphere_visual_id = pp.create_sphere(radius, color=(1, 0, 0, 0.5))
-    #             else:
-    #                 pp.remove_body(self.debug_sphere_visual_id)
-    #                 self.debug_sphere_visual_id = pp.create_sphere(radius, color=(1, 0, 0, 0.5))
-    #             pp.set_point(self.debug_sphere_visual_id, c)
+            with pp.LockRenderer():
+                if self.debug_sphere_visual_id == -1:
+                    self.debug_sphere_visual_id = pp.create_sphere(radius, color=(1, 0, 0, 0.5))
+                else:
+                    pp.remove_body(self.debug_sphere_visual_id)
+                    self.debug_sphere_visual_id = pp.create_sphere(radius, color=(1, 0, 0, 0.5))
+                pp.set_point(self.debug_sphere_visual_id, c)
 
-    #             if self.debug_line_visual_id == -1:
-    #                 self.debug_line_visual_id = pp.add_line(x, c)
-    #             else:
-    #                 pp.remove_debug(self.debug_line_visual_id)
-    #                 self.debug_line_visual_id = pp.add_line(x, c)
+                if self.debug_line_visual_id == -1:
+                    self.debug_line_visual_id = pp.add_line(x, c)
+                else:
+                    pp.remove_debug(self.debug_line_visual_id)
+                    self.debug_line_visual_id = pp.add_line(x, c)
 
     def __call__(
         self,
@@ -526,6 +526,7 @@ class SDF(object):
         q: Union[List[float], np.ndarray, ca.MX],
         x: Union[List[float], np.ndarray, ca.MX],
         method: str = "sphere",
+        visualize: bool = False,
     ) -> Union[float, np.ndarray, ca.MX]:
         """
         Calculate SDF(p, q, x).
@@ -543,6 +544,9 @@ class SDF(object):
             sdf, meta_info = self.SphereApproximation(p, q, x)
         else:
             raise NotImplementedError(f"Method {method} is not implemented.")
+
+        if visualize:
+            self.SphereSDFVisualize(meta_info, p, q, x)
 
         return sdf
 
@@ -586,7 +590,10 @@ class SVSDF(object):
         # -------------------- 构建符号化计算系统 --------------------#
         self.t_sym = ca.MX.sym("t", 1)
         self.p_sym = ca.MX.sym("p", 3)  # [x, y, yaw]
-        self.q_sym = self._BuildSymbolicQ(self.t_sym)  # joint positions
+        if symbolic_traj:
+            self.q_sym = self._BuildSymbolicQ(self.t_sym)  # joint positions
+        else:
+            self.q_sym = ca.MX.sym("q", self.num_joints)
         self.x_sym = ca.MX.sym("x", 3)  # [x, y, z]
 
         # urdf_path = "/home/jeong/summer_research/eth_ws/src/husky_assembly/data/husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf"
@@ -769,7 +776,7 @@ class SVSDF(object):
         t_seed: Union[float, None] = None,
         traj: Union[None, Trajectory, NodeTrajectory] = None,
         symbolic_output: bool = False,
-    ) -> Tuple[float, Union[float, ca.MX]]:
+    ) -> Tuple[float, Union[float, ca.MX], List[Tuple[float, float]]]:
         """
         计算点 x 到 SV 的最短距离。
 
@@ -788,25 +795,28 @@ class SVSDF(object):
 
         min_sdf = float("inf")
         best_t = 0.0
+        collision_times = []
 
         # init_points = np.linspace(0, t_max, 5)
         if t_seed is None:
-            init_points = t_max * np.random.random(20)
+            init_points = np.linspace(0, t_max, 20)
             init_points.sort()
         else:
             init_points = [t_seed]
 
         for t_init in init_points:
-            print(f"Running at time {t_init}")
+            # print(f"Running at time {t_init}")
             t_curr, sdf_val = self._GradientDescent(p, x, traj, t_init, t_max)
-            print(f"Optimal time {t_curr} and value {sdf_val}")
+            # print(f"Optimal time {t_curr} and value {sdf_val}")
             if sdf_val < min_sdf:
                 min_sdf = sdf_val
                 best_t = t_curr
+            if sdf_val <= 0:
+                collision_times.append((t_curr, sdf_val))
 
         refined_t, refined_sdf = self._GradientDescent(p, x, traj, best_t, t_max, lr=0.01, max_iter=50)
 
-        return refined_t, refined_sdf
+        return refined_t, refined_sdf, collision_times
 
 
 if __name__ == "__main__":
@@ -878,50 +888,38 @@ if __name__ == "__main__":
     v_max = np.pi / 6
 
     # 生成轨迹
-    trajectory = generate_trajectory(start_pos, end_pos, v_max)
+    traj = generate_trajectory(start_pos, end_pos, v_max)
 
     # 创建 SVSDF 实例
     urdf_path = "/home/jeong/summer_research/eth_ws/src/husky_assembly/data/husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf"
-    svsdf = SVSDF(urdf_path, rb, trajectory)
+    svsdf = SVSDF(urdf_path, rb, traj)
 
-    # 计算点到轨迹的最小距离
+    # 定义相关参数
     robot_pose = np.array([0, 0, 0])
-    target_point = np.array([0.5, -0.35, 0.75])
-    # target_point = np.array([0, 0, 0.2])
-    svsdf_tup = svsdf(robot_pose, target_point, 3.0)
+    x_target = np.array([0.5, -0.35, 0.75])
 
-    print("")
-    print("")
-    print("")
-    print("")
-    print(f"SVSDF Value at point {target_point.tolist()} and time {svsdf_tup[0]}: {svsdf_tup[1]}")
+    slider = p.addUserDebugParameter("replay", 0, 1, 0)
+    x_slider = p.addUserDebugParameter("x", -3, 3, 0.5)
+    y_slider = p.addUserDebugParameter("y", -3, 3, -0.35)
+    z_slider = p.addUserDebugParameter("z", -3, 3, 0.75)
 
-    # continue_button = p.addUserDebugParameter("continue", 1, 0, 0)
-    # prev_button_value = p.readUserDebugParameter(continue_button)
+    max_time = max([temp[-1][1] for temp in traj])
+    times = np.linspace(0, max_time, 1000)
 
-    # slider = p.addUserDebugParameter("replay", 0, 1, 0)
+    sphere_id = pp.create_sphere(0.05, color=pp.BLACK)
+    pp.set_point(sphere_id, x_target.tolist())
 
-    # test_times = np.linspace(0, 3.0, 30)
+    while True:
+        slider_value = p.readUserDebugParameter(slider)
+        time_idx = int(slider_value * (times.shape[0] - 1))
+        t = times[time_idx]
+        pos = svsdf.EvaluateJointPosition(t, traj)
+        rb.set_joint_positions(rb.arm_joints, pos)
 
-    # # 创建可视化
-    # test_point = [0.5, -0.35, 0.75]
-    # sphere_id = pp.create_sphere(0.05, color=pp.BLACK)
-    # pp.set_point(sphere_id, test_point)
+        x_value = p.readUserDebugParameter(x_slider)
+        y_value = p.readUserDebugParameter(y_slider)
+        z_value = p.readUserDebugParameter(z_slider)
+        pp.set_point(sphere_id, [x_value, y_value, z_value])
+        svsdf.sdf_solver(robot_pose, pos, np.array([x_value, y_value, z_value]), visualize=True)
 
-    # while True:
-    #     # button_value = p.readUserDebugParameter(continue_button)
-    #     # if button_value > prev_button_value:
-    #     #     prev_button_value = button_value
-    #     #     for t in test_times:
-    #     #         pos = svsdf.EvaluateJointPosition(t)
-    #     #         rb.set_joint_positions(rb.arm_joints, pos)
-    #     #         time.sleep(3.0 / 30)
-
-    #     slider_value = p.readUserDebugParameter(slider)
-    #     time_idx = int(slider_value * (test_times.shape[0] - 1))
-    #     t = test_times[time_idx]
-    #     pos = svsdf.EvaluateJointPosition(t)
-    #     rb.set_joint_positions(rb.arm_joints, pos)
-    #     # svsdf.sdf_solver([0, 0, 0], pos, test_point, visualize=True)
-    #     print(f"SVSDF Value at point {test_point} and time {t}: {svsdf.EvaluateSDF(t, [0, 0, 0], test_point)}")
-    #     time.sleep(1.0 / 60)
+        time.sleep(1.0 / 60)

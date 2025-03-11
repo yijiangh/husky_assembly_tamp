@@ -67,7 +67,7 @@ if __name__ == "__main__":
     pp.set_pose(
         grasped_element,
         pp.multiply(
-            pp.get_link_pose(rb.robot, rb.tool_link), pp.Pose(point=(0, 0, 0.15), euler=pp.Euler(1.5708, 0, 0))
+            pp.get_link_pose(rb.robot, rb.tool_link), pp.Pose(point=(0, 0.1, 0.15), euler=pp.Euler(1.5708, 0, 0))
         ),
     )
     attachment = pp.create_attachment(rb.robot, rb.tool_link, grasped_element)
@@ -79,8 +79,12 @@ if __name__ == "__main__":
 
     path = None
     if input == "y" or input == "Y":
-        path = rb.plan_manipulator_path(init_q, target_q, [attachment], element_bodies, max_time=30, max_iterations=100)
-        print(path)
+        start_time = time.time()
+        path = rb.plan_manipulator_path(
+            init_q, target_q, [attachment], element_bodies, max_time=600, max_iterations=1000
+        )
+        end_time = time.time()
+        print(f"planning time: {end_time - start_time}")
 
     if path is not None:
 

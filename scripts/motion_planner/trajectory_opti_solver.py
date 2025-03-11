@@ -44,7 +44,7 @@ class TrajectoryOptimizer:
         x_target: np.ndarray,
         q_init: np.ndarray,
         q_final: np.ndarray,
-        sdf_threshold: float = 0,
+        sdf_threshold: float = 0.05,
     ) -> None:
         """
         符号化轨迹参数初始化
@@ -119,9 +119,9 @@ class TrajectoryOptimizer:
 
         # -------------------- SDF --------------------#
         sdf_sym = self.svsdf.sdf_sym
-        # G_s = ca.if_else(sdf_sym > self.sdf_threshold, 0, self.sdf_threshold - sdf_sym)
-        # cost_sdf = ca.if_else(G_s > 0, G_s**3, 0)
-        cost_sdf = -sdf_sym
+        G_s = ca.if_else(sdf_sym > self.sdf_threshold, 0, self.sdf_threshold - sdf_sym)
+        cost_sdf = ca.if_else(G_s > 0, G_s, 0)
+        # cost_sdf = -sdf_sym
 
         cost = cost_sdf
 
@@ -212,6 +212,16 @@ class TrajectoryOptimizer:
         # 预处理约束条件
         processed_constraints = []
         for name, constr in self.constraints:
+            if constr.is_op(ca.OP_LE):
+                expr = constr.dep(0) - constr.dep(1)  # g(X) <= 0
+                processed_constraints.append(("ineq", name, expr))
+            elif constr.is_op(ca.OP_EQ):
+                expr = constr.dep(0) - constr.dep(1)  # h(X) = 0
+                processed_constraints.append(("eq", name, expr))
+
+        # 预处理约束条件
+        processed_constraints = []
+        for name, constr in self.constraints:
             # 分解约束结构
             if constr.is_op(ca.OP_LE):
                 expr = constr.dep(0) - constr.dep(1)
@@ -235,9 +245,24 @@ class TrajectoryOptimizer:
         # grad_obj_X = ca.gradient(obj, self.X)
         fn_grad_obj_X = ca.Function("fn_grad_obj_X", [self.svsdf.t_sym, self.X], [grad_obj_X])
 
-        # **************************************************************************
-        # 求解器：测试代码
-        # **************************************************************************
+        # ***** 新增：定义惩罚项和梯度 *****
+        w_ineq = 1e3  # 不等式约束惩罚权重
+        v_eq = 1e3  # 等式约束惩罚权重
+        total_penalty = 0
+        grad_total_penalty = ca.MX.zeros(self.X.size1(), self.X.size2())
+
+        for constr_type, name, expr in processed_constraints:
+            if constr_type == "ineq":
+                penalty = w_ineq * ca.fmax(0, expr) ** 2  # max(0, g(X))^2
+                total_penalty += penalty
+                grad_total_penalty += ca.gradient(penalty, self.X)
+            elif constr_type == "eq":
+                penalty = v_eq * expr**2  # h(X)^2
+                total_penalty += penalty
+                grad_total_penalty += ca.gradient(penalty, self.X)
+
+        fn_total_penalty = ca.Function("fn_total_penalty", [self.X], [total_penalty])
+        fn_grad_total_penalty = ca.Function("fn_grad_total_penalty", [self.X], [grad_total_penalty])
 
         # 预先计算t*
         t_star, svsdf_star, collision_times = self.svsdf(
@@ -330,11 +355,14 @@ class TrajectoryOptimizer:
 
             # 构建当前时刻梯度 (t = t*, X = X_curr) -> grad
             grad_obj_X_curr = fn_grad_obj_X(t_star_curr, node_traj_var_curr).toarray()
+            # ***** 修改：计算带约束的总梯度 *****
+            grad_total_penalty_curr = fn_grad_total_penalty(node_traj_var_curr).toarray()
+            grad_obj_total = grad_obj_X_curr + grad_total_penalty_curr  # 总梯度
 
             # 动量加速
             # velocity = momentum * velocity + (1 - momentum) * grad_obj_X_curr
             # delta_X = -lr * velocity
-            delta_X = -lr * grad_obj_X_curr
+            delta_X = -lr * grad_obj_total
 
             # 自适应步长
             if grad_obj_X_prev is not None and (np.sign(grad_obj_X_curr) != np.sign(grad_obj_X_prev)).any():

@@ -245,7 +245,7 @@ class TrajectoryOptimizer:
         # grad_obj_X = ca.gradient(obj, self.X)
         fn_grad_obj_X = ca.Function("fn_grad_obj_X", [self.svsdf.t_sym, self.X], [grad_obj_X])
 
-        # ***** 新增：定义惩罚项和梯度 *****
+        # 预处理惩罚项和梯度
         w_ineq = 1e3  # 不等式约束惩罚权重
         v_eq = 1e3  # 等式约束惩罚权重
         total_penalty = 0
@@ -355,7 +355,7 @@ class TrajectoryOptimizer:
 
             # 构建当前时刻梯度 (t = t*, X = X_curr) -> grad
             grad_obj_X_curr = fn_grad_obj_X(t_star_curr, node_traj_var_curr).toarray()
-            # ***** 修改：计算带约束的总梯度 *****
+            # 计算带约束的总梯度
             grad_total_penalty_curr = fn_grad_total_penalty(node_traj_var_curr).toarray()
             grad_obj_total = grad_obj_X_curr + grad_total_penalty_curr  # 总梯度
 

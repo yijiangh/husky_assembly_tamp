@@ -160,7 +160,7 @@ if __name__ == "__main__":
                             break
                         prev_continue_button_value = current_continue_button_value
             else:
-                print("\rBIRRT plan failed, total time: {elapsed_time:.2f} s!", flush=True)
+                print(f"\rBIRRT plan failed, total time: {elapsed_time:.2f} s!", flush=True)
 
         except KeyboardInterrupt:
             print("\nexit!")

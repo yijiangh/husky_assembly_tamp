@@ -24,7 +24,7 @@ from utils.utils import HideOutput, TermPrint
 from utils.utils_casadi import eval
 
 
-class TrajectoryOptimizer:
+class TrajectorySVSDFSolver:
     """
     符号化轨迹参数优化类
 
@@ -460,7 +460,7 @@ if __name__ == "__main__":
 
     x_target = np.array([0.5, -0.35, 0.75])
 
-    optimizer = TrajectoryOptimizer(
+    optimizer = TrajectorySVSDFSolver(
         urdf_path,
         rb,
         num_segments=5,

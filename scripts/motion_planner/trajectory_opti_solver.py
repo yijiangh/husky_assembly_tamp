@@ -495,7 +495,7 @@ if __name__ == "__main__":
     shadow_times = np.linspace(0, max_shadow_time, 1000)
     slider_shadow = p.addUserDebugParameter("replay_shadow", 0, 1, 0)
 
-    sphere_id = pp.create_sphere(0.05, color=pp.BLACK)
+    sphere_id = pp.create_sphere(0.05, color=pp.RED)
     pp.set_point(sphere_id, x_target.tolist())
 
     while True:

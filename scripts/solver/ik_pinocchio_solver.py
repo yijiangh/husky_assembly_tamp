@@ -321,9 +321,6 @@ if __name__ == "__main__":
     q_trac = trac_ik_solver_relative.ik(target_pose, qinit=np.array([0, 0, 0, 0, 0, 0]))
     q_pin = pin_ik_solver_relative(target_pose, qinit=q_trac)
 
-    print(q_pin)
-    print(q_trac)
-
     init_pb()
     rb = RobotSetup("r0")
 
@@ -334,3 +331,6 @@ if __name__ == "__main__":
 
     rb.set_joint_positions(rb.arm_joints, q_trac)
     pp.wait_for_user()
+
+    rb.set_joint_positions(rb.arm_joints, np.array([0, -np.pi / 2, -np.pi / 2, 0, 0, 0]))
+    print(pp.get_link_pose(rb.robot, pp.link_from_name(rb.robot, "ur_arm_tool0")))

@@ -1,0 +1,149 @@
+##
+## Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+##
+## NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
+## property and proprietary rights in and to this material, related
+## documentation and any modifications thereto. Any use, reproduction,
+## disclosure or distribution of this material and related documentation
+## without an express license agreement from NVIDIA CORPORATION or
+## its affiliates is strictly prohibited.
+##
+
+robot_cfg:
+  kinematics:
+    usd_path: "robot/husky_ur5_e/husky_ur5_e.usd"
+    usd_robot_root: "/robot"
+    isaac_usd_path: ""
+    usd_flip_joints: {}
+    usd_flip_joint_limits: []
+
+    urdf_path: "robot/husky_ur5_e/husky_ur5_e.urdf"
+    asset_root_path: "robot"
+    
+    base_link: "base_footprint"
+    ee_link: "ur_arm_tool0"
+    link_names: null
+    lock_joints: null
+    extra_links: null
+
+    
+    collision_link_names: ["base_link", "ur_arm_base_link_inertia", "ur_arm_shoulder_link", "ur_arm_upper_arm_link", "ur_arm_forearm_link", "ur_arm_wrist_1_link", "ur_arm_wrist_2_link", "ur_arm_wrist_3_link", "attached_object"] # List[str]
+    collision_spheres:
+      base_link:
+        - "center": [0.316, 0.253, 0.03]
+          "radius": 0.20793
+        - "center": [0.316, 0.0, 0.03]
+          "radius": 0.20595
+        - "center": [0.316, -0.253, 0.03]
+          "radius": 0.20793
+        - "center": [-0.316, 0.253, 0.03]
+          "radius": 0.20793
+        - "center": [-0.316, 0.0, 0.03]
+          "radius": 0.20595
+        - "center": [-0.316, -0.253, 0.03]
+          "radius": 0.20595
+        - "center": [0.0, 0.253, 0.03]
+          "radius": 0.20694
+        - "center": [0.0, 0.0, 0.03]
+          "radius": 0.20595
+        - "center": [0.0, -0.253, 0.03]
+          "radius": 0.201
+      ur_arm_base_link_inertia:
+        - "center": [0.01, 0.001, 0.05]
+          "radius": 0.07433
+      ur_arm_shoulder_link:
+        - "center": [-0.0, -0.004, 0.0]
+          "radius": 0.07776
+      ur_arm_upper_arm_link:
+        - "center": [-0.416, -0.0, 0.143]
+          "radius": 0.07781
+        - "center": [-0.015, 0.0, 0.134]
+          "radius": 0.07725
+        - "center": [-0.14, 0.0, 0.138]
+          "radius": 0.06206
+        - "center": [-0.285, -0.001, 0.139]
+          "radius": 0.0615
+        - "center": [-0.376, 0.001, 0.138]
+          "radius": 0.07669
+        - "center": [-0.222, 0.001, 0.139]
+          "radius": 0.06094
+        - "center": [-0.055, 0.008, 0.14]
+          "radius": 0.06994
+      ur_arm_forearm_link:
+        - "center": [-0.009, 0.002, 0.031]
+          "radius": 0.07158
+        - "center": [-0.387, 0.0, 0.014]
+          "radius": 0.05706
+        - "center": [-0.121, -0.0, 0.006]
+          "radius": 0.05706
+        - "center": [-0.206, 0.001, 0.007]
+          "radius": 0.05656
+        - "center": [-0.312, -0.001, 0.006]
+          "radius": 0.05606
+        - "center": [-0.057, 0.003, 0.008]
+          "radius": 0.06507
+        - "center": [-0.266, 0.0, 0.006]
+          "radius": 0.05656
+        - "center": [-0.397, -0.001, -0.018]
+          "radius": 0.05155
+        - "center": [-0.164, -0.0, 0.007]
+          "radius": 0.05656
+      ur_arm_wrist_1_link:
+        - "center": [-0.0, 0.0, -0.009]
+          "radius": 0.04695
+        - "center": [-0.0, 0.0, -0.052]
+          "radius": 0.04695
+        - "center": [-0.002, 0.021, -0.001]
+          "radius": 0.04491
+        - "center": [0.001, -0.01, 0.0]
+          "radius": 0.04627
+      ur_arm_wrist_2_link:
+        - "center": [0.0, -0.01, -0.001]
+          "radius": 0.04736
+        - "center": [0.0, 0.008, -0.001]
+          "radius": 0.04736
+        - "center": [0.001, -0.001, -0.036]
+          "radius": 0.04674
+        - "center": [-0.0, -0.02, -0.0]
+          "radius": 0.04674
+      ur_arm_wrist_3_link:
+        - "center": [-0.0, 0.004, -0.04]
+          "radius": 0.04325
+        - "center": [0.005, 0.001, 0.04]
+          "radius": 0.06
+    collision_sphere_buffer: 0.005 # float or Dict[str, float]
+    extra_collision_spheres: {"attached_object": 100}
+    self_collision_ignore: {
+      "base_link": ["ur_arm_base_link_inertia"],
+      "ur_arm_base_link_inertia": ["ur_arm_shoulder_link"],
+      "ur_arm_shoulder_link": ["ur_arm_upper_arm_link"],
+      "ur_arm_upper_arm_link": ["ur_arm_forearm_link"],
+      "ur_arm_forearm_link": ["ur_arm_wrist_1_link"],
+      "ur_arm_wrist_1_link": ["ur_arm_wrist_2_link"],
+      "ur_arm_wrist_2_link": ["ur_arm_wrist_3_link"],
+      "ur_arm_wrist_3_link": ["attached_object"],
+    } # Dict[str, List[str]]
+    self_collision_buffer: {
+      "base_link": 0,
+      "ur_arm_base_link_inertia": 0,
+      "ur_arm_shoulder_link": 0,
+      "ur_arm_upper_arm_link": 0,
+      "ur_arm_wrist_1_link": 0,
+      "ur_arm_wrist_2_link": 0,
+      "ur_arm_wrist_3_link": 0,
+      "attached_object": 0.0,
+    } # Dict[str, float]
+
+    extra_links: {"attached_object":{"parent_link_name": "ur_arm_tool0", "link_name": "attached_object", "fixed_transform": [0, 0, 0, 1, 0, 0, 0], "joint_type":"FIXED","joint_name": "attach_joint"}}
+
+    use_global_cumul: True
+    mesh_link_names: null # List[str]
+    external_asset_path: null # Use this to add path for externally located assets/robot folder.
+
+    cspace:
+      joint_names: ["ur_arm_shoulder_pan_joint", "ur_arm_shoulder_lift_joint", "ur_arm_elbow_joint", "ur_arm_wrist_1_joint", "ur_arm_wrist_2_joint", "ur_arm_wrist_3_joint"] # List[str]
+      retract_config: [0.0, -1.5708, 0.0, 0.0, 0.0, 0.0] # List[float]
+      null_space_weight: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0] # List[str]
+      cspace_distance_weight: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0] # List[str]
+      max_jerk: 500.0
+      max_acceleration: 15.0

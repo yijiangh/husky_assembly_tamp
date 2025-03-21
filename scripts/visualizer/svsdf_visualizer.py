@@ -15,8 +15,8 @@ from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from utils.params import *
 
 package_path = os.environ.get("ROS_PACKAGE_PATH", "").split(os.pathsep)
-if PACKAGE_DIRECTORY not in package_path:
-    package_path.append(PACKAGE_DIRECTORY)
+if PACKAGE_DIR not in package_path:
+    package_path.append(PACKAGE_DIR)
 os.environ["ROS_PACKAGE_PATH"] = os.pathsep.join(package_path)
 
 if __name__ == "__main__":
@@ -62,7 +62,7 @@ if __name__ == "__main__":
     display_trajectory.trajectory_start = current_state
     display_trajectory.trajectory.append(robot_trajectory)
 
-    pub = rospy.Publisher('/move_group/display_planned_path', DisplayTrajectory, queue_size=10)
+    pub = rospy.Publisher("/move_group/display_planned_path", DisplayTrajectory, queue_size=10)
     rospy.sleep(1)
     pub.publish(display_trajectory)
 

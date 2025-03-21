@@ -299,3 +299,5 @@ def HideOutput():
 def SetSeeds(seed=24):
     random.seed(seed)
     np.random.seed(seed)
+    pp.set_numpy_seed(seed)
+    pp.set_random_seed(seed)

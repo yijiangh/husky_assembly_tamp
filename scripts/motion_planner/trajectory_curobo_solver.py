@@ -23,8 +23,7 @@ from robot.robot_setup import RobotSetup
 
 
 class TrajectoryCuroboSolver:
-    def __init__(self, urdf_path: str, robot_setup: RobotSetup, tensor_args: TensorDeviceType) -> None:
-        self.urdf_path = urdf_path
+    def __init__(self, robot_setup: RobotSetup, tensor_args: TensorDeviceType) -> None:
         self.robot_setup = robot_setup
         self.tensor_args = tensor_args
         self.robot_cfg = RobotConfig.from_dict(
@@ -76,7 +75,7 @@ class TrajectoryCuroboSolver:
                 grasp_element_pose[1][3],
                 grasp_element_pose[1][0],
                 grasp_element_pose[1][1],
-                grasp_pose_quat[1][2],
+                grasp_element_pose[1][2],
             ]
             grasp_object = Cylinder(
                 name="grasp_element",

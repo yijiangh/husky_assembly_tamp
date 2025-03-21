@@ -6,7 +6,7 @@ from typing import Dict, List, Set, Tuple, Union
 
 import casadi as ca
 import numpy as np
-from utils.params import DATA_DIRECTORY, PICK_DIRECTION, PROJECT_DIR
+from utils.params import DATA_DIR, PICK_DIRECTION, PROJECT_DIR
 
 HUSKY_ASSEMBLY_PATH = os.path.join(PROJECT_DIR, "src")
 sys.path.extend([HUSKY_ASSEMBLY_PATH, PROJECT_DIR])
@@ -80,9 +80,9 @@ class RobotSetup:
         Raises:
             FileNotFoundError: If required files are missing.
         """
-        robot_urdf = os.path.join(DATA_DIRECTORY, "husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf")
-        robot_srdf = os.path.join(DATA_DIRECTORY, "husky_urdf/mt_husky_moveit_config/config/husky.srdf")
-        gripper_obj = os.path.join(DATA_DIRECTORY, "husky_urdf/robotiq_85/meshes/static/robotiq_85_close_20mm.obj")
+        robot_urdf = os.path.join(DATA_DIR, "husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf")
+        robot_srdf = os.path.join(DATA_DIR, "husky_urdf/mt_husky_moveit_config/config/husky.srdf")
+        gripper_obj = os.path.join(DATA_DIR, "husky_urdf/robotiq_85/meshes/static/robotiq_85_close_20mm.obj")
 
         if not all(os.path.exists(path) for path in [robot_urdf, robot_srdf, gripper_obj]):
             raise FileNotFoundError("Required robot or gripper files not found.")

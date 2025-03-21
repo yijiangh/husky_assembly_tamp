@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import random
 import signal
@@ -29,10 +30,13 @@ HERE = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(HERE)
 
 import utils.load_multi_tangent as load_multi_tangent
+from motion_planner.trajectory_curobo_solver import TrajectoryCuroboSolver
+from motion_planner.trajectory_ompl_solver import TrajectoryOMPLSolver
 from multi_tangent.collision import create_collision_bodies
 from multi_tangent.convert import flatten_list
 from robot.robot_setup import RobotSetup
 from utils.collision import Element, create_couplers, init_pb
+from utils.params import *
 from utils.utils import CounterModule, SetSeeds
 
 
@@ -59,6 +63,17 @@ class PlanningThread(threading.Thread):
 if __name__ == "__main__":
     # seed = 128363
     # SetSeeds(seed)
+
+    parser = argparse.ArgumentParser(description="Corner case for transfer planning")
+    parser.add_argument("--birrt", action="store_true", help="Enable BIRRT planning")
+    parser.add_argument("--curobo", action="store_true", help="Enable cuRobo planning")
+    parser.add_argument("--eitstar", action="store_true", help="Enable OMPL ETIStar planning")
+    parser.add_argument("--manual", action="store_true", help="Enable manual control")
+    parser.add_argument("--repeat", type=int, default=1, help="Number of repetitions for the planning")
+    parser.add_argument("--save", action="store_true", help="Whether to save the results")
+    parser.add_argument("--visualize", action="store_true", help="Whether to visualize the results")
+    parser.add_argument("--random", action="store_true", help="Enable random planning")
+    args = parser.parse_args()
 
     init_pb()
     line_pts_flattened = [
@@ -105,204 +120,236 @@ if __name__ == "__main__":
             pp.get_link_pose(rb.robot, rb.tool_link), pp.Pose(point=(0, 0.1, 0.15), euler=pp.Euler(1.5708, 0, 0))
         ),
     )
-    attachment = pp.create_attachment(rb.robot, rb.tool_link, grasped_element)
+    grasp_attachment = pp.create_attachment(rb.robot, rb.tool_link, grasped_element)
 
     target_q = np.array([1.323, 0.331, -1.753, -0.397, 1.653, 1.819])
     init_q = np.array([np.pi / 2, 0.0, 0.0, -np.pi, 0.0, -np.pi / 2])
 
-    # **************************************************************************
-    # BIRRT plan
-    # **************************************************************************
+    results = {"BIRRT": [], "cuRobo": [], "EITStar": []}
 
-    input = pp.wait_for_user("start birrt plan?")
+    for repeat_id in range(args.repeat):
 
-    path = None
-    if input == "y" or input == "Y":
+        if args.random:
+            seed = int.from_bytes(os.urandom(4), byteorder="big")
+            SetSeeds(seed)
+            print(f"\n-------------------- current seed: {seed} --------------------\n")
 
-        # 创建并启动规划线程，将计划函数作为参数传入
-        planning_thread = PlanningThread(
-            rb.plan_manipulator_path,  # 传入规划函数
-            init_q,
-            target_q,
-            [attachment],
-            element_bodies,
-            max_time=600,
-            max_iterations=10000,
-        )
-        planning_thread.start()
+        # **************************************************************************
+        # BIRRT plan
+        # **************************************************************************
 
-        start_time = time.time()
-        try:
-            while not planning_thread.done:
-                elapsed_time = time.time() - start_time
-                print(f"\rPlanning... current time: {elapsed_time:.2f} s", end="", flush=True)
-                time.sleep(0.1)
+        if args.birrt:
+            print("\n========================================")
+            print(f"{repeat_id+1}th BIRRT planning")
+            print("========================================\n")
 
-            elapsed_time = time.time() - start_time
-            path = planning_thread.result
-
-            if path is not None:
-                print(f"\rPlan success! Total time: {elapsed_time:.2f} s!", flush=True)
-                input = pp.wait_for_user("\nvisualize planned path?")
-                if input == "y" or input == "Y":
-                    replay_slider = p.addUserDebugParameter("replay", 0, 1, 0)
-                    continue_button = p.addUserDebugParameter("continue", 1, 0, 0)
-                    prev_continue_button_value = p.readUserDebugParameter(continue_button)
-                    while True:
-                        replay = p.readUserDebugParameter(replay_slider)
-                        current_continue_button_value = p.readUserDebugParameter(continue_button)
-                        idx = int(replay * (len(path) - 1))
-                        conf = path[idx]
-                        rb.set_joint_positions(rb.arm_joints, conf)
-                        attachment.assign()
-                        time.sleep(1.0 / 240)
-                        if current_continue_button_value > prev_continue_button_value:
-                            break
-                        prev_continue_button_value = current_continue_button_value
-            else:
-                print(f"\rBIRRT plan failed, total time: {elapsed_time:.2f} s!", flush=True)
-
-        except KeyboardInterrupt:
-            print("\nexit!")
-            exit()
-
-    # **************************************************************************
-    # curobo plan
-    # **************************************************************************
-
-    input = pp.wait_for_user("\nstart curobo plan?")
-
-    rb.set_joint_positions(rb.arm_joints, target_q)
-    attachment.assign()
-
-    if input == "y" or input == "Y":
-        p.removeAllUserParameters()
-        tensor_args = TensorDeviceType()
-
-        # load robot
-        config_file = load_yaml(join_path(get_robot_path(), "husky_ur5_e.yml"))["robot_cfg"]
-        robot_cfg = RobotConfig.from_dict(config_file, tensor_args)
-        kin_model = CudaRobotModel(robot_cfg.kinematics)
-
-        # load obstacles
-        obstacles = []
-        for element_body in element_bodies:
-            pose = pp.multiply(pp.invert(pp.get_pose(rb.robot)), pp.get_pose(element_body))
-            point = list(pose[0])
-            quat = [pose[1][3], pose[1][0], pose[1][1], pose[1][2]]
-            obstacle = Cylinder(
-                name=f"element_{element_body}",
-                radius=0.01,
-                height=1.0,
-                pose=point + quat,
-                color=[1.0, 0, 0, 1.0],
+            # 创建并启动规划线程，将计划函数作为参数传入
+            planning_thread = PlanningThread(
+                rb.plan_manipulator_path,  # 传入规划函数
+                init_q,
+                target_q,
+                [grasp_attachment],
+                element_bodies,
+                max_time=600,
+                max_iterations=10000,
             )
-            obstacles.append(obstacle)
+            planning_thread.start()
 
-        q_init = torch.tensor(init_q, dtype=torch.float32).reshape(1, 6).cuda()
-        q_target = torch.tensor(target_q, dtype=torch.float32).reshape(1, 6).cuda()
+            start_time = time.time()
+            try:
+                while not planning_thread.done:
+                    elapsed_time = time.time() - start_time
+                    print(f"\rPlanning... current time: {elapsed_time:.2f} s", end="", flush=True)
+                    time.sleep(0.1)
 
-        # load grasp object
-        rb.set_joint_positions(rb.arm_joints, init_q)
-        attachment.assign()
-        grasp_element_pose = pp.multiply(pp.invert(pp.get_pose(rb.robot)), pp.get_pose(grasped_element))
-        grasp_pose_point = list(grasp_element_pose[0])
-        grasp_pose_quat = [
-            grasp_element_pose[1][3],
-            grasp_element_pose[1][0],
-            grasp_element_pose[1][1],
-            grasp_element_pose[1][2],
-        ]
-        grasp_object = Cylinder(
-            name="grasp_element",
-            radius=0.01,
-            height=1.0,
-            pose=grasp_pose_point + grasp_pose_quat,
-            color=[1.0, 0, 0, 1.0],
-        )
-
-        # create world config
-        world_config = WorldConfig(cylinder=obstacles + [grasp_object])
-        world_config_obb = WorldConfig.create_obb_world(world_config)
-
-        # world_config_obb.save_world_as_mesh("debug_mesh.obj")
-
-        # create motion gen
-        motion_gen_config = MotionGenConfig.load_from_robot_config(
-            "husky_ur5_e.yml", world_config_obb, interpolation_dt=0.01
-        )
-        motion_gen = MotionGen(motion_gen_config)
-        motion_gen.warmup()
-
-        # attach element
-        init_js = JointState(
-            position=q_init, velocity=q_init, acceleration=q_init, jerk=q_init, joint_names=robot_cfg.cspace.joint_names
-        )
-        motion_gen.attach_objects_to_robot(
-            init_js, ["grasp_element"], sphere_fit_type=SphereFitType.VOXEL_VOLUME_SAMPLE_SURFACE
-        )
-
-        # set target and start
-        out = kin_model.get_state(q_target)
-        goal_pose = Pose.from_list(
-            out.ee_pose.position.cpu().numpy().flatten().tolist()
-            + out.ee_pose.quaternion.cpu().numpy().flatten().tolist()
-        )
-        start_state = JointState.from_position(q_init, joint_names=robot_cfg.cspace.joint_names)
-
-        # 创建并启动 Curobo 规划线程
-        planning_thread = PlanningThread(
-            motion_gen.plan_single,
-            start_state,
-            goal_pose,
-            MotionGenPlanConfig(max_attempts=6000, timeout=600),
-        )
-        planning_thread.start()
-
-        start_time = time.time()
-        try:
-            while not planning_thread.done:
                 elapsed_time = time.time() - start_time
-                print(f"\rPlanning... current time: {elapsed_time:.2f} s ", end="", flush=True)
-                time.sleep(0.1)
+                path = planning_thread.result
 
-            elapsed_time = time.time() - start_time
-            result = planning_thread.result
+                cur_result = (seed, path is not None, elapsed_time)
+                results["BIRRT"].append(cur_result)
 
-            if result.success:
-                print(f"\rPlan success! Total time: {elapsed_time:.2f} s! ", flush=True)
-                path = result.get_interpolated_plan().position.cpu().numpy()
-                # print("Plan result: \n", path)
-                input = pp.wait_for_user("\nvisualize planned path? ")
-                if input == "y" or input == "Y":
-                    replay_slider = p.addUserDebugParameter("replay", 0, 1, 0)
-                    continue_button = p.addUserDebugParameter("continue", 1, 0, 0)
-                    prev_continue_button_value = p.readUserDebugParameter(continue_button)
-                    while True:
-                        replay = p.readUserDebugParameter(replay_slider)
-                        current_continue_button_value = p.readUserDebugParameter(continue_button)
-                        idx = int(replay * (len(path) - 1))
-                        conf = path[idx]
-                        rb.set_joint_positions(rb.arm_joints, conf)
-                        attachment.assign()
-                        time.sleep(1.0 / 240)
-                        if current_continue_button_value > prev_continue_button_value:
-                            break
-                        prev_continue_button_value = current_continue_button_value
-            else:
-                print(f"\rCurobo plan failed, total time: {elapsed_time:.2f} s! ", flush=True)
+                if path is not None:
+                    print(f"\rPlan success! Total time: {elapsed_time:.2f} s!", flush=True)
+                    if args.visualize:
+                        input = pp.wait_for_user("\nvisualize planned path?")
+                        if input == "y" or input == "Y":
+                            replay_slider = p.addUserDebugParameter("replay", 0, 1, 0)
+                            continue_button = p.addUserDebugParameter("continue", 1, 0, 0)
+                            prev_continue_button_value = p.readUserDebugParameter(continue_button)
+                            while True:
+                                replay = p.readUserDebugParameter(replay_slider)
+                                current_continue_button_value = p.readUserDebugParameter(continue_button)
+                                idx = int(replay * (len(path) - 1))
+                                conf = path[idx]
+                                rb.set_joint_positions(rb.arm_joints, conf)
+                                grasp_attachment.assign()
+                                time.sleep(1.0 / 240)
+                                if current_continue_button_value > prev_continue_button_value:
+                                    break
+                                prev_continue_button_value = current_continue_button_value
+                else:
+                    print(f"\rBIRRT plan failed, total time: {elapsed_time:.2f} s!", flush=True)
 
-        except KeyboardInterrupt:
-            print("\nexit!")
-            exit()
+            except KeyboardInterrupt:
+                print("\nexit!")
+                exit()
+
+        # **************************************************************************
+        # curobo plan
+        # **************************************************************************
+
+        if args.curobo:
+            print("\n========================================")
+            print(f"{repeat_id+1}th cuRobo planning")
+            print("========================================\n")
+
+            p.removeAllUserParameters()
+
+            curobo_planner = TrajectoryCuroboSolver(rb, TensorDeviceType())
+            planning_thread = PlanningThread(
+                curobo_planner.plan,
+                init_q,
+                target_q,
+                600,
+                10000,
+                element_bodies,
+                grasped_element=grasped_element,
+                grasped_attachment=grasp_attachment,
+            )
+
+            planning_thread.start()
+
+            start_time = time.time()
+            try:
+                while not planning_thread.done:
+                    elapsed_time = time.time() - start_time
+                    print(f"\rPlanning... current time: {elapsed_time:.2f} s ", end="", flush=True)
+                    time.sleep(0.1)
+
+                elapsed_time = time.time() - start_time
+                result = planning_thread.result
+
+                cur_result = (seed, result["success"], elapsed_time)
+                results["cuRobo"].append(cur_result)
+
+                if result["success"]:
+                    print(f"\rPlan success! Total time: {elapsed_time:.2f} s! ", flush=True)
+                    path = result["path"]
+                    # print("Plan result: \n", path)
+                    if args.visualize:
+                        input = pp.wait_for_user("\nvisualize planned path?")
+                        if input == "y" or input == "Y":
+                            replay_slider = p.addUserDebugParameter("replay", 0, 1, 0)
+                            continue_button = p.addUserDebugParameter("continue", 1, 0, 0)
+                            prev_continue_button_value = p.readUserDebugParameter(continue_button)
+                            while True:
+                                replay = p.readUserDebugParameter(replay_slider)
+                                current_continue_button_value = p.readUserDebugParameter(continue_button)
+                                idx = int(replay * (len(path) - 1))
+                                conf = path[idx]
+                                rb.set_joint_positions(rb.arm_joints, conf)
+                                grasp_attachment.assign()
+                                time.sleep(1.0 / 240)
+                                if current_continue_button_value > prev_continue_button_value:
+                                    break
+                                prev_continue_button_value = current_continue_button_value
+                else:
+                    print(f"\rCurobo plan failed, total time: {elapsed_time:.2f} s! ", flush=True)
+
+            except KeyboardInterrupt:
+                print("\nexit!")
+                exit()
+
+        # **************************************************************************
+        # ompl plan
+        # **************************************************************************
+
+        planner = "EITstar"
+
+        if args.eitstar:
+            print("\n========================================")
+            print(f"{repeat_id+1}th EITStar planning")
+            print("========================================\n")
+
+            p.removeAllUserParameters()
+
+            extra_disabled_collisions = [
+                (
+                    (rb.robot, pp.link_from_name(rb.robot, "ur_arm_wrist_3_link")),
+                    (rb.ee_attachment.child, pp.BASE_LINK),
+                ),
+                (
+                    (rb.ee_attachment.child, pp.BASE_LINK),
+                    (grasp_attachment.child, pp.BASE_LINK),
+                ),
+            ]
+
+            collision_fn = pp.get_collision_fn(
+                rb.robot,
+                rb.arm_joints,
+                obstacles=element_bodies,
+                attachments=[grasp_attachment, rb.ee_attachment] + rb.attachments,
+                self_collisions=True,
+                disabled_collisions=rb.disabled_collisions,
+                extra_disabled_collisions=extra_disabled_collisions,
+                max_distance=0.0,
+            )
+
+            ompl_planner = TrajectoryOMPLSolver(collision_fn, planner=planner)
+
+            planning_thread = PlanningThread(ompl_planner.plan, init_q, target_q, time=600)
+
+            planning_thread.start()
+
+            start_time = time.time()
+            try:
+                while not planning_thread.done:
+                    elapsed_time = time.time() - start_time
+                    print(f"\rPlanning... current time: {elapsed_time:.2f} s ", end="", flush=True)
+                    time.sleep(0.1)
+
+                elapsed_time = time.time() - start_time
+                path = planning_thread.result
+
+                cur_result = (seed, path is not None, elapsed_time)
+                results["EITStar"].append(cur_result)
+
+                if path is not None:
+                    print(f"\rPlan success! Total time: {elapsed_time:.2f} s!", flush=True)
+                    if args.visualize:
+                        input = pp.wait_for_user("\nvisualize planned path?")
+                        if input == "y" or input == "Y":
+                            replay_slider = p.addUserDebugParameter("replay", 0, 1, 0)
+                            continue_button = p.addUserDebugParameter("continue", 1, 0, 0)
+                            prev_continue_button_value = p.readUserDebugParameter(continue_button)
+                            while True:
+                                replay = p.readUserDebugParameter(replay_slider)
+                                current_continue_button_value = p.readUserDebugParameter(continue_button)
+                                idx = int(replay * (len(path) - 1))
+                                conf = path[idx]
+                                rb.set_joint_positions(rb.arm_joints, conf)
+                                grasp_attachment.assign()
+                                time.sleep(1.0 / 240)
+                                if current_continue_button_value > prev_continue_button_value:
+                                    break
+                                prev_continue_button_value = current_continue_button_value
+                else:
+                    print(f"\r{planner} plan failed, total time: {elapsed_time:.2f} s!", flush=True)
+
+            except KeyboardInterrupt:
+                print("\nexit!")
+                exit()
+
+    if args.save:
+        file_path = os.path.join(LOG_DIR, "corner_case_for_transfer.json")
+        with open(file_path, "w") as f:
+            json.dump(results, f, indent=4)
 
     # **************************************************************************
     # manual control
     # **************************************************************************
 
-    input = pp.wait_for_user("\nstart manual control?")
-
-    if input == "y" or input == "Y":
+    if args.manual:
 
         p.removeAllUserParameters()
 
@@ -334,7 +381,7 @@ if __name__ == "__main__":
             j5 = p.readUserDebugParameter(j5_slider)
 
             rb.set_joint_positions(rb.arm_joints, np.array([j0, j1, j2, j3, j4, j5]))
-            attachment.assign()
+            grasp_attachment.assign()
 
             current_record_button_value = p.readUserDebugParameter(record_button)
             if current_record_button_value > prev_record_button_value:
@@ -359,7 +406,7 @@ if __name__ == "__main__":
                 )
                 for i in range(len(current_record)):
                     rb.set_joint_positions(rb.arm_joints, np.array(current_record[i]))
-                    attachment.assign()
+                    grasp_attachment.assign()
                     time.sleep(1.0 / 60)
             prev_replay_button_value = current_replay_button_value
 

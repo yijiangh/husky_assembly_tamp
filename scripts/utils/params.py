@@ -62,5 +62,7 @@ MNIPULATOR_PLAN_SHOW = True
 
 HERE = os.path.dirname(os.path.dirname(__file__))  # scripts
 PROJECT_DIR = os.path.dirname(HERE)  # husky_assembly
-DATA_DIRECTORY = os.path.join(PROJECT_DIR, "data")  # data
-PACKAGE_DIRECTORY = os.path.join(DATA_DIRECTORY, "husky_urdf")  # husky_urdf
+DATA_DIR = os.path.join(PROJECT_DIR, "data")  # data
+PACKAGE_DIR = os.path.join(DATA_DIR, "husky_urdf")  # husky_urdf
+EXT_DIR = os.path.join(PROJECT_DIR, "ext")  # ext
+LOG_DIR = os.path.join(HERE, "logs")  # ompl

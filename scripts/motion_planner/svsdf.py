@@ -454,7 +454,7 @@ class SDF(object):
         is_numeric = all(isinstance(arg, (list, np.ndarray)) for arg in [p, q, x])
 
         if is_numeric:
-            sdf = float(eval("SphereApproximation", sdf_robot, [self.q], [q]))
+            sdf = float(eval("SphereApproximation", sdf_robot, [self.q], [q]).item())
             sdf_values = eval("SphereApproximationList", sdf_vec, [self.q], [q]).flatten()
             min_index = np.argmin(sdf_values)
             min_metadata = metadata_list[min_index]
@@ -561,6 +561,8 @@ class SVSDF(object):
         urdf_path: str,
         robot_setup: RobotSetup,
         joint_trajectory: Trajectory,
+        obstacle_spheres: List[np.ndarray],
+        robot_pose: np.ndarray,
         traj_var: Union[ca.MX, None] = None,
         symbolic_traj: bool = False,
         node_traj: bool = False,
@@ -596,11 +598,15 @@ class SVSDF(object):
             self.q_sym = ca.MX.sym("q", self.num_joints)
         self.x_sym = ca.MX.sym("x", 3)  # [x, y, z]
 
-        # urdf_path = "/home/jeong/summer_research/eth_ws/src/husky_assembly/data/husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf"
         self.sdf_solver = SDF(urdf_path, robot_setup, self.q_sym)
 
-        # SDF(p, q(t, c, T), x)
-        self.sdf_sym = self.sdf_solver(self.p_sym, self.q_sym, self.x_sym)
+        # SDF(q(t, c, T))
+        sdf_sym_full = self.sdf_solver(self.p_sym, self.q_sym, self.x_sym)
+        sdf_sym_list = [
+            eval("", sdf_sym_full, [self.x_sym, self.p_sym], [sphere, robot_pose], full=False)
+            for sphere in obstacle_spheres
+        ]
+        self.sdf_sym = ca.mmin(ca.vertcat(*sdf_sym_list))
         self.jac_sym = ca.gradient(self.sdf_sym, self.t_sym)
 
     def _BuildSymbolicQ(self, t: ca.MX) -> ca.MX:
@@ -632,8 +638,6 @@ class SVSDF(object):
 
     def _GradientDescent(
         self,
-        p: np.ndarray,
-        x: np.ndarray,
         traj: Union[NodeTrajectory, Trajectory, None],
         t_init: float,
         t_max: float,
@@ -644,8 +648,6 @@ class SVSDF(object):
         带自适应学习率的梯度下降
 
         Params:
-            p (np.ndarray): robot 2D pose
-            x (np.ndarray): point in 3D space
             traj (NodeTrajectory | Trajectory | None): trajectory
             t_init (float): initial time
             t_max (float): max time
@@ -663,22 +665,12 @@ class SVSDF(object):
         if self.symbolic_traj:
             if self.node_traj:
                 jac_sym_sim = eval(
-                    "",
-                    self.jac_sym,
-                    [self.traj_sym_var, self.x_sym, self.p_sym],
-                    [NodeTraj2Arr(traj, self.num_joints), x, p],
-                    full=False,
+                    "", self.jac_sym, [self.traj_sym_var], [NodeTraj2Arr(traj, self.num_joints)], full=False
                 )
             else:
-                jac_sym_sim = eval(
-                    "",
-                    self.jac_sym,
-                    [self.traj_sym_var, self.x_sym, self.p_sym],
-                    [Traj2Arr(traj, self.num_joints), x, p],
-                    full=False,
-                )
+                jac_sym_sim = eval("", self.jac_sym, [self.traj_sym_var], [Traj2Arr(traj, self.num_joints)], full=False)
         else:
-            jac_sym_sim = eval("", self.jac_sym, [self.x_sym, self.p_sym], [x, p], full=False)
+            jac_sym_sim = self.jac_sym
 
         for _ in range(max_iter):
             grad = eval("", jac_sym_sim, [self.t_sym], [t_curr]).item()
@@ -703,20 +695,14 @@ class SVSDF(object):
         if self.symbolic_traj:
             if self.node_traj:
                 svsdf_curr = eval(
-                    "",
-                    self.sdf_sym,
-                    [self.t_sym, self.x_sym, self.p_sym, self.traj_sym_var],
-                    [t_curr, x, p, NodeTraj2Arr(traj, self.num_joints)],
+                    "", self.sdf_sym, [self.t_sym, self.traj_sym_var], [t_curr, NodeTraj2Arr(traj, self.num_joints)]
                 ).item()
             else:
                 svsdf_curr = eval(
-                    "",
-                    self.sdf_sym,
-                    [self.t_sym, self.x_sym, self.p_sym, self.traj_sym_var],
-                    [t_curr, x, p, Traj2Arr(traj, self.num_joints)],
+                    "", self.sdf_sym, [self.t_sym, self.traj_sym_var], [t_curr, Traj2Arr(traj, self.num_joints)]
                 ).item()
         else:
-            svsdf_curr = eval("", self.sdf_sym, [self.t_sym, self.x_sym, self.p_sym], [t_curr, x, p]).item()
+            svsdf_curr = eval("", self.sdf_sym, [self.t_sym], [t_curr]).item()
 
         return t_curr, svsdf_curr
 
@@ -770,25 +756,22 @@ class SVSDF(object):
 
     def __call__(
         self,
-        p: np.ndarray,
-        x: np.ndarray,
         t_max: float,
         t_seed: Union[float, None] = None,
         traj: Union[None, Trajectory, NodeTrajectory] = None,
+        sdf_threshold: float = 0.0,
         symbolic_output: bool = False,
     ) -> Tuple[float, Union[float, ca.MX], List[Tuple[float, float]]]:
         """
-        计算点 x 到 SV 的最短距离。
+        计算SVSDF。
 
         Params:
-            p (np.ndarray): robot 2D pose
-            x (float): point in 3D space
             t_max (float): max time
             traj (Trajectory | NodeTrajectory | None, (default) None): trajectory
             symbolic_output (bool, (default) False): whether return symbolic output
 
         Returns:
-            ((float, float) | ca.MX): optimal time, svsdf SDF(p, q(t, c, T), x)
+            ((float, float) | ca.MX): optimal time, svsdf SDF(q(t, c, T))
         """
         if symbolic_output:
             return self.sdf_sym
@@ -799,22 +782,22 @@ class SVSDF(object):
 
         # init_points = np.linspace(0, t_max, 5)
         if t_seed is None:
-            init_points = np.linspace(0, t_max, 20)
+            init_points = np.linspace(0, t_max, self.num_segments + 1)
             init_points.sort()
         else:
             init_points = [t_seed]
 
         for t_init in init_points:
             # print(f"Running at time {t_init}")
-            t_curr, sdf_val = self._GradientDescent(p, x, traj, t_init, t_max)
+            t_curr, sdf_val = self._GradientDescent(traj, t_init, t_max)
             # print(f"Optimal time {t_curr} and value {sdf_val}")
             if sdf_val < min_sdf:
                 min_sdf = sdf_val
                 best_t = t_curr
-            if sdf_val <= 0:
+            if sdf_val <= sdf_threshold:
                 collision_times.append((t_curr, sdf_val))
 
-        refined_t, refined_sdf = self._GradientDescent(p, x, traj, best_t, t_max, lr=0.01, max_iter=50)
+        refined_t, refined_sdf = self._GradientDescent(traj, best_t, t_max, lr=0.01, max_iter=50)
 
         return refined_t, refined_sdf, collision_times
 
@@ -890,13 +873,13 @@ if __name__ == "__main__":
     # 生成轨迹
     traj = generate_trajectory(start_pos, end_pos, v_max)
 
-    # 创建 SVSDF 实例
-    urdf_path = "/home/jeong/summer_research/eth_ws/src/husky_assembly/data/husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf"
-    svsdf = SVSDF(urdf_path, rb, traj)
-
     # 定义相关参数
     robot_pose = np.array([0, 0, 0])
     x_target = np.array([0.5, -0.35, 0.75])
+
+    # 创建 SVSDF 实例
+    urdf_path = "/home/jeong/summer_research/eth_ws/src/husky_assembly/data/husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf"
+    svsdf = SVSDF(urdf_path, rb, traj, [x_target], robot_pose)
 
     slider = p.addUserDebugParameter("replay", 0, 1, 0)
     x_slider = p.addUserDebugParameter("x", -3, 3, 0.5)

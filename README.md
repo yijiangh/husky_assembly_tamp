@@ -32,3 +32,9 @@ python motion_planner/svsdf.py
 * 报错```ImportError: /lib/x86_64-linux-gnu/libp11-kit.so.0: undefined symbol: ffi_type_pointer, version LIBFFI_BASE_7.0```：
   * 降级python到3.8.10
   * ```conda install libffi==3.3```
+
+## TODO List
+
+- [ ] Approximate element into spheres
+- [ ] plan for multiple collision spheres
+- [ ] add attachment

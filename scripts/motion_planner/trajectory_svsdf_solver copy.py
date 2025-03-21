@@ -41,10 +41,10 @@ class TrajectorySVSDFSolver:
         num_segments: int,
         num_joints: int,
         max_total_time: float,
-        obstacles: List[np.ndarray],
+        obstacle_spheres: List[np.ndarray],
         q_init: np.ndarray,
         q_final: np.ndarray,
-        sdf_threshold: float = 0.05,
+        sdf_threshold: float = 0.01,
     ) -> None:
         """
         符号化轨迹参数初始化
@@ -55,7 +55,7 @@ class TrajectorySVSDFSolver:
             num_segments (int): 每个关节的轨迹片段数
             num_joints (int): 机器人关节数目
             max_total_time (int): 轨迹允许的最大总时间
-            x_target (np.ndaaray): 3D空间中目标点的坐标
+            obstacle_spheres (List[np.ndaaray]): 3D空间中目标点的坐标
         """
         self.urdf_path = urdf_path
         self.robot = robot
@@ -68,7 +68,7 @@ class TrajectorySVSDFSolver:
 
         self.max_vel = np.pi / 2  # 最大关节速度 (rad/s)
         self.max_accel = np.pi  # 最大关节加速度 (rad/s²)
-        self.obstacles = obstacles  # 目标点坐标
+        self.obstacle_spheres = obstacle_spheres  # 目标点坐标
         self.q_init = q_init
         self.dq_init = np.zeros(self.num_joints)
         self.ddq_init = np.zeros(self.num_joints)
@@ -102,7 +102,14 @@ class TrajectorySVSDFSolver:
 
         # -------------------- 创建SVSDF实例 --------------------#
         self.svsdf = SVSDF(
-            urdf_path, robot, self.traj, obstacles, self.p, self.X, symbolic_traj=self.symbolic_traj, node_traj=True
+            urdf_path,
+            robot,
+            self.traj,
+            obstacle_spheres,
+            self.p,
+            self.X,
+            symbolic_traj=self.symbolic_traj,
+            node_traj=True,
         )
 
         # -------------------- 添加系统约束 --------------------#
@@ -121,9 +128,9 @@ class TrajectorySVSDFSolver:
 
         # -------------------- SDF --------------------#
         sdf_sym = self.svsdf.sdf_sym
-        G_s = ca.if_else(sdf_sym > self.sdf_threshold, 0, self.sdf_threshold - sdf_sym)
-        cost_sdf = ca.if_else(G_s > 0, G_s, 0)
-        # cost_sdf = -sdf_sym
+        # G_s = ca.if_else(sdf_sym > self.sdf_threshold, 0, self.sdf_threshold - sdf_sym)
+        # cost_sdf = ca.if_else(G_s > 0, G_s, 0)
+        cost_sdf = -sdf_sym
 
         cost = cost_sdf
 
@@ -160,7 +167,7 @@ class TrajectorySVSDFSolver:
             start_t = 0
             for node_idx in range(len(joint_traj)):
                 delta_t = joint_traj[node_idx][3] - start_t
-                self.constraints.append((f"delta time of j{joint_idx}_seg{node_idx}", delta_t >= 0))
+                self.constraints.append((f"delta time of j{joint_idx}_seg{node_idx}", delta_t >= 0.5))
                 start_t += delta_t
 
             # -------------------- 2. 末尾时间约束 --------------------#
@@ -203,7 +210,150 @@ class TrajectorySVSDFSolver:
         ).item()
 
     def optimize(self, traj_init: Trajectory) -> Dict:
-        """高斯牛顿法实现带约束的轨迹优化"""
+
+        # # 初始化变量和参数
+        # node_traj_init = Traj2NodeTraj(traj_init, self.num_joints)
+
+        # # 预处理约束条件
+        # processed_constraints = []
+        # for name, constr in self.constraints:
+        #     if constr.is_op(ca.OP_LE):
+        #         expr = constr.dep(0) - constr.dep(1)  # g(X) <= 0
+        #         processed_constraints.append(("ineq", name, expr))
+        #     elif constr.is_op(ca.OP_EQ):
+        #         expr = constr.dep(0) - constr.dep(1)  # h(X) = 0
+        #         processed_constraints.append(("eq", name, expr))
+
+        # # 预处理惩罚项和梯度
+        # w_ineq = 100.0  # 不等式约束惩罚权重
+        # v_eq = 100.0  # 等式约束惩罚权重
+        # total_penalty = 0
+        # # grad_total_penalty = ca.MX.zeros(self.X.size1(), self.X.size2())
+
+        # for constr_type, name, expr in processed_constraints:
+        #     if constr_type == "ineq":
+        #         penalty = w_ineq * ca.fmax(0, expr) ** 2  # max(0, g(X))^2
+        #         total_penalty += penalty
+        #         # grad_total_penalty += ca.gradient(penalty, self.X)
+        #     elif constr_type == "eq":
+        #         penalty = v_eq * expr**2  # h(X)^2
+        #         total_penalty += penalty
+        #         # grad_total_penalty += ca.gradient(penalty, self.X)
+
+        # # 预编译符号函数
+        # obj_fn = ca.Function("obj_fn", [self.svsdf.t_sym, self.X], [self.obj + total_penalty])
+        # grad_fn = ca.Function("grad_fn", [self.svsdf.t_sym, self.X], [ca.gradient(self.obj, self.X)])
+
+        # # 设置优化参数
+        # init_lr = 0.01
+        # lr = init_lr
+
+        # # 初始化优化变量
+        # node_traj_var_curr = NodeTraj2Arr(node_traj_init, self.num_joints)
+        # _, _, collision_times_curr = self.svsdf(
+        #     t_max=self.max_total_time, traj=node_traj_init, sdf_threshold=self.sdf_threshold
+        # )
+        # t_star_idx_curr = np.argmin(np.array([pair[1] for pair in collision_times_curr]))
+        # t_star_curr, sdf_star_curr = collision_times_curr[t_star_idx_curr]
+        # # collision_times_curr.remove(collision_times_curr[t_star_idx_curr])
+
+        # if len(collision_times_curr) == 0:
+        #     TermPrint.print(f"No collisions, return initial trajectory.", color="green")
+        #     return {"t_star": t_star_curr, "svsdf": sdf_star_curr, "traj": traj_init, "node_traj": node_traj_init}
+
+        # # 设置迭代参数
+        # iter_count = 0
+        # max_iter = 5000
+
+        # while iter_count < max_iter:
+        #     iter_count += 1
+
+        #     # 打印迭代信息
+        #     TermPrint.print(f"=======================================", blank_f=True)
+        #     TermPrint.print(f"Iteration {iter_count}")
+        #     TermPrint.print(f"=======================================", blank_b=True)
+
+        #     # 计算更新步长
+        #     delta = grad_fn(t_star_curr, node_traj_var_curr).toarray().reshape(-1)
+
+        #     # 更新变量
+        #     node_traj_var_next = node_traj_var_curr - lr * delta
+        #     node_traj_next = Arr2NodeTraj(node_traj_var_next, self.num_joints, self.num_segments)
+        #     traj_next = NodeTraj2Traj(
+        #         node_traj_next,
+        #         self.num_joints,
+        #         self.q_init,
+        #         self.dq_init,
+        #         self.ddq_init,
+        #         self.q_target,
+        #         self.dq_target,
+        #         self.ddq_target,
+        #         self.max_total_time,
+        #         self.symbolic_traj,
+        #     )
+
+        #     # 根据更新后的变量计算新的SDF值
+        #     collision_times_next = []
+        #     switch_target = False
+        #     for collision_pair_idx, collision_pair in enumerate(collision_times_curr):
+        #         sdf_next = eval(
+        #             "", self.svsdf.sdf_sym, [self.svsdf.t_sym, self.X], [collision_pair[0], node_traj_var_next]
+        #         ).item()
+        #         collision_times_next.append((collision_pair[0], sdf_next))
+        #         # 检查当前时间点的SDF值，如果小于阈值，继续更新，否则切换优化目标
+        #         if collision_pair_idx == t_star_idx_curr and sdf_next >= self.sdf_threshold:
+        #             switch_target = True
+
+        #     # 如果需要更换目标，那么更新整个碰撞时间列表
+        #     if switch_target:
+        #         for collision_pair_idx, collision_pair in enumerate(collision_times_next):
+        #             if collision_pair[1] >= self.sdf_threshold:
+        #                 collision_times_next.remove(collision_pair)
+        #     # 否则，继续优化当前时间的SDF值
+        #     else:
+        #         t_star_idx_next = t_star_idx_curr
+        #         t_star_next, sdf_star_next = collision_times_next[t_star_idx_next]
+
+        #     # 如果需要更换目标且还有碰撞，那么更新最小SDF值
+        #     if switch_target and len(collision_times_next) != 0:
+        #         TermPrint.print(f"Still have collisions, switch target.", color="red")
+        #         t_star_idx_next = np.argmin(np.array([pair[1] for pair in collision_times_next]))
+        #         t_star_next, sdf_star_next = collision_times_next[t_star_idx_next]
+        #     # 如果没有碰撞，需要再次检查
+        #     elif len(collision_times_next) == 0:
+        #         TermPrint.print(f"No collisions, need double check.", color="yellow")
+        #         t_star_next, sdf_star_next, collision_times_next = self.svsdf(
+        #             t_max=self.max_total_time, traj=node_traj_next, sdf_threshold=self.sdf_threshold
+        #         )
+        #         # 如果没有碰撞，返回结果
+        #         if len(collision_times_next) == 0:
+        #             TermPrint.print(f"No collisions, return trajectory.", color="green")
+        #             return {
+        #                 "t_star": t_star_next,
+        #                 "svsdf": sdf_star_next,
+        #                 "traj": traj_next,
+        #                 "node_traj": node_traj_next,
+        #             }
+        #         # 如果有碰撞，更新碰撞时间
+        #         else:
+        #             TermPrint.print(f"Still have collisions, generate new target.", color="red")
+        #             t_star_idx_next = np.argmin(np.array([pair[1] for pair in collision_times_next]))
+        #             t_star_next, sdf_star_next = collision_times_next[t_star_idx_next]
+
+        #     TermPrint.print(f"t_star: {t_star_curr: .4f} -> {t_star_next: .4f}")
+        #     TermPrint.print(f"sdf_star: {sdf_star_curr: .4f} -> {sdf_star_next: .4f}")
+        #     TermPrint.print(f"collision_times: {len(collision_times_curr)} -> {len(collision_times_next)}")
+
+        #     # 更新优化变量
+        #     node_traj_var_curr = deepcopy(node_traj_var_next)
+        #     t_star_idx_curr = deepcopy(t_star_idx_next)
+        #     t_star_curr = deepcopy(t_star_next)
+        #     sdf_star_curr = deepcopy(sdf_star_next)
+        #     collision_times_curr = deepcopy(collision_times_next)
+
+        # **************************************************************************
+        # old code
+        # **************************************************************************
 
         # 初始化变量和参数
         node_traj_init = Traj2NodeTraj(traj_init, self.num_joints)
@@ -230,11 +380,11 @@ class TrajectorySVSDFSolver:
                 processed_constraints.append(("eq", name, expr))
 
         # 预处理目标函数: (t, X = (q, dq, ddq, T)) -> obj
-        obj = eval("", self.obj, [self.svsdf.p_sym], [self.p], full=False)
+        obj = self.obj
         fn_obj = ca.Function("fn_obj", [self.svsdf.t_sym, self.X], [obj])
 
         # 预处理敏感函数: (t, X = (q, dq, ddq, T)) -> sensitivity
-        sensitivity = eval("", self.sensitivity, [self.svsdf.p_sym], [self.p], full=False)
+        sensitivity = self.sensitivity
         fn_sensitivity = ca.Function("fn_sensitivity", [self.svsdf.t_sym, self.X], [sensitivity])
 
         # 预处理梯度信息: (t, X = (q, dq, ddq, T)) -> grad
@@ -243,8 +393,8 @@ class TrajectorySVSDFSolver:
         fn_grad_obj_X = ca.Function("fn_grad_obj_X", [self.svsdf.t_sym, self.X], [grad_obj_X])
 
         # 预处理惩罚项和梯度
-        w_ineq = 1e3  # 不等式约束惩罚权重
-        v_eq = 1e3  # 等式约束惩罚权重
+        w_ineq = 5.0  # 不等式约束惩罚权重
+        v_eq = 5.0  # 等式约束惩罚权重
         total_penalty = 0
         grad_total_penalty = ca.MX.zeros(self.X.size1(), self.X.size2())
 
@@ -266,7 +416,7 @@ class TrajectorySVSDFSolver:
             t_max=self.max_total_time, traj=node_traj_init, sdf_threshold=self.sdf_threshold
         )
 
-        if svsdf_star >= self.sdf_threshold:
+        if svsdf_star > self.sdf_threshold:
             TermPrint.print(f"SVSDF > {self.sdf_threshold}, exit!!!")
             return {
                 "obj": svsdf_star,
@@ -289,7 +439,7 @@ class TrajectorySVSDFSolver:
         # 参数初始化
         iter_count = 0
         max_iter = 5000
-        lr = 0.75
+        lr = 0.05
         momentum = 0.9
         velocity = 0
 
@@ -308,7 +458,7 @@ class TrajectorySVSDFSolver:
             print("=======================================\n")
 
             # 如果当前的svsdf大于阈值，需要进行判断
-            if svsdf_star_curr >= self.sdf_threshold:
+            if svsdf_star_curr > self.sdf_threshold:
 
                 if len(collision_times) != 0:  # 如果还有潜在的碰撞，优先解决这些
                     TermPrint.print(f"There are still collisions: {collision_times}", "red")
@@ -322,8 +472,22 @@ class TrajectorySVSDFSolver:
                         traj=Arr2NodeTraj(node_traj_var_curr, self.num_joints, self.num_segments),
                         sdf_threshold=self.sdf_threshold,
                     )
-                    if svsdf_star >= self.sdf_threshold:
-                        TermPrint.print(f"SVSDF > {self.sdf_threshold}, optimization finished!!!", "green")
+                    if len(collision_times) == 0:
+                        TermPrint.print(f"No collisions, optimization finished!!!", "green")
+                        print(
+                            NodeTraj2Traj(
+                                Arr2NodeTraj(node_traj_var_curr, self.num_joints, self.num_segments),
+                                self.num_joints,
+                                self.q_init,
+                                self.dq_init,
+                                self.ddq_init,
+                                self.q_target,
+                                self.dq_target,
+                                self.ddq_target,
+                                self.max_total_time,
+                                is_symbolic=False,
+                            )
+                        )
                         return {
                             "obj": svsdf_star_curr,
                             "traj": NodeTraj2Traj(
@@ -347,13 +511,16 @@ class TrajectorySVSDFSolver:
                         collision_times.remove(collision_times[t_star_idx])
                         grad_obj_X_prev = None
                         velocity = 0
-                        lr = 0.75
+                        lr = 0.05
+
+            print(f"t*: {t_star_curr}, svsdf: {svsdf_star_curr}")
 
             # 构建当前时刻梯度 (t = t*, X = X_curr) -> grad
             grad_obj_X_curr = fn_grad_obj_X(t_star_curr, node_traj_var_curr).toarray()
             # 计算带约束的总梯度
             grad_total_penalty_curr = fn_grad_total_penalty(node_traj_var_curr).toarray()
-            grad_obj_total = grad_obj_X_curr + grad_total_penalty_curr  # 总梯度
+            # grad_obj_total = grad_obj_X_curr + grad_total_penalty_curr  # 总梯度
+            grad_obj_total = grad_obj_X_curr  # 总梯度
 
             # 动量加速
             # velocity = momentum * velocity + (1 - momentum) * grad_obj_X_curr
@@ -361,10 +528,12 @@ class TrajectorySVSDFSolver:
             delta_X = -lr * grad_obj_total
 
             # 自适应步长
-            if grad_obj_X_prev is not None and (np.sign(grad_obj_X_curr) != np.sign(grad_obj_X_prev)).any():
-                lr *= 0.75
+            # if grad_obj_X_prev is not None and (np.sign(grad_obj_X_curr) != np.sign(grad_obj_X_prev)).any():
+            #     lr *= 0.75
 
             node_traj_var_next = node_traj_var_curr + delta_X
+
+            # print("delta X: ", delta_X.reshape((1, -1)).flatten().tolist())
 
             # print(
             #     "delta_X:\n",
@@ -389,11 +558,15 @@ class TrajectorySVSDFSolver:
             t_star_next_sen = (
                 t_star_curr + (delta_X.reshape((1, -1)) @ (0.5 * (sensitivity_curr + sensitivity_next))).item()
             )
+            # t_star_next_sen = t_star_curr + (delta_X.reshape((1, -1)) @ sensitivity_next).item()
             svsdf_star_next_sen = eval(
                 "", self.svsdf.sdf_sym, [self.svsdf.t_sym, self.X], [t_star_next_sen, node_traj_var_next]
             ).item()
 
-            if iter_count % 10 == 0:
+            # print(f"sensitivity: {sensitivity_curr.reshape((1, -1)).flatten().tolist()}")
+            # print(f"next sensitivity: {sensitivity_next.reshape((1, -1)).flatten().tolist()}")
+
+            if iter_count % 5 == 0:
                 # 使用梯度下降更新准确的t*
                 t_star_next, svsdf_star_next, _ = self.svsdf(
                     t_max=self.max_total_time,
@@ -449,24 +622,27 @@ if __name__ == "__main__":
     rb_shadow = RobotSetup("rb_shadow")
     pp.set_color(rb_shadow.robot, (0, 0, 1, 0.5))
 
-    # obstacles = [
+    # obstacle_spheres = [
     #     np.array([0.5, -0.35, 0.75]),
-    #     np.array([0.5, -0.35, 0.80]),
-    #     np.array([0.5, -0.35, 0.85]),
-    #     np.array([0.5, -0.35, 0.90]),
+    #     np.array([0.55, -0.35, 0.75]),
+    #     np.array([0.6, -0.35, 0.75]),
+    #     np.array([0.65, -0.35, 0.75]),
+    #     np.array([0.7, -0.35, 0.75]),
+    #     np.array([0.75, -0.35, 0.75]),
+    #     np.array([0.8, -0.35, 0.75]),
+    #     np.array([0.85, -0.35, 0.75]),
     # ]
 
-    obstacles = [
-        np.array([0.50, -0.35, 0.75]),
-        np.array([0.55, -0.35, 0.75]),
+    obstacle_spheres = [
+        np.array([0.5, -0.35, 0.75]),
+        # np.array([0.5, -0.35, 0.8]),
+        # np.array([0.5, -0.35, 0.85]),
+        # np.array([0.5, -0.35, 0.9]),
+        # np.array([0.5, -0.35, 0.95]),
+        # np.array([0.5, -0.35, 1.0]),
+        # np.array([0.5, -0.35, 1.05]),
+        # np.array([0.5, -0.35, 1.1]),
     ]
-
-    # obstacles = [
-    #     np.array([0.5, 0.0, 0.75]),
-    #     np.array([0.5, 0.0, 0.80]),
-    #     np.array([0.5, 0.0, 0.85]),
-    #     np.array([0.5, 0.0, 0.90]),
-    # ]
 
     optimizer = TrajectorySVSDFSolver(
         urdf_path,
@@ -474,7 +650,7 @@ if __name__ == "__main__":
         num_segments=5,
         num_joints=6,
         max_total_time=3.0,
-        obstacles=obstacles,
+        obstacle_spheres=obstacle_spheres,
         q_init=np.array([0, 0, 0, 0, 0, 0]),
         q_final=np.array([0, -np.pi / 2, -np.pi / 2, 0, 0, 0]),
         sdf_threshold=0.01,
@@ -504,9 +680,9 @@ if __name__ == "__main__":
     shadow_times = np.linspace(0, max_shadow_time, 1000)
     slider_shadow = p.addUserDebugParameter("replay_shadow", 0, 1, 0)
 
-    for obstacle in obstacles:
-        sphere_id = pp.create_sphere(0.05, color=pp.RED)
-        pp.set_point(sphere_id, obstacle.tolist())
+    for i in range(len(obstacle_spheres)):
+        sphere_id = pp.create_sphere(0.01, color=pp.RED)
+        pp.set_point(sphere_id, obstacle_spheres[i].tolist())
 
     while True:
         slider_value = p.readUserDebugParameter(slider)
@@ -521,8 +697,8 @@ if __name__ == "__main__":
         pos_shadow = optimizer.svsdf.EvaluateJointPosition(t_shadow, solution["traj"])
         rb_shadow.set_joint_positions(rb_shadow.arm_joints, pos_shadow)
 
-        # print(
-        #     f"raw time: {t}, new time: {t_shadow}, new SDF value: {optimizer.EvaluateSDF(t_shadow, solution['node_traj'])}"
-        # )
+        print(
+            f"raw time: {t}, new time: {t_shadow}, new SDF value: {optimizer.EvaluateSDF(t_shadow, solution['node_traj'])}"
+        )
 
         time.sleep(1.0 / 60)

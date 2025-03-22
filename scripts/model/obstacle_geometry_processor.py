@@ -21,7 +21,7 @@ class BallCloudDataset(Dataset):
 
     def __init__(self, data_path=None, num_samples=1000, generate_samples=True):
         """
-        参数:
+        Params:
             data_path: 数据文件路径，如果为None则生成随机数据
             num_samples: 生成的样本数量
             generate_samples: 是否生成随机样本数据
@@ -37,12 +37,14 @@ class BallCloudDataset(Dataset):
             self.samples = self._generate_random_samples(num_samples)
 
     def _generate_random_samples(self, num_samples):
-        """生成随机场景样本 - 创建结构化的通道边界"""
+        """
+        生成随机场景样本 - 创建结构化的通道边界
+        """
         samples = []
 
         for _ in range(num_samples):
             # 决定场景中通道的数量
-            num_channels = np.random.randint(1, 4)
+            num_channels = np.random.randint(1, 20)
             all_obstacles = []
 
             # 生成多个通道
@@ -51,11 +53,11 @@ class BallCloudDataset(Dataset):
                 # 随机决定通道类型: 圆形、椭圆形、矩形或不规则
                 channel_type = np.random.choice(["circle", "ellipse", "rectangle", "irregular"])
 
-                # 生成通道中心和方向
-                channel_center = torch.randn(3) * 2.0  # 随机中心点
+                # 生成通道中心
+                channel_center = torch.randn(3) * 2.0
 
                 # 生成随机方向向量
-                channel_dir = F.normalize(torch.randn(3), dim=0)  # 主方向
+                channel_dir = F.normalize(torch.randn(3), dim=0)
 
                 # 创建通道坐标系
                 z_axis = channel_dir
@@ -69,7 +71,17 @@ class BallCloudDataset(Dataset):
 
                 # 通道参数
                 channel_size = torch.rand(1) * 1.0 + 1.0  # 通道大小 [1.0, 2.0]
-                channel_thickness = torch.rand(1) * 0.3 + 0.1  # 通道厚度 [0.1, 0.4]
+                # 根据通道类型设置尺寸
+                if channel_type == "circle":
+                    channel_size = torch.rand(1) * 1.0 + 1.0  # 圆形通道半径 [1.0, 2.0]
+                elif channel_type == "rectangle":
+                    channel_size = torch.rand(2) * 1.0 + 1.0  # 矩形通道长宽 [1.0, 2.0]
+                elif channel_type == "ellipse":
+                    channel_size = torch.stack(
+                        [torch.rand(1) * 1.0 + 1.0, torch.rand(1) * 0.5 + 0.5]  # 长轴 [1.0, 2.0]  # 短轴 [0.5, 1.0]
+                    )
+                else:  # irregular
+                    channel_size = torch.rand(1) * 1.0 + 1.0  # 不规则通道基准尺寸 [1.0, 2.0]
 
                 # 通道轮廓点数量
                 num_boundary_points = np.random.randint(20, 40)
@@ -104,8 +116,8 @@ class BallCloudDataset(Dataset):
 
                 elif channel_type == "ellipse":
                     # 椭圆通道
-                    a = channel_size  # 长轴
-                    b = channel_size * (0.5 + torch.rand(1) * 0.3)  # 短轴 [0.5*size, 0.8*size]
+                    a = channel_size[0]  # 长轴
+                    b = channel_size[1]  # 短轴
 
                     for i in range(num_boundary_points):
                         angle = (i / num_boundary_points) * 2 * np.pi
@@ -128,8 +140,8 @@ class BallCloudDataset(Dataset):
 
                 elif channel_type == "rectangle":
                     # 矩形通道
-                    width = channel_size
-                    height = channel_size * (0.6 + torch.rand(1) * 0.8)  # [0.6*size, 1.4*size]
+                    width = channel_size[0]
+                    height = channel_size[1]
 
                     # 矩形四条边的点分布
                     sides = 4
@@ -199,7 +211,10 @@ class BallCloudDataset(Dataset):
                         "center": channel_center,
                         "direction": channel_dir,
                         "type": channel_type,
-                        "size": channel_size.item(),
+                        "size": (
+                            channel_size.tolist() if isinstance(channel_size, torch.Tensor) else channel_size.item()
+                        ),
+                        "thickness": ball_radius.item() * 2,
                     }
                 )
 
@@ -257,7 +272,9 @@ class BallCloudDataset(Dataset):
 
 
 class BallsToTensor:
-    """将不同长度的小球集合转换为固定长度的张量"""
+    """
+    将不同长度的小球集合转换为固定长度的张量
+    """
 
     def __init__(self, max_balls=200, padding_value=0.0):
         self.max_balls = max_balls
@@ -280,9 +297,15 @@ class BallsToTensor:
         return {"obstacles": all_obstacles, "channel_pos": channel_pos, "channel_dir": channel_dir}
 
 
-# PointNet++相关实现
+# **************************************************************************
+# PointNet++相关
+# **************************************************************************
+
+
 def square_distance(src, dst):
-    """计算两组点之间的平方欧氏距离"""
+    """
+    计算两组点之间的平方欧氏距离
+    """
     B, N, _ = src.shape
     _, M, _ = dst.shape
     dist = -2 * torch.matmul(src, dst.permute(0, 2, 1))
@@ -292,7 +315,9 @@ def square_distance(src, dst):
 
 
 def index_points(points, idx):
-    """根据索引从点集中获取特定点"""
+    """
+    根据索引从点集中获取特定点
+    """
     device = points.device
     B = points.shape[0]
     view_shape = list(idx.shape)
@@ -305,7 +330,9 @@ def index_points(points, idx):
 
 
 def farthest_point_sample(xyz, npoint):
-    """最远点采样算法"""
+    """
+    最远点采样算法
+    """
     device = xyz.device
     B, N, C = xyz.shape
     centroids = torch.zeros(B, npoint, dtype=torch.long).to(device)
@@ -325,7 +352,9 @@ def farthest_point_sample(xyz, npoint):
 
 
 def query_ball_point(radius, nsample, xyz, new_xyz):
-    """球查询: 找到每个中心点半径范围内的所有点"""
+    """
+    球查询: 找到每个中心点半径范围内的所有点
+    """
     device = xyz.device
     B, N, C = xyz.shape
     _, S, _ = new_xyz.shape
@@ -342,7 +371,9 @@ def query_ball_point(radius, nsample, xyz, new_xyz):
 
 
 class SetAbstraction(nn.Module):
-    """PointNet++的集合抽象层"""
+    """
+    PointNet++的集合抽象层
+    """
 
     def __init__(self, npoint, radius, nsample, in_channel, mlp):
         super(SetAbstraction, self).__init__()
@@ -361,10 +392,11 @@ class SetAbstraction(nn.Module):
 
     def forward(self, xyz, points):
         """
-        输入:
+        Params:
             xyz: 点坐标 [B, N, 3]
             points: 点特征 [B, N, D]
-        返回:
+
+        Returns:
             new_xyz: 采样后的点坐标 [B, npoint, 3]
             new_points: 新点特征 [B, npoint, mlp[-1]]
         """
@@ -402,7 +434,9 @@ class SetAbstraction(nn.Module):
 
 
 class ObstaclePointNet(nn.Module):
-    """处理障碍物小球的PointNet++模型"""
+    """
+    处理障碍物小球的PointNet++模型
+    """
 
     def __init__(self, normal_channel=False):
         super(ObstaclePointNet, self).__init__()
@@ -414,7 +448,7 @@ class ObstaclePointNet(nn.Module):
         # 第一层：捕获局部邻域关系
         self.sa1 = SetAbstraction(
             npoint=128,  # 采样128个点
-            radius=0.3,  # 适当的搜索半径，捕获局部关系
+            radius=0.3,  # 小搜索半径，捕获局部关系
             nsample=32,  # 每组最多包含32个点
             in_channel=in_channel,
             mlp=[64, 64, 128],  # MLP通道数
@@ -451,9 +485,10 @@ class ObstaclePointNet(nn.Module):
 
     def forward(self, obstacles):
         """
-        输入:
+        Params:
             obstacles: [B, N, 4] - 每个点包含 [x, y, z, r]
-        输出:
+
+        Returns:
             x: [B, 128] - 场景特征向量
         """
         B, N, _ = obstacles.shape
@@ -479,7 +514,9 @@ class ObstaclePointNet(nn.Module):
 
 
 class ChannelPredictor(nn.Module):
-    """预测场景中的最佳通道位置和方向"""
+    """
+    预测场景中的最佳通道位置和方向
+    """
 
     def __init__(self):
         super(ChannelPredictor, self).__init__()
@@ -503,7 +540,9 @@ class ChannelPredictor(nn.Module):
 
 
 def channel_prediction_loss(pred_pos, pred_dir, gt_pos, gt_dir):
-    """通道预测损失函数"""
+    """
+    通道预测损失函数
+    """
     pos_loss = F.mse_loss(pred_pos, gt_pos)
     # 方向损失（考虑方向和反方向等价）
     cos_sim = F.cosine_similarity(pred_dir, gt_dir, dim=1)
@@ -513,7 +552,9 @@ def channel_prediction_loss(pred_pos, pred_dir, gt_pos, gt_dir):
 
 
 def train_channel_predictor(model, data_loader, optimizer, epochs=100, save_path="models/channel_predictor.pt"):
-    """训练通道预测模型"""
+    """
+    训练通道预测模型
+    """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Training on {device}")
 
@@ -558,8 +599,9 @@ def train_channel_predictor(model, data_loader, optimizer, epochs=100, save_path
 
 
 def visualize_point_cloud(obstacles, pred_pos=None, pred_dir=None, gt_pos=None, gt_dir=None, save_path=None):
-    """可视化点云和预测的通道"""
-    # 确保数据在CPU上并转换为numpy
+    """
+    可视化点云和预测的通道
+    """
     if isinstance(obstacles, torch.Tensor):
         obstacles = obstacles.detach().cpu().numpy()
 
@@ -643,7 +685,9 @@ def visualize_point_cloud(obstacles, pred_pos=None, pred_dir=None, gt_pos=None, 
 
 
 def visualize_channel_scene(sample, save_path=None, show_all_channels=True):
-    """增强的可视化函数，显示通道结构"""
+    """
+    增强的可视化函数，显示通道结构
+    """
     obstacles = sample["obstacles"]
     main_pos = sample["channel_pos"]
     main_dir = sample["channel_dir"]
@@ -744,7 +788,9 @@ def visualize_channel_scene(sample, save_path=None, show_all_channels=True):
 
 
 def test_model(model, test_loader, num_visualizations=5):
-    """测试模型并可视化结果"""
+    """
+    测试模型并可视化结果
+    """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Testing on {device}")
 
@@ -806,7 +852,6 @@ def test_model(model, test_loader, num_visualizations=5):
 
 
 def main():
-    """主函数：数据准备、模型训练和测试"""
     # 创建数据集
     logger.info("Creating datasets")
     dataset = BallCloudDataset(num_samples=1000, generate_samples=True)

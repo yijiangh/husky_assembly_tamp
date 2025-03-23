@@ -151,21 +151,15 @@ class SceneParser:
                     channel_thickness = channel.thickness
 
                     # 计算通道的尺寸
-                    if channel_type == "circle":
-                        radius = channel_size
-                        height = channel_thickness
-                    elif channel_type == "rectangle":
-                        width = channel_size[0]
-                        height = channel_size[1]
-                        radius = min(width, height) / 2
-                        height = channel_thickness
-                    elif channel_type == "ellipse":
+                    if channel_type == "ellipse":
                         a = channel_size[0]  # 长轴
                         b = channel_size[1]  # 短轴
                         radius = min(a, b) / 2
                         height = channel_thickness
-                    else:  # irregular
-                        radius = channel_size
+                    else:  # rectangle
+                        width = channel_size[0]
+                        height = channel_size[1]
+                        radius = min(width, height) / 2
                         height = channel_thickness
 
                     # 创建扁平的透明圆柱体

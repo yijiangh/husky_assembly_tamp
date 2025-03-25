@@ -138,3 +138,4 @@ scripts/logs/**/*.json
 scripts/*test*.py
 scripts/model/checkpoints/
 scripts/model/logs/
+scripts/model/data/

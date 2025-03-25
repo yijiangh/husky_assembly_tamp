@@ -13,6 +13,7 @@ from curobo.geom.types import Capsule, Cuboid, Cylinder, Mesh, Sphere, WorldConf
 from curobo.types.base import TensorDeviceType
 from curobo.types.math import Pose
 from curobo.types.robot import JointState, RobotConfig
+from curobo.util.logger import setup_logger
 from curobo.util_file import get_robot_path, join_path, load_yaml
 from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig, MotionGenPlanConfig
 
@@ -30,6 +31,7 @@ class TrajectoryCuroboSolver:
             load_yaml(join_path(get_robot_path(), "husky_ur5_e.yml"))["robot_cfg"], tensor_args
         )
         self.kin_model = CudaRobotModel(self.robot_cfg.kinematics)
+        self.logger = setup_logger("error", "trajectory_curobo_solver")
 
     def plan(
         self,

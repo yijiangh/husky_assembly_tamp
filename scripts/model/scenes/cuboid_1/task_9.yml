@@ -1,18 +1,21 @@
-scene_name: cuboid_2
+# Generated from: task_1.yml
+# Generated time: 2025-03-25 22:22:57
+
+scene_name: "scenes_task_9"
 num_elements: 12
 
 robot:
-  start: [1.5708, 0.0, 0.0, -3.1416, 0.0, -1.5708]
-  target: [1.587, 0.331, -1.984, -0.397, 1.587, 1.587]
-  grasp_offset: [0.0, 0.1, 0.15] # [x, y, z] in tool_link
-  pose_2d: [1.5, 0.5, 3.1416] # [x, y, yaw]
+  start: [1.4381636001677505, -0.2645029946758263, 0.01941998389191485, -3.1371553988282863, -0.09061327719716433, -1.8359163480701306]
+  target: [1.3017126972617787, 0.2620091284940117, -1.9498131666684537, -0.32847721212298453, 1.4873426125359548, 1.866801211921287]
+  grasp_offset: [0.0, 0.12125427125388726, 0.15]
+  pose_2d: [-0.41647230484719466, 0.4401582445027802, -0.2405537580254043]
 
 channels_info:
-  - center: [0.1, 0.1, 1.0] # 通道中心位置
-    direction: [0.0, 0.0, 1.0] # 通道方向向量
-    type: "rectangle" # 通道类型
-    size: [0.2, 0.2] # 通道大小
-    thickness: 0.02 # 通道厚度
+  - center: [0.1, 0.1, 1.0]
+    direction: [0.0, 0.0, 1.0]
+    type: "rectangle"
+    size: [0.2, 0.2]
+    thickness: 0.02
 
   - center: [0.4, 0.1, 1.0]
     direction: [0.0, 0.0, 1.0]
@@ -88,10 +91,10 @@ channels_info:
 
 elements:
   - id: "element_1"
-    position: [0.0, 0.0, 0.5] # x, y, z coordinates
-    orientation: [0.0, 0.0, 0.0, 1.0] # quaternion x, y, z, w
+    position: [0.0, 0.0, 0.5]
+    orientation: [0.0, 0.0, 0.0, 1.0]
     shape:
-      type: "cylinder" # (cylinder, sphere, cuboid)
+      type: "cylinder"
       parameters:
         radius: 0.01
         height: 1.0
@@ -230,3 +233,4 @@ elements:
     sphere_fit:
       radius: 0.01
       count: 100
+

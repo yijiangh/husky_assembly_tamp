@@ -63,15 +63,18 @@ if __name__ == "__main__":
     parser.add_argument("--random", action="store_true", help="Enable random planning")
     parser.add_argument("--visualize", action="store_true", help="Enable visualization")
     parser.add_argument("--manual", action="store_true", help="Enable manual control")
+    parser.add_argument("--confirm", action="store_true", help="Enable manual confirm")
+    parser.add_argument("--validation", action="store_true", help="Enable validation")
 
     parser.add_argument("--repeat", type=int, default=1, help="Number of repetitions for the planning")
     parser.add_argument("--scene", type=str, default="cuboid_1", help="Scene name")
     parser.add_argument("--task", type=str, default="task_1", help="Task number")
+    parser.add_argument("--max_attempts", type=int, default=-1, help="Maximum number of attempts")
     args = parser.parse_args()
 
     init_pb()
 
-    scene_parser = SceneParser(os.path.join(HERE, "model", "scenes", f"{args.scene}_{args.task}.yml"))
+    scene_parser = SceneParser(os.path.join(HERE, "model", "scenes", f"{args.scene}", f"{args.task}.yml"))
     scene_parser.load_scene()
 
     line_pts_flattened, radius_per_edge = scene_parser.get_element_info()
@@ -97,7 +100,6 @@ if __name__ == "__main__":
     target_q = np.array(scene_parser.get_robot_target_pose())
     init_q = np.array(scene_parser.get_robot_start_pose())
 
-    results = {"BIRRT": [], "cuRobo": []}
     success_counts = {"BIRRT": 0, "cuRobo": 0}
 
     # Create data directories if they don't exist
@@ -107,13 +109,23 @@ if __name__ == "__main__":
             planner_dir = os.path.join(data_dir, planner)
             os.makedirs(planner_dir, exist_ok=True)
 
-    pp.wait_for_user("Press Enter to start generation...")
+    if args.confirm:
+        pp.wait_for_user("Press Enter to start generation...")
 
     loop_count = 0
+    max_attempts = args.max_attempts if args.max_attempts != -1 else float("inf")
 
     while (args.birrt and success_counts["BIRRT"] < args.repeat) or (
         args.curobo and success_counts["cuRobo"] < args.repeat
     ):
+        if loop_count >= max_attempts:
+            print(f"Max attempts reached: {max_attempts}")
+            break
+
+        if args.validation:
+            if success_counts["BIRRT"] + success_counts["cuRobo"] > 0:
+                break
+
         if args.random:
             seed = int.from_bytes(os.urandom(4), byteorder="big")
             SetSeeds(seed)
@@ -153,7 +165,6 @@ if __name__ == "__main__":
                 if path is not None:
                     print(f"\rPlan success! Total time: {elapsed_time:.2f} s!", flush=True)
                     success_counts["BIRRT"] += 1
-                    results["BIRRT"].append((seed, True, elapsed_time))
 
                     # Save trajectory if requested
                     if args.save:
@@ -183,7 +194,6 @@ if __name__ == "__main__":
 
                 else:
                     print(f"\rBIRRT plan failed, total time: {elapsed_time:.2f} s!", flush=True)
-                    results["BIRRT"].append((seed, False, elapsed_time))
 
             except KeyboardInterrupt:
                 print("\nexit!")
@@ -225,7 +235,6 @@ if __name__ == "__main__":
                 if result["success"]:
                     print(f"\rPlan success! Total time: {elapsed_time:.2f} s! ", flush=True)
                     success_counts["cuRobo"] += 1
-                    results["cuRobo"].append((seed, True, elapsed_time))
                     path = result["path"]
 
                     if args.visualize:
@@ -256,7 +265,6 @@ if __name__ == "__main__":
 
                 else:
                     print(f"\rCurobo plan failed, total time: {elapsed_time:.2f} s! ", flush=True)
-                    results["cuRobo"].append((seed, False, elapsed_time))
 
             except KeyboardInterrupt:
                 print("\nexit!")

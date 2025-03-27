@@ -1,0 +1,232 @@
+scene_name: cuboid_1_task_2
+num_elements: 12
+
+robot:
+  start: [1.5708, 0.0, 0.0, -3.1416, 0.0, -1.5708]
+  target: [1.587, 0.331, -1.984, -0.397, 1.587, 1.587]
+  grasp_offset: [0.0, 0.1, 0.15] # [x, y, z] in tool_link
+  pose_2d: [1.5, 0.5, 3.1416] # [x, y, yaw]
+
+channels_info:
+  - center: [0.1, 0.1, 1.0] # 通道中心位置
+    direction: [0.0, 0.0, 1.0] # 通道方向向量
+    type: "rectangle" # 通道类型
+    size: [0.2, 0.2] # 通道大小
+    thickness: 0.02 # 通道厚度
+
+  - center: [0.4, 0.1, 1.0]
+    direction: [0.0, 0.0, 1.0]
+    type: "rectangle"
+    size: [0.4, 0.2]
+    thickness: 0.02
+
+  - center: [0.8, 0.1, 1.0]
+    direction: [0.0, 0.0, 1.0]
+    type: "rectangle"
+    size: [0.4, 0.2]
+    thickness: 0.02
+
+  - center: [0.1, 0.5, 1.0]
+    direction: [0.0, 0.0, 1.0]
+    type: "rectangle"
+    size: [0.2, 0.6]
+    thickness: 0.02
+
+  - center: [0.4, 0.5, 1.0]
+    direction: [0.0, 0.0, 1.0]
+    type: "rectangle"
+    size: [0.4, 0.6]
+    thickness: 0.02
+
+  - center: [0.8, 0.5, 1.0]
+    direction: [0.0, 0.0, 1.0]
+    type: "rectangle"
+    size: [0.4, 0.6]
+    thickness: 0.02
+
+  - center: [0.1, 0.9, 1.0]
+    direction: [0.0, 0.0, 1.0]
+    type: "rectangle"
+    size: [0.2, 0.2]
+    thickness: 0.02
+
+  - center: [0.4, 0.9, 1.0]
+    direction: [0.0, 0.0, 1.0]
+    type: "rectangle"
+    size: [0.4, 0.2]
+    thickness: 0.02
+
+  - center: [0.8, 0.9, 1.0]
+    direction: [0.0, 0.0, 1.0]
+    type: "rectangle"
+    size: [0.4, 0.2]
+    thickness: 0.02
+
+  - center: [0.5, 0.0, 0.5]
+    direction: [0.0, 1.0, 0.0]
+    type: "rectangle"
+    size: [1.0, 1.0]
+    thickness: 0.02
+
+  - center: [0.0, 0.5, 0.5]
+    direction: [1.0, 0.0, 0.0]
+    type: "rectangle"
+    size: [1.0, 1.0]
+    thickness: 0.02
+
+  - center: [0.5, 1.0, 0.5]
+    direction: [0.0, -1.0, 0.0]
+    type: "rectangle"
+    size: [1.0, 1.0]
+    thickness: 0.02
+
+  - center: [1.0, 0.5, 0.5]
+    direction: [-1.0, 0.0, 0.0]
+    type: "rectangle"
+    size: [1.0, 1.0]
+    thickness: 0.02
+
+elements:
+  - id: "element_1"
+    position: [0.0, 0.0, 0.5] # x, y, z coordinates
+    orientation: [0.0, 0.0, 0.0, 1.0] # quaternion x, y, z, w
+    shape:
+      type: "cylinder" # (cylinder, sphere, cuboid)
+      parameters:
+        radius: 0.01
+        height: 1.0
+    sphere_fit:
+      radius: 0.01
+      count: 100
+
+  - id: "element_2"
+    position: [0.0, 1.0, 0.5]
+    orientation: [0.0, 0.0, 0.0, 1.0]
+    shape:
+      type: "cylinder"
+      parameters:
+        radius: 0.01
+        height: 1.0
+    sphere_fit:
+      radius: 0.01
+      count: 100
+
+  - id: "element_3"
+    position: [1.0, 1.0, 0.5]
+    orientation: [0.0, 0.0, 0.0, 1.0]
+    shape:
+      type: "cylinder"
+      parameters:
+        radius: 0.01
+        height: 1.0
+    sphere_fit:
+      radius: 0.01
+      count: 100
+
+  - id: "element_4"
+    position: [1.0, 0.0, 0.5]
+    orientation: [0.0, 0.0, 0.0, 1.0]
+    shape:
+      type: "cylinder"
+      parameters:
+        radius: 0.01
+        height: 1.0
+    sphere_fit:
+      radius: 0.01
+      count: 100
+
+  - id: "element_5"
+    position: [0.5, 0.0, 1.0]
+    orientation: [0.0, 0.7071067811865475, 0.0, 0.7071067811865476]
+    shape:
+      type: "cylinder"
+      parameters:
+        radius: 0.01
+        height: 1.0
+    sphere_fit:
+      radius: 0.01
+      count: 100
+
+  - id: "element_6"
+    position: [1.0, 0.5, 1.0]
+    orientation: [-0.5, 0.5, 0.5, 0.5]
+    shape:
+      type: "cylinder"
+      parameters:
+        radius: 0.01
+        height: 1.0
+    sphere_fit:
+      radius: 0.01
+      count: 100
+
+  - id: "element_7"
+    position: [0.0, 0.5, 1.0]
+    orientation: [0.5, 0.5, -0.5, 0.5]
+    shape:
+      type: "cylinder"
+      parameters:
+        radius: 0.01
+        height: 1.0
+    sphere_fit:
+      radius: 0.01
+      count: 100
+
+  - id: "element_8"
+    position: [0.5, 1.0, 1.0]
+    orientation: [-0.7071067811865475, 0.0, 0.7071067811865476, 0.0]
+    shape:
+      type: "cylinder"
+      parameters:
+        radius: 0.01
+        height: 1.0
+    sphere_fit:
+      radius: 0.01
+      count: 100
+
+  - id: "element_9"
+    position: [0.5, 0.2, 1.0]
+    orientation: [0.0, 0.7071067811865475, 0.0, 0.7071067811865476]
+    shape:
+      type: "cylinder"
+      parameters:
+        radius: 0.01
+        height: 1.0
+    sphere_fit:
+      radius: 0.01
+      count: 100
+
+  - id: "element_10"
+    position: [0.6, 0.5, 1.0]
+    orientation: [-0.5, 0.5, 0.5, 0.5]
+    shape:
+      type: "cylinder"
+      parameters:
+        radius: 0.01
+        height: 1.0
+    sphere_fit:
+      radius: 0.01
+      count: 100
+
+  - id: "element_11"
+    position: [0.5, 0.8, 1.0]
+    orientation: [-0.7071067811865475, 0.0, 0.7071067811865476, 0.0]
+    shape:
+      type: "cylinder"
+      parameters:
+        radius: 0.01
+        height: 1.0
+    sphere_fit:
+      radius: 0.01
+      count: 100
+
+  - id: "element_12"
+    position: [0.2, 0.5, 1.0]
+    orientation: [0.5, 0.5, -0.5, 0.5]
+    shape:
+      type: "cylinder"
+      parameters:
+        radius: 0.01
+        height: 1.0
+    sphere_fit:
+      radius: 0.01
+      count: 100

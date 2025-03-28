@@ -1,13 +1,16 @@
 import os
 import sys
 from types import SimpleNamespace
-from typing import Dict, List, Tuple
-
-import pybullet_planning as pp
-from scipy.spatial.transform import Rotation
+from typing import Dict, List, Tuple, Union
 
 import numpy as np
+import pybullet_planning as pp
 import yaml
+from scipy.spatial.transform import Rotation
+import glob
+import time
+import pybullet as p
+import argparse
 
 HERE = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(HERE)
@@ -159,10 +162,26 @@ class SceneParser:
             ]
         )
 
-    def visualize_scene(self):
+    def visualize_scene(
+        self,
+        scene_name: str,
+        task_name: str,
+        algorithm_name: str,
+        plan_id: int,
+        enable_spheres=True,
+        enable_channels=True,
+    ):
         """
         Visualize the scene using PyBullet.
         Creates collision bodies for cylinders and spheres, and visualizes channels.
+
+        Args:
+            scene_name: 场景名称
+            task_name: 任务名称
+            algorithm_name: 算法名称
+            plan_id: 轨迹编号
+            enable_spheres: 是否显示球体近似
+            enable_channels: 是否显示通道
         """
         # Initialize PyBullet
         init_pb()
@@ -200,84 +219,164 @@ class SceneParser:
             element_bodies = create_collision_bodies(line_pts_flattened, radius_per_edge, viewer=True)
 
         # Create sphere approximations using pp.create_sphere
-        sphere_bodies = []
-        with pp.LockRenderer():
-            for sphere in self.approximate_elements_with_spheres():
-                sphere_body = pp.create_sphere(radius=sphere["radius"], color=(0, 1, 0, 0.5))  # Green semi-transparent
-                pp.set_pose(sphere_body, pp.Pose(point=sphere["position"]))
-                sphere_bodies.append(sphere_body)
-
-        # Visualize channels
-        if hasattr(self.scene_data, "channels_info"):
-            channel_bodies = []
+        if enable_spheres:
+            sphere_bodies = []
             with pp.LockRenderer():
-                for channel in self.scene_data.channels_info:
-                    # Get channel parameters
-                    channel_center = np.array(channel.center)
-                    channel_dir = np.array(channel.direction)
-                    channel_type = channel.type
-                    channel_size = channel.size
-                    channel_thickness = channel.thickness
+                for sphere in self.approximate_elements_with_spheres():
+                    sphere_body = pp.create_sphere(
+                        radius=sphere["radius"], color=(0, 1, 0, 0.5)
+                    )  # Green semi-transparent
+                    pp.set_pose(sphere_body, pp.Pose(point=sphere["position"]))
+                    sphere_bodies.append(sphere_body)
 
-                    # Calculate channel dimensions
-                    if channel_type == "ellipse":
-                        a = channel_size[0]  # Major axis
-                        b = channel_size[1]  # Minor axis
-                        radius = min(a, b) / 2
-                        height = channel_thickness
-                    else:  # rectangle
-                        width = channel_size[0]
-                        height = channel_size[1]
-                        radius = min(width, height) / 2
-                        height = channel_thickness
+        if enable_channels:
+            # Visualize channels
+            if hasattr(self.scene_data, "channels_info"):
+                channel_bodies = []
+                with pp.LockRenderer():
+                    for channel in self.scene_data.channels_info:
+                        # Get channel parameters
+                        channel_center = np.array(channel.center)
+                        channel_dir = np.array(channel.direction)
+                        channel_type = channel.type
+                        channel_size = channel.size
+                        channel_thickness = channel.thickness
 
-                    # Create flat transparent cylinder
-                    cylinder_body = pp.create_cylinder(radius=radius, height=height, color=(0, 1, 1, 0.3))
+                        # Calculate channel dimensions
+                        if channel_type == "ellipse":
+                            a = channel_size[0]  # Major axis
+                            b = channel_size[1]  # Minor axis
+                            radius = min(a, b) / 2
+                            height = channel_thickness
+                        else:  # rectangle
+                            width = channel_size[0]
+                            height = channel_size[1]
+                            radius = min(width, height) / 2
+                            height = channel_thickness
 
-                    # Build coordinate system based on channel_dir
-                    z_axis = channel_dir / np.linalg.norm(channel_dir)
+                        # Create flat transparent cylinder
+                        cylinder_body = pp.create_cylinder(radius=radius, height=height, color=(0, 1, 1, 0.3))
 
-                    # Choose any vector not parallel to z-axis as temporary x-axis
-                    temp_x = np.array([1, 0, 0])
-                    if np.abs(np.dot(temp_x, z_axis)) > 0.9:  # If too close to parallel
-                        temp_x = np.array([0, 1, 0])
+                        # Build coordinate system based on channel_dir
+                        z_axis = channel_dir / np.linalg.norm(channel_dir)
 
-                    # Calculate y-axis
-                    y_axis = np.cross(z_axis, temp_x)
-                    y_axis = y_axis / np.linalg.norm(y_axis)
+                        # Choose any vector not parallel to z-axis as temporary x-axis
+                        temp_x = np.array([1, 0, 0])
+                        if np.abs(np.dot(temp_x, z_axis)) > 0.9:  # If too close to parallel
+                            temp_x = np.array([0, 1, 0])
 
-                    # Calculate x-axis
-                    x_axis = np.cross(y_axis, z_axis)
-                    x_axis = x_axis / np.linalg.norm(x_axis)
+                        # Calculate y-axis
+                        y_axis = np.cross(z_axis, temp_x)
+                        y_axis = y_axis / np.linalg.norm(y_axis)
 
-                    # Build rotation matrix
-                    rotation_matrix = np.column_stack([x_axis, y_axis, z_axis])
+                        # Calculate x-axis
+                        x_axis = np.cross(y_axis, z_axis)
+                        x_axis = x_axis / np.linalg.norm(x_axis)
 
-                    # Convert to Euler angles
-                    rotation = Rotation.from_matrix(rotation_matrix)
-                    rotation_euler = rotation.as_euler("xyz", degrees=False).tolist()
+                        # Build rotation matrix
+                        rotation_matrix = np.column_stack([x_axis, y_axis, z_axis])
 
-                    # Set cylinder position and orientation
-                    pp.set_pose(
-                        cylinder_body,
-                        pp.Pose(point=channel_center, euler=rotation_euler),
-                    )
-                    channel_bodies.append(cylinder_body)
+                        # Convert to Euler angles
+                        rotation = Rotation.from_matrix(rotation_matrix)
+                        rotation_euler = rotation.as_euler("xyz", degrees=False).tolist()
 
-                    # Create channel direction indicator line
-                    line_body = pp.add_line(
-                        channel_center, channel_center + channel_dir * 0.25, color=(0, 1, 1, 1), width=4
-                    )
-                    channel_bodies.append(line_body)
+                        # Set cylinder position and orientation
+                        pp.set_pose(
+                            cylinder_body,
+                            pp.Pose(point=channel_center, euler=rotation_euler),
+                        )
+                        channel_bodies.append(cylinder_body)
 
-        print(
-            f"Scene visualization complete: {len(element_bodies)} elements, {len(sphere_bodies)} sphere approximations"
-        )
+                        # Create channel direction indicator line
+                        line_body = pp.add_line(
+                            channel_center, channel_center + channel_dir * 0.25, color=(0, 1, 1, 1), width=4
+                        )
+                        channel_bodies.append(line_body)
+
+        # 添加轨迹复现功能
+        data_dir = os.path.join(HERE, "model", "data")
+        task_dir = os.path.join(data_dir, scene_name, task_name)
+        traj_file = os.path.join(task_dir, algorithm_name, f"plan_{plan_id}.npy")
+
+        if os.path.exists(traj_file):
+            # 创建DataLoader实例
+            from model.data_loader import SceneDataLoader
+
+            data_loader = SceneDataLoader()
+
+            # 加载轨迹数据并进行插值
+            trajectories = data_loader.load_trajectories(
+                scene_name=scene_name, task_name=task_name, algorithm_name=algorithm_name, target_length=5000
+            )
+
+            # 获取指定ID的轨迹
+            if plan_id < len(trajectories):
+                trajectory = trajectories[plan_id]
+            else:
+                print(f"轨迹ID {plan_id} 超出范围")
+                return
+
+            # 添加回放控制滑块
+            p.removeAllUserParameters()
+            replay_slider = p.addUserDebugParameter("replay", 0, 1, 0)
+            continue_button = p.addUserDebugParameter("continue", 1, 0, 0)
+            prev_continue_button_value = p.readUserDebugParameter(continue_button)
+
+            # 获取机器人实例
+            from robot.robot_setup import RobotSetup
+
+            rb = RobotSetup("r0")
+            pp.set_pose(rb.robot, pp.Pose(point=(-0.5, 0.5, 0), euler=pp.Euler(0, 0, 0)))
+
+            # 创建被抓取的元素
+            line_pts_grasped = [np.array([0, 0, 0]), np.array([0, 0, 1])]
+            grasped_element = create_collision_bodies(line_pts_grasped, [0.01], viewer=True)[0]
+
+            # 设置被抓取元素的位姿并创建附着关系
+            pp.set_pose(
+                grasped_element,
+                pp.multiply(
+                    pp.get_link_pose(rb.robot, rb.tool_link),
+                    pp.Pose(point=(0, 0.1, 0.15), euler=pp.Euler(1.5708, 0, 0)),
+                ),
+            )
+            grasp_attachment = pp.create_attachment(rb.robot, rb.tool_link, grasped_element)
+
+            pp.wait_for_user("按回车键继续...")
+
+            print(f"场景: {scene_name}")
+            print(f"任务: {task_name}")
+            print(f"算法: {algorithm_name}")
+            print(f"轨迹ID: {plan_id}")
+
+            while True:
+                # 获取回放进度
+                replay = p.readUserDebugParameter(replay_slider)
+                current_continue_button_value = p.readUserDebugParameter(continue_button)
+
+                # 根据进度设置机器人位置
+                idx = int(replay * (len(trajectory) - 1))
+                conf = trajectory[idx]
+                rb.set_joint_positions(rb.arm_joints, conf)
+
+                # 更新抓取的元素位置
+                grasp_attachment.assign()
+
+                time.sleep(1.0 / 240)
+
+                # 检查是否继续
+                if current_continue_button_value > prev_continue_button_value:
+                    break
+                prev_continue_button_value = current_continue_button_value
+        else:
+            print(f"\n未找到轨迹数据 {traj_file}")
+
+        print(f"场景可视化完成: {len(element_bodies)} 个元素")
         if hasattr(self.scene_data, "channels_info"):
-            print(f"Number of channels: {len(self.scene_data.channels_info)}")
+            print(f"通道数量: {len(self.scene_data.channels_info)}")
 
-        # Keep GUI running
-        pp.wait_for_user("Press Enter to exit...")
+        # 保持GUI运行
+        pp.wait_for_user("按回车键退出...")
 
     def get_robot_start_pose(self) -> List[float]:
         """
@@ -312,16 +411,24 @@ class SceneParser:
             raise ValueError("Robot information not loaded")
         return self.robot_info.grasp_offset
 
-    def get_robot_pose_2d(self) -> List[float]:
+    def get_robot_pose_2d(self, output_type: str = "list") -> Union[List[float], np.ndarray]:
         """
         Get the robot's 2D pose.
+
+        Args:
+            output_type (str): The type of output to return. Can be "list" or "array".
 
         Returns:
             List[float]: Robot's 2D pose [x, y, yaw]
         """
         if not self.robot_info:
             raise ValueError("Robot information not loaded")
-        return self.robot_info.pose_2d
+        if output_type == "list":
+            return self.robot_info.pose_2d
+        elif output_type == "array":
+            return np.array(self.robot_info.pose_2d)
+        else:
+            raise ValueError(f"Invalid output type: {output_type}")
 
     def get_element_info(self) -> Tuple[List[np.ndarray], List[float]]:
         """
@@ -365,7 +472,135 @@ class SceneParser:
         return line_pts_flattened, radius_per_edge
 
 
+def reorganize_tasks(scene_name: str):
+    """
+    重新排布指定场景的任务编号，同时更新scenes和data目录中的文件
+
+    Args:
+        scene_name: 场景名称
+    """
+    scenes_dir = os.path.join(HERE, "model", "scenes", scene_name)
+    data_dir = os.path.join(HERE, "model", "data", scene_name)
+
+    if not os.path.exists(scenes_dir) or not os.path.exists(data_dir):
+        print(f"场景 {scene_name} 的目录不存在")
+        return
+
+    # 获取所有任务文件并按数字顺序排序
+    task_files = glob.glob(os.path.join(scenes_dir, "*.yml"))
+
+    # 自定义排序函数，提取task_后的数字进行排序
+    def get_task_number(filename):
+        basename = os.path.splitext(os.path.basename(filename))[0]
+        try:
+            return int(basename.split("_")[1])
+        except (IndexError, ValueError):
+            return float("inf")  # 对于非标准命名的文件排在最后
+
+    task_files.sort(key=get_task_number)
+
+    # 创建新旧任务名称映射
+    task_mapping = {}  # {old_name: new_name}
+    current_number = 1
+
+    for task_file in task_files:
+        old_name = os.path.splitext(os.path.basename(task_file))[0]
+        new_name = f"task_{current_number}"
+        task_mapping[old_name] = new_name
+        current_number += 1
+
+    print("\n任务重命名映射:")
+    for old, new in task_mapping.items():
+        print(f"{old} -> {new}")
+
+    # 更新scenes目录
+    print("\n更新scenes目录...")
+    for old_name, new_name in task_mapping.items():
+        old_file = os.path.join(scenes_dir, f"{old_name}.yml")
+        new_file = os.path.join(scenes_dir, f"{new_name}.yml")
+
+        if old_name == new_name:
+            continue
+
+        # 读取并更新yml文件内容
+        with open(old_file, "r") as f:
+            content = f.read()
+
+        # 更新scene_name字段
+        content = content.replace(f'scene_name: "{scene_name}_{old_name}"', f'scene_name: "{scene_name}_{new_name}"')
+
+        # 如果新旧文件名不同，直接重命名文件
+        if old_file != new_file:
+            # 先写入更新后的内容到原文件
+            with open(old_file, "w") as f:
+                f.write(content)
+            # 然后重命名文件
+            os.rename(old_file, new_file)
+
+    # 更新data目录
+    print("\n更新data目录...")
+    for old_name, new_name in task_mapping.items():
+        old_dir = os.path.join(data_dir, old_name)
+        new_dir = os.path.join(data_dir, new_name)
+
+        if old_name == new_name:
+            continue
+
+        if os.path.exists(old_dir):
+            # 如果新目录已存在，先删除
+            if os.path.exists(new_dir):
+                import shutil
+                shutil.rmtree(new_dir)
+            # 重命名目录
+            os.rename(old_dir, new_dir)
+
+    print("\n重排布完成!")
+
+
 if __name__ == "__main__":
-    parser = SceneParser("/home/jeong/summer_research/eth_ws/src/husky_assembly/scripts/model/scenes/cuboid_1.yml")
-    parser.load_scene()
-    parser.visualize_scene()
+    parser = argparse.ArgumentParser(description="场景工具")
+    parser.add_argument(
+        "--mode",
+        type=str,
+        required=True,
+        choices=["visualize", "reorganize"],
+        help="工具模式: visualize(可视化) 或 reorganize(重排布)",
+    )
+
+    # 可视化模式的参数
+    vis_group = parser.add_argument_group("可视化参数")
+    vis_group.add_argument("--scene", type=str, help="场景名称")
+    vis_group.add_argument("--task", type=str, help="任务名称")
+    vis_group.add_argument("--algorithm", type=str, help="算法名称")
+    vis_group.add_argument("--plan-id", type=int, help="轨迹编号")
+    vis_group.add_argument("--enable-spheres", action="store_true", help="显示球体近似")
+    vis_group.add_argument("--enable-channels", action="store_true", help="显示通道")
+
+    # 重排布模式的参数
+    reorg_group = parser.add_argument_group("重排布参数")
+    reorg_group.add_argument("--target-scene", type=str, help="要重排布的场景名称")
+
+    args = parser.parse_args()
+
+    if args.mode == "visualize":
+        # 检查可视化所需的参数
+        if not all([args.scene, args.task, args.algorithm, args.plan_id is not None]):
+            parser.error("可视化模式需要指定 --scene, --task, --algorithm 和 --plan-id")
+
+        # 构建场景文件路径
+        scene_file = os.path.join(HERE, "model", "scenes", args.scene, f"{args.task}.yml")
+
+        scene_parser = SceneParser(scene_file)
+        scene_parser.load_scene()
+        scene_parser.visualize_scene(
+            scene_name=args.scene,
+            task_name=args.task,
+            algorithm_name=args.algorithm,
+            plan_id=args.plan_id,
+            enable_spheres=args.enable_spheres,
+            enable_channels=args.enable_channels,
+        )
+    else:  # reorganize mode
+        if not args.target_scene:
+            parser.error("重排布模式需要指定 --target-scene")
+        reorganize_tasks(args.target_scene)

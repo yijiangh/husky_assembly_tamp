@@ -1,4 +1,4 @@
-scene_name: cuboid_1_task_1
+scene_name: "cuboid_1_task_1"
 num_elements: 12
 
 robot:

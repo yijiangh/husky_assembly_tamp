@@ -1,19 +1,24 @@
+import argparse
 import glob
 import os
 import sys
-from typing import Dict, List, Optional, Tuple, Union, Callable
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pybullet_planning as pp
 import torch
 from mpl_toolkits.mplot3d import Axes3D
-from torch.utils.data import Dataset, DataLoader as TorchDataLoader
+from torch.utils.data import DataLoader as TorchDataLoader
+from torch.utils.data import Dataset
 
 HERE = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(HERE)
 
 from model.scene_parse import SceneParser
-from utils.params import *
+from multi_tangent.collision import create_collision_bodies
+from robot.robot_setup import RobotSetup
+from utils.collision import init_pb
 
 
 class PointCloudDataset(Dataset):
@@ -32,6 +37,9 @@ class PointCloudDataset(Dataset):
         normal_channel: bool = True,
         trajectory_length: Optional[int] = None,
         transform: Optional[Callable] = None,
+        add_noise: bool = False,
+        noise_ratio: float = 0.05,
+        noise_scale: float = 0.01
     ):
         """
         Initialize point cloud dataset
@@ -46,6 +54,9 @@ class PointCloudDataset(Dataset):
             normal_channel: Whether to include normals
             trajectory_length: Target trajectory length, if specified re-interpolate trajectory
             transform: Transformation function applied to point clouds
+            add_noise: Whether to add random noise to points
+            noise_ratio: Ratio of points to add noise
+            noise_scale: Scale of the noise
         """
         self.data_loader = data_loader if data_loader else SceneDataLoader()
         self.num_points = num_points
@@ -53,6 +64,9 @@ class PointCloudDataset(Dataset):
         self.normal_channel = normal_channel
         self.trajectory_length = trajectory_length
         self.transform = transform
+        self.add_noise = add_noise
+        self.noise_ratio = noise_ratio
+        self.noise_scale = noise_scale
 
         # Convert single string to list
         if isinstance(scene_names, str):
@@ -155,7 +169,13 @@ class PointCloudDataset(Dataset):
 
             # Generate point cloud data and element labels
             point_cloud, element_labels = self.data_loader._sample_points_from_elements(
-                line_pts, radius_per_edge, num_points=self.num_points, normal_channel=self.normal_channel
+                line_pts, 
+                radius_per_edge, 
+                num_points=self.num_points, 
+                normal_channel=self.normal_channel,
+                add_noise=self.add_noise,
+                noise_ratio=self.noise_ratio,
+                noise_scale=self.noise_scale
             )
             self.point_cloud_cache[scene_task_key] = (point_cloud, element_labels)
         else:
@@ -174,7 +194,7 @@ class PointCloudDataset(Dataset):
             grasped_radius = [radius]
 
             grasped_point_cloud, _ = self.data_loader._sample_points_from_elements(
-                grasped_line_pts, grasped_radius, num_points=self.num_grasp_points, normal_channel=self.normal_channel
+                grasped_line_pts, grasped_radius, num_points=self.num_grasp_points, normal_channel=self.normal_channel, add_noise=self.add_noise, noise_ratio=self.noise_ratio, noise_scale=self.noise_scale
             )
             self.grasped_element_cache["default_grasped_element"] = grasped_point_cloud
         else:
@@ -508,6 +528,9 @@ class SceneDataLoader:
         radius_per_edge: List[float],
         num_points: int = 1024,
         normal_channel: bool = True,
+        add_noise: bool = False,
+        noise_ratio: float = 0.05,
+        noise_scale: float = 0.01
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Sample points from surface of element cylinder and add element labels
@@ -517,6 +540,9 @@ class SceneDataLoader:
             radius_per_edge: Radius of each line
             num_points: Number of points to sample for each element
             normal_channel: Whether to calculate normal vector
+            add_noise: Whether to add random noise to some points
+            noise_ratio: Ratio of points to add noise
+            noise_scale: Scale of the noise
 
         Returns:
             Tuple[np.ndarray, np.ndarray]: Point cloud data and element labels
@@ -566,14 +592,26 @@ class SceneDataLoader:
                 # Calculate point on cylinder surface
                 radial_vec = np.cos(theta) * base1 + np.sin(theta) * base2
                 surface_point = center + radius * radial_vec
+                
+                # Add random noise to some points if requested
+                if add_noise and np.random.random() < noise_ratio:
+                    # Generate random noise vector
+                    noise = np.random.normal(0, noise_scale, 3)
+                    # Apply noise to surface point
+                    surface_point = surface_point + noise
+                    
+                    # If normal vectors are needed, slightly disturb them too
+                    if normal_channel:
+                        # Small disturbance to normal direction
+                        normal_noise = np.random.normal(0, noise_scale/3, 3)
+                        radial_vec = radial_vec + normal_noise
+                        # Renormalize to unit vector
+                        radial_vec = radial_vec / np.linalg.norm(radial_vec)
+                
+                # Always append point and label regardless of noise
                 sampled_points.append(surface_point)
-
-                # Add element label
                 element_labels.append(element_idx)
-
-                # If normal vector is needed, calculate normal vector
-                if normal_channel:
-                    normals.append(radial_vec)  # Normal vector is direction from axis to surface
+                normals.append(radial_vec)
 
         # Convert to numpy array
         points_array = np.array(sampled_points)
@@ -694,9 +732,13 @@ class SceneDataLoader:
         task_names: Union[str, List[str]] = None,
         algorithm_names: Union[str, List[str]] = None,
         num_points: int = 1024,
+        num_grasp_points: int = 256,
         normal_channel: bool = True,
         trajectory_length: Optional[int] = None,
         transform: Optional[Callable] = None,
+        add_noise: bool = False,
+        noise_ratio: float = 0.05,
+        noise_scale: float = 0.01
     ) -> PointCloudDataset:
         """
         Create PyTorch point cloud dataset
@@ -706,9 +748,13 @@ class SceneDataLoader:
             task_names: Task name or list, if None use all tasks
             algorithm_names: Algorithm name or list, if None use all algorithms
             num_points: Number of points to sample for each element
+            num_grasp_points: Number of points to sample for grasped element
             normal_channel: Whether to include normal vector
             trajectory_length: Target trajectory length, if specified re-interpolate trajectory
             transform: Transformation function applied to point clouds
+            add_noise: Whether to add random noise to points
+            noise_ratio: Ratio of points to add noise
+            noise_scale: Scale of the noise
 
         Returns:
             PointCloudDataset: PyTorch dataset
@@ -719,13 +765,254 @@ class SceneDataLoader:
             algorithm_names=algorithm_names,
             data_loader=self,
             num_points=num_points,
+            num_grasp_points=num_grasp_points,
             normal_channel=normal_channel,
             trajectory_length=trajectory_length,
             transform=transform,
+            add_noise=add_noise,
+            noise_ratio=noise_ratio,
+            noise_scale=noise_scale
         )
+
+    def check_trajectory_collisions(
+        self,
+        scene_name: str,
+        task_name: str,
+        algorithm_name: str,
+        interpolation_steps: int = 5000,
+    ) -> List[str]:
+        """
+        检查指定场景/任务/算法下所有轨迹的碰撞情况
+
+        Args:
+            scene_name: 场景名称
+            task_name: 任务名称
+            algorithm_name: 算法名称
+            interpolation_steps: 插值后的轨迹点数量
+
+        Returns:
+            List[str]: 发生碰撞的轨迹文件列表
+        """
+
+        # 加载场景配置
+        parser = self.load_scene_config(scene_name, task_name)
+
+        # 获取场景元素信息
+        line_pts, radius_per_edge = parser.get_element_info()
+
+        init_pb()
+
+        # 创建机器人实例
+        rb = RobotSetup("r0")
+
+        # 从配置文件获取机器人2D位姿
+        robot_pose_2d = parser.get_robot_pose_2d(output_type="array")
+        robot_x, robot_y, robot_yaw = robot_pose_2d
+
+        # 设置机器人位姿
+        pp.set_pose(rb.robot, pp.Pose(point=(robot_x, robot_y, 0), euler=pp.Euler(0, 0, robot_yaw)))
+
+        # 创建被抓取的元素
+        line_pts_grasped = [np.array([0, 0, 0]), np.array([0, 0, 1])]
+        grasped_element = create_collision_bodies(line_pts_grasped, [0.01], viewer=False)[0]
+
+        # 从配置文件获取抓取偏移量
+        grasp_offset = parser.get_robot_grasp_offset()
+
+        # 设置被抓取元素的位姿并创建附着关系
+        pp.set_pose(
+            grasped_element,
+            pp.multiply(
+                pp.get_link_pose(rb.robot, rb.tool_link),
+                pp.Pose(point=tuple(grasp_offset), euler=pp.Euler(1.5708, 0, 0)),
+            ),
+        )
+        grasp_attachment = pp.create_attachment(rb.robot, rb.tool_link, grasped_element)
+
+        # 创建碰撞检测函数
+        element_bodies = create_collision_bodies(line_pts, radius_per_edge, viewer=False)
+        extra_disabled_collisions = [
+            (
+                (rb.robot, pp.link_from_name(rb.robot, "ur_arm_wrist_3_link")),
+                (rb.ee_attachment.child, pp.BASE_LINK),
+            ),
+            (
+                (rb.ee_attachment.child, pp.BASE_LINK),
+                (grasp_attachment.child, pp.BASE_LINK),
+            ),
+        ]
+
+        collision_fn = pp.get_collision_fn(
+            rb.robot,
+            rb.arm_joints,
+            obstacles=element_bodies,
+            attachments=[grasp_attachment, rb.ee_attachment] + rb.attachments,
+            self_collisions=True,
+            disabled_collisions=rb.disabled_collisions,
+            extra_disabled_collisions=extra_disabled_collisions,
+            max_distance=0.0,
+        )
+
+        # 加载所有轨迹
+        trajectories = self.load_trajectories(
+            scene_name=scene_name, task_name=task_name, algorithm_name=algorithm_name, target_length=interpolation_steps
+        )
+
+        # 检查每条轨迹
+        collision_files = []
+        task_dir = os.path.join(self.data_dir, scene_name, task_name, algorithm_name)
+        traj_files = sorted(glob.glob(os.path.join(task_dir, "plan_*.npy")))
+
+        pp.wait_for_user("按回车键继续...")
+
+        print(f"\n开始检查轨迹碰撞:")
+        print(f"场景: {scene_name}")
+        print(f"任务: {task_name}")
+        print(f"算法: {algorithm_name}")
+        print(f"轨迹数量: {len(traj_files)}")
+        print("=" * 50)
+
+        for i, (traj_file, trajectory) in enumerate(zip(traj_files, trajectories)):
+            file_name = os.path.basename(traj_file)
+            print(f"\r检查轨迹 {i+1}/{len(traj_files)}: {file_name}", end="")
+
+            # 检查轨迹中的每个配置
+            for conf in trajectory:
+                if collision_fn(conf):
+                    collision_files.append(file_name)
+                    print(f"\n发现碰撞: {file_name}")
+                    break
+
+        print("\n\n碰撞检查完成!")
+        if collision_files:
+            print("\n以下轨迹存在碰撞:")
+            for file in collision_files:
+                print(f"- {file}")
+        else:
+            print("\n所有轨迹均无碰撞!")
+
+        return collision_files
+
+    def reorganize_all_trajectories(self) -> None:
+        """
+        重新排序所有场景/任务/算法下的轨迹文件
+        """
+        print("\n开始扫描数据集...")
+
+        # 遍历所有场景
+        for scene_name in os.listdir(self.data_dir):
+            scene_dir = os.path.join(self.data_dir, scene_name)
+            if not os.path.isdir(scene_dir):
+                continue
+
+            # 遍历所有任务
+            for task_name in os.listdir(scene_dir):
+                task_dir = os.path.join(scene_dir, task_name)
+                if not os.path.isdir(task_dir):
+                    continue
+
+                # 遍历所有算法
+                for algorithm_name in os.listdir(task_dir):
+                    alg_dir = os.path.join(task_dir, algorithm_name)
+                    if not os.path.isdir(alg_dir):
+                        continue
+
+                    # 获取所有轨迹文件
+                    traj_files = glob.glob(os.path.join(alg_dir, "plan_*.npy"))
+                    if not traj_files:
+                        continue
+
+                    # 自定义排序函数，提取plan_后的数字进行排序
+                    def get_plan_number(filename):
+                        basename = os.path.basename(filename)
+                        try:
+                            return int(basename.split("_")[1].split(".")[0])
+                        except (IndexError, ValueError):
+                            return float("inf")  # 对于非标准命名的文件排在最后
+
+                    # 按数字顺序排序
+                    traj_files.sort(key=get_plan_number)
+
+                    # 修改这部分，将编号从0开始
+                    file_mapping = {}  # {old_name: new_name}
+                    for i, old_file in enumerate(traj_files):
+                        old_name = os.path.basename(old_file)
+                        new_name = f"plan_{i}.npy"  # 改为从0开始编号
+                        if old_name != new_name:
+                            file_mapping[old_name] = new_name
+
+                    if not file_mapping:
+                        continue
+
+                    print(f"\n发现需要重排序的轨迹:")
+                    print(f"场景: {scene_name}")
+                    print(f"任务: {task_name}")
+                    print(f"算法: {algorithm_name}")
+                    print(f"轨迹数量: {len(traj_files)}")
+                    print("=" * 50)
+
+                    print("\n文件重命名映射:")
+                    for old, new in file_mapping.items():
+                        print(f"{old} -> {new}")
+
+                    # 执行重命名
+                    print("\n开始重命名...")
+                    temp_files = {}  # 用于存储临时文件名，避免重命名冲突
+
+                    # 第一步：将所有文件重命名为临时名称
+                    for old_name, new_name in file_mapping.items():
+                        old_path = os.path.join(alg_dir, old_name)
+                        temp_name = f"temp_{old_name}"
+                        temp_path = os.path.join(alg_dir, temp_name)
+                        os.rename(old_path, temp_path)
+                        temp_files[temp_name] = new_name
+                        print(f"临时重命名: {old_name} -> {temp_name}")
+
+                    # 第二步：将临时文件重命名为目标名称
+                    for temp_name, new_name in temp_files.items():
+                        temp_path = os.path.join(alg_dir, temp_name)
+                        new_path = os.path.join(alg_dir, new_name)
+                        os.rename(temp_path, new_path)
+                        print(f"最终重命名: {temp_name} -> {new_name}")
+
+                    print("\n当前目录重排序完成!")
+
+            print(f"\n场景 {scene_name} 处理完成!")
+
+        print("\n所有数据重排序完成!")
 
 
 if __name__ == "__main__":
-    loader = SceneDataLoader()
-    # loader.visualize_point_cloud("cuboid_1", "task_1", show_normals=False)
-    data = loader.prepare_point_cloud_data("cuboid_1", "task_1", "BIRRT")
+    parser = argparse.ArgumentParser(description="数据集工具")
+    parser.add_argument(
+        "--mode",
+        type=str,
+        required=True,
+        choices=["check", "reorganize"],
+        help="工具模式: check(检查碰撞) 或 reorganize(重新排序)",
+    )
+
+    # 碰撞检查模式的参数
+    check_group = parser.add_argument_group("碰撞检查参数")
+    check_group.add_argument("--scene", type=str, help="场景名称")
+    check_group.add_argument("--task", type=str, help="任务名称")
+    check_group.add_argument("--algorithm", type=str, help="算法名称")
+    check_group.add_argument("--interpolation-steps", type=int, default=5000, help="插值步数")
+
+    args = parser.parse_args()
+
+    data_loader = SceneDataLoader()
+
+    if args.mode == "check":
+        # 检查必要参数
+        if not all([args.scene, args.task, args.algorithm]):
+            parser.error("碰撞检查模式需要指定 --scene, --task 和 --algorithm")
+
+        data_loader.check_trajectory_collisions(
+            scene_name=args.scene,
+            task_name=args.task,
+            algorithm_name=args.algorithm,
+            interpolation_steps=args.interpolation_steps,
+        )
+    else:  # reorganize mode
+        data_loader.reorganize_all_trajectories()

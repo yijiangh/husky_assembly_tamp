@@ -79,31 +79,136 @@ def save_scene_config(config: SceneParser, save_path: str):
 
 
 def randomize_robot_config(
-    config: Dict, joint_range: float, position_range: float, yaw_range: float, grasp_offset_range: float
+    config: SceneParser, 
+    rb: RobotSetup,
+    rb_shadow: RobotSetup,
+    grasped_element,
+    grasped_element_shadow,
+    element_bodies,
+    joint_range: float, 
+    position_range: float, 
+    yaw_range: float, 
+    grasp_offset_range: float,
+    max_attempts: int = 100
 ) -> Dict:
-    """随机化机器人配置"""
+    """随机化机器人配置并检查碰撞"""
     new_config = deepcopy(config)
-
-    # 随机化起始关节角
-    new_config.robot_info.start = [
-        angle + random.uniform(-joint_range, joint_range) for angle in config.robot_info.start
+    
+    # 为被抓握物体创建附着关系
+    grasp_offset = config.get_robot_grasp_offset()
+    
+    grasp_attachment = pp.create_attachment(rb.robot, rb.tool_link, grasped_element)
+    grasp_attachment_shadow = pp.create_attachment(rb_shadow.robot, rb_shadow.tool_link, grasped_element_shadow)
+    
+    # 创建碰撞检测函数 - 起始构型
+    extra_disabled_collisions = [
+        (
+            (rb.robot, pp.link_from_name(rb.robot, "ur_arm_wrist_3_link")),
+            (rb.ee_attachment.child, pp.BASE_LINK),
+        ),
+        (
+            (rb.ee_attachment.child, pp.BASE_LINK),
+            (grasp_attachment.child, pp.BASE_LINK),
+        ),
     ]
-
-    # 随机化目标关节角
-    new_config.robot_info.target = [
-        angle + random.uniform(-joint_range, joint_range) for angle in config.robot_info.target
+    
+    collision_fn_start = pp.get_collision_fn(
+        rb.robot,
+        rb.arm_joints,
+        obstacles=element_bodies,
+        attachments=[grasp_attachment, rb.ee_attachment] + rb.attachments,
+        self_collisions=True,
+        disabled_collisions=rb.disabled_collisions,
+        extra_disabled_collisions=extra_disabled_collisions,
+        max_distance=0.0,
+    )
+    
+    # 创建碰撞检测函数 - 终止构型
+    extra_disabled_collisions_shadow = [
+        (
+            (rb_shadow.robot, pp.link_from_name(rb_shadow.robot, "ur_arm_wrist_3_link")),
+            (rb_shadow.ee_attachment.child, pp.BASE_LINK),
+        ),
+        (
+            (rb_shadow.ee_attachment.child, pp.BASE_LINK),
+            (grasp_attachment_shadow.child, pp.BASE_LINK),
+        ),
     ]
-
-    # 随机化pose_2d
-    new_config.robot_info.pose_2d = [
-        val + random.uniform(-position_range, position_range) for val in config.robot_info.pose_2d
-    ]
-    new_config.robot_info.pose_2d[2] += random.uniform(-yaw_range, yaw_range)
-
-    # 随机化grasp_offset的y轴
-    new_config.robot_info.grasp_offset = config.robot_info.grasp_offset.copy()
-    new_config.robot_info.grasp_offset[1] += random.uniform(-grasp_offset_range, grasp_offset_range)
-
+    
+    collision_fn_target = pp.get_collision_fn(
+        rb_shadow.robot,
+        rb_shadow.arm_joints,
+        obstacles=element_bodies,
+        attachments=[grasp_attachment_shadow, rb_shadow.ee_attachment] + rb_shadow.attachments,
+        self_collisions=True,
+        disabled_collisions=rb_shadow.disabled_collisions,
+        extra_disabled_collisions=extra_disabled_collisions_shadow,
+        max_distance=0.0,
+    )
+    
+    # 尝试生成无碰撞配置
+    attempt = 0
+    found_valid_config = False
+    
+    while not found_valid_config and attempt < max_attempts:
+        attempt += 1
+        
+        # 随机化参数
+        new_start = [angle + random.uniform(-joint_range, joint_range) for angle in config.robot_info.start]
+        new_target = [angle + random.uniform(-joint_range, joint_range) for angle in config.robot_info.target]
+        new_pose_2d = [val + random.uniform(-position_range, position_range) for val in config.robot_info.pose_2d]
+        new_pose_2d[2] += random.uniform(-yaw_range, yaw_range)
+        new_grasp_offset = config.robot_info.grasp_offset.copy()
+        new_grasp_offset[1] += random.uniform(-grasp_offset_range, grasp_offset_range)
+        
+        # 设置配置并检查
+        rb.set_base_pose_2d(*new_pose_2d)
+        rb_shadow.set_base_pose_2d(*new_pose_2d)
+        
+        # 检查起始位置碰撞
+        rb.set_joint_positions(rb.arm_joints, new_start)
+        pp.set_pose(
+            grasped_element,
+            pp.multiply(
+                pp.get_link_pose(rb.robot, rb.tool_link),
+                pp.Pose(point=tuple(new_grasp_offset), euler=pp.Euler(1.5708, 0, 0)),
+            ),
+        )
+        grasp_attachment.assign()
+        
+        start_has_collision = collision_fn_start(new_start)
+        
+        # 检查目标位置碰撞
+        rb_shadow.set_joint_positions(rb_shadow.arm_joints, new_target)
+        pp.set_pose(
+            grasped_element_shadow,
+            pp.multiply(
+                pp.get_link_pose(rb_shadow.robot, rb_shadow.tool_link),
+                pp.Pose(point=tuple(new_grasp_offset), euler=pp.Euler(1.5708, 0, 0)),
+            ),
+        )
+        grasp_attachment_shadow.assign()
+        
+        target_has_collision = collision_fn_target(new_target)
+        
+        # 如果两个配置都没有碰撞，则采用这个配置
+        if not start_has_collision and not target_has_collision:
+            found_valid_config = True
+            new_config.robot_info.start = new_start
+            new_config.robot_info.target = new_target
+            new_config.robot_info.pose_2d = new_pose_2d
+            new_config.robot_info.grasp_offset = new_grasp_offset
+            print(f"找到无碰撞配置! 尝试次数: {attempt}")
+            break
+    
+    if not found_valid_config:
+        print(f"警告：未能找到无碰撞配置，使用最后一次尝试的配置。")
+        # 使用最后生成的配置（可能有碰撞）
+        new_config.robot_info.start = new_start
+        new_config.robot_info.target = new_target
+        new_config.robot_info.pose_2d = new_pose_2d
+        new_config.robot_info.grasp_offset = new_grasp_offset
+    
     return new_config
 
 
@@ -111,6 +216,7 @@ def main():
     parser = argparse.ArgumentParser(description="Scene Configuration Generator")
     parser.add_argument("--scene", type=str, default="cuboid_1", help="Scene name")
     parser.add_argument("--task", type=str, default="task_1", help="Task ID")
+    parser.add_argument("--max-attempts", type=int, default=100, help="最大尝试次数来寻找无碰撞配置")
     args = parser.parse_args()
 
     init_pb()
@@ -127,12 +233,14 @@ def main():
     pp.set_pose(
         rb.robot, pp.Pose(point=[robot_pose_2d[0], robot_pose_2d[1], 0], euler=pp.Euler(0, 0, robot_pose_2d[2]))
     )
+    rb.set_joint_positions(rb.arm_joints, scene_parser.get_robot_start_pose())
+    
     rb_shadow = RobotSetup("r0_shadow")
-    robot_pose_2d = scene_parser.get_robot_pose_2d()
     pp.set_pose(
         rb_shadow.robot, pp.Pose(point=[robot_pose_2d[0], robot_pose_2d[1], 0], euler=pp.Euler(0, 0, robot_pose_2d[2]))
     )
     pp.set_color(rb_shadow.robot, (0, 0, 1, 0.5))
+    rb_shadow.set_joint_positions(rb_shadow.arm_joints, scene_parser.get_robot_target_pose())
 
     line_pts_grasped = [np.array([0, 0, 0]), np.array([0, 0, 1])]
     grasped_element = create_collision_bodies(line_pts_grasped, [0.01], viewer=True)[0]
@@ -160,11 +268,14 @@ def main():
     grasp_offset_slider = p.addUserDebugParameter("Grasp Offset Y Range", 0.0, 0.2, 0.1)
     generate_button = p.addUserDebugParameter("Generate New Config", 1, 0, 0)
     save_button = p.addUserDebugParameter("Save Config", 1, 0, 0)
+    max_attempts_slider = p.addUserDebugParameter("Max Attempts", 10, 500, args.max_attempts)
 
     prev_generate_value = 0
     prev_save_value = 0
     current_config = deepcopy(scene_parser)
     base_config = deepcopy(scene_parser)
+    
+    pp.wait_for_user()
 
     while True:
         joint_range = p.readUserDebugParameter(joint_range_slider)
@@ -173,10 +284,12 @@ def main():
         grasp_offset_range = p.readUserDebugParameter(grasp_offset_slider)
         generate_value = p.readUserDebugParameter(generate_button)
         save_value = p.readUserDebugParameter(save_button)
+        max_attempts = int(p.readUserDebugParameter(max_attempts_slider))
 
         if generate_value > prev_generate_value:
             current_config = randomize_robot_config(
-                base_config, joint_range, position_range, yaw_range, grasp_offset_range
+                base_config, rb, rb_shadow, grasped_element, grasped_element_shadow, element_bodies,
+                joint_range, position_range, yaw_range, grasp_offset_range, max_attempts
             )
             print("New configuration generated")
 

@@ -167,7 +167,7 @@ class SceneParser:
         scene_name: str,
         task_name: str,
         algorithm_name: str,
-        plan_id: int,
+        plan_id: int = None,  # 修改为可选参数
         enable_spheres=True,
         enable_channels=True,
     ):
@@ -179,7 +179,7 @@ class SceneParser:
             scene_name: 场景名称
             task_name: 任务名称
             algorithm_name: 算法名称
-            plan_id: 轨迹编号
+            plan_id: 轨迹编号，如果为None则可视化所有轨迹
             enable_spheres: 是否显示球体近似
             enable_channels: 是否显示通道
         """
@@ -296,58 +296,82 @@ class SceneParser:
         # 添加轨迹复现功能
         data_dir = os.path.join(HERE, "model", "data")
         task_dir = os.path.join(data_dir, scene_name, task_name)
-        traj_file = os.path.join(task_dir, algorithm_name, f"plan_{plan_id}.npy")
+        alg_dir = os.path.join(task_dir, algorithm_name)
 
-        if os.path.exists(traj_file):
-            # 创建DataLoader实例
-            from model.data_loader import SceneDataLoader
+        if not os.path.exists(alg_dir):
+            print(f"\n未找到算法目录 {alg_dir}")
+            return
 
-            data_loader = SceneDataLoader()
+        # 获取所有轨迹文件
+        traj_files = sorted(glob.glob(os.path.join(alg_dir, "plan_*.npy")))
+        if not traj_files:
+            print(f"\n未找到任何轨迹数据")
+            return
 
-            # 加载轨迹数据并进行插值
-            trajectories = data_loader.load_trajectories(
-                scene_name=scene_name, task_name=task_name, algorithm_name=algorithm_name, target_length=5000
-            )
-
-            # 获取指定ID的轨迹
-            if plan_id < len(trajectories):
-                trajectory = trajectories[plan_id]
-            else:
-                print(f"轨迹ID {plan_id} 超出范围")
+        # 如果指定了plan_id，只处理该轨迹
+        if plan_id is not None:
+            traj_file = os.path.join(alg_dir, f"plan_{plan_id}.npy")
+            if not os.path.exists(traj_file):
+                print(f"\n未找到轨迹数据 {traj_file}")
                 return
+            traj_files = [traj_file]
+
+        # 创建DataLoader实例
+        from model.data_loader import SceneDataLoader
+        data_loader = SceneDataLoader()
+
+        # 加载轨迹数据并进行插值
+        trajectories = data_loader.load_trajectories(
+            scene_name=scene_name,
+            task_name=task_name,
+            algorithm_name=algorithm_name,
+            target_length=5000
+        )
+
+        # 获取机器人实例
+        from robot.robot_setup import RobotSetup
+        rb = RobotSetup("r0")
+        pp.set_pose(rb.robot, pp.Pose(point=(-0.5, 0.5, 0), euler=pp.Euler(0, 0, 0)))
+
+        # 创建被抓取的元素
+        line_pts_grasped = [np.array([0, 0, 0]), np.array([0, 0, 1])]
+        grasped_element = create_collision_bodies(line_pts_grasped, [0.01], viewer=True)[0]
+
+        # 设置被抓取元素的位姿并创建附着关系
+        pp.set_pose(
+            grasped_element,
+            pp.multiply(
+                pp.get_link_pose(rb.robot, rb.tool_link),
+                pp.Pose(point=(0, 0.1, 0.15), euler=pp.Euler(1.5708, 0, 0)),
+            ),
+        )
+        grasp_attachment = pp.create_attachment(rb.robot, rb.tool_link, grasped_element)
+        
+        pp.wait_for_user("按回车键开始回放...")
+
+        # 遍历所有需要可视化的轨迹
+        for i, traj_file in enumerate(traj_files):
+            current_plan_id = int(os.path.basename(traj_file).split('_')[1].split('.')[0])
+            
+            print("\n" + "="*50)
+            print(f"当前轨迹 ({i+1}/{len(traj_files)}):")
+            print(f"场景: {scene_name}")
+            print(f"任务: {task_name}")
+            print(f"算法: {algorithm_name}")
+            print(f"轨迹ID: {current_plan_id}")
+            print("="*50)
+
+            if current_plan_id >= len(trajectories):
+                print(f"轨迹ID {current_plan_id} 超出范围")
+                continue
+
+            trajectory = trajectories[current_plan_id]
 
             # 添加回放控制滑块
             p.removeAllUserParameters()
             replay_slider = p.addUserDebugParameter("replay", 0, 1, 0)
             continue_button = p.addUserDebugParameter("continue", 1, 0, 0)
             prev_continue_button_value = p.readUserDebugParameter(continue_button)
-
-            # 获取机器人实例
-            from robot.robot_setup import RobotSetup
-
-            rb = RobotSetup("r0")
-            pp.set_pose(rb.robot, pp.Pose(point=(-0.5, 0.5, 0), euler=pp.Euler(0, 0, 0)))
-
-            # 创建被抓取的元素
-            line_pts_grasped = [np.array([0, 0, 0]), np.array([0, 0, 1])]
-            grasped_element = create_collision_bodies(line_pts_grasped, [0.01], viewer=True)[0]
-
-            # 设置被抓取元素的位姿并创建附着关系
-            pp.set_pose(
-                grasped_element,
-                pp.multiply(
-                    pp.get_link_pose(rb.robot, rb.tool_link),
-                    pp.Pose(point=(0, 0.1, 0.15), euler=pp.Euler(1.5708, 0, 0)),
-                ),
-            )
-            grasp_attachment = pp.create_attachment(rb.robot, rb.tool_link, grasped_element)
-
-            pp.wait_for_user("按回车键继续...")
-
-            print(f"场景: {scene_name}")
-            print(f"任务: {task_name}")
-            print(f"算法: {algorithm_name}")
-            print(f"轨迹ID: {plan_id}")
 
             while True:
                 # 获取回放进度
@@ -358,25 +382,16 @@ class SceneParser:
                 idx = int(replay * (len(trajectory) - 1))
                 conf = trajectory[idx]
                 rb.set_joint_positions(rb.arm_joints, conf)
-
-                # 更新抓取的元素位置
                 grasp_attachment.assign()
 
                 time.sleep(1.0 / 240)
 
-                # 检查是否继续
+                # 检查是否继续下一个轨迹
                 if current_continue_button_value > prev_continue_button_value:
                     break
                 prev_continue_button_value = current_continue_button_value
-        else:
-            print(f"\n未找到轨迹数据 {traj_file}")
 
-        print(f"场景可视化完成: {len(element_bodies)} 个元素")
-        if hasattr(self.scene_data, "channels_info"):
-            print(f"通道数量: {len(self.scene_data.channels_info)}")
-
-        # 保持GUI运行
-        pp.wait_for_user("按回车键退出...")
+        print("\n所有轨迹回放完成!")
 
     def get_robot_start_pose(self) -> List[float]:
         """
@@ -572,7 +587,7 @@ if __name__ == "__main__":
     vis_group.add_argument("--scene", type=str, help="场景名称")
     vis_group.add_argument("--task", type=str, help="任务名称")
     vis_group.add_argument("--algorithm", type=str, help="算法名称")
-    vis_group.add_argument("--plan-id", type=int, help="轨迹编号")
+    vis_group.add_argument("--plan-id", type=int, help="轨迹编号，不指定则可视化所有轨迹")
     vis_group.add_argument("--enable-spheres", action="store_true", help="显示球体近似")
     vis_group.add_argument("--enable-channels", action="store_true", help="显示通道")
 
@@ -583,9 +598,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.mode == "visualize":
-        # 检查可视化所需的参数
-        if not all([args.scene, args.task, args.algorithm, args.plan_id is not None]):
-            parser.error("可视化模式需要指定 --scene, --task, --algorithm 和 --plan-id")
+        # 修改参数检查
+        if not all([args.scene, args.task, args.algorithm]):
+            parser.error("可视化模式需要指定 --scene, --task 和 --algorithm")
 
         # 构建场景文件路径
         scene_file = os.path.join(HERE, "model", "scenes", args.scene, f"{args.task}.yml")

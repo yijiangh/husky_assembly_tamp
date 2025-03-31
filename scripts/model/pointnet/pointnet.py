@@ -6,7 +6,7 @@ from .util import PointNetFeaturePropagation, PointNetSetAbstraction, PointNetSe
 
 
 class PointNet(nn.Module):
-    def __init__(self, num_classes, normal_channel=True):
+    def __init__(self, num_classes, global_feature_dim=1024, normal_channel=True):
         super(PointNet, self).__init__()
         if normal_channel:
             additional_channel = 3
@@ -20,9 +20,9 @@ class PointNet(nn.Module):
             128, [0.4, 0.8], [64, 128], 128 + 128 + 64, [[128, 128, 256], [128, 196, 256]]
         )
         self.sa3 = PointNetSetAbstraction(
-            npoint=None, radius=None, nsample=None, in_channel=512 + 3, mlp=[256, 512, 1024], group_all=True
+            npoint=None, radius=None, nsample=None, in_channel=512 + 3, mlp=[256, 512, global_feature_dim], group_all=True
         )
-        self.fp3 = PointNetFeaturePropagation(in_channel=(256 + 256) + 1024, mlp=[256, 256])
+        self.fp3 = PointNetFeaturePropagation(in_channel=(256 + 256) + global_feature_dim, mlp=[256, 256])
         self.fp2 = PointNetFeaturePropagation(in_channel=(64 + 128 + 128) + 256, mlp=[256, 128])
         self.fp1 = PointNetFeaturePropagation(in_channel=128 + 3 + additional_channel, mlp=[128, 128])
         self.conv1 = nn.Conv1d(128, 128, 1)

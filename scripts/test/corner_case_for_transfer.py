@@ -109,11 +109,11 @@ if __name__ == "__main__":
     radius_per_edge = [0.01] * int(len(line_pts_flattened) / 2)
     element_bodies = create_collision_bodies(line_pts_flattened, radius_per_edge, viewer=True)
 
-    for body in element_bodies:
-        print(f"body: {body}, pose: {pp.get_pose(body)}")
+    # for body in element_bodies:
+    #     print(f"body: {body}, pose: {pp.get_pose(body)}")
 
-    pp.wait_for_user("Press Enter to exit...")
-    exit()
+    # pp.wait_for_user("Press Enter to exit...")
+    # exit()
 
     rb = RobotSetup("r0")
     pp.set_pose(rb.robot, pp.Pose(point=(-0.5, 0.5, 0), euler=pp.Euler(0, 0, 0)))

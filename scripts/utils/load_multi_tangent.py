@@ -9,4 +9,4 @@ sys.path.append(multi_tangent_path)
 
 import multi_tangent
 
-cprint("Using FrameX multi_tangent from {}".format(os.path.dirname(multi_tangent.__file__)), 'yellow')
+# cprint("Using FrameX multi_tangent from {}".format(os.path.dirname(multi_tangent.__file__)), 'yellow')

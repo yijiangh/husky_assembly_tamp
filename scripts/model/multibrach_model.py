@@ -1,13 +1,11 @@
 import math
 
 import numpy as np
+import pysdtw
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from fastdtw import fastdtw
 from model.pointnet.pointnet import PointNet
-from model.soft_dtw_cuda import SoftDTW
-from scipy.spatial.distance import euclidean
 
 
 class PositionalEncoding(nn.Module):
@@ -366,27 +364,6 @@ class MultiPathTrajectoryNetwork(nn.Module):
         # 解码轨迹
         trajectory = self.decoder(fused_features)
         
-        # # 添加合法性约束 - 确保轨迹从起始位置到目标位置
-        # batch_size = trajectory.size(0)
-        # seq_len = trajectory.size(1)
-        
-        # # 根据轨迹位置为轨迹的起点和终点添加约束
-        # # 使用指数平滑权重函数，使轨迹起点更接近起始位置，终点更接近目标位置
-        # start_weights = torch.exp(-torch.arange(seq_len, device=trajectory.device) / (seq_len / 10))
-        # end_weights = torch.exp(-(seq_len - 1 - torch.arange(seq_len, device=trajectory.device)) / (seq_len / 10))
-        
-        # # 调整起点
-        # for i in range(batch_size):
-        #     for j in range(seq_len):
-        #         # 起点部分逐渐过渡到原始预测
-        #         if j < seq_len // 10:  # 前10%的轨迹点
-        #             trajectory[i, j] = start_joints[i] * start_weights[j] + trajectory[i, j] * (1 - start_weights[j])
-                
-        #         # 终点部分逐渐过渡到目标位置
-        #         if j > seq_len * 9 // 10:  # 后10%的轨迹点
-        #             idx = j - seq_len * 9 // 10
-        #             trajectory[i, j] = target_joints[i] * end_weights[idx] + trajectory[i, j] * (1 - end_weights[idx])
-        
         return trajectory
 
 
@@ -407,7 +384,8 @@ class HybridTrajectoryLoss(nn.Module):
             alpha_l2: L2损失权重
         """
         super(HybridTrajectoryLoss, self).__init__()
-        self.sdtw = SoftDTW(use_cuda=use_cuda, gamma=gamma)
+        self.fun = pysdtw.distance.pairwise_l2_squared
+        self.sdtw = pysdtw.SoftDTW(gamma=gamma, dist_func=self.fun, use_cuda=use_cuda)
         self.alpha_dtw = alpha_dtw
         self.alpha_l1 = alpha_l1
         self.alpha_l2 = alpha_l2

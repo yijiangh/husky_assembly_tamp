@@ -15,16 +15,35 @@ import torch.optim as optim
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
-from rich.progress import (BarColumn, Progress, SpinnerColumn, TextColumn,
-                           TimeElapsedColumn, TimeRemainingColumn)
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 from torch.utils.data import DataLoader, random_split
 
 HERE = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(HERE)
 
 from model.data_loader import SceneDataLoader
-from model.multibrach_model import (HybridTrajectoryLoss,
-                                    MultiPathTrajectoryNetwork)
+from model.multibrach_model import HybridTrajectoryLoss, MultiPathTrajectoryNetwork
+
+
+def get_gpu_with_least_memory():
+    """获取显存占用最低的GPU"""
+    if not torch.cuda.is_available():
+        return None
+    
+    # 获取所有可用的GPU数量
+    num_gpus = torch.cuda.device_count()
+    if num_gpus == 0:
+        return None
+    
+    # 获取每个GPU的显存使用情况
+    memory_usage = []
+    for i in range(num_gpus):
+        memory_allocated = torch.cuda.memory_allocated(i)
+        memory_usage.append((i, memory_allocated))
+    
+    # 按显存使用量排序，选择显存占用最低的GPU
+    memory_usage.sort(key=lambda x: x[1])
+    return memory_usage[0][0]
 
 
 def set_seed(seed=42):
@@ -174,8 +193,18 @@ def train_two_stage(args):
     set_seed(args.seed)
 
     # 确定设备
-    device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
-    print(f"Using device: {device}")
+    if args.no_cuda or not torch.cuda.is_available():
+        device = torch.device("cpu")
+        print("Using CPU for training")
+    else:
+        # 获取显存占用最低的GPU
+        best_gpu = get_gpu_with_least_memory()
+        if best_gpu is not None:
+            device = torch.device(f"cuda:{best_gpu}")
+            print(f"Using GPU {best_gpu} for training (least memory usage)")
+        else:
+            device = torch.device("cpu")
+            print("No GPU available, using CPU for training")
 
     # 创建结果目录
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -231,7 +260,7 @@ def train_two_stage(args):
 
     val_size = int(dataset_size * args.val_ratio)
     train_size = dataset_size - val_size
-    
+
     # Ensure validation set is not empty if dataset is small
     if val_size == 0 and train_size > 0:
         val_size = 1
@@ -239,8 +268,8 @@ def train_two_stage(args):
         warnings.warn("Validation set size was 0, adjusted to 1.")
 
     if train_size <= 0:
-         print(f"Error: Training set size is {train_size}. Not enough data. Exiting.")
-         sys.exit(1)
+        print(f"Error: Training set size is {train_size}. Not enough data. Exiting.")
+        sys.exit(1)
 
     train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 
@@ -369,7 +398,7 @@ def train_two_stage(args):
         stage1_scheduler.step(val_loss)
 
         # 记录到日志文件
-        current_lr_stage1 = stage1_optimizer.param_groups[0]['lr']
+        current_lr_stage1 = stage1_optimizer.param_groups[0]["lr"]
         log_message(
             f"Stage 1 - Epoch {epoch+1}/{stage1_epochs} - "
             f"Train Loss: {train_loss:.6f}, Val Loss: {val_loss:.6f}, "
@@ -423,7 +452,9 @@ def train_two_stage(args):
     if os.path.exists(os.path.join(result_dir, "stage1_best_model.pth")):
         checkpoint = torch.load(os.path.join(result_dir, "stage1_best_model.pth"))
         model.load_state_dict(checkpoint["model_state_dict"])
-        print(f"Loaded best Stage 1 model (Epoch {checkpoint['epoch']}, Val Loss: {checkpoint['val_loss']:.6f}) for Stage 2 training.")
+        print(
+            f"Loaded best Stage 1 model (Epoch {checkpoint['epoch']}, Val Loss: {checkpoint['val_loss']:.6f}) for Stage 2 training."
+        )
         log_message(f"Loaded best Stage 1 model (Epoch {checkpoint['epoch']}, Val Loss: {checkpoint['val_loss']:.6f})")
     else:
         print("Warning: Best Stage 1 model checkpoint not found. Proceeding with the current model state for Stage 2.")
@@ -437,19 +468,16 @@ def train_two_stage(args):
     model.traj_branch.dropout.p = args.dropout
     if hasattr(model.decoder, "dropout"):
         model.decoder.dropout.p = args.dropout
-    if hasattr(model.fusion_layer, '2') and isinstance(model.fusion_layer[2], nn.Dropout):
-         model.fusion_layer[2].p = args.dropout
+    if hasattr(model.fusion_layer, "2") and isinstance(model.fusion_layer[2], nn.Dropout):
+        model.fusion_layer[2].p = args.dropout
 
     # 第二阶段使用混合损失函数，加强DTW权重
     stage2_criterion = HybridTrajectoryLoss(
-        gamma=0.1, alpha_dtw=1.5, alpha_l1=0.3, alpha_l2=0.1,
-        use_cuda= (device.type == 'cuda')
+        gamma=0.1, alpha_dtw=1.5, alpha_l1=0.3, alpha_l2=0.1, use_cuda=(device.type == "cuda")
     ).to(device)
 
     # 第二阶段优化器
-    stage2_optimizer = optim.AdamW(
-        model.parameters(), lr=args.lr * 0.5, weight_decay=args.weight_decay, amsgrad=True
-    )
+    stage2_optimizer = optim.AdamW(model.parameters(), lr=args.lr * 0.5, weight_decay=args.weight_decay, amsgrad=True)
 
     # 使用余弦退火学习率调度
     stage2_scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(stage2_optimizer, T_0=10, T_mult=2, eta_min=1e-6)
@@ -538,9 +566,21 @@ def train_two_stage(args):
     if stage1_train_losses or stage2_train_losses:
         plt.figure(figsize=(12, 6))
         if stage1_train_losses:
-            plt.plot(range(1, len(stage1_train_losses) + 1), stage1_train_losses, label="Stage 1 - Train Loss", color="blue", linestyle="-")
-            plt.plot(range(1, len(stage1_val_losses) + 1), stage1_val_losses, label="Stage 1 - Val Loss", color="blue", linestyle="--")
-            plt.axvline(x=len(stage1_train_losses), color="black", linestyle=":", alpha=0.7, label='Stage Transition')
+            plt.plot(
+                range(1, len(stage1_train_losses) + 1),
+                stage1_train_losses,
+                label="Stage 1 - Train Loss",
+                color="blue",
+                linestyle="-",
+            )
+            plt.plot(
+                range(1, len(stage1_val_losses) + 1),
+                stage1_val_losses,
+                label="Stage 1 - Val Loss",
+                color="blue",
+                linestyle="--",
+            )
+            plt.axvline(x=len(stage1_train_losses), color="black", linestyle=":", alpha=0.7, label="Stage Transition")
 
         if stage2_train_losses:
             x_offset = len(stage1_train_losses)
@@ -563,34 +603,41 @@ def train_two_stage(args):
     selected_stage = "None"
 
     # Handle cases where one or both stages didn't save a model
-    stage1_exists = os.path.exists(stage1_best_path) # Define before use
-    stage2_exists = os.path.exists(stage2_best_path) # Define before use
+    stage1_exists = os.path.exists(stage1_best_path)  # Define before use
+    stage2_exists = os.path.exists(stage2_best_path)  # Define before use
 
     import shutil
+
     if stage1_exists and stage2_exists:
         if best_stage1_val_loss < best_stage2_val_loss:
-            log_message(f"Stage 1 model performed better (Loss: {best_stage1_val_loss:.6f} vs {best_stage2_val_loss:.6f}). Copying as final model.")
+            log_message(
+                f"Stage 1 model performed better (Loss: {best_stage1_val_loss:.6f} vs {best_stage2_val_loss:.6f}). Copying as final model."
+            )
             shutil.copy(stage1_best_path, final_best_model_path)
             selected_stage = "Stage 1"
         else:
-            log_message(f"Stage 2 model performed better (Loss: {best_stage2_val_loss:.6f} vs {best_stage1_val_loss:.6f}). Copying as final model.")
+            log_message(
+                f"Stage 2 model performed better (Loss: {best_stage2_val_loss:.6f} vs {best_stage1_val_loss:.6f}). Copying as final model."
+            )
             shutil.copy(stage2_best_path, final_best_model_path)
             selected_stage = "Stage 2"
     elif stage1_exists:
-         log_message(f"Only Stage 1 model available (Loss: {best_stage1_val_loss:.6f}). Copying as final model.")
-         shutil.copy(stage1_best_path, final_best_model_path)
-         selected_stage = "Stage 1"
+        log_message(f"Only Stage 1 model available (Loss: {best_stage1_val_loss:.6f}). Copying as final model.")
+        shutil.copy(stage1_best_path, final_best_model_path)
+        selected_stage = "Stage 1"
     elif stage2_exists:
-         log_message(f"Only Stage 2 model available (Loss: {best_stage2_val_loss:.6f}). Copying as final model.")
-         shutil.copy(stage2_best_path, final_best_model_path)
-         selected_stage = "Stage 2"
+        log_message(f"Only Stage 2 model available (Loss: {best_stage2_val_loss:.6f}). Copying as final model.")
+        shutil.copy(stage2_best_path, final_best_model_path)
+        selected_stage = "Stage 2"
     else:
-         log_message("No best models saved from either stage. Saving the final state of the model.")
-         torch.save({
-             'model_state_dict': model.state_dict(),
-         }, final_best_model_path)
-         selected_stage = "Final State (No Best Checkpoint)"
-
+        log_message("No best models saved from either stage. Saving the final state of the model.")
+        torch.save(
+            {
+                "model_state_dict": model.state_dict(),
+            },
+            final_best_model_path,
+        )
+        selected_stage = "Final State (No Best Checkpoint)"
 
     # 记录最终结果
     log_message("\n====== Training Finished ======")
@@ -638,47 +685,104 @@ if __name__ == "__main__":
 
     # Data related arguments
     parser.add_argument("--scenes", type=str, nargs="+", default=["cuboid_1"], help="Scene names to load data from.")
-    parser.add_argument("--num-points", type=int, default=1024, help="Number of points per element in the environment point cloud.")
-    parser.add_argument("--num-grasp-points", type=int, default=256, help="Number of points for the grasped object point cloud.")
-    parser.add_argument("--trajectory-length", type=int, default=2048, help="Target length for input/output trajectory sequences after interpolation.")
-    parser.add_argument("--output-seq-len", type=int, default=2048, help="Length of the trajectory sequence generated by the decoder.")
-    parser.add_argument("--val-ratio", type=float, default=0.1, help="Ratio of the dataset to use for validation (e.g., 0.1 for 10%).")
-    parser.add_argument("--no-normal-channel", action="store_false", dest="normal_channel", help="Disable using normal vectors in point clouds.")
+    parser.add_argument(
+        "--num-points", type=int, default=1024, help="Number of points per element in the environment point cloud."
+    )
+    parser.add_argument(
+        "--num-grasp-points", type=int, default=256, help="Number of points for the grasped object point cloud."
+    )
+    parser.add_argument(
+        "--trajectory-length",
+        type=int,
+        default=2048,
+        help="Target length for input/output trajectory sequences after interpolation.",
+    )
+    parser.add_argument(
+        "--output-seq-len", type=int, default=2048, help="Length of the trajectory sequence generated by the decoder."
+    )
+    parser.add_argument(
+        "--val-ratio", type=float, default=0.1, help="Ratio of the dataset to use for validation (e.g., 0.1 for 10%)."
+    )
+    parser.add_argument(
+        "--no-normal-channel",
+        action="store_false",
+        dest="normal_channel",
+        help="Disable using normal vectors in point clouds.",
+    )
     parser.set_defaults(normal_channel=True)
-    parser.add_argument("--add-noise", action="store_false", help="Add random noise to point cloud during data loading.")
-    parser.add_argument("--noise-ratio", type=float, default=0.05, help="Ratio of points to add noise to if --add-noise is used.")
-    parser.add_argument("--noise-scale", type=float, default=0.01, help="Scale (standard deviation) of the noise if --add-noise is used.")
+    parser.add_argument(
+        "--add-noise", action="store_false", help="Add random noise to point cloud during data loading."
+    )
+    parser.add_argument(
+        "--noise-ratio", type=float, default=0.05, help="Ratio of points to add noise to if --add-noise is used."
+    )
+    parser.add_argument(
+        "--noise-scale",
+        type=float,
+        default=0.01,
+        help="Scale (standard deviation) of the noise if --add-noise is used.",
+    )
 
     # Model related arguments
-    parser.add_argument("--object-feature-dim", type=int, default=512, help="Feature dimension from the object branch (PointNet).")
-    parser.add_argument("--env-feature-dim", type=int, default=512, help="Feature dimension from the environment branch (PointNet).")
-    parser.add_argument("--task-feature-dim", type=int, default=512, help="Feature dimension from the task branch (MLP).")
-    parser.add_argument("--traj-feature-dim", type=int, default=512, help="Feature dimension from the trajectory branch (Transformer/LSTM).")
+    parser.add_argument(
+        "--object-feature-dim", type=int, default=512, help="Feature dimension from the object branch (PointNet)."
+    )
+    parser.add_argument(
+        "--env-feature-dim", type=int, default=512, help="Feature dimension from the environment branch (PointNet)."
+    )
+    parser.add_argument(
+        "--task-feature-dim", type=int, default=512, help="Feature dimension from the task branch (MLP)."
+    )
+    parser.add_argument(
+        "--traj-feature-dim",
+        type=int,
+        default=512,
+        help="Feature dimension from the trajectory branch (Transformer/LSTM).",
+    )
     parser.add_argument("--fusion-dim", type=int, default=1024, help="Output dimension of the feature fusion layer.")
-    parser.add_argument("--use-lstm", action="store_true", help="Use LSTM instead of Transformer in the trajectory branch (potentially saves memory).")
-    parser.add_argument("--dropout", type=float, default=0.5, help="Dropout rate for regularization in various model parts.")
-
+    parser.add_argument(
+        "--use-lstm",
+        action="store_true",
+        help="Use LSTM instead of Transformer in the trajectory branch (potentially saves memory).",
+    )
+    parser.add_argument(
+        "--dropout", type=float, default=0.5, help="Dropout rate for regularization in various model parts."
+    )
 
     # Training related arguments
     parser.add_argument("--batch-size", type=int, default=4, help="Batch size for training and validation.")
     parser.add_argument("--epochs", type=int, default=120, help="Total number of training epochs across both stages.")
     parser.add_argument("--lr", type=float, default=1e-4, help="Base learning rate.")
     parser.add_argument("--weight-decay", type=float, default=1e-5, help="Weight decay for optimizer.")
-    parser.add_argument("--output-dir", type=str, default="./results", help="Directory to save training results (logs, models, plots).")
+    parser.add_argument(
+        "--output-dir", type=str, default="./results", help="Directory to save training results (logs, models, plots)."
+    )
     parser.add_argument("--num-workers", type=int, default=4, help="Number of parallel workers for data loading.")
     parser.add_argument("--seed", type=int, default=531, help="Random seed for reproducibility.")
     parser.add_argument("--no-cuda", action="store_true", help="Disable CUDA, force use of CPU.")
 
     # Staged training arguments
     parser.add_argument("--two-stage", action="store_false", help="Enable two-stage training strategy.")
-    parser.add_argument("--stage1-epochs", type=int, default=0, help="Number of epochs for Stage 1. If 0, defaults to 1/3 of total epochs.")
-    parser.add_argument("--stage2-epochs", type=int, default=0, help="Number of epochs for Stage 2. If 0, defaults to remaining epochs after Stage 1.")
+    parser.add_argument(
+        "--stage1-epochs",
+        type=int,
+        default=0,
+        help="Number of epochs for Stage 1. If 0, defaults to 1/3 of total epochs.",
+    )
+    parser.add_argument(
+        "--stage2-epochs",
+        type=int,
+        default=0,
+        help="Number of epochs for Stage 2. If 0, defaults to remaining epochs after Stage 1.",
+    )
 
     args = parser.parse_args()
 
     # Ensure output sequence length matches trajectory length if not specified otherwise
     if args.output_seq_len != args.trajectory_length:
-         warnings.warn(f"Output sequence length ({args.output_seq_len}) differs from trajectory length ({args.trajectory_length}). Ensure this is intended.")
+        warnings.warn(
+            f"Output sequence length ({args.output_seq_len}) differs from trajectory length ({args.trajectory_length}). Ensure this is intended."
+        )
 
     if args.two_stage:
         train_two_stage(args)

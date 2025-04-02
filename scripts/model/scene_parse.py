@@ -113,7 +113,7 @@ class SceneParser:
 
         # Calculate rotated direction vector
         base_direction = np.array([0, 0, 1])  # Default cylinder axis
-        rotation_matrix = self._quaternion_to_rotation_matrix(orientation)
+        rotation_matrix = SceneParser.quaternion_to_rotation_matrix(orientation)
         direction = rotation_matrix @ base_direction
         direction = direction / np.linalg.norm(direction)  # Normalize direction vector
 
@@ -130,6 +130,32 @@ class SceneParser:
             spheres.append({"id": f"{element.id}_sphere_{i+1}", "position": position.tolist(), "radius": sphere_radius})
         return spheres
 
+    @staticmethod
+    def approximate_cylinder(element_body: int, count: int = 100) -> List[Dict]:
+        """
+        Approximate a sphere with a series of spheres along its axis.
+        """
+        # 获取圆柱体的中心点和方向
+        center = pp.get_pose(element_body)[0]
+        orientation = pp.get_pose(element_body)[1]
+        base_direction = np.array([0, 0, 1])
+        rotation_matrix = SceneParser.quaternion_to_rotation_matrix(orientation)
+        direction = rotation_matrix @ base_direction
+        direction = direction / np.linalg.norm(direction)  # Normalize direction vector
+        radius = 0.01
+        height = 1.0
+
+        half_height = height / 2
+        start = center - direction * half_height
+        end = center + direction * half_height
+
+        spheres = []
+        for i in range(count):
+            t = i / (count - 1) if count > 1 else 0.5
+            position = (1 - t) * start + t * end
+            spheres.append({"name": f"{element_body}_sphere_{i+1}", "position": position.tolist(), "radius": radius})
+        return spheres
+
     def _approximate_cuboid(self, element: SimpleNamespace) -> List[Dict]:
         """
         Approximate a cuboid with spheres (placeholder method).
@@ -143,7 +169,8 @@ class SceneParser:
         # Placeholder for cuboid approximation
         return []
 
-    def _quaternion_to_rotation_matrix(self, q: List[float]) -> np.ndarray:
+    @staticmethod
+    def quaternion_to_rotation_matrix(q: List[float]) -> np.ndarray:
         """
         Convert a quaternion to a 3x3 rotation matrix.
 
@@ -201,7 +228,7 @@ class SceneParser:
 
                 # Calculate rotated direction vector
                 base_direction = np.array([0, 0, 1])  # Default cylinder axis
-                rotation_matrix = self._quaternion_to_rotation_matrix(orientation)
+                rotation_matrix = SceneParser.quaternion_to_rotation_matrix(orientation)
                 direction = rotation_matrix @ base_direction
                 direction = direction / np.linalg.norm(direction)  # Normalize direction vector
 
@@ -223,9 +250,7 @@ class SceneParser:
             sphere_bodies = []
             with pp.LockRenderer():
                 for sphere in self.approximate_elements_with_spheres():
-                    sphere_body = pp.create_sphere(
-                        radius=sphere["radius"], color=(0, 1, 0, 0.5)
-                    )  # Green semi-transparent
+                    sphere_body = pp.create_sphere(radius=sphere["radius"], color=(0, 1, 0, 0.5))  # Green semi-transparent
                     pp.set_pose(sphere_body, pp.Pose(point=sphere["position"]))
                     sphere_bodies.append(sphere_body)
 
@@ -288,9 +313,7 @@ class SceneParser:
                         channel_bodies.append(cylinder_body)
 
                         # Create channel direction indicator line
-                        line_body = pp.add_line(
-                            channel_center, channel_center + channel_dir * 0.25, color=(0, 1, 1, 1), width=4
-                        )
+                        line_body = pp.add_line(channel_center, channel_center + channel_dir * 0.25, color=(0, 1, 1, 1), width=4)
                         channel_bodies.append(line_body)
 
         # 添加轨迹复现功能
@@ -318,18 +341,15 @@ class SceneParser:
 
         # 创建DataLoader实例
         from model.data_loader import SceneDataLoader
+
         data_loader = SceneDataLoader()
 
         # 加载轨迹数据并进行插值
-        trajectories = data_loader.load_trajectories(
-            scene_name=scene_name,
-            task_name=task_name,
-            algorithm_name=algorithm_name,
-            target_length=5000
-        )
+        trajectories = data_loader.load_trajectories(scene_name=scene_name, task_name=task_name, algorithm_name=algorithm_name, target_length=5000)
 
         # 获取机器人实例
         from robot.robot_setup import RobotSetup
+
         rb = RobotSetup("r0")
         pp.set_pose(rb.robot, pp.Pose(point=(-0.5, 0.5, 0), euler=pp.Euler(0, 0, 0)))
 
@@ -346,20 +366,20 @@ class SceneParser:
             ),
         )
         grasp_attachment = pp.create_attachment(rb.robot, rb.tool_link, grasped_element)
-        
+
         pp.wait_for_user("按回车键开始回放...")
 
         # 遍历所有需要可视化的轨迹
         for i, traj_file in enumerate(traj_files):
-            current_plan_id = int(os.path.basename(traj_file).split('_')[1].split('.')[0])
-            
-            print("\n" + "="*50)
+            current_plan_id = int(os.path.basename(traj_file).split("_")[1].split(".")[0])
+
+            print("\n" + "=" * 50)
             print(f"当前轨迹 ({i+1}/{len(traj_files)}):")
             print(f"场景: {scene_name}")
             print(f"任务: {task_name}")
             print(f"算法: {algorithm_name}")
             print(f"轨迹ID: {current_plan_id}")
-            print("="*50)
+            print("=" * 50)
 
             if current_plan_id >= len(trajectories):
                 print(f"轨迹ID {current_plan_id} 超出范围")
@@ -471,7 +491,7 @@ class SceneParser:
 
                 # Calculate rotated direction vector
                 base_direction = np.array([0, 0, 1])  # Default cylinder axis
-                rotation_matrix = self._quaternion_to_rotation_matrix(orientation)
+                rotation_matrix = SceneParser.quaternion_to_rotation_matrix(orientation)
                 direction = rotation_matrix @ base_direction
                 direction = direction / np.linalg.norm(direction)  # Normalize direction vector
 
@@ -565,6 +585,7 @@ def reorganize_tasks(scene_name: str):
             # 如果新目录已存在，先删除
             if os.path.exists(new_dir):
                 import shutil
+
                 shutil.rmtree(new_dir)
             # 重命名目录
             os.rename(old_dir, new_dir)

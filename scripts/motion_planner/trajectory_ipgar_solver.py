@@ -28,59 +28,12 @@ from utils.collision import element_collision_info, init_pb
 from utils.params import URDF_PATH
 
 
-@dataclass
-class Node:
-    """RRT tree node"""
-
-    state: np.ndarray  # Joint angle state
-    parent: Optional["Node"] = None  # Parent node
-    cost: float = 0.0  # Cost from root to current node
-
-
-class RRTree:
-    """RRT tree data structure"""
-
-    def __init__(self, root_state: np.ndarray):
-        self.root = Node(root_state)
-        self.nodes = [self.root]
-
-    def add_node(self, state: np.ndarray, parent: Node, cost: float = 0.0) -> Node:
-        """Add new node to tree"""
-        node = Node(state, parent, cost)
-        self.nodes.append(node)
-        return node
-
-    def get_nearest_node(self, state: np.ndarray) -> Tuple[Node, float]:
-        """Find nearest node to given state"""
-        min_dist = float("inf")
-        nearest = None
-
-        for node in self.nodes:
-            dist = np.linalg.norm(node.state - state)
-            if dist < min_dist:
-                min_dist = dist
-                nearest = node
-
-        return nearest, min_dist
-
-    def get_path_to_root(self, node: Node) -> List[np.ndarray]:
-        """Get path from node to root"""
-        path = []
-        current = node
-        while current is not None:
-            path.append(current.state)
-            current = current.parent
-        return list(reversed(path))
-
-
 class TrajectoryIPGARSolver:
-    def __init__(self, urdf_path: str, robot_setup: RobotSetup, grasp_offset: List[float], extend_method_name: str = "default", tensor_args: Optional[Dict] = None, logger_level: str = "error") -> None:
+    def __init__(self, urdf_path: str, robot_setup: RobotSetup, grasp_offset: List[float]) -> None:
         """Initialize IPGAR trajectory planner with custom BIRRT as base planner"""
         self.urdf_path = urdf_path
         self.robot_setup = robot_setup
         self.grasp_offset = grasp_offset
-        self.tensor_args = tensor_args
-        self.logger_level = logger_level
 
         # BIRRT parameters
         self.step_size = 0.05  # Extension step size
@@ -99,120 +52,6 @@ class TrajectoryIPGARSolver:
         self.sdf = ca.Function("sdf", [self.p_sym, self.q_sym, self.x_sym], [sdf_sym, sdf_grad])
 
         self.sdf_threshold = 0.01
-
-        # Select extension function based on name
-        if extend_method_name == "default":
-            self.extend_fn = self._extend_tree_default
-        else:
-            raise ValueError(f"Unknown extension method: {extend_method_name}")
-
-    def _extend_tree_default(self, tree: RRTree, target_state: np.ndarray, collision_fn: Callable[[np.ndarray], bool]) -> Optional[Node]:
-        """Default RRT tree extension function"""
-        # Sample random state or bias towards goal
-        if random.random() < self.goal_bias:
-            sample = target_state
-        else:
-            sample = np.random.uniform(-np.pi, np.pi, 6)
-
-        # Find nearest node
-        nearest, _ = tree.get_nearest_node(sample)
-
-        # Calculate extension direction
-        direction = sample - nearest.state
-        distance = np.linalg.norm(direction)
-
-        if distance > self.step_size:
-            direction = direction / distance * self.step_size
-            new_state = nearest.state + direction
-        else:
-            new_state = sample
-
-        # Check if new state is valid
-        if not collision_fn(new_state):
-            for t in np.linspace(0, 1, 5)[1:]:
-                intermediate_state = nearest.state + t * (new_state - nearest.state)
-                if collision_fn(intermediate_state):
-                    return None
-            return tree.add_node(new_state, nearest)
-        return None
-
-    def _extend_tree(self, tree: RRTree, target_state: np.ndarray, collision_fn: Callable[[np.ndarray], bool], active_obstacles: List[Dict], original_path_segment: np.ndarray, pose_2d: np.ndarray) -> Optional[Node]:
-        """RRT tree extension with obstacle repulsion"""
-        # Sample random state or bias towards goal
-        if random.random() < self.goal_bias:
-            q_rand = target_state
-        else:
-            q_rand = np.random.uniform(-np.pi, np.pi, 6)
-
-        # Find nearest node
-        q_near_node, _ = tree.get_nearest_node(q_rand)
-        q_near = q_near_node.state
-
-        # 计算所有障碍物的合力
-        v_repulsion_total = np.zeros(6)
-        min_sdf_val = float("inf")
-        rep_decay_rate = 10.0
-
-        if active_obstacles:
-            for obs_sphere in active_obstacles:
-                obs_pos = np.array(obs_sphere["position"])
-                current_sdf_val_ca, current_sdf_grad_ca = self.sdf(pose_2d, q_near, obs_pos)
-                current_sdf_val = current_sdf_val_ca.toarray().item()
-                current_grad = current_sdf_grad_ca.toarray().flatten()
-
-                # 更新最小SDF值（用于自适应步长）
-                if current_sdf_val < min_sdf_val:
-                    min_sdf_val = current_sdf_val
-
-                if np.linalg.norm(current_grad) > 1e-6:
-                    # 归一化梯度
-                    grad_norm = current_grad / np.linalg.norm(current_grad)
-
-                    # 根据SDF值计算排斥权重
-                    w_rep = np.exp(-rep_decay_rate * max(0, current_sdf_val))
-
-                    # 累加排斥力
-                    v_repulsion_total += w_rep * grad_norm
-
-            # 如果有非零排斥力，归一化合力
-            if np.linalg.norm(v_repulsion_total) > 1e-6:
-                v_repulsion_total = v_repulsion_total / np.linalg.norm(v_repulsion_total)
-
-            if min_sdf_val > self.sdf_threshold:
-                min_sdf_val = self.sdf_threshold
-        else:
-            min_sdf_val = self.sdf_threshold
-
-        # Calculate standard exploration direction
-        v_standard_raw = q_rand - q_near
-        dist_standard = np.linalg.norm(v_standard_raw)
-        if dist_standard > 1e-6:
-            v_standard = v_standard_raw / dist_standard
-        else:
-            v_standard = np.zeros(6)
-
-        w_std = 1.0
-        w_rep = 0.1
-
-        # Combine final extension direction
-        v_final_raw = w_std * v_standard + w_rep * v_repulsion_total
-        norm_final = np.linalg.norm(v_final_raw)
-
-        v_final = v_final_raw / norm_final
-
-        # Generate new configuration
-        q_new = q_near + v_final * self.step_size
-        # q_new = np.clip(q_new, -np.pi, np.pi)
-
-        # Check state validity
-        if not collision_fn(q_new):
-            for t in np.linspace(0, 1, 5)[1:]:
-                intermediate_state = q_near + t * (q_new - q_near)
-                if collision_fn(intermediate_state):
-                    return None
-            return tree.add_node(q_new, q_near_node)
-
-        return None
 
     def _create_collision_fn(self, obstacle_bodies: List[int]) -> Callable[[np.ndarray], bool]:
         """Create PyBullet-based collision function"""
@@ -289,75 +128,7 @@ class TrajectoryIPGARSolver:
 
         return np.array(interpolated)
 
-    def birrt_plan(
-        self, q_init: np.ndarray, q_target: np.ndarray, max_time: int, collision_fn: Callable[[np.ndarray], bool], extend_fn: Callable[[RRTree, np.ndarray, Callable[[np.ndarray], bool]], Optional[Node]], interpolate: bool = True
-    ) -> Dict:
-        """Plan path using BIRRT algorithm"""
-        forward_tree = RRTree(q_init)
-        backward_tree = RRTree(q_target)
-
-        start_time = time.time()
-        for _ in range(self.max_iterations):
-            if time.time() - start_time > max_time:
-                return {"success": False, "path": None}
-
-            # Extend forward tree
-            new_node = extend_fn(forward_tree, q_target, collision_fn)
-
-            if new_node is not None:
-                nearest_backward, dist = backward_tree.get_nearest_node(new_node.state)
-                if dist < self.goal_threshold:
-                    forward_path = forward_tree.get_path_to_root(new_node)
-                    backward_path = backward_tree.get_path_to_root(nearest_backward)
-                    path = forward_path + list(reversed(backward_path[:-1]))
-
-                    if interpolate:
-                        path = self._interpolate_path(path)
-                    else:
-                        path = np.array(path)
-
-                    for state in path:
-                        if collision_fn(state):
-                            print("Warning: Initial path state has collision.")
-                            continue
-
-                    return {"success": True, "path": path}
-
-            # Extend backward tree
-            new_node = extend_fn(backward_tree, q_init, collision_fn)
-
-            if new_node is not None:
-                nearest_forward, dist = forward_tree.get_nearest_node(new_node.state)
-                if dist < self.goal_threshold:
-                    forward_path = forward_tree.get_path_to_root(nearest_forward)
-                    backward_path = backward_tree.get_path_to_root(new_node)
-                    path = forward_path + list(reversed(backward_path[:-1]))
-
-                    if interpolate:
-                        path = self._interpolate_path(path)
-                    else:
-                        path = np.array(path)
-
-                    for state in path:
-                        if collision_fn(state):
-                            print("Warning: Initial path state has collision.")
-                            continue
-
-                    return {"success": True, "path": path}
-
-        return {"success": False, "path": None}
-
-    def plan(
-        self,
-        q_init: np.ndarray,
-        q_target: np.ndarray,
-        pose_2d: np.ndarray,
-        max_time: int,
-        max_attempts: int,
-        element_bodies: List[int],
-        grasped_element: Optional[int] = None,
-        grasped_attachment: Optional[object] = None,
-    ) -> Dict:
+    def plan(self, q_init: np.ndarray, q_target: np.ndarray, pose_2d: np.ndarray, element_bodies: List[int]) -> Dict:
         """Main planning function using IPGAR algorithm"""
         print("\n========== IPGAR TRAJECTORY PLANNING ==========")
 
@@ -382,14 +153,14 @@ class TrajectoryIPGARSolver:
             # 第一次迭代时初始化路径，后续迭代使用上一次的结果
             if final_path is None:
                 # 初始路径规划
-                print(f"IPGAR: Planning initial path in free space...")                
+                print(f"IPGAR: Planning initial path in free space...")
                 initial_solution = self.robot_setup.plan_manipulator_path(q_init, q_target, self.robot_setup.attachments, [], max_time=10, max_iterations=10000)
                 if initial_solution is None:
                     print("IPGAR: ERROR - Initial path planning failed in free space")
                     return {"success": False, "path": None}
                 print("IPGAR: Initial path successfully found")
                 current_path = initial_solution
-                  
+
                 # 应用路径优化流程，确保每个步骤都保留原始起点和终点
                 collision_fn = self._create_collision_fn([])
                 temp_path = self._shortcut_path(current_path, collision_fn, iterations=30)
@@ -399,7 +170,7 @@ class TrajectoryIPGARSolver:
                 # 使用上一次规划结果作为当前路径
                 print(f"IPGAR: Using previous density level path as starting path")
                 current_path = final_path
-                
+
             print("IPGAR: Starting Incremental Obstacle Addition and Repair process...")
             print(f"IPGAR: Processing obstacles - {len(remaining_obstacles_dict)} remaining")
 
@@ -410,7 +181,7 @@ class TrajectoryIPGARSolver:
                 for body in active_obstacles_body:
                     pp.set_color(body, [0, 0, 1, 1])
 
-            #-------------------- Step 2.1: Calculate SVSDF for all remaining obstacles --------------------#
+            # -------------------- Step 2.1: Calculate SVSDF for all remaining obstacles --------------------#
             print("IPGAR: Calculating SVSDF values for remaining obstacles...")
             remaining_obstacles_list = list(remaining_obstacles_dict.values())
             svsdf_values = self._compute_path_obstacle_sdfs(pose_2d, current_path, remaining_obstacles_list)
@@ -430,7 +201,7 @@ class TrajectoryIPGARSolver:
                         element_obstacles[element_id] = []
                     element_obstacles[element_id].append((name, obs, svsdf_by_name.get(name, 0)))
 
-            #-------------------- Step 2.2: Find elements where all obstacles have SVSDF > threshold --------------------#
+            # -------------------- Step 2.2: Find elements where all obstacles have SVSDF > threshold --------------------#
             elements_all_above_threshold = []
             for element_id, obs_list in element_obstacles.items():
                 if all(sdf_val > self.sdf_threshold for _, _, sdf_val in obs_list):
@@ -465,15 +236,15 @@ class TrajectoryIPGARSolver:
                 print("IPGAR: All obstacles have been added")
                 continue
 
-            #-------------------- Step 2.3: For remaining elements, calculate average SVSDF --------------------#
+            # -------------------- Step 2.3: For remaining elements, calculate average SVSDF --------------------#
             print("IPGAR: Calculating average SVSDF for remaining elements...")
             element_averages = {}
             for element_id, obs_list in element_obstacles.items():
                 if element_id not in elements_all_above_threshold:
                     avg_sdf = np.mean([sdf_val for _, _, sdf_val in obs_list])
                     element_averages[element_id] = avg_sdf
-        
-            #-------------------- Step 2.4: Select element with highest average SVSDF --------------------#
+
+            # -------------------- Step 2.4: Select element with highest average SVSDF --------------------#
             avg_element = max(element_averages.items(), key=lambda x: x[1])[0]
             print(f"IPGAR: Selected element {avg_element} with average SVSDF {element_averages[avg_element]:.4f}")
 
@@ -484,17 +255,17 @@ class TrajectoryIPGARSolver:
             # sorted_obstacles = sorted(element_obstacles[max_avg_element], key=lambda x: x[2], reverse=True) # SVSDF从大到小排序
             # sorted_obstacles = sorted(element_obstacles[max_avg_element], key=lambda x: x[2]) # SVSDF从小到大排序
             sorted_obstacles = [sorted(element_obstacles[element_id], key=lambda x: int(x[0].split("_sphere_")[1]) if "_sphere_" in x[0] else 0) for element_id in element_averages.keys()]  # 按照obstacle的编号(sphere_id)排序
-            
-            #-------------------- Step 2.5: Process obstacles one by one --------------------#
+
+            # -------------------- Step 2.5: Process obstacles one by one --------------------#
             while len([item for sublist in sorted_obstacles for item in sublist]) != 0:
                 repair_flag = True
                 current_active_obs_ids = []
                 for sub_obs_list in sorted_obstacles:
-                    
+
                     find_collision = False
                     while len(sub_obs_list) != 0:
                         name, obs, sdf_val = sub_obs_list.pop(0)
-                        
+
                         del remaining_obstacles_dict[name]
                         active_obstacles.append(obs)
                         obs_id = pp.create_sphere(obs["radius"])
@@ -502,34 +273,34 @@ class TrajectoryIPGARSolver:
                         pp.set_color(obs_id, [0, 1, 0, 1])  # Green for normal addition
                         active_obstacles_body.append(obs_id)
                         print(f"    IPGAR: Activated obstacle {name}")
-                        
+
                         if sdf_val > self.sdf_threshold:
                             pp.set_color(obs_id, [0, 0, 1, 1])
                             continue
-                        
+
                         find_collision = True
                         break
-                    
+
                     if find_collision:
                         current_active_obs_ids.append(obs_id)
-                        
+
                 if len(current_active_obs_ids) == 0:
                     continue
-                
+
                 # Update collision function and check path
                 with pp.LockRenderer():
                     collision_fn = self._create_collision_fn(active_obstacles_body)
-                    collision_intervals = self._check_path_collision(current_path, collision_fn)       
-                        
+                    collision_intervals = self._check_path_collision(current_path, collision_fn)
+
                 if len(collision_intervals) > 0:
                     print(f"IPGAR: Path has {len(collision_intervals)} collisions, repairing...")
-                    
+
                     # Repair path
                     repair_result = self._repair_path(current_path, collision_intervals, collision_fn, active_obstacles_body, active_obstacles, pose_2d)
                     if repair_result["success"]:
                         current_path = repair_result["path"]
                         print("IPGAR: Path successfully repaired")
-                        
+
                         # Recalculate SVSDF for remaining obstacles in this element after successful repair
                         temp_sorted_obstacles = []
                         for sub_obs_list in sorted_obstacles:
@@ -542,20 +313,20 @@ class TrajectoryIPGARSolver:
                                 temp_sorted_obs.append(tuple(new_item))
                             temp_sorted_obstacles.append(temp_sorted_obs)
                         sorted_obstacles = deepcopy(temp_sorted_obstacles)
-                        
+
                     else:
                         print("IPGAR: Repair failed")
                         repair_flag = False
-                
+
                 for temp_id in current_active_obs_ids:
                     pp.set_color(temp_id, [0, 0, 1, 1])
-                        
+
             with pp.LockRenderer():
                 temp_path = self._shortcut_path(current_path, collision_fn, iterations=30)
                 temp_path = self._resample_path_fixed_length(temp_path, fixed_length=max(100, len(temp_path)))
                 # final_path = self._smooth_path_bspline(final_path, collision_fn)
                 current_path = deepcopy(temp_path)
-            
+
             # Clean up PyBullet objects from current iteration
             with pp.LockRenderer():
                 for body_id in active_obstacles_body:
@@ -572,7 +343,7 @@ class TrajectoryIPGARSolver:
                     print("IPGAR: ERROR - First density level planning failed!")
                     return {"success": False, "path": None}
 
-        #-------------------- Final path check and output --------------------#
+        # -------------------- Final path check and output --------------------#
         final_density = max([d for i, d in enumerate(density_levels) if i < len(density_levels) and (i == len(density_levels) - 1 or final_path is not None)])
         final_spheres = [SceneParser.approximate_cylinder(element_body, count=final_density) for element_body in element_bodies]
         final_obstacle_bodies = []
@@ -597,11 +368,11 @@ class TrajectoryIPGARSolver:
             print("IPGAR: Final path successfully validated")
 
         print("\n========== IPGAR PLANNING SUCCESSFUL ==========")
-        final_path_interpolated = self._interpolate_path(list(final_path))
+        final_path = self._resample_path_fixed_length(final_path, fixed_length=max(1000, len(final_path)))
         with pp.LockRenderer():
             for body_id in final_obstacle_bodies:
                 pp.remove_body(body_id)
-        return {"success": True, "path": final_path_interpolated}
+        return {"success": True, "path": final_path}
 
     def _repair_path(self, path, collision_intervals, collision_fn, active_obstacles_body, active_obstacles, pose_2d):
         """Repair path segments with collisions"""
@@ -614,7 +385,7 @@ class TrajectoryIPGARSolver:
         end_point = path[-1].copy()
 
         current_path = path.copy()  # 创建路径副本，以便在修补过程中更新
-        
+
         # 循环直到所有碰撞区间都被处理
         while collision_intervals:
             # 获取当前区间
@@ -630,13 +401,9 @@ class TrajectoryIPGARSolver:
                 # 尝试修复扩展区间
                 q_start_local = current_path[expanded_start]
                 q_end_local = current_path[expanded_end]
-                
-                max_plan_time = 10.0 + repair_attempts * 10.0
-                
-                # repair_result = self.birrt_plan(q_start_local, q_end_local, 30.0, collision_fn, self._extend_tree_default, interpolate=False)
 
-                # wrapped_extend_fn = partial(self._extend_tree, active_obstacles=active_obstacles, original_path_segment=path[expanded_start:expanded_end], pose_2d=pose_2d)
-                # repair_result = self.birrt_plan(q_start_local, q_end_local, max_plan_time, collision_fn, wrapped_extend_fn, interpolate=False)
+                max_plan_time = 10.0 + repair_attempts * 10.0
+
                 with pp.LockRenderer():
                     repair_result = self.robot_setup.plan_manipulator_path(q_start_local, q_end_local, self.robot_setup.attachments, active_obstacles_body, max_time=max_plan_time, max_iterations=10000)
 
@@ -721,7 +488,7 @@ class TrajectoryIPGARSolver:
         """
         if len(path) < 2:
             return path
-        
+
         if len(path) >= fixed_length:
             return path
 
@@ -793,7 +560,7 @@ class TrajectoryIPGARSolver:
         def is_segment_collision(q1, q2):
             """检查两点之间的直线段是否有碰撞"""
             # 在两点之间采样多个中间点进行检查
-            samples = 100
+            samples = 360
             for t in np.linspace(0, 1, samples)[1:-1]:  # 排除端点
                 q_interp = q1 + t * (q2 - q1)
                 if collision_fn(q_interp):
@@ -939,8 +706,6 @@ if __name__ == "__main__":
     pose_2d = scene_parser.get_robot_pose_2d(output_type="array")
     grasp_offset = scene_parser.get_robot_grasp_offset()
 
-    # start_q[0] = 20.0 / 180.0 * np.pi
-
     rb = RobotSetup("rb")  # 'rb' is created here, only available in main block
     rb.set_joint_positions(rb.arm_joints, start_q)
     rb.set_base_pose_2d(pose_2d[0], pose_2d[1], pose_2d[2])
@@ -951,12 +716,9 @@ if __name__ == "__main__":
     grasped_attachment = pp.create_attachment(rb.robot, rb.tool_link, grasped_element)
     rb.update_attachments([grasped_attachment])
 
-    # 执行规划并获取路径
-    # path = rb.plan_manipulator_path(start_q, target_q, [], bodies, max_time=600, max_iterations=10000)
-
     # Pass rb (RobotSetup instance) to the solver
     solver = TrajectoryIPGARSolver(URDF_PATH, rb, grasp_offset)
-    plan_result = solver.plan(start_q, target_q, pose_2d, max_time=600, max_attempts=10000, element_bodies=bodies)
+    plan_result = solver.plan(start_q, target_q, pose_2d, bodies)
 
     if plan_result["success"]:
         path = plan_result["path"]

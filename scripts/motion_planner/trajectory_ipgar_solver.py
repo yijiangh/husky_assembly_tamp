@@ -382,15 +382,7 @@ class TrajectoryIPGARSolver:
             # 第一次迭代时初始化路径，后续迭代使用上一次的结果
             if final_path is None:
                 # 初始路径规划
-                print(f"IPGAR: Step 1 - Planning initial path in free space...")
-                # collision_fn = self._create_collision_fn([])  # Empty list for free space
-                # initial_solution = self.birrt_plan(q_init, q_target, max_time, collision_fn, self._extend_tree_default, interpolate=False)
-                # if not initial_solution["success"]:
-                #     print("IPGAR: ERROR - Initial path planning failed in free space")
-                #     return {"success": False, "path": None}
-                # print("IPGAR: Initial path successfully found")
-                # current_path = initial_solution["path"]
-                
+                print(f"IPGAR: Planning initial path in free space...")                
                 initial_solution = self.robot_setup.plan_manipulator_path(q_init, q_target, self.robot_setup.attachments, [], max_time=10, max_iterations=10000)
                 if initial_solution is None:
                     print("IPGAR: ERROR - Initial path planning failed in free space")
@@ -402,218 +394,185 @@ class TrajectoryIPGARSolver:
                 collision_fn = self._create_collision_fn([])
                 temp_path = self._shortcut_path(current_path, collision_fn, iterations=30)
                 temp_path = self._resample_path_fixed_length(temp_path, fixed_length=max(100, len(temp_path)))
-                # final_path = self._smooth_path_bspline(final_path, collision_fn)
                 current_path = deepcopy(temp_path)
             else:
                 # 使用上一次规划结果作为当前路径
                 print(f"IPGAR: Using previous density level path as starting path")
                 current_path = final_path
+                
+            print("IPGAR: Starting Incremental Obstacle Addition and Repair process...")
+            print(f"IPGAR: Processing obstacles - {len(remaining_obstacles_dict)} remaining")
 
-            # 主规划循环
-            print("IPGAR: Step 2 - Starting Incremental Obstacle Addition and Repair process...")
-            iteration_count = 0
             active_obstacles_body = []
-            while remaining_obstacles_dict:
-                iteration_count += 1
-                print("\n---------- IPGAR Iteration {} ----------".format(iteration_count))
-                print(f"IPGAR: Processing obstacles - {len(remaining_obstacles_dict)} remaining")
+            collision_fn = self._create_collision_fn([])
 
+            with pp.LockRenderer():
+                for body in active_obstacles_body:
+                    pp.set_color(body, [0, 0, 1, 1])
+
+            #-------------------- Step 2.1: Calculate SVSDF for all remaining obstacles --------------------#
+            print("IPGAR: Calculating SVSDF values for remaining obstacles...")
+            remaining_obstacles_list = list(remaining_obstacles_dict.values())
+            svsdf_values = self._compute_path_obstacle_sdfs(pose_2d, current_path, remaining_obstacles_list)
+
+            # Map SVSDF values from indices to obstacle names
+            svsdf_by_name = {}
+            for i, obs in enumerate(remaining_obstacles_list):
+                name = obs.get("name", f"unnamed_{i}")
+                svsdf_by_name[name] = svsdf_values.get(i, 0)
+
+            # Group obstacles by element
+            element_obstacles = {}
+            for name, obs in remaining_obstacles_dict.items():
+                if "_sphere_" in name:
+                    element_id = name.split("_sphere_")[0]
+                    if element_id not in element_obstacles:
+                        element_obstacles[element_id] = []
+                    element_obstacles[element_id].append((name, obs, svsdf_by_name.get(name, 0)))
+
+            #-------------------- Step 2.2: Find elements where all obstacles have SVSDF > threshold --------------------#
+            elements_all_above_threshold = []
+            for element_id, obs_list in element_obstacles.items():
+                if all(sdf_val > self.sdf_threshold for _, _, sdf_val in obs_list):
+                    elements_all_above_threshold.append(element_id)
+
+            # Process elements with all obstacles above threshold
+            if elements_all_above_threshold:
+                print(f"IPGAR: Found {len(elements_all_above_threshold)} elements with all obstacles above threshold {self.sdf_threshold}")
+
+                # Process obstacles for all elements that meet the threshold criteria
+                obs_to_activate = []
+                for element_id in elements_all_above_threshold:
+                    for name, obs, sdf_val in element_obstacles[element_id]:
+                        obs_to_activate.append((name, obs))
+
+                # Add all obstacles
                 with pp.LockRenderer():
-                    for body in active_obstacles_body:
-                        pp.set_color(body, [0, 0, 1, 1])
+                    for name, obs in obs_to_activate:
+                        del remaining_obstacles_dict[name]
+                        active_obstacles.append(obs)
+                        obs_id = pp.create_sphere(obs["radius"])
+                        pp.set_point(obs_id, obs["position"])
+                        pp.set_color(obs_id, [0, 0, 1, 1])
+                        active_obstacles_body.append(obs_id)
+                        print(f"    IPGAR: Activated obstacle {name}")
 
-                # Step 1: Calculate SVSDF for all remaining obstacles
-                print("IPGAR: Calculating SVSDF values for remaining obstacles...")
-                remaining_obstacles_list = list(remaining_obstacles_dict.values())
-                svsdf_values = self._compute_path_obstacle_sdfs(pose_2d, current_path, remaining_obstacles_list)
+                # Update collision function with new obstacles
+                collision_fn = self._create_collision_fn(active_obstacles_body)
 
-                # 将SVSDF值从索引映射到name
-                svsdf_by_name = {}
-                for i, obs in enumerate(remaining_obstacles_list):
-                    name = obs.get("name", f"unnamed_{i}")
-                    svsdf_by_name[name] = svsdf_values.get(i, 0)
+            # Check if need to continue
+            if len(remaining_obstacles_dict) == 0:
+                print("IPGAR: All obstacles have been added")
+                continue
 
-                # Group obstacles by element
-                element_obstacles = {}
-                for name, obs in remaining_obstacles_dict.items():
-                    if "_sphere_" in name:
-                        element_id = name.split("_sphere_")[0]
-                        if element_id not in element_obstacles:
-                            element_obstacles[element_id] = []
-                        element_obstacles[element_id].append((name, obs, svsdf_by_name.get(name, 0)))
+            #-------------------- Step 2.3: For remaining elements, calculate average SVSDF --------------------#
+            print("IPGAR: Calculating average SVSDF for remaining elements...")
+            element_averages = {}
+            for element_id, obs_list in element_obstacles.items():
+                if element_id not in elements_all_above_threshold:
+                    avg_sdf = np.mean([sdf_val for _, _, sdf_val in obs_list])
+                    element_averages[element_id] = avg_sdf
+        
+            #-------------------- Step 2.4: Select element with highest average SVSDF --------------------#
+            avg_element = max(element_averages.items(), key=lambda x: x[1])[0]
+            print(f"IPGAR: Selected element {avg_element} with average SVSDF {element_averages[avg_element]:.4f}")
 
-                # Step 2: Find elements where all obstacles have SVSDF > threshold
-                elements_all_above_threshold = []
-                for element_id, obs_list in element_obstacles.items():
-                    if all(sdf_val > self.sdf_threshold for _, _, sdf_val in obs_list):
-                        elements_all_above_threshold.append(element_id)
+            # # -------------------- Step 2.4: Select element with lowest average SVSDF --------------------#
+            # avg_element = min(element_averages.items(), key=lambda x: x[1])[0]
+            # print(f"IPGAR: Selected element {avg_element} with average SVSDF {element_averages[avg_element]:.4f}")
 
-                # Process elements with all obstacles above threshold
-                if elements_all_above_threshold:
-                    print(f"IPGAR: Found {len(elements_all_above_threshold)} elements with all obstacles above threshold")
-
-                    # 处理所有满足条件的元素的障碍物
-                    obs_to_activate = []
-                    for element_id in elements_all_above_threshold:
-                        print(f"IPGAR: Preparing obstacles for element {element_id}")
-                        for name, obs, sdf_val in element_obstacles[element_id]:
-                            obs_to_activate.append((name, obs))
-
-                    # 添加所有障碍物
-                    with pp.LockRenderer():
-                        for name, obs in obs_to_activate:
-                            # 从字典中移除
-                            del remaining_obstacles_dict[name]
-                            active_obstacles.append(obs)
-                            # 创建PyBullet物体
-                            obs_id = pp.create_sphere(obs["radius"])
-                            pp.set_point(obs_id, obs["position"])
+            # sorted_obstacles = sorted(element_obstacles[max_avg_element], key=lambda x: x[2], reverse=True) # SVSDF从大到小排序
+            # sorted_obstacles = sorted(element_obstacles[max_avg_element], key=lambda x: x[2]) # SVSDF从小到大排序
+            sorted_obstacles = [sorted(element_obstacles[element_id], key=lambda x: int(x[0].split("_sphere_")[1]) if "_sphere_" in x[0] else 0) for element_id in element_averages.keys()]  # 按照obstacle的编号(sphere_id)排序
+            
+            #-------------------- Step 2.5: Process obstacles one by one --------------------#
+            while len([item for sublist in sorted_obstacles for item in sublist]) != 0:
+                repair_flag = True
+                current_active_obs_ids = []
+                for sub_obs_list in sorted_obstacles:
+                    
+                    find_collision = False
+                    while len(sub_obs_list) != 0:
+                        name, obs, sdf_val = sub_obs_list.pop(0)
+                        
+                        del remaining_obstacles_dict[name]
+                        active_obstacles.append(obs)
+                        obs_id = pp.create_sphere(obs["radius"])
+                        pp.set_point(obs_id, obs["position"])
+                        pp.set_color(obs_id, [0, 1, 0, 1])  # Green for normal addition
+                        active_obstacles_body.append(obs_id)
+                        print(f"    IPGAR: Activated obstacle {name}")
+                        
+                        if sdf_val > self.sdf_threshold:
                             pp.set_color(obs_id, [0, 0, 1, 1])
-                            active_obstacles_body.append(obs_id)
-                            print(f"  IPGAR: Activated obstacle {name} - SVSDF > {self.sdf_threshold}")
-
-                    # Update collision function with new obstacles
-                    collision_fn = self._create_collision_fn(active_obstacles_body)
-
-                    # Check path for collisions
-                    collision_intervals = self._check_path_collision(current_path, collision_fn)
-                    if len(collision_intervals) > 0:
-                        print(f"IPGAR: Path has {len(collision_intervals)} collisions after adding elements, repairing...")
-
-                        # Repair colliding segments
-                        repair_result = self._repair_path(current_path, collision_intervals, collision_fn, active_obstacles_body, active_obstacles, pose_2d)
-                        if repair_result["success"]:
-                            current_path = repair_result["path"]
-                            print("IPGAR: Path successfully repaired after adding elements")
-                        else:
-                            print("IPGAR: ERROR - Path repair failed after adding elements")
-                            with pp.LockRenderer():
-                                for body_id in active_obstacles_body:
-                                    pp.remove_body(body_id)
-                        # 当前密度失败，但可以尝试降低密度
+                            continue
+                        
+                        find_collision = True
                         break
                     
-                if len(remaining_obstacles_dict) == 0:
-                    print("IPGAR: All obstacles have been added")
-                    break
-
-                # Step 3: For remaining elements, calculate average SVSDF
-                if remaining_obstacles_dict:
-                    print("IPGAR: Calculating average SVSDF for remaining elements...")
-                    element_averages = {}
-                    for element_id, obs_list in element_obstacles.items():
-                        if element_id not in elements_all_above_threshold:
-                            avg_sdf = np.mean([sdf_val for _, _, sdf_val in obs_list])
-                            element_averages[element_id] = avg_sdf
-
-                    if element_averages:
-                        # Step 4: Select element with highest average SVSDF
-                        avg_element = max(element_averages.items(), key=lambda x: x[1])[0]
-                        print(f"IPGAR: Selected element {avg_element} with average SVSDF {element_averages[avg_element]:.4f}")
-
-                        # # Step 4: Select element with lowest average SVSDF
-                        # avg_element = min(element_averages.items(), key=lambda x: x[1])[0]
-                        # print(f"IPGAR: Selected element {avg_element} with average SVSDF {element_averages[avg_element]:.4f}")
-
-                        # sorted_obstacles = sorted(element_obstacles[max_avg_element], key=lambda x: x[2], reverse=True) # SVSDF从大到小排序
-                        # sorted_obstacles = sorted(element_obstacles[max_avg_element], key=lambda x: x[2]) # SVSDF从小到大排序
-                        # 按照obstacle的编号(sphere_id)排序
-                        sorted_obstacles = [sorted(element_obstacles[element_id], key=lambda x: int(x[0].split("_sphere_")[1]) if "_sphere_" in x[0] else 0) for element_id in element_averages.keys()]  # 按sphere_id排序
-
-                        # Process obstacles one by one
-                        while len([item for sublist in sorted_obstacles for item in sublist]) != 0:
-                            
-                            current_active_obs_ids = []
-                            for sub_obs_list in sorted_obstacles:
-                                
-                                find_collision = False
-                                while len(sub_obs_list) != 0:
-                                    name, obs, sdf_val = sub_obs_list.pop(0)
-                                    
-                                    del remaining_obstacles_dict[name]
-                                    active_obstacles.append(obs)
-                                    # 创建PyBullet物体
-                                    obs_id = pp.create_sphere(obs["radius"])
-                                    pp.set_point(obs_id, obs["position"])
-                                    pp.set_color(obs_id, [0, 1, 0, 1])  # Green for normal addition
-                                    active_obstacles_body.append(obs_id)
-                                    print(f"  IPGAR: Activated obstacle {name} with SVSDF {sdf_val:.4f}")
-                                    
-                                    if sdf_val > self.sdf_threshold:
-                                        pp.set_color(obs_id, [0, 0, 1, 1])
-                                        continue
-                                    
-                                    find_collision = True
-                                    break
-                                
-                                if find_collision:
-                                    current_active_obs_ids.append(obs_id)
-                                    
-                            if len(current_active_obs_ids) == 0:
-                                continue
-                            
-                            # Update collision function and check path
-                            with pp.LockRenderer():
-                                collision_fn = self._create_collision_fn(active_obstacles_body)
-                                collision_intervals = self._check_path_collision(current_path, collision_fn)       
-                                    
-                            if len(collision_intervals) > 0:
-                                print(f"  IPGAR: Path has {len(collision_intervals)} collisions, repairing...")
-                                
-                                # Repair path
-                                repair_result = self._repair_path(current_path, collision_intervals, collision_fn, active_obstacles_body, active_obstacles, pose_2d)
-                                if repair_result["success"]:
-                                    current_path = repair_result["path"]
-                                    print("  IPGAR: Path successfully repaired")
-                                    
-                                    # Recalculate SVSDF for remaining obstacles in this element after successful repair
-                                    temp_sorted_obstacles = []
-                                    for sub_obs_list in sorted_obstacles:
-                                        temp_svsdf_values = self._compute_path_obstacle_sdfs(pose_2d, current_path, [item[1] for item in sub_obs_list])
-                                        temp_sorted_obs = []
-                                        for i, item in enumerate(sub_obs_list):
-                                            new_item = list(deepcopy(item))
-                                            new_item[2] = temp_svsdf_values[i]
-                                            print(f"      IPGAR: Updated SVSDF for {item[0]}: {item[2]:.4f} -> {new_item[2]:.4f}")
-                                            temp_sorted_obs.append(tuple(new_item))
-                                        temp_sorted_obstacles.append(temp_sorted_obs)
-                                    sorted_obstacles = deepcopy(temp_sorted_obstacles)
-                                    
-                                else:
-                                    print("  IPGAR: Repair failed")
-                            
-                            for temp_id in current_active_obs_ids:
-                                pp.set_color(temp_id, [0, 0, 1, 1])
-                            
+                    if find_collision:
+                        current_active_obs_ids.append(obs_id)
+                        
+                if len(current_active_obs_ids) == 0:
+                    continue
+                
+                # Update collision function and check path
                 with pp.LockRenderer():
-                    # 应用路径优化流程，确保每个步骤都保留原始起点和终点
-                    temp_path = self._shortcut_path(current_path, collision_fn, iterations=30)
-                    temp_path = self._resample_path_fixed_length(temp_path, fixed_length=max(100, len(temp_path)))
-                    # final_path = self._smooth_path_bspline(final_path, collision_fn)
-                    current_path = deepcopy(temp_path)
-
-                print(f"IPGAR: Total active obstacles: {len(active_obstacles)} (PyBullet bodies: {len(active_obstacles_body)})")
-
-            # 清理当前迭代的PyBullet物体
+                    collision_fn = self._create_collision_fn(active_obstacles_body)
+                    collision_intervals = self._check_path_collision(current_path, collision_fn)       
+                        
+                if len(collision_intervals) > 0:
+                    print(f"IPGAR: Path has {len(collision_intervals)} collisions, repairing...")
+                    
+                    # Repair path
+                    repair_result = self._repair_path(current_path, collision_intervals, collision_fn, active_obstacles_body, active_obstacles, pose_2d)
+                    if repair_result["success"]:
+                        current_path = repair_result["path"]
+                        print("IPGAR: Path successfully repaired")
+                        
+                        # Recalculate SVSDF for remaining obstacles in this element after successful repair
+                        temp_sorted_obstacles = []
+                        for sub_obs_list in sorted_obstacles:
+                            temp_svsdf_values = self._compute_path_obstacle_sdfs(pose_2d, current_path, [item[1] for item in sub_obs_list])
+                            temp_sorted_obs = []
+                            for i, item in enumerate(sub_obs_list):
+                                new_item = list(deepcopy(item))
+                                new_item[2] = temp_svsdf_values[i]
+                                print(f"    IPGAR: Updated SVSDF for {item[0]}: {item[2]:.4f} -> {new_item[2]:.4f}")
+                                temp_sorted_obs.append(tuple(new_item))
+                            temp_sorted_obstacles.append(temp_sorted_obs)
+                        sorted_obstacles = deepcopy(temp_sorted_obstacles)
+                        
+                    else:
+                        print("IPGAR: Repair failed")
+                        repair_flag = False
+                
+                for temp_id in current_active_obs_ids:
+                    pp.set_color(temp_id, [0, 0, 1, 1])
+                        
+            with pp.LockRenderer():
+                temp_path = self._shortcut_path(current_path, collision_fn, iterations=30)
+                temp_path = self._resample_path_fixed_length(temp_path, fixed_length=max(100, len(temp_path)))
+                # final_path = self._smooth_path_bspline(final_path, collision_fn)
+                current_path = deepcopy(temp_path)
+            
+            # Clean up PyBullet objects from current iteration
             with pp.LockRenderer():
                 for body_id in active_obstacles_body:
                     pp.remove_body(body_id)
 
-            # 检查当前密度迭代是否成功
-            if not remaining_obstacles_dict:
+            if repair_flag:
                 print(f"IPGAR: Density level {density} planning successful!")
                 final_path = current_path
             else:
-                print(f"IPGAR: Density level {density} planning incomplete, using previous result")
-                # 如果当前密度失败但已有前一次成功的结果，可以继续尝试下一个密度
                 if final_path is not None:
+                    print(f"IPGAR: Density level {density} planning incomplete, using previous result!")
                     continue
                 else:
-                    # 如果第一次密度就失败且没有前一次结果，则整体规划失败
+                    print("IPGAR: ERROR - First density level planning failed!")
                     return {"success": False, "path": None}
 
-        # Final path check and output
-        # 使用最后一次成功规划的密度级别重新创建障碍物进行最终检查
+        #-------------------- Final path check and output --------------------#
         final_density = max([d for i, d in enumerate(density_levels) if i < len(density_levels) and (i == len(density_levels) - 1 or final_path is not None)])
         final_spheres = [SceneParser.approximate_cylinder(element_body, count=final_density) for element_body in element_bodies]
         final_obstacle_bodies = []
@@ -623,41 +582,31 @@ class TrajectoryIPGARSolver:
                 for sphere in sphere_list:
                     obs_id = pp.create_sphere(sphere["radius"])
                     pp.set_point(obs_id, sphere["position"])
-                    pp.set_color(obs_id, [1, 0, 0, 0.5])  # 红色半透明用于最终验证
+                    pp.set_color(obs_id, [1, 0, 0, 0.5])
                     final_obstacle_bodies.append(obs_id)
 
         final_collision_fn = self._create_collision_fn(final_obstacle_bodies)
         final_collision_check = self._check_path_collision(final_path, final_collision_fn)
         if len(final_collision_check) > 0:
             print(f"IPGAR: ERROR - Final path still has {len(final_collision_check)} collisions!")
-
-            # 尝试最后一次修复
-            print(f"IPGAR: Attempting final path repair...")
-            final_repair_result = self._repair_path(final_path, final_collision_check, final_collision_fn, final_obstacle_bodies, [], pose_2d)
-
-            if not final_repair_result["success"]:
-                print("IPGAR: Final repair failed!")
-                with pp.LockRenderer():
-                    for body_id in final_obstacle_bodies:
-                        pp.remove_body(body_id)
-                return {"success": False, "path": None}
-
-            final_path = final_repair_result["path"]
-            print("IPGAR: Final path successfully repaired")
+            with pp.LockRenderer():
+                for body_id in final_obstacle_bodies:
+                    pp.remove_body(body_id)
+            return {"success": False, "path": None}
+        else:
+            print("IPGAR: Final path successfully validated")
 
         print("\n========== IPGAR PLANNING SUCCESSFUL ==========")
         final_path_interpolated = self._interpolate_path(list(final_path))
-
         with pp.LockRenderer():
             for body_id in final_obstacle_bodies:
                 pp.remove_body(body_id)
-
         return {"success": True, "path": final_path_interpolated}
 
     def _repair_path(self, path, collision_intervals, collision_fn, active_obstacles_body, active_obstacles, pose_2d):
         """Repair path segments with collisions"""
-        print("---------- Path Repair ----------")
-        print(f"Repair: Processing {len(collision_intervals)} collision segments...")
+        print("    ---------- Path Repair ----------")
+        print(f"    Repair: Processing {len(collision_intervals)} collision segments...")
         repair_successful = True
 
         # 保存原始起点和终点
@@ -676,7 +625,7 @@ class TrajectoryIPGARSolver:
             max_repair_attempts = 10
 
             while repair_attempts < max_repair_attempts:
-                print(f"  Repair: Attempt {repair_attempts + 1}/{max_repair_attempts} for segment {expanded_start}-{expanded_end}")
+                print(f"    Repair: Attempt {repair_attempts + 1}/{max_repair_attempts} for segment {expanded_start}-{expanded_end}")
 
                 # 尝试修复扩展区间
                 q_start_local = current_path[expanded_start]
@@ -693,7 +642,7 @@ class TrajectoryIPGARSolver:
 
                 # if repair_result["success"]:
                 if repair_result is not None:
-                    print(f"  Repair: Success after {repair_attempts + 1} attempts")
+                    print(f"    Repair: Success after {repair_attempts + 1} attempts")
 
                     # 更新路径：保留修复区间之前的部分 + 修复后的段 + 修复区间之后的部分
                     # repaired_segment = repair_result["path"]
@@ -725,18 +674,18 @@ class TrajectoryIPGARSolver:
                     # 重新检测碰撞区间
                     with pp.LockRenderer():
                         collision_intervals = self._check_path_collision(current_path, collision_fn)
-                    print(f"  Repair: After update, {len(collision_intervals)} collision segments remain")
+                    print(f"    Repair: After update, {len(collision_intervals)} collision segments remain")
 
                     # 如果没有剩余碰撞，完成修复
                     if not collision_intervals:
-                        print("  Repair: All collisions resolved")
+                        print("    Repair: All collisions resolved")
                         break
                     else:
                         # 重置尝试计数器，开始处理新的第一个区间
                         break
 
                 else:
-                    print(f"  Repair: Attempt {repair_attempts + 1} failed, expanding repair region...")
+                    print(f"    Repair: Attempt {repair_attempts + 1} failed, expanding repair region...")
                     repair_attempts += 1
 
                     # 扩展修补区间
@@ -744,27 +693,15 @@ class TrajectoryIPGARSolver:
                     expanded_start = max(0, expanded_start - expansion_size)
                     expanded_end = min(len(current_path) - 1, expanded_end + expansion_size)
 
-                    # # 如果还有下一个区间，扩展修复区间
-                    # if current_interval_idx + 1 < len(collision_intervals):
-                    #     next_start, next_end = collision_intervals[current_interval_idx + 1]
-                    #     expanded_start = min(expanded_start, next_start)
-                    #     expanded_end = max(expanded_end, next_end)
-                    #     current_interval_idx += 1
-                    # else:
-                    #     # 如果没有下一个区间，增加当前区间的范围
-                    #     expansion_size = 10
-                    #     expanded_start = max(0, expanded_start - expansion_size)
-                    #     expanded_end = min(len(path) - 1, expanded_end + expansion_size)
-
             # 如果达到最大尝试次数仍未成功，则修补失败
             if repair_attempts >= max_repair_attempts:
-                print(f"  Repair: FAILED after {max_repair_attempts} attempts with expanded regions")
+                print(f"    Repair: FAILED after {max_repair_attempts} attempts with expanded regions")
                 repair_successful = False
                 return {"success": False, "path": None}
 
         if repair_successful:
-            print("Repair: All segments successfully repaired")
-            print("---------- Path Repair Complete ----------")
+            print("    Repair: All segments successfully repaired")
+            print("    ---------- Path Repair Complete ----------")
 
             return {"success": True, "path": current_path}
         else:
@@ -788,7 +725,7 @@ class TrajectoryIPGARSolver:
         if len(path) >= fixed_length:
             return path
 
-        print(f"Resampling: Resampling path to {fixed_length} points...")
+        print(f"Resampling: Resampling path from {len(path)} to {fixed_length} points...")
 
         # 保存原始起点和终点
         start_point = path[0].copy()
@@ -843,7 +780,6 @@ class TrajectoryIPGARSolver:
         if not isinstance(path, np.ndarray) or len(path) < 3:
             return path  # 路径太短，无法缩短
 
-        print("---------- Path Optimization ----------")
         print("Shortcutting: Starting path optimization process...")
         optimized_path = deepcopy(path)  # 操作副本以防万一
         n = len(optimized_path)
@@ -889,7 +825,7 @@ class TrajectoryIPGARSolver:
             if not is_segment_collision(q_i, q_j):
                 # 如果无碰撞，移除中间的节点
                 shortcut_count += 1
-                print(f"  Shortcutting: Found shortcut {shortcut_count} - Between indices {i} and {j}, removing {j-i-1} points")
+                print(f"Shortcutting: Found shortcut {shortcut_count} - Between indices {i} and {j}, removing {j-i-1} points")
 
                 # 更新路径：保留 i 之前的部分 + 直连线段 + j 之后的部分
                 optimized_path = np.vstack([optimized_path[: i + 1], optimized_path[j:]])

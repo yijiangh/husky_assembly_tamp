@@ -35,9 +35,7 @@ BASE_CONTROL_JOINT_NAMES = ["x", "y", "theta"]
 INIT_ARM_JOINT_ANGLES = np.array([0, -np.pi / 2, 0, 0, 0, 0])
 
 # Onboard configuration based on pick direction
-ONBOARD_POSE = (
-    [0.0, -0.5, 0.5, -np.pi / 2, 0.0, np.pi / 2] if PICK_DIRECTION == "left" else [0.4, 0.0, 0.5, -np.pi / 2, 0.0, 0.0]
-)
+ONBOARD_POSE = [0.0, -0.5, 0.5, -np.pi / 2, 0.0, np.pi / 2] if PICK_DIRECTION == "left" else [0.4, 0.0, 0.5, -np.pi / 2, 0.0, 0.0]
 ONBOARD_LINK = "ur_arm_base_link"
 
 
@@ -120,9 +118,7 @@ class RobotSetup:
         for attachment in self.attachments:
             attachment.assign()
 
-    def get_disabled_collisions_from_link_names(
-        self, robot: int, link_names: Set[Tuple[str, str]]
-    ) -> Set[Tuple[int, int]]:
+    def get_disabled_collisions_from_link_names(self, robot: int, link_names: Set[Tuple[str, str]]) -> Set[Tuple[int, int]]:
         """Get link pairs disabled from collision checking.
 
         Params:
@@ -132,9 +128,7 @@ class RobotSetup:
         Returns:
             Set of tuples containing link indices.
         """
-        return {
-            tuple(pp.link_from_name(robot, link) for link in pair if pp.has_link(robot, link)) for pair in link_names
-        }
+        return {tuple(pp.link_from_name(robot, link) for link in pair if pp.has_link(robot, link)) for pair in link_names}
 
     def get_relative_pose(self, pose_world: Tuple, link_name: str = "ur_arm_base_link") -> Tuple:
         """Calculate pose relative to a specified link.
@@ -165,9 +159,7 @@ class RobotSetup:
         self.ee_attachment.assign()
         return conf
 
-    def plan_manipulator_path(
-        self, init_q: np.ndarray, target_q: np.ndarray, attachments: List[Attachment], obstacles: Set[int], **kwargs
-    ) -> np.ndarray:
+    def plan_manipulator_path(self, init_q: np.ndarray, target_q: np.ndarray, attachments: List[Attachment], obstacles: Set[int], **kwargs) -> np.ndarray:
         """Plan a manipulator path from initial to target configuration.
 
         Params:
@@ -246,9 +238,7 @@ class RobotSetup:
         pp.set_pose(body, body_pose)
         return pp.create_attachment(self.robot, pp.link_from_name(self.robot, ONBOARD_LINK), body)
 
-    def plan_manipulator_motion(
-        self, start_conf: np.ndarray, end_conf: np.ndarray, attachments: List[Attachment], obstacles: Set[int], **kwargs
-    ) -> Union[List[Tuple[float]], None]:
+    def plan_manipulator_motion(self, start_conf: np.ndarray, end_conf: np.ndarray, attachments: List[Attachment], obstacles: Set[int], **kwargs) -> Union[List[Tuple[float]], None]:
         """Plan a motion path for the manipulator.
 
         Params:
@@ -267,8 +257,11 @@ class RobotSetup:
         coarse_waypoints = kwargs.get("coarse_waypoints", False)
         diagnosis = kwargs.get("diagnosis", False)
         max_time = kwargs.get("max_time", 10)
-        max_iterations = kwargs.get("max_iterations", 40)
+        max_iterations = kwargs.get("max_iterations", 10000)
         smooth = kwargs.get("smooth", 40)
+        resolution = kwargs.get("resolution", 1.0)
+
+        resolutions = np.array([resolution if j in frozen_joints else resolution / 180.0 * np.pi for j in self.control_joints])
 
         def get_sample_fn():
             lower, upper = pp.get_custom_limits(self.robot, self.control_joints, circular_limits=pp.CIRCULAR_LIMITS)
@@ -282,24 +275,23 @@ class RobotSetup:
 
             return fn
 
-        sample_fn = get_sample_fn()
-        distance_fn = pp.get_distance_fn(self.robot, self.control_joints)
-        resolutions = np.array([1.0 if j in frozen_joints else np.pi / 180.0 for j in self.control_joints])
-        extend_fn = pp.get_extend_fn(self.robot, self.control_joints, resolutions=resolutions)
-        collision_fn = pp.get_collision_fn(
+        default_sample_fn = get_sample_fn()
+        default_distance_fn = pp.get_distance_fn(self.robot, self.control_joints)
+        default_extend_fn = pp.get_extend_fn(self.robot, self.control_joints, resolutions=resolutions)
+        default_collision_fn = pp.get_collision_fn(
             self.robot,
             self.control_joints,
             obstacles=obstacles,
             attachments=attachments,
             self_collisions=True,
             disabled_collisions=disabled_collisions,
-            extra_disabled_collisions=[
-                (
-                    (self.robot, pp.link_from_name(self.robot, "ur_arm_wrist_3_link")),
-                    (attachments[0].child, pp.BASE_LINK),
-                )
-            ],
+            extra_disabled_collisions=[((self.robot, pp.link_from_name(self.robot, "ur_arm_wrist_3_link")), (attachments[0].child, pp.BASE_LINK))],
         )
+
+        sample_fn = kwargs.get("sample_fn", default_sample_fn)
+        distance_fn = kwargs.get("distance_fn", default_distance_fn)
+        extend_fn = kwargs.get("extend_fn", default_extend_fn)
+        collision_fn = kwargs.get("collision_fn", default_collision_fn)
 
         with pp.WorldSaver():
             if not collision_fn(end_conf, diagnosis=diagnosis):
@@ -531,13 +523,9 @@ class RobotSetup:
             joint = joints[joint_name]
             if joint_name in control_joint_name_list:
                 i_q = control_joint_name_list.index(joint_name)
-                joint_T = RobotSetup.transform_matrix(
-                    joint["origin"]["xyz"], joint["origin"]["rpy"], joint["axis"], q[i_q], joint["type"]
-                )
+                joint_T = RobotSetup.transform_matrix(joint["origin"]["xyz"], joint["origin"]["rpy"], joint["axis"], q[i_q], joint["type"])
             else:
-                joint_T = RobotSetup.transform_matrix(
-                    joint["origin"]["xyz"], joint["origin"]["rpy"], joint["axis"], 0, joint["type"]
-                )
+                joint_T = RobotSetup.transform_matrix(joint["origin"]["xyz"], joint["origin"]["rpy"], joint["axis"], 0, joint["type"])
             T = T @ joint_T
 
         if output_type == "function":

@@ -7,6 +7,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from model.pointnet.pointnet import PointNet
 
+from model.soft_dtw_cuda import SoftDTW
+
 
 class PositionalEncoding(nn.Module):
     """Transformer中的位置编码"""
@@ -187,9 +189,7 @@ class TrajectoryBranch(nn.Module):
 class TrajectoryDecoder(nn.Module):
     """轨迹解码器，使用Transformer解码器生成轨迹"""
 
-    def __init__(
-        self, d_model=512, nhead=8, num_layers=6, dim_feedforward=1024, output_dim=6, max_seq_len=256, dropout=0.4
-    ):
+    def __init__(self, d_model=512, nhead=8, num_layers=6, dim_feedforward=1024, output_dim=6, max_seq_len=256, dropout=0.4):
         """
         Args:
             d_model: Transformer模型维度
@@ -323,9 +323,7 @@ class MultiPathTrajectoryNetwork(nn.Module):
             dropout=dropout,  # 传递dropout参数
         )
 
-    def forward(
-        self, grasped_point_cloud, env_point_cloud, start_joints, target_joints, grasp_offset, input_trajectory=None
-    ):
+    def forward(self, grasped_point_cloud, env_point_cloud, start_joints, target_joints, grasp_offset, input_trajectory=None):
         """
         Args:
             grasped_point_cloud: 抓握物体点云 [batch_size, num_points, 3+3]
@@ -363,7 +361,7 @@ class MultiPathTrajectoryNetwork(nn.Module):
 
         # 解码轨迹
         trajectory = self.decoder(fused_features)
-        
+
         return trajectory
 
 
@@ -372,10 +370,11 @@ class HybridTrajectoryLoss(nn.Module):
     """
     混合轨迹损失函数，结合SoftDTW与其他损失函数
     """
+
     def __init__(self, gamma=1.0, use_cuda=True, alpha_dtw=1.0, alpha_l1=0.5, alpha_l2=0.1):
         """
         初始化混合损失函数
-        
+
         Args:
             gamma: SoftDTW平滑参数
             use_cuda: 是否使用CUDA
@@ -384,48 +383,43 @@ class HybridTrajectoryLoss(nn.Module):
             alpha_l2: L2损失权重
         """
         super(HybridTrajectoryLoss, self).__init__()
-        self.fun = pysdtw.distance.pairwise_l2_squared
-        self.sdtw = pysdtw.SoftDTW(gamma=gamma, dist_func=self.fun, use_cuda=use_cuda)
+        # self.fun = pysdtw.distance.pairwise_l2_squared
+        # self.sdtw = pysdtw.SoftDTW(gamma=gamma, dist_func=self.fun, use_cuda=use_cuda)
+        self.sdtw = SoftDTW(use_cuda=use_cuda, gamma=gamma)
         self.alpha_dtw = alpha_dtw
         self.alpha_l1 = alpha_l1
         self.alpha_l2 = alpha_l2
-        
+
     def forward(self, pred_trajectory, full_trajectory):
         """
         计算混合损失
-        
+
         Args:
             pred_trajectory: 预测轨迹 [batch_size, seq_len, joint_dim]
             full_trajectory: 目标轨迹 [batch_size, seq_len, joint_dim]
-            
+
         Returns:
             torch.Tensor: 标量损失值
         """
         # DTW损失
         batch_dtw_losses = self.sdtw(pred_trajectory, full_trajectory)
         dtw_loss = batch_dtw_losses.mean() / max(pred_trajectory.shape[1], full_trajectory.shape[1])
-        
+
         # L1损失 - 绝对位置差异
         l1_loss = F.l1_loss(pred_trajectory, full_trajectory)
-        
+
         # L2损失 - 平方位置差异
         l2_loss = F.mse_loss(pred_trajectory, full_trajectory)
-        
+
         # 键控点损失 - 直接计算关键点损失而不使用cat操作
         start_point_loss = F.mse_loss(pred_trajectory[:, 0, :], full_trajectory[:, 0, :])
         mid_idx = pred_trajectory.shape[1] // 2
-        mid_point_loss = F.mse_loss(
-            pred_trajectory[:, mid_idx, :], 
-            full_trajectory[:, mid_idx, :]
-        )
+        mid_point_loss = F.mse_loss(pred_trajectory[:, mid_idx, :], full_trajectory[:, mid_idx, :])
         end_point_loss = F.mse_loss(pred_trajectory[:, -1, :], full_trajectory[:, -1, :])
-        
+
         keypoints_loss = start_point_loss + mid_point_loss + end_point_loss
-        
+
         # 组合损失
-        total_loss = (self.alpha_dtw * dtw_loss + 
-                      self.alpha_l1 * l1_loss + 
-                      self.alpha_l2 * l2_loss + 
-                      0.5 * keypoints_loss)
-        
+        total_loss = self.alpha_dtw * dtw_loss + self.alpha_l1 * l1_loss + self.alpha_l2 * l2_loss + 0.5 * keypoints_loss
+
         return total_loss

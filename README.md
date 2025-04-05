@@ -14,9 +14,8 @@ conda activate husky_assembly
 * install python dependencies
 
 ```bash
-pip install matplotlib torch rich pybullet_planning pyyaml casadi compas_fab
+pip install matplotlib torch rich pybullet_planning pyyaml casadi compas_fab pysdtw pynvml
 conda install pinocchio -c conda-forge
-pip install pysdtw
 ```
 
 ## How to Run?

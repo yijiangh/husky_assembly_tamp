@@ -25,27 +25,6 @@ from model.data_loader import SceneDataLoader
 from model.multibrach_model import HybridTrajectoryLoss, MultiPathTrajectoryNetwork
 
 
-def get_gpu_with_least_memory():
-    """获取显存占用最低的GPU"""
-    if not torch.cuda.is_available():
-        return None
-    
-    # 获取所有可用的GPU数量
-    num_gpus = torch.cuda.device_count()
-    if num_gpus == 0:
-        return None
-    
-    # 获取每个GPU的显存使用情况
-    memory_usage = []
-    for i in range(num_gpus):
-        memory_allocated = torch.cuda.memory_allocated(i)
-        memory_usage.append((i, memory_allocated))
-    
-    # 按显存使用量排序，选择显存占用最低的GPU
-    memory_usage.sort(key=lambda x: x[1])
-    return memory_usage[0][0]
-
-
 def set_seed(seed=42):
     """设置随机种子以确保结果可复现"""
     np.random.seed(seed)
@@ -193,18 +172,23 @@ def train_two_stage(args):
     set_seed(args.seed)
 
     # 确定设备
-    if args.no_cuda or not torch.cuda.is_available():
+    if args.device == "cpu":
         device = torch.device("cpu")
-        print("Using CPU for training")
-    else:
-        # 获取显存占用最低的GPU
-        best_gpu = get_gpu_with_least_memory()
-        if best_gpu is not None:
-            device = torch.device(f"cuda:{best_gpu}")
-            print(f"Using GPU {best_gpu} for training (least memory usage)")
-        else:
+        print("使用CPU进行训练")
+    elif args.device == "cuda":
+        if not torch.cuda.is_available():
+            print("警告：CUDA不可用，将使用CPU进行训练")
             device = torch.device("cpu")
-            print("No GPU available, using CPU for training")
+        else:
+            if args.gpu_id >= torch.cuda.device_count():
+                print(f"警告：指定的GPU ID {args.gpu_id} 不可用，将使用GPU 0")
+                device = torch.device("cuda:0")
+            else:
+                device = torch.device(f"cuda:{args.gpu_id}")
+            print(f"使用GPU {device.index} 进行训练")
+    else:
+        print("警告：设备设置错误，将使用CPU进行训练")
+        device = torch.device("cpu")
 
     # 创建结果目录
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -368,9 +352,7 @@ def train_two_stage(args):
     stage1_optimizer = optim.Adam(model.parameters(), lr=args.lr * 2, weight_decay=1e-5)
 
     # 学习率调度器
-    stage1_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        stage1_optimizer, mode="min", factor=0.5, patience=5, verbose=True
-    )
+    stage1_scheduler = optim.lr_scheduler.ReduceLROnPlateau(stage1_optimizer, mode="min", factor=0.5, patience=5, verbose=True)
 
     # 训练日志
     stage1_train_losses = []
@@ -399,34 +381,16 @@ def train_two_stage(args):
 
         # 记录到日志文件
         current_lr_stage1 = stage1_optimizer.param_groups[0]["lr"]
-        log_message(
-            f"Stage 1 - Epoch {epoch+1}/{stage1_epochs} - "
-            f"Train Loss: {train_loss:.6f}, Val Loss: {val_loss:.6f}, "
-            f"LR: {current_lr_stage1:.6e}"
-        )
+        log_message(f"Stage 1 - Epoch {epoch+1}/{stage1_epochs} - " f"Train Loss: {train_loss:.6f}, Val Loss: {val_loss:.6f}, " f"LR: {current_lr_stage1:.6e}")
 
         # 控制台输出保持不变
-        console.print(
-            f"[bold]Stage 1 - Epoch {epoch+1}/{stage1_epochs}[/bold] - "
-            f"Train Loss: [yellow]{train_loss:.6f}[/yellow], "
-            f"Val Loss: [green]{val_loss:.6f}[/green], "
-            f"LR: [blue]{current_lr_stage1:.6e}[/blue]"
-        )
+        console.print(f"[bold]Stage 1 - Epoch {epoch+1}/{stage1_epochs}[/bold] - " f"Train Loss: [yellow]{train_loss:.6f}[/yellow], " f"Val Loss: [green]{val_loss:.6f}[/green], " f"LR: [blue]{current_lr_stage1:.6e}[/blue]")
 
         if val_loss < best_stage1_val_loss:
             best_stage1_val_loss = val_loss
             patience_counter_stage1 = 0
             # 保存最佳阶段1模型
-            torch.save(
-                {
-                    "epoch": epoch + 1,
-                    "model_state_dict": model.state_dict(),
-                    "optimizer_state_dict": stage1_optimizer.state_dict(),
-                    "train_loss": train_loss,
-                    "val_loss": val_loss,
-                },
-                os.path.join(result_dir, "stage1_best_model.pth"),
-            )
+            torch.save({"epoch": epoch + 1, "model_state_dict": model.state_dict(), "optimizer_state_dict": stage1_optimizer.state_dict(), "train_loss": train_loss, "val_loss": val_loss}, os.path.join(result_dir, "stage1_best_model.pth"))
             log_message(f"Stage 1 best model saved with validation loss: {val_loss:.6f}")
             console.print(f"[green]Stage 1 best model saved. Validation Loss: {val_loss:.6f}[/green]")
         else:
@@ -452,9 +416,7 @@ def train_two_stage(args):
     if os.path.exists(os.path.join(result_dir, "stage1_best_model.pth")):
         checkpoint = torch.load(os.path.join(result_dir, "stage1_best_model.pth"))
         model.load_state_dict(checkpoint["model_state_dict"])
-        print(
-            f"Loaded best Stage 1 model (Epoch {checkpoint['epoch']}, Val Loss: {checkpoint['val_loss']:.6f}) for Stage 2 training."
-        )
+        print(f"Loaded best Stage 1 model (Epoch {checkpoint['epoch']}, Val Loss: {checkpoint['val_loss']:.6f}) for Stage 2 training.")
         log_message(f"Loaded best Stage 1 model (Epoch {checkpoint['epoch']}, Val Loss: {checkpoint['val_loss']:.6f})")
     else:
         print("Warning: Best Stage 1 model checkpoint not found. Proceeding with the current model state for Stage 2.")
@@ -472,9 +434,7 @@ def train_two_stage(args):
         model.fusion_layer[2].p = args.dropout
 
     # 第二阶段使用混合损失函数，加强DTW权重
-    stage2_criterion = HybridTrajectoryLoss(
-        gamma=0.1, alpha_dtw=1.5, alpha_l1=0.3, alpha_l2=0.1, use_cuda=(device.type == "cuda")
-    ).to(device)
+    stage2_criterion = HybridTrajectoryLoss(gamma=0.1, alpha_dtw=1.5, alpha_l1=0.3, alpha_l2=0.1, use_cuda=(device.type == "cuda")).to(device)
 
     # 第二阶段优化器
     stage2_optimizer = optim.AdamW(model.parameters(), lr=args.lr * 0.5, weight_decay=args.weight_decay, amsgrad=True)
@@ -512,34 +472,16 @@ def train_two_stage(args):
 
         # 记录到日志文件
         current_lr_stage2 = stage2_scheduler.get_last_lr()[0]
-        log_message(
-            f"Stage 2 - Epoch {epoch+1}/{stage2_epochs} - "
-            f"Train Loss: {train_loss:.6f}, Val Loss: {val_loss:.6f}, "
-            f"LR: {current_lr_stage2:.6e}"
-        )
+        log_message(f"Stage 2 - Epoch {epoch+1}/{stage2_epochs} - " f"Train Loss: {train_loss:.6f}, Val Loss: {val_loss:.6f}, " f"LR: {current_lr_stage2:.6e}")
 
         # 控制台输出保持不变
-        console.print(
-            f"[bold]Stage 2 - Epoch {epoch+1}/{stage2_epochs}[/bold] - "
-            f"Train Loss: [yellow]{train_loss:.6f}[/yellow], "
-            f"Val Loss: [green]{val_loss:.6f}[/green], "
-            f"LR: [blue]{current_lr_stage2:.6e}[/blue]"
-        )
+        console.print(f"[bold]Stage 2 - Epoch {epoch+1}/{stage2_epochs}[/bold] - " f"Train Loss: [yellow]{train_loss:.6f}[/yellow], " f"Val Loss: [green]{val_loss:.6f}[/green], " f"LR: [blue]{current_lr_stage2:.6e}[/blue]")
 
         if val_loss < best_stage2_val_loss:
             best_stage2_val_loss = val_loss
             patience_counter_stage2 = 0
             # 保存最佳阶段2模型
-            torch.save(
-                {
-                    "epoch": epoch + 1,
-                    "model_state_dict": model.state_dict(),
-                    "optimizer_state_dict": stage2_optimizer.state_dict(),
-                    "train_loss": train_loss,
-                    "val_loss": val_loss,
-                },
-                os.path.join(result_dir, "stage2_best_model.pth"),
-            )
+            torch.save({"epoch": epoch + 1, "model_state_dict": model.state_dict(), "optimizer_state_dict": stage2_optimizer.state_dict(), "train_loss": train_loss, "val_loss": val_loss}, os.path.join(result_dir, "stage2_best_model.pth"))
             log_message(f"Stage 2 best model saved with validation loss: {val_loss:.6f}")
             console.print(f"[green]Stage 2 best model saved. Validation Loss: {val_loss:.6f}[/green]")
         else:
@@ -610,15 +552,11 @@ def train_two_stage(args):
 
     if stage1_exists and stage2_exists:
         if best_stage1_val_loss < best_stage2_val_loss:
-            log_message(
-                f"Stage 1 model performed better (Loss: {best_stage1_val_loss:.6f} vs {best_stage2_val_loss:.6f}). Copying as final model."
-            )
+            log_message(f"Stage 1 model performed better (Loss: {best_stage1_val_loss:.6f} vs {best_stage2_val_loss:.6f}). Copying as final model.")
             shutil.copy(stage1_best_path, final_best_model_path)
             selected_stage = "Stage 1"
         else:
-            log_message(
-                f"Stage 2 model performed better (Loss: {best_stage2_val_loss:.6f} vs {best_stage1_val_loss:.6f}). Copying as final model."
-            )
+            log_message(f"Stage 2 model performed better (Loss: {best_stage2_val_loss:.6f} vs {best_stage1_val_loss:.6f}). Copying as final model.")
             shutil.copy(stage2_best_path, final_best_model_path)
             selected_stage = "Stage 2"
     elif stage1_exists:
@@ -642,10 +580,7 @@ def train_two_stage(args):
     # 记录最终结果
     log_message("\n====== Training Finished ======")
     log_message(
-        f"Final Results:\n"
-        f"Best Stage 1 Validation Loss: {best_stage1_val_loss if stage1_exists else 'N/A'}\n"
-        f"Best Stage 2 Validation Loss: {best_stage2_val_loss if stage2_exists else 'N/A'}\n"
-        f"Selected Model from: {selected_stage}"
+        f"Final Results:\n" f"Best Stage 1 Validation Loss: {best_stage1_val_loss if stage1_exists else 'N/A'}\n" f"Best Stage 2 Validation Loss: {best_stage2_val_loss if stage2_exists else 'N/A'}\n" f"Selected Model from: {selected_stage}"
     )
 
     # 保持原有的控制台输出
@@ -685,104 +620,49 @@ if __name__ == "__main__":
 
     # Data related arguments
     parser.add_argument("--scenes", type=str, nargs="+", default=["cuboid_1"], help="Scene names to load data from.")
-    parser.add_argument(
-        "--num-points", type=int, default=1024, help="Number of points per element in the environment point cloud."
-    )
-    parser.add_argument(
-        "--num-grasp-points", type=int, default=256, help="Number of points for the grasped object point cloud."
-    )
-    parser.add_argument(
-        "--trajectory-length",
-        type=int,
-        default=2048,
-        help="Target length for input/output trajectory sequences after interpolation.",
-    )
-    parser.add_argument(
-        "--output-seq-len", type=int, default=2048, help="Length of the trajectory sequence generated by the decoder."
-    )
-    parser.add_argument(
-        "--val-ratio", type=float, default=0.1, help="Ratio of the dataset to use for validation (e.g., 0.1 for 10%)."
-    )
-    parser.add_argument(
-        "--no-normal-channel",
-        action="store_false",
-        dest="normal_channel",
-        help="Disable using normal vectors in point clouds.",
-    )
+    parser.add_argument("--num-points", type=int, default=1024, help="Number of points per element in the environment point cloud.")
+    parser.add_argument("--num-grasp-points", type=int, default=256, help="Number of points for the grasped object point cloud.")
+    parser.add_argument("--trajectory-length", type=int, default=2048, help="Target length for input/output trajectory sequences after interpolation.")
+    parser.add_argument("--output-seq-len", type=int, default=2048, help="Length of the trajectory sequence generated by the decoder.")
+    parser.add_argument("--val-ratio", type=float, default=0.1, help="Ratio of the dataset to use for validation (e.g., 0.1 for 10%).")
+    parser.add_argument("--no-normal-channel", action="store_false", dest="normal_channel", help="Disable using normal vectors in point clouds.")
     parser.set_defaults(normal_channel=True)
-    parser.add_argument(
-        "--add-noise", action="store_false", help="Add random noise to point cloud during data loading."
-    )
-    parser.add_argument(
-        "--noise-ratio", type=float, default=0.05, help="Ratio of points to add noise to if --add-noise is used."
-    )
-    parser.add_argument(
-        "--noise-scale",
-        type=float,
-        default=0.01,
-        help="Scale (standard deviation) of the noise if --add-noise is used.",
-    )
+    parser.add_argument("--add-noise", action="store_false", help="Add random noise to point cloud during data loading.")
+    parser.add_argument("--noise-ratio", type=float, default=0.05, help="Ratio of points to add noise to if --add-noise is used.")
+    parser.add_argument("--noise-scale", type=float, default=0.01, help="Scale (standard deviation) of the noise if --add-noise is used.")
 
     # Model related arguments
-    parser.add_argument(
-        "--object-feature-dim", type=int, default=512, help="Feature dimension from the object branch (PointNet)."
-    )
-    parser.add_argument(
-        "--env-feature-dim", type=int, default=512, help="Feature dimension from the environment branch (PointNet)."
-    )
-    parser.add_argument(
-        "--task-feature-dim", type=int, default=512, help="Feature dimension from the task branch (MLP)."
-    )
-    parser.add_argument(
-        "--traj-feature-dim",
-        type=int,
-        default=512,
-        help="Feature dimension from the trajectory branch (Transformer/LSTM).",
-    )
+    parser.add_argument("--object-feature-dim", type=int, default=512, help="Feature dimension from the object branch (PointNet).")
+    parser.add_argument("--env-feature-dim", type=int, default=512, help="Feature dimension from the environment branch (PointNet).")
+    parser.add_argument("--task-feature-dim", type=int, default=512, help="Feature dimension from the task branch (MLP).")
+    parser.add_argument("--traj-feature-dim", type=int, default=512, help="Feature dimension from the trajectory branch (Transformer/LSTM).")
     parser.add_argument("--fusion-dim", type=int, default=1024, help="Output dimension of the feature fusion layer.")
-    parser.add_argument(
-        "--use-lstm",
-        action="store_true",
-        help="Use LSTM instead of Transformer in the trajectory branch (potentially saves memory).",
-    )
-    parser.add_argument(
-        "--dropout", type=float, default=0.5, help="Dropout rate for regularization in various model parts."
-    )
+    parser.add_argument("--use-lstm", action="store_true", help="Use LSTM instead of Transformer in the trajectory branch (potentially saves memory).")
+    parser.add_argument("--dropout", type=float, default=0.5, help="Dropout rate for regularization in various model parts.")
 
     # Training related arguments
     parser.add_argument("--batch-size", type=int, default=4, help="Batch size for training and validation.")
     parser.add_argument("--epochs", type=int, default=120, help="Total number of training epochs across both stages.")
     parser.add_argument("--lr", type=float, default=1e-4, help="Base learning rate.")
     parser.add_argument("--weight-decay", type=float, default=1e-5, help="Weight decay for optimizer.")
-    parser.add_argument(
-        "--output-dir", type=str, default="./results", help="Directory to save training results (logs, models, plots)."
-    )
+    parser.add_argument("--output-dir", type=str, default="./results", help="Directory to save training results (logs, models, plots).")
     parser.add_argument("--num-workers", type=int, default=4, help="Number of parallel workers for data loading.")
     parser.add_argument("--seed", type=int, default=531, help="Random seed for reproducibility.")
-    parser.add_argument("--no-cuda", action="store_true", help="Disable CUDA, force use of CPU.")
+
+    # Device selection arguments
+    parser.add_argument("--device", type=str, default="cuda", choices=["cuda", "cpu"], help="Device to use for training (cuda/cpu).")
+    parser.add_argument("--gpu-id", type=int, default=0, help="GPU ID to use when device is set to cuda. Ignored for other device settings.")
 
     # Staged training arguments
     parser.add_argument("--two-stage", action="store_false", help="Enable two-stage training strategy.")
-    parser.add_argument(
-        "--stage1-epochs",
-        type=int,
-        default=0,
-        help="Number of epochs for Stage 1. If 0, defaults to 1/3 of total epochs.",
-    )
-    parser.add_argument(
-        "--stage2-epochs",
-        type=int,
-        default=0,
-        help="Number of epochs for Stage 2. If 0, defaults to remaining epochs after Stage 1.",
-    )
+    parser.add_argument("--stage1-epochs", type=int, default=0, help="Number of epochs for Stage 1. If 0, defaults to 1/3 of total epochs.")
+    parser.add_argument("--stage2-epochs", type=int, default=0, help="Number of epochs for Stage 2. If 0, defaults to remaining epochs after Stage 1.")
 
     args = parser.parse_args()
 
     # Ensure output sequence length matches trajectory length if not specified otherwise
     if args.output_seq_len != args.trajectory_length:
-        warnings.warn(
-            f"Output sequence length ({args.output_seq_len}) differs from trajectory length ({args.trajectory_length}). Ensure this is intended."
-        )
+        warnings.warn(f"Output sequence length ({args.output_seq_len}) differs from trajectory length ({args.trajectory_length}). Ensure this is intended.")
 
     if args.two_stage:
         train_two_stage(args)

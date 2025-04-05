@@ -8,6 +8,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, Callable, Dict, Generator, Iterable, List, Optional, Tuple, Union
+from concurrent.futures import ThreadPoolExecutor
 
 import casadi as ca
 import numpy as np
@@ -145,12 +146,13 @@ class RRTTree:
             return self.nodes[self.root_id]
         return None
 
-    def rewire(self, collision_fn: Callable, steps: int = 10) -> int:
+    def rewire(self, collision_fn: Callable, steps: int = 10, max_workers: int = 4) -> int:
         """根据更新后的障碍物对树进行剪枝，去除发生碰撞的分支
 
         Args:
             collision_fn: 碰撞检测函数
             steps: 路径检查的步数
+            max_workers: 并行执行的最大工作线程数
 
         Returns:
             移除的节点数量
@@ -174,43 +176,59 @@ class RRTTree:
         # 使用BFS逐层检查节点
         queue = deque([self.root_id])
         visited = {self.root_id}
-
-        while queue:
-            node_id = queue.popleft()
+        
+        # 定义用于并行执行的碰撞检测函数
+        def check_collision_segment(node_id, child_id):
+            """检查从node_id到child_id的路径是否碰撞
+            
+            Returns:
+                Tuple[int, bool]: (子节点ID, 是否碰撞)
+            """
             node_config = self.nodes[node_id]
+            child_config = self.nodes[child_id]
+            
+            # 检查子节点本身是否与障碍物碰撞
+            if collision_fn(child_config):
+                return child_id, True
+                
+            # 检查从父节点到子节点的路径是否碰撞
+            for step in range(1, steps):  # 跳过起点和终点，它们已经被单独检查
+                t = step / steps
+                interp_config = node_config * (1 - t) + child_config * t
+                if collision_fn(interp_config):
+                    return child_id, True
+                    
+            return child_id, False
 
-            # 获取子节点
-            child_nodes = self.children.get(node_id, [])
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            while queue:
+                node_id = queue.popleft()
+                node_config = self.nodes[node_id]
 
-            for child_id in child_nodes:
-                if child_id in visited:
+                # 获取子节点
+                child_nodes = self.children.get(node_id, [])
+                
+                if not child_nodes:
                     continue
-
-                child_config = self.nodes[child_id]
-
-                # 检查子节点本身是否与障碍物碰撞
-                if collision_fn(child_config):
-                    # 将该节点及其所有后代标记为需要移除
-                    self._mark_branch_for_removal(child_id, nodes_to_remove, visited)
-                    continue
-
-                # 检查从父节点到子节点的路径是否碰撞
-                path_collision = False
-
-                for step in range(1, steps):  # 跳过起点和终点，它们已经被单独检查
-                    t = step / steps
-                    interp_config = node_config * (1 - t) + child_config * t
-                    if collision_fn(interp_config):
-                        path_collision = True
-                        break
-
-                if path_collision:
-                    # 路径发生碰撞，移除子节点及其分支
-                    self._mark_branch_for_removal(child_id, nodes_to_remove, visited)
-                else:
-                    # 节点和路径都无碰撞，添加到队列中继续检查
-                    queue.append(child_id)
-                    visited.add(child_id)
+                    
+                # 并行提交所有子节点的碰撞检测任务
+                futures = []
+                for child_id in child_nodes:
+                    if child_id in visited:
+                        continue
+                    futures.append(executor.submit(check_collision_segment, node_id, child_id))
+                
+                # 收集结果
+                for future in futures:
+                    child_id, has_collision = future.result()
+                    
+                    if has_collision:
+                        # 将该节点及其所有后代标记为需要移除
+                        self._mark_branch_for_removal(child_id, nodes_to_remove, visited)
+                    else:
+                        # 节点和路径都无碰撞，添加到队列中继续检查
+                        queue.append(child_id)
+                        visited.add(child_id)
 
         # 移除标记的节点和分支
         for node_id in nodes_to_remove:
@@ -650,14 +668,33 @@ class TrajectoryIPGARSolver:
 
     def _compute_path_obstacle_sdfs(self, pose_2d: np.ndarray, path: np.ndarray, obstacles: List[Dict]) -> Dict[int, float]:
         """Compute minimum SDF values for obstacles along path"""
-        min_sdfs = {}
-        for obs_idx, obstacle_dict in enumerate(obstacles):
+        # 为每个障碍物定义一个计算最小SDF的函数
+        def compute_min_sdf_for_obstacle(obs_idx_and_dict):
+            obs_idx, obstacle_dict = obs_idx_and_dict
             min_sdf = float("inf")
             obs_pos = np.array(obstacle_dict["position"])
             for point in path:
                 sdf_val_ca, _ = self.sdf(pose_2d, point, obs_pos)
                 min_sdf = min(min_sdf, sdf_val_ca.toarray().item())
-            min_sdfs[obs_idx] = min_sdf
+            return obs_idx, min_sdf
+        
+        # 创建障碍物索引和字典的列表
+        obs_with_idx = [(obs_idx, obstacle_dict) for obs_idx, obstacle_dict in enumerate(obstacles)]
+        
+        # 使用线程池并行计算
+        min_sdfs = {}
+        max_workers = min(8, len(obstacles))  # 设置合理的工作线程数，避免创建过多线程
+        
+        if len(obstacles) > 0:  # 确保有障碍物需要处理
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # 提交所有计算任务
+                future_results = [executor.submit(compute_min_sdf_for_obstacle, obs_item) for obs_item in obs_with_idx]
+                
+                # 收集结果
+                for future in future_results:
+                    obs_idx, min_sdf = future.result()
+                    min_sdfs[obs_idx] = min_sdf
+        
         return min_sdfs
 
     def _interpolate_path(self, path: List[np.ndarray]) -> np.ndarray:
@@ -710,7 +747,7 @@ class TrajectoryIPGARSolver:
             collision_fn = self._create_collision_fn(active_obstacles_body)
             if final_path is None:
                 print(f"IPGAR: Planning initial path in free space...")
-                initial_solution = self.planner.plan(q_init, q_target, collision_fn)
+                initial_solution = self.planner.plan(q_init, q_target, collision_fn, smooth=100)
                 if initial_solution is None:
                     print("IPGAR: ERROR - Initial path planning failed in free space")
                     print("\n========== IPGAR PLANNING FAILED ==========")
@@ -812,32 +849,14 @@ class TrajectoryIPGARSolver:
             while len([item for sublist in sorted_obstacles for item in sublist]) != 0:
 
                 # -------------------- 3.4.1 寻找碰撞的连续障碍物列表 --------------------#
-                find_collision = False
-                current_active_obs_ids = []
-                for sub_obs_list in sorted_obstacles:
-                    current_obs_ids = []
-                    # 找到第一个碰撞的障碍物
-                    while len(sub_obs_list) != 0:
-                        name, obs, sdf_val = sub_obs_list.pop(0)
-                        obs_id = pp.create_sphere(obs["radius"])
-                        pp.set_point(obs_id, obs["position"])
-                        pp.set_color(obs_id, [0, 1, 0, 1])
-                        del remaining_obstacles_dict[name]
-                        active_obstacles.append(obs)
-                        active_obstacles_body.append(obs_id)
-                        current_obs_ids.append(obs_id)
-                        if sdf_val <= self.sdf_threshold:
-                            print(f"    IPGAR: Activated collision obstacle {name}")
-                            find_collision = True
-                            break
-                        else:
-                            print(f"    IPGAR: Activated no collision obstacle {name}")
-                            pp.set_color(obs_id, [0, 0, 1, 1])
-                    # 寻找后续连续的碰撞障碍物
-                    while len(sub_obs_list) != 0:
-                        name, obs, sdf_val = sub_obs_list[0]
-                        if sdf_val <= self.sdf_threshold:
-                            sub_obs_list.pop(0)
+                with pp.LockRenderer():
+                    find_collision = False
+                    current_active_obs_ids = []
+                    for sub_obs_list in sorted_obstacles:
+                        current_obs_ids = []
+                        # 找到第一个碰撞的障碍物
+                        while len(sub_obs_list) != 0:
+                            name, obs, sdf_val = sub_obs_list.pop(0)
                             obs_id = pp.create_sphere(obs["radius"])
                             pp.set_point(obs_id, obs["position"])
                             pp.set_color(obs_id, [0, 1, 0, 1])
@@ -845,10 +864,29 @@ class TrajectoryIPGARSolver:
                             active_obstacles.append(obs)
                             active_obstacles_body.append(obs_id)
                             current_obs_ids.append(obs_id)
-                            print(f"    IPGAR: Activated continuous collision obstacle {name}")
-                        else:
-                            break
-                    current_active_obs_ids.extend(current_obs_ids)
+                            if sdf_val <= self.sdf_threshold:
+                                print(f"    IPGAR: Activated collision obstacle {name}")
+                                find_collision = True
+                                break
+                            else:
+                                print(f"    IPGAR: Activated no collision obstacle {name}")
+                                pp.set_color(obs_id, [0, 0, 1, 1])
+                        # 寻找后续连续的碰撞障碍物
+                        while len(sub_obs_list) != 0:
+                            name, obs, sdf_val = sub_obs_list[0]
+                            if sdf_val <= self.sdf_threshold:
+                                sub_obs_list.pop(0)
+                                obs_id = pp.create_sphere(obs["radius"])
+                                pp.set_point(obs_id, obs["position"])
+                                pp.set_color(obs_id, [0, 1, 0, 1])
+                                del remaining_obstacles_dict[name]
+                                active_obstacles.append(obs)
+                                active_obstacles_body.append(obs_id)
+                                current_obs_ids.append(obs_id)
+                                print(f"    IPGAR: Activated continuous collision obstacle {name}")
+                            else:
+                                break
+                        current_active_obs_ids.extend(current_obs_ids)
 
                 # -------------------- 3.4.2 当前没有碰撞，可以结束 --------------------#
                 if len(remaining_obstacles_dict) == 0 and not find_collision:
@@ -979,6 +1017,127 @@ class TrajectoryIPGARSolver:
                 return tuple(sample)
 
             return fn
+            
+        # 创建带SVSDF斥力场的扩展函数
+        def get_extend_fn(original_extend_fn, pose_2d, obstacles, repulsion_weight=1.0, attraction_weight=1.0, safety_distance=0.05):
+            """
+            创建一个扩展函数，结合原始扩展方向和SVSDF障碍物斥力
+            
+            Args:
+                original_extend_fn: 原始扩展函数
+                pose_2d: 机器人2D位姿
+                obstacles: 障碍物列表
+                repulsion_weight: 斥力权重
+                attraction_weight: 吸引力(原始方向)权重
+                safety_distance: 安全距离阈值，当SDF小于此值时增强斥力
+                
+            Returns:
+                新的扩展函数
+            """
+            # 确保obstacles是列表
+            if not isinstance(obstacles, list):
+                obstacles = []
+                
+            # 从active_obstacles_body获取障碍物位置信息
+            obstacle_positions = []
+            for obs_id in active_obstacles_body:
+                try:
+                    pos, _ = pp.get_pose(obs_id)
+                    radius = 0.01
+                    obstacle_positions.append({"position": pos, "radius": radius})
+                except Exception as e:
+                    print(f"警告: 无法获取障碍物 {obs_id} 的位置: {e}")
+            
+            def svsdf_extend(q1, q2):
+                """
+                带SVSDF斥力的扩展函数
+                
+                Args:
+                    q1: 起始配置
+                    q2: 目标配置
+                    
+                Returns:
+                    修改后的路径点生成器
+                """
+                # 首先获取原始路径点
+                original_path = list(original_extend_fn(q1, q2))
+                if len(original_path) <= 1:
+                    # 原始扩展失败，直接返回
+                    for pt in original_path:
+                        yield pt
+                    return
+                
+                # 获取扩展方向（单位向量）
+                direction = q2 - q1
+                direction_norm = np.linalg.norm(direction)
+                if direction_norm < 1e-6:
+                    # 如果方向太小，直接返回原始路径
+                    for pt in original_path:
+                        yield pt
+                    return
+                
+                direction = direction / direction_norm  # 归一化
+                
+                # 处理路径上的每个点
+                for i, q in enumerate(original_path):
+                    if i == 0:  # 第一个点直接返回
+                        yield q
+                        continue
+                        
+                    # 确保使用numpy数组进行运算
+                    q_np = np.array(q) if isinstance(q, tuple) else q
+                    q_prev_np = np.array(original_path[i-1]) if isinstance(original_path[i-1], tuple) else original_path[i-1]
+                    
+                    # 计算所有障碍物对当前点的斥力
+                    repulsion = np.zeros_like(q_np)
+                    for obs in obstacle_positions:
+                        # 计算SDF值和梯度
+                        obs_pos = np.array(obs["position"])
+                        sdf_val, sdf_grad = self.sdf(pose_2d, q_np, obs_pos)
+                        sdf_val = float(sdf_val)
+                        
+                        # 当SDF值小于安全距离时增强斥力
+                        if sdf_val < safety_distance:
+                            # 斥力与SDF负梯度成正比，与SDF值成反比
+                            force_magnitude = (safety_distance - sdf_val) / safety_distance
+                            force_direction = -np.array(sdf_grad).flatten()  # 使用SDF梯度的反方向
+                            
+                            # 归一化斥力方向
+                            force_dir_norm = np.linalg.norm(force_direction)
+                            if force_dir_norm > 1e-6:
+                                force_direction = force_direction / force_dir_norm
+                                
+                                # 累加所有障碍物的斥力
+                                repulsion += force_magnitude * force_direction
+                    
+                    # 如果有计算得到的斥力
+                    if np.linalg.norm(repulsion) > 1e-6:
+                        # 归一化斥力
+                        repulsion = repulsion / np.linalg.norm(repulsion)
+                        
+                        # 结合原始方向和斥力方向
+                        combined_direction = attraction_weight * direction + repulsion_weight * repulsion
+                        combined_norm = np.linalg.norm(combined_direction)
+                        
+                        if combined_norm > 1e-6:
+                            # 归一化组合方向
+                            combined_direction = combined_direction / combined_norm
+                            
+                            # 计算修正后的位置 - 注意使用numpy数组
+                            step_size = np.linalg.norm(q_np - q_prev_np)
+                            new_q = q_prev_np + step_size * combined_direction
+                            
+                            # 如果需要，将numpy数组转回元组
+                            if isinstance(q, tuple):
+                                new_q = tuple(new_q)
+                                
+                            yield new_q
+                            continue
+                
+                    # 如果没有有效的斥力或组合失败，使用原始路径点
+                    yield q
+            
+            return svsdf_extend
 
         # 循环直到所有碰撞区间都被处理
         while collision_intervals:
@@ -996,7 +1155,7 @@ class TrajectoryIPGARSolver:
                 q_start_local = current_path[expanded_start]
                 q_end_local = current_path[expanded_end]
 
-                max_plan_time = 10.0 + repair_attempts * 5.0
+                max_plan_time = 5.0 + repair_attempts * 5.0
 
                 # 计算当前轨迹片段上每个关节角的最大值和最小值
                 joint_limits = []
@@ -1025,10 +1184,41 @@ class TrajectoryIPGARSolver:
 
                 # 使用扩展后的限制创建采样函数
                 sample_fn = get_sample_fn(lower=np.array([limit[0] for limit in expanded_limits]), upper=np.array([limit[1] for limit in expanded_limits]))
+                
+                # 获取原始扩展函数
+                resolutions = np.array([0.1 / 180.0 * np.pi for j in self.robot_setup.arm_joints])  # 使用较小的分辨率提高精度
+                original_extend_fn = pp.get_extend_fn(self.robot_setup.robot, self.robot_setup.arm_joints, resolutions=resolutions)
+                
+                # 创建增强的扩展函数，结合SVSDF斥力
+                # 根据修复尝试次数调整权重
+                repulsion_weight = min(2.0, 0.5 + repair_attempts * 0.1)  # 随着尝试次数增加，增加斥力权重
+                attraction_weight = 1.0
+                
+                # 获取当前的2D姿态
+                pose_2d_current = pp.get_joint_positions(self.robot_setup.robot, self.robot_setup.base_joints)
+                
+                # 创建结合SVSDF的扩展函数
+                svsdf_extend_fn = get_extend_fn(
+                    original_extend_fn, 
+                    pose_2d_current, 
+                    active_obstacles_body,
+                    repulsion_weight=repulsion_weight,
+                    attraction_weight=attraction_weight,
+                    safety_distance=0.01 * (1 + repair_attempts * 0.1)  # 随着尝试次数增加，扩大安全距离
+                )
 
                 with pp.LockRenderer():
                     start_tree, end_tree = self.planner.get_trees()
-                    repair_path = self.planner.plan(start_point, end_point, collision_fn, sample_fn=sample_fn, max_time=max_plan_time, start_tree=start_tree, end_tree=end_tree)
+                    repair_path = self.planner.plan(
+                        start_point, 
+                        end_point, 
+                        collision_fn, 
+                        sample_fn=sample_fn, 
+                        extend_fn=None,  # 使用增强的扩展函数
+                        max_time=max_plan_time, 
+                        start_tree=start_tree, 
+                        end_tree=end_tree
+                    )
 
                 if repair_path is not None:
                     print(f"    Repair: Success after {repair_attempts + 1} attempts")
@@ -1052,7 +1242,7 @@ class TrajectoryIPGARSolver:
                     repair_attempts += 1
 
                     # 扩展修补区间
-                    expansion_size = len(current_path) // 10
+                    expansion_size = len(current_path) // (max_repair_attempts * 2)
                     expanded_start = max(0, expanded_start - expansion_size)
                     expanded_end = min(len(current_path) - 1, expanded_end + expansion_size)
 

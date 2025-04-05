@@ -66,3 +66,5 @@ DATA_DIR = os.path.join(PROJECT_DIR, "data")  # data
 PACKAGE_DIR = os.path.join(DATA_DIR, "husky_urdf")  # husky_urdf
 EXT_DIR = os.path.join(PROJECT_DIR, "ext")  # ext
 LOG_DIR = os.path.join(HERE, "logs")  # ompl
+
+URDF_PATH = os.path.join(PACKAGE_DIR, "mt_husky_moveit_config", "urdf", "husky_ur5_e.urdf")

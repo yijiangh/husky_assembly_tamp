@@ -167,7 +167,7 @@ class RobotSetup:
 
     def plan_manipulator_path(
         self, init_q: np.ndarray, target_q: np.ndarray, attachments: List[Attachment], obstacles: Set[int], **kwargs
-    ) -> List[np.ndarray]:
+    ) -> np.ndarray:
         """Plan a manipulator path from initial to target configuration.
 
         Params:
@@ -199,7 +199,7 @@ class RobotSetup:
             frozen_values=frozen_values,
             **kwargs,
         )
-        return [np.array(conf)[3:] for conf in path] if path else None
+        return np.array([np.array(conf)[3:] for conf in path]) if path else None
 
     def set_base_pose(self, pose: Pose) -> None:
         """Set the robot's base pose and update attachments.

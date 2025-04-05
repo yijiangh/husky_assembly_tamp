@@ -1,12 +1,12 @@
 from collections import defaultdict, namedtuple
 
+import numpy as np
 import pybullet as p
 import pybullet_planning as pp
-
 import utils.load_multi_tangent as load_multi_tangent
 from multi_tangent.collision import create_swivel_coupler
-from multi_tangent.convert import flatten_list, list_to_pairs
 from multi_tangent.contact import compute_closest_t_between_lines
+from multi_tangent.convert import flatten_list, list_to_pairs
 
 Element = namedtuple("Element", ["index", "body", "init_pose", "goal_pose", "axis_endpoints"])
 
@@ -82,6 +82,8 @@ collision_info = {
     ],
 }
 
+element_collision_info = [{"offset": [0.0, 0.0, z], "radius": 0.01} for z in np.linspace(-0.5, 0.5, 50)]
+
 
 class Grasp(object):
     def __init__(self, element, gripper_from_object):
@@ -96,7 +98,7 @@ def init_pb():
     """初始化PyBullet环境，屏蔽版本信息输出"""
     # * start pybullet simulator
     pp.connect(use_gui=True, shadows=True, color=[0.9, 0.9, 1.0])
-    
+
     p.configureDebugVisualizer(p.COV_ENABLE_GUI, 1, physicsClientId=pp.CLIENT)
     # pp.set_camera(np.deg2rad(92.0), np.deg2rad(-85), 5.20)
     # pp.set_camera(92.0, -85, 5.20)

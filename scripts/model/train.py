@@ -193,18 +193,23 @@ def train_two_stage(args):
     set_seed(args.seed)
 
     # 确定设备
-    if args.no_cuda or not torch.cuda.is_available():
+    if args.device == "cpu":
         device = torch.device("cpu")
-        print("Using CPU for training")
-    else:
-        # 获取显存占用最低的GPU
-        best_gpu = get_gpu_with_least_memory()
-        if best_gpu is not None:
-            device = torch.device(f"cuda:{best_gpu}")
-            print(f"Using GPU {best_gpu} for training (least memory usage)")
-        else:
+        print("使用CPU进行训练")
+    elif args.device == "cuda":
+        if not torch.cuda.is_available():
+            print("警告：CUDA不可用，将使用CPU进行训练")
             device = torch.device("cpu")
-            print("No GPU available, using CPU for training")
+        else:
+            if args.gpu_id >= torch.cuda.device_count():
+                print(f"警告：指定的GPU ID {args.gpu_id} 不可用，将使用GPU 0")
+                device = torch.device("cuda:0")
+            else:
+                device = torch.device(f"cuda:{args.gpu_id}")
+            print(f"使用GPU {device.index} 进行训练")
+    else:
+        print("警告：设备设置错误，将使用CPU进行训练")
+        device = torch.device("cpu")
 
     # 创建结果目录
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -406,16 +411,7 @@ def train_two_stage(args):
             best_stage1_val_loss = val_loss
             patience_counter_stage1 = 0
             # 保存最佳阶段1模型
-            torch.save(
-                {
-                    "epoch": epoch + 1,
-                    "model_state_dict": model.state_dict(),
-                    "optimizer_state_dict": stage1_optimizer.state_dict(),
-                    "train_loss": train_loss,
-                    "val_loss": val_loss,
-                },
-                os.path.join(result_dir, "stage1_best_model.pth"),
-            )
+            torch.save({"epoch": epoch + 1, "model_state_dict": model.state_dict(), "optimizer_state_dict": stage1_optimizer.state_dict(), "train_loss": train_loss, "val_loss": val_loss}, os.path.join(result_dir, "stage1_best_model.pth"))
             log_message(f"Stage 1 best model saved with validation loss: {val_loss:.6f}")
             console.print(f"[green]Stage 1 best model saved. Validation Loss: {val_loss:.6f}[/green]")
         else:
@@ -506,16 +502,7 @@ def train_two_stage(args):
             best_stage2_val_loss = val_loss
             patience_counter_stage2 = 0
             # 保存最佳阶段2模型
-            torch.save(
-                {
-                    "epoch": epoch + 1,
-                    "model_state_dict": model.state_dict(),
-                    "optimizer_state_dict": stage2_optimizer.state_dict(),
-                    "train_loss": train_loss,
-                    "val_loss": val_loss,
-                },
-                os.path.join(result_dir, "stage2_best_model.pth"),
-            )
+            torch.save({"epoch": epoch + 1, "model_state_dict": model.state_dict(), "optimizer_state_dict": stage2_optimizer.state_dict(), "train_loss": train_loss, "val_loss": val_loss}, os.path.join(result_dir, "stage2_best_model.pth"))
             log_message(f"Stage 2 best model saved with validation loss: {val_loss:.6f}")
             console.print(f"[green]Stage 2 best model saved. Validation Loss: {val_loss:.6f}[/green]")
         else:
@@ -682,7 +669,10 @@ if __name__ == "__main__":
     parser.add_argument("--output-dir", type=str, default="./results", help="Directory to save training results (logs, models, plots).")
     parser.add_argument("--num-workers", type=int, default=4, help="Number of parallel workers for data loading.")
     parser.add_argument("--seed", type=int, default=531, help="Random seed for reproducibility.")
-    parser.add_argument("--no-cuda", action="store_true", help="Disable CUDA, force use of CPU.")
+
+    # Device selection arguments
+    parser.add_argument("--device", type=str, default="cuda", choices=["cuda", "cpu"], help="Device to use for training (cuda/cpu).")
+    parser.add_argument("--gpu-id", type=int, default=0, help="GPU ID to use when device is set to cuda. Ignored for other device settings.")
 
     # Staged training arguments
     parser.add_argument("--two-stage", action="store_false", help="Enable two-stage training strategy.")

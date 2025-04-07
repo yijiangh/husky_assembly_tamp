@@ -506,6 +506,59 @@ class SceneParser:
 
         return line_pts_flattened, radius_per_edge
 
+    def get_channel_info(self) -> List[Dict]:
+        """
+        Get channel information from scene elements.
+
+        Returns:
+            List[Dict]: A list of dictionaries containing channel information
+        """
+        if not self.scene_data:
+            raise ValueError("Scene data is not loaded. Call load_scene() first.")
+
+        channel_info = []
+
+        for channel in self.scene_data.channels_info:
+            channel_info.append(
+                {
+                    "center": channel.center,
+                    "direction": channel.direction,
+                    "type": channel.type,
+                    "size": channel.size,
+                    "thickness": channel.thickness,
+                }
+            )
+
+        return channel_info
+    
+    @staticmethod
+    def load_channel(channel: Dict):
+        channel_center = np.array(channel["center"])
+        channel_direction = np.array(channel["direction"])
+        channel_type = channel["type"]
+        channel_size = channel["size"]
+        channel_thickness = channel["thickness"]
+        if channel_type == "rectangle":
+            channel_body = pp.create_box(channel_size[0], channel_size[1], channel_thickness)
+        elif channel_type == "circle":
+            channel_body = pp.create_cylinder(channel_size[0], channel_thickness)
+        else:
+            raise ValueError(f"Unknown channel type: {channel_type}")
+        channel_z_axis = channel_direction / np.linalg.norm(channel_direction)
+        temp_x = np.array([1, 0, 0])
+        if np.abs(np.dot(temp_x, channel_z_axis)) > 0.9:
+            temp_x = np.array([0, 1, 0])
+        channel_y_axis = np.cross(channel_z_axis, temp_x)
+        channel_y_axis = channel_y_axis / np.linalg.norm(channel_y_axis)
+        channel_x_axis = np.cross(channel_y_axis, channel_z_axis)
+        channel_x_axis = channel_x_axis / np.linalg.norm(channel_x_axis)
+        rotation_matrix = np.column_stack([channel_x_axis, channel_y_axis, channel_z_axis])
+        rotation = Rotation.from_matrix(rotation_matrix)
+        rotation_euler = rotation.as_euler("xyz", degrees=False).tolist()
+        pp.set_pose(channel_body, pp.Pose(point=channel_center, euler=rotation_euler))
+        pp.set_color(channel_body, [0, 1, 1, 0.5])
+        return channel_body
+
 
 def reorganize_tasks(scene_name: str):
     """

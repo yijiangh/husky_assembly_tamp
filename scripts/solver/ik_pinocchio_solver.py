@@ -79,18 +79,7 @@ class PinocchioSolver(object):
             print(f"{frame_id:<10} {frame_name:<20} {parent_joint_id:<15} {placement_translation}")
 
     def ik(
-        self,
-        pose: np.ndarray,
-        tip_name: str,
-        qinit: Union[np.ndarray, None] = None,
-        link: bool = True,
-        verbose: bool = False,
-        output: str = "array",
-        output_flag: bool = False,
-        eps=1e-4,
-        IT_MAX=10000,
-        DT=1e-2,
-        damp=1e-12,
+        self, pose: np.ndarray, tip_name: str, qinit: Union[np.ndarray, None] = None, link: bool = True, verbose: bool = False, output: str = "array", output_flag: bool = False, eps=1e-4, IT_MAX=10000, DT=1e-2, damp=1e-12
     ) -> Union[Union[np.ndarray, None], Tuple[Union[np.ndarray, None], bool]]:
         """
         Calculate IK solution.
@@ -298,7 +287,6 @@ if __name__ == "__main__":
     from functools import partial
 
     import pybullet_planning as pp
-    from tracikpy import TracIKSolver
 
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -310,16 +298,12 @@ if __name__ == "__main__":
     robot_urdf = "/home/jeong/summer_research/eth_ws/src/husky_assembly/data/husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf"
 
     pinocchio_solver = PinocchioSolver(robot_urdf)
-    # pin_ik_solver = partial(pinocchio_solver.ik, base_name="world_link", tip_name="ur_arm_tool0", relative=False)
     pin_ik_solver_relative = partial(pinocchio_solver.ik, tip_name="ur_arm_tool0")
-
-    # trac_ik_solver = TracIKSolver(robot_urdf, "world_link", "ur_arm_tool0")
-    trac_ik_solver_relative = TracIKSolver(robot_urdf, "ur_arm_base_link", "ur_arm_tool0")
 
     target_pose = np.array([[0, 0, 1, 0.5], [0, 1, 0, 0.25], [-1, 0, 0, 0.5], [0, 0, 0, 1]])
 
-    q_trac = trac_ik_solver_relative.ik(target_pose, qinit=np.array([0, 0, 0, 0, 0, 0]))
-    q_pin = pin_ik_solver_relative(target_pose, qinit=q_trac)
+    # q_trac = trac_ik_solver_relative.ik(target_pose, qinit=np.array([0, 0, 0, 0, 0, 0]))
+    q_pin = pin_ik_solver_relative(target_pose, qinit=np.array([0, 0, 0, 0, 0, 0]))
 
     init_pb()
     rb = RobotSetup("r0")
@@ -329,8 +313,7 @@ if __name__ == "__main__":
     rb.set_joint_positions(rb.arm_joints, q_pin)
     pp.wait_for_user()
 
-    rb.set_joint_positions(rb.arm_joints, q_trac)
-    pp.wait_for_user()
-
-    rb.set_joint_positions(rb.arm_joints, np.array([0, -np.pi / 2, -np.pi / 2, 0, 0, 0]))
-    print(pp.get_link_pose(rb.robot, pp.link_from_name(rb.robot, "ur_arm_tool0")))
+    # rb.set_joint_positions(rb.arm_joints, np.array([0, -np.pi / 2, -np.pi / 2, 0, 0, 0]))
+    # print(pp.get_link_pose(rb.robot, pp.link_from_name(rb.robot, "ur_arm_tool0")))
+    
+    pp.get_link_pose(rb.robot, pp.link_from_name(rb.robot, ""))

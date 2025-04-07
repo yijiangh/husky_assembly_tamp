@@ -2,7 +2,7 @@ import os
 import sys
 import xml.etree.ElementTree as ET
 from functools import partial
-from typing import Dict, List, Set, Tuple, Union
+from typing import Dict, List, Set, Tuple, Union, Callable
 
 import casadi as ca
 import numpy as np
@@ -17,6 +17,8 @@ from compas_fab.robots.robot import RobotModel
 from pybullet_planning import Attachment, Euler, Point, Pose, multiply
 from solver.ik_pinocchio_solver import PinocchioSolver
 from utils.utils import HUSKYU_JOINT_NAMES
+from utils.params import URDF_PATH
+from utils.utils_casadi import eval
 
 # Constants
 TOOL0_FROM_EE_POSE = pp.Pose(point=[0, 0, 0.160])
@@ -41,6 +43,38 @@ ONBOARD_LINK = "ur_arm_base_link"
 
 class RobotSetup:
     """Handles robot setup, kinematics, and motion planning using Pinocchio IK solver."""
+
+    MANIPULATOR_CONTROL_JOINT_NAMES = [
+        "ur_arm_shoulder_pan_joint",
+        "ur_arm_shoulder_lift_joint",
+        "ur_arm_elbow_joint",
+        "ur_arm_wrist_1_joint",
+        "ur_arm_wrist_2_joint",
+        "ur_arm_wrist_3_joint",
+    ]
+
+    MANIPULATOR_REDUCED_MODEL_JOINT_NAMES = [
+        "ur_arm_base_link-base_fixed_joint",
+        "ur_arm_shoulder_pan_joint",
+        "ur_arm_shoulder_lift_joint",
+        "ur_arm_elbow_joint",
+        "ur_arm_wrist_1_joint",
+        "ur_arm_wrist_2_joint",
+        "ur_arm_wrist_3_joint",
+        "ur_arm_wrist_3-flange",
+        "ur_arm_flange-tool0",
+        "tool0-bar_tcp_fixed_joint",
+    ]
+
+    BASE_CONTROL_JOINT_NAMES = []
+
+    BASE_REDUCED_MODEL_JOINT_NAMES = [
+        "base_footprint_joint",
+        "top_plate_joint",
+        "top_plate_front_joint",
+        "arm_mount_joint",
+        # "ur_arm_base_link-base_fixed_joint",
+    ]
 
     def __init__(self, robot_name: str = "r0", attachments: List[Attachment] = None):
         """Initialize the RobotSetup instance.
@@ -68,6 +102,9 @@ class RobotSetup:
         self.base_joints = pp.joints_from_names(self.robot, BASE_CONTROL_JOINT_NAMES)
         self.arm_init_angles = INIT_ARM_JOINT_ANGLES
         self.set_joint_positions(self.arm_joints, self.arm_init_angles)
+
+        base_from_connect_sym = RobotSetup.symbolic_forward(URDF_PATH, self.BASE_REDUCED_MODEL_JOINT_NAMES, self.BASE_CONTROL_JOINT_NAMES, output_type="matrix")
+        self.base_from_connect = eval("base_from_connect", base_from_connect_sym, [], [])
 
     def _load_robot(self) -> Dict:
         """Load robot URDF and configure Pinocchio IK solver for relative kinematics.
@@ -143,7 +180,7 @@ class RobotSetup:
         link_pose = pp.get_link_pose(self.robot, pp.link_from_name(self.robot, link_name))
         return pp.multiply(pp.invert(link_pose), pose_world)
 
-    def get_relative_ik_solution(self, tool_pose_world: Tuple, q_init: List[float] = None) -> np.ndarray:
+    def get_relative_ik_solution(self, world_from_tool: Tuple, q_init: List[float] = None) -> np.ndarray:
         """Calculate inverse kinematics solution relative to base using Pinocchio.
 
         Params:
@@ -153,8 +190,9 @@ class RobotSetup:
         Returns:
             Joint configuration solving the IK problem.
         """
-        tool_pose_relative = self.get_relative_pose(tool_pose_world)
-        tform = pp.tform_from_pose(tool_pose_relative)
+        world_from_connect = pp.multiply(pp.get_pose(self.robot), pp.pose_from_tform(self.base_from_connect))
+        connect_from_tool = pp.multiply(pp.invert(world_from_connect), world_from_tool)
+        tform = pp.tform_from_pose(connect_from_tool)
         conf = self.ik_solver_relative(tform, qinit=q_init)
         self.ee_attachment.assign()
         return conf
@@ -181,17 +219,8 @@ class RobotSetup:
         frozen_joints = self.base_joints
         frozen_values = [init_conf[self.control_joints.index(j)] for j in frozen_joints]
 
-        path = self.plan_manipulator_motion(
-            init_conf,
-            target_conf,
-            [self.ee_attachment] + attachments,
-            obstacles,
-            disabled_collisions=self.disabled_collisions,
-            frozen_joints=frozen_joints,
-            frozen_values=frozen_values,
-            **kwargs,
-        )
-        return np.array([np.array(conf)[3:] for conf in path]) if path else None
+        path = self.plan_manipulator_motion(init_q, target_q, [self.ee_attachment] + attachments, obstacles, disabled_collisions=self.disabled_collisions, frozen_joints=frozen_joints, frozen_values=frozen_values, **kwargs)
+        return np.array([np.array(conf) for conf in path]) if path else None
 
     def set_base_pose(self, pose: Pose) -> None:
         """Set the robot's base pose and update attachments.
@@ -536,3 +565,24 @@ class RobotSetup:
         else:
             fk_function = ca.Function("forward_kinematics", [q], [T])
             return fk_function
+
+    def create_collision_fn(self, obstacle_bodies: List[int]) -> Callable[[np.ndarray], bool]:
+        """Create PyBullet-based collision function"""
+        robot_body = self.robot
+        arm_joints = self.arm_joints
+        attachments = [self.ee_attachment] + self.attachments
+        disabled_collisions = self.disabled_collisions
+        tool_link = self.tool_link
+        wrist_link = pp.link_from_name(robot_body, "ur_arm_wrist_3_link")
+
+        extra_disabled_collisions = []
+        if self.ee_attachment is not None:
+            extra_disabled_collisions.extend(
+                [
+                    ((robot_body, wrist_link), (self.ee_attachment.child, pp.BASE_LINK)),
+                ]
+            )
+
+        return pp.get_collision_fn(
+            robot_body, arm_joints, obstacles=obstacle_bodies, attachments=attachments, self_collisions=True, disabled_collisions=disabled_collisions, extra_disabled_collisions=extra_disabled_collisions, max_distance=0.0
+        )

@@ -28,15 +28,13 @@ from utils.params import URDF_PATH
 
 class TrajectoryTAMPORSolver:
     """TAMPOR (Topology-Aware Motion Planning with Obstacle Rearrangement)求解器
-    
+
     将TopologyPlanner和Planner整合到一个类中，提供统一的规划接口。
     """
-    
-    def __init__(self, robot_setup: RobotSetup, channel_info: List[Dict], grasp_offset: List[float], 
-                 object_size: List[float] = [1.0, 0.02], obstacle_size: List[float] = [1.0, 0.02],
-                 eval_max_attempts: int = 50000) -> None:
+
+    def __init__(self, robot_setup: RobotSetup, channel_info: List[Dict], grasp_offset: List[float], object_size: List[float] = [1.0, 0.02], obstacle_size: List[float] = [1.0, 0.02], eval_max_attempts: int = 50000) -> None:
         """初始化TAMPOR求解器
-        
+
         Args:
             robot_setup: 机器人设置对象
             channel_info: 通道信息列表
@@ -51,40 +49,36 @@ class TrajectoryTAMPORSolver:
         self.object_size = object_size
         self.obstacle_size = obstacle_size
         self.eval_max_attempts = eval_max_attempts
-        
+
         # 创建内部规划器实例，但不立即初始化
         self.topology_planner = None
-        self.path_planner = None 
+        self.path_planner = None
 
     def _init_topology_planner(self, bodies: List[int]) -> None:
         """初始化拓扑规划器
-        
+
         Args:
             bodies: 碰撞体列表
         """
-        self.topology_planner = self._TopologyPlanner(self.robot_setup, self.channel_info, bodies, 
-                                                     self.object_size, self.eval_max_attempts)
-    
+        self.topology_planner = self._TopologyPlanner(self.robot_setup, self.channel_info, bodies, self.object_size, self.eval_max_attempts)
+
     def _init_path_planner(self, collision_fn: Callable[[np.ndarray], bool]) -> None:
         """初始化路径规划器
-        
+
         Args:
             collision_fn: 碰撞检测函数
         """
-        self.path_planner = self._Planner(self.robot_setup, self.channel_info, collision_fn, 
-                                          self.object_size, self.obstacle_size)
+        self.path_planner = self._Planner(self.robot_setup, self.channel_info, collision_fn, self.object_size, self.obstacle_size)
 
     class _TopologyPlanner:
         """内部拓扑规划器类，用于高层路径规划
-        
+
         基于通道信息进行拓扑规划，找出最优的通道通过顺序。
         """
-        
-        def __init__(self, robot_setup: RobotSetup, channel_info: List[Dict], 
-                     bodies: List[int], object_size: List[float] = [1.0, 0.02], 
-                     eval_max_attempts: int = 50000):
+
+        def __init__(self, robot_setup: RobotSetup, channel_info: List[Dict], bodies: List[int], object_size: List[float] = [1.0, 0.02], eval_max_attempts: int = 50000):
             """初始化拓扑规划器
-            
+
             Args:
                 robot_setup: 机器人设置
                 channel_info: 通道信息列表
@@ -105,12 +99,13 @@ class TrajectoryTAMPORSolver:
 
         def _evaluate_channel_priority(self) -> List[Dict]:
             """评估各个通道的优先级
-            
+
             基于可达性和几何特性计算每个通道的优先级得分。
-            
+
             Returns:
                 更新了优先级信息的通道列表
             """
+
             # 评估通道可达性
             def get_sample_fn():
                 lower, upper = pp.get_custom_limits(self.robot_setup.robot, self.robot_setup.arm_joints, circular_limits=pp.CIRCULAR_LIMITS)
@@ -183,7 +178,7 @@ class TrajectoryTAMPORSolver:
 
         def _generate_channel_colors(self) -> List[List[float]]:
             """为每个通道生成唯一的颜色
-            
+
             Returns:
                 每个通道对应的颜色列表
             """
@@ -202,12 +197,12 @@ class TrajectoryTAMPORSolver:
 
         def _build_channel_graph(self, sample_attempts: int = 200) -> Dict:
             """构建通道之间的无向图
-            
+
             对于每对通道，随机选择点尝试连接，如果连线不发生碰撞，则添加这条边。
-            
+
             Args:
                 sample_attempts: 每对通道之间的采样次数
-                
+
             Returns:
                 通道之间的无向图
             """
@@ -294,16 +289,16 @@ class TrajectoryTAMPORSolver:
 
             self.robot_setup.set_base_pose(init_pose)
 
-            return graph 
+            return graph
 
         def _build_full_graph(self, start_xyz: np.ndarray, target_xyz: np.ndarray, sample_attempts: int = 200) -> Dict:
             """构建包含起点、终点和所有通道的完整图结构
-            
+
             Args:
                 start_xyz: 起点坐标
                 target_xyz: 终点坐标
                 sample_attempts: 每对节点之间的采样次数
-                
+
             Returns:
                 完整的图表示，起点为-1，终点为-2
             """
@@ -439,14 +434,14 @@ class TrajectoryTAMPORSolver:
 
         def _find_all_paths(self, graph: Dict, start_node: int, target_node: int, max_depth: int = 3, timeout: float = 5.0) -> List[List[int]]:
             """使用BFS找到图中所有低于给定深度的可行路径
-            
+
             Args:
                 graph: 图结构
                 start_node: 起点节点索引
                 target_node: 终点节点索引
                 max_depth: 最大搜索深度
                 timeout: 超时时间(秒)
-                
+
             Returns:
                 所有可行路径列表
             """
@@ -483,11 +478,11 @@ class TrajectoryTAMPORSolver:
 
         def _calculate_path_priorities(self, paths: List[List[int]], graph: Dict) -> List[tuple]:
             """计算每条路径的优先级，并按优先级排序
-            
+
             Args:
                 paths: 路径列表
                 graph: 图结构
-                
+
             Returns:
                 排序后的 (path, priority) 元组列表
             """
@@ -533,7 +528,7 @@ class TrajectoryTAMPORSolver:
 
         def plot_graph(self, graph: Dict, highlight_path: List[int] = None, start_point: np.ndarray = None, target_point: np.ndarray = None):
             """可视化连接图结构
-            
+
             Args:
                 graph: 图结构
                 highlight_path: 要高亮显示的路径
@@ -657,11 +652,11 @@ class TrajectoryTAMPORSolver:
 
         def plan(self, start_xyz: np.ndarray, target_xyz: np.ndarray) -> List[int]:
             """执行拓扑规划
-            
+
             Args:
                 start_xyz: 起点坐标
                 target_xyz: 终点坐标
-                
+
             Returns:
                 最优通道路径
             """
@@ -687,20 +682,17 @@ class TrajectoryTAMPORSolver:
                 return best_path
             else:
                 print("未找到可行路径!")
-                return [] 
+                return []
 
     class _Planner:
         """内部路径规划器类，用于低层轨迹规划
-        
+
         通过采样和排序关键帧，规划通过指定通道序列的路径。
         """
-        
-        def __init__(self, robot_setup: RobotSetup, channel_info: List[Dict], 
-                    collision_fn: Callable[[np.ndarray], bool], 
-                    object_size: List[float] = [1.0, 0.02], 
-                    obstacle_size: List[float] = [1.0, 0.02]):
+
+        def __init__(self, robot_setup: RobotSetup, channel_info: List[Dict], collision_fn: Callable[[np.ndarray], bool], object_size: List[float] = [1.0, 0.02], obstacle_size: List[float] = [1.0, 0.02]):
             """初始化路径规划器
-            
+
             Args:
                 robot_setup: 机器人设置
                 channel_info: 通道信息列表
@@ -716,12 +708,12 @@ class TrajectoryTAMPORSolver:
 
         def _generate_key_frames(self, channel_id: int, num_points: int = 10, max_attempts: int = 1000) -> List[np.ndarray]:
             """在指定通道内生成关键帧
-            
+
             Args:
                 channel_id: 通道ID
                 num_points: 生成的关键帧数量
                 max_attempts: 最大尝试次数
-                
+
             Returns:
                 关键帧列表，如果生成失败则返回None
             """
@@ -754,7 +746,7 @@ class TrajectoryTAMPORSolver:
                 yaw = np.random.uniform(-np.pi, np.pi)
                 point = center + dx * x_axis + dy * y_axis + dz * z_axis
                 element_pose = pp.Pose(point=point, euler=pp.Euler(roll, pitch, yaw))  # world_from_element
-                
+
                 # 获取运动学解
                 joint_val = self.robot_setup.get_relative_ik_solution(element_pose, q_init=np.random.uniform(-np.pi, np.pi, size=6).tolist())
                 if joint_val is not None:
@@ -770,62 +762,62 @@ class TrajectoryTAMPORSolver:
 
         def _sort_key_frames(self, channel_id: int, key_frames: List[np.ndarray]) -> List[np.ndarray]:
             """根据channel信息和机器人配置对key frames进行排序
-            
+
             Args:
                 channel_id: 通道ID
                 key_frames: 生成的关键帧列表
-                
+
             Returns:
                 排序后的关键帧列表
             """
             if not key_frames:
                 return []
-                
+
             channel = self.channel_info[channel_id]
             channel_center = np.array(channel["center"])
             channel_direction = np.array(channel["direction"])
             channel_size = channel["size"]
             channel_thickness = channel["thickness"]
-            
+
             # 计算每个关键帧的评分
             frame_scores = []
             for frame in key_frames:
                 # 设置机器人关节角度
                 self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, frame)
-                
+
                 # 获取末端位置
                 tool_pose = pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link)
                 tool_point = np.array(tool_pose[0])
-                
+
                 # 计算与通道中心的距离
                 distance_to_center = np.linalg.norm(tool_point - channel_center)
-                
+
                 # 计算与通道方向的夹角
                 tool_direction = np.array(pp.tform_from_pose(tool_pose))
                 tool_direction = Rotation.from_matrix(tool_direction[:3, :3]).as_rotvec()
                 alignment = np.abs(np.dot(tool_direction, channel_direction)) / (np.linalg.norm(tool_direction) * np.linalg.norm(channel_direction))
-                
+
                 # 检查碰撞情况
                 collision_score = 0 if self.collision_fn(frame) else 1
-                
+
                 # 计算最终评分 (距离越近、越对齐方向、无碰撞越好)
                 score = collision_score * (alignment + 1.0 / (distance_to_center + 0.1))
-                
+
                 frame_scores.append((frame, score))
-            
+
             # 按评分降序排序
             frame_scores.sort(key=lambda x: x[1], reverse=True)
-            
+
             return [frame for frame, _ in frame_scores]
 
         def _stratified_sampling(self, strata, sample_sizes=None, sample_fraction=None):
             """分层随机抽样的迭代器
-            
+
             Args:
                 strata: 包含多个子列表的列表，每个子列表是一个层
                 sample_sizes: 每层要抽取的样本数量列表
                 sample_fraction: 每层要抽取的样本比例
-                
+
             Yields:
                 每次产生一个可能的抽样结果列表
             """
@@ -862,14 +854,14 @@ class TrajectoryTAMPORSolver:
 
         def plan(self, start_conf: np.ndarray, target_conf: np.ndarray, channel_path: List[int], max_time: float = 600.0, num_points: int = 20) -> List[np.ndarray]:
             """规划从起始配置到目标配置的路径
-            
+
             Args:
                 start_conf: 起始关节配置
                 target_conf: 目标关节配置
                 channel_path: 通道路径
                 max_time: 最大规划时间(秒)
                 num_points: 每个通道生成的关键帧数量
-                
+
             Returns:
                 规划路径，如果失败则返回None
             """
@@ -882,7 +874,7 @@ class TrajectoryTAMPORSolver:
                 key_frames = self._generate_key_frames(channel_id, num_points=num_points)
                 if key_frames is not None:
                     # 排序关键帧
-                    key_frames = self._sort_key_frames(channel_id, key_frames)
+                    # key_frames = self._sort_key_frames(channel_id, key_frames)
                     key_frames_list.append(key_frames)
             key_frames_list.append([target_conf])
 
@@ -913,7 +905,9 @@ class TrajectoryTAMPORSolver:
                     print(f"    Generating {i+1} / {len(temp_channel_path) - 1} path...")
                     start_conf = temp_channel_path[i]
                     target_conf = temp_channel_path[i + 1]
-                    temp_path = self.robot_setup.plan_manipulator_path(start_conf, target_conf, self.robot_setup.attachments, [], collision_fn=self.collision_fn, sample_fn=sample_fn, extend_fn=extend_fn, distance_fn=distance_fn, max_time=10.0)
+                    temp_path = self.robot_setup.plan_manipulator_path(
+                        start_conf, target_conf, self.robot_setup.attachments, [], collision_fn=self.collision_fn, sample_fn=sample_fn, extend_fn=extend_fn, distance_fn=distance_fn, max_time=15.0
+                    )
 
                     current_time = time.time()
                     if current_time - start_time > max_time:
@@ -937,72 +931,71 @@ class TrajectoryTAMPORSolver:
 
             return None
 
-    def plan(self, start_conf: np.ndarray, target_conf: np.ndarray, element_bodies: List[int], 
-             pose_2d: np.ndarray, grasp_attachment: Attachment) -> Dict:
+    def plan(self, start_conf: np.ndarray, target_conf: np.ndarray, element_bodies: List[int], pose_2d: np.ndarray, grasp_attachment: Attachment) -> Dict:
         """执行完整的规划过程
-        
+
         结合拓扑规划和路径规划，找到从起点到终点的最优路径。
-        
+
         Args:
             start_conf: 起始关节配置
             target_conf: 目标关节配置
             element_bodies: 碰撞体列表
             pose_2d: 机器人2D姿态
             grasp_attachment: 抓取附件
-            
+
         Returns:
             包含规划结果的字典 {"success": bool, "path": np.ndarray}
         """
         print("\n========== TAMPOR TRAJECTORY PLANNING ==========")
-        
+
         # 保存当前机器人状态
         self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, start_conf)
         self.robot_setup.update_attachments([grasp_attachment])
-        
+
         # 获取起点和终点位置
         start_point = np.array(pp.get_point(grasp_attachment.child))
         self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, target_conf)
         target_point = np.array(pp.get_point(grasp_attachment.child))
-        
+
         # 恢复起始位置
         self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, start_conf)
-        
+
         # 创建碰撞检测函数
         collision_fn = self.robot_setup.create_collision_fn(element_bodies)
-        
+
         # 初始化规划器
         with pp.LockRenderer():
             print("TAMPOR: Initializing topology planner...")
             self._init_topology_planner(element_bodies)
             print("TAMPOR: Initializing path planner...")
             self._init_path_planner(collision_fn)
-        
+
         # 1. 拓扑规划
         print("TAMPOR: Starting topology planning...")
         start_time = time.time()
         best_path = self.topology_planner.plan(start_point, target_point)
         topology_time = time.time() - start_time
         print(f"TAMPOR: Topology planning completed in {topology_time:.2f} seconds")
-        
+
         if not best_path:
             print("TAMPOR: Failed to find a valid topology path")
             return {"success": False, "path": None}
-        
+
         # 2. 路径规划
         print("TAMPOR: Starting path planning...")
         start_time = time.time()
         with pp.LockRenderer():
-            path = self.path_planner.plan(start_conf, target_conf, best_path, num_points=100)
+            path = self.path_planner.plan(start_conf, target_conf, best_path, num_points=100, max_time=1000)
         path_time = time.time() - start_time
         print(f"TAMPOR: Path planning completed in {path_time:.2f} seconds")
-        
+
         if path is None:
             print("TAMPOR: Failed to find a valid trajectory path")
             return {"success": False, "path": None}
-        
+
         print("\n========== TAMPOR PLANNING SUCCESSFUL ==========")
         print(f"TAMPOR: Total planning time: {topology_time + path_time:.2f} seconds")
-        
+
         return {"success": True, "path": path}
 
 
@@ -1038,7 +1031,7 @@ if __name__ == "__main__":
 
     if plan_result["success"]:
         path = plan_result["path"]
-        
+
         # 可视化路径
         slider = p.addUserDebugParameter("replay", 0, 1, 0)
         while True:
@@ -1048,4 +1041,4 @@ if __name__ == "__main__":
             rb.set_joint_positions(rb.arm_joints, joint_val)
             time.sleep(1.0 / 60)
     else:
-        print("规划失败") 
+        print("规划失败")

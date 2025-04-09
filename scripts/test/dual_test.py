@@ -25,8 +25,8 @@ robot_srdf = os.path.join(DATA_DIR, "husky_urdf", "mt_husky_dual_ur5_e_moveit_co
 gripper_obj = os.path.join(DATA_DIR, "husky_urdf", "robotiq_85", "meshes", "static", "robotiq_85_close_20mm.obj")
 
 robot = pp.load_pybullet(robot_urdf, fixed_base=False, cylinder=False)
-# left_joints = pp.joints_from_names(robot, CONTROL_JOINT_NAMES)
 
+left_joints = pp.joints_from_names(robot, CONTROL_JOINT_NAMES)
 # # 创建6个滑块来控制左臂关节角度
 # sliders = []
 # for i, joint_name in enumerate(CONTROL_JOINT_NAMES):
@@ -34,16 +34,12 @@ robot = pp.load_pybullet(robot_urdf, fixed_base=False, cylinder=False)
 #     joint_info = pp.get_joint_info(robot, joint_index)
 #     lower_limit = joint_info.jointLowerLimit
 #     upper_limit = joint_info.jointUpperLimit
-#     slider = p.addUserDebugParameter(
-#         joint_name, 
-#         lower_limit, 
-#         upper_limit, 
-#         pp.get_joint_position(robot, joint_index)
-#     )
+#     slider = p.addUserDebugParameter(joint_name, lower_limit, upper_limit, pp.get_joint_position(robot, joint_index))
 #     sliders.append(slider)
-    
-# pose = pp.get_link_pose(robot, pp.link_from_name(robot, "left_ur_arm_tool0"))
-# pp.draw_pose(pose, length = 0.25)
+
+line_pts_grasped = [np.array([0, 0, 0]), np.array([0, 0, 1])]
+grasped_element = create_collision_bodies(line_pts_grasped, [0.01], viewer=True)[0]
+left_box = pp.create_box(0.02, 0.02, 0.1)
 
 # # 主循环中更新关节位置
 # while True:
@@ -51,25 +47,39 @@ robot = pp.load_pybullet(robot_urdf, fixed_base=False, cylinder=False)
 #     for slider in sliders:
 #         joint_positions.append(p.readUserDebugParameter(slider))
 #     pp.set_joint_positions(robot, left_joints, joint_positions)
+#     pose = pp.multiply(pp.get_link_pose(robot, pp.link_from_name(robot, "left_ur_arm_tool0")), pp.Pose(point=np.array([0, 0, 0]), euler=pp.Euler(1.5708, 0, 0)))
+#     pp.set_pose(grasped_element, pose)
 
+left_solver = TracIKSolver(robot_urdf, "base_link", "left_ur_arm_tool0")
 
-line_pts_grasped = [np.array([0, 0, 0]), np.array([0, 0, 1])]
-grasped_element = create_collision_bodies(line_pts_grasped, [0.01], viewer=True)[0]
-# pp.set_pose(grasped_element, pp.multiply(pp.get_link_pose(rb.robot, rb.tool_link), pp.Pose(point=grasp_offset, euler=pp.Euler(1.5708, 0, 0))))
-# grasped_attachment = pp.create_attachment(rb.robot, rb.tool_link, grasped_element)
-# rb.update_attachments([grasped_attachment])
-
-
-sliders = []
+box_sliders = []
+names = ["left_y", "left_pitch"]
+for i in range(2):
+    slider = p.addUserDebugParameter(f"{names[i]}", -3.14, 3.14, 0)
+    box_sliders.append(slider)
+    
+element_sliders = []
 names = ["x", "y", "z", "roll", "pitch", "yaw"]
 for i in range(6):
     slider = p.addUserDebugParameter(f"{names[i]}", -3.14, 3.14, 0)
-    sliders.append(slider)
-    
-while True:
-    cartesian_pos = []
-    for slider in sliders:
-        cartesian_pos.append(p.readUserDebugParameter(slider))
-    pp.set_pose(grasped_element, pp.Pose(point=cartesian_pos[0:3], euler=pp.Euler(*cartesian_pos[3:])))
+    element_sliders.append(slider)
 
-pp.wait_for_user()
+while True:
+    cartesian_pose = []
+    for slider in element_sliders:
+        cartesian_pose.append(p.readUserDebugParameter(slider))
+    pose = pp.Pose(point=cartesian_pose[0:3], euler=pp.Euler(*cartesian_pose[3:]))
+    pp.set_pose(grasped_element, pose)
+    
+    cartesian_offset = []
+    for slider in box_sliders:
+        cartesian_offset.append(p.readUserDebugParameter(slider))
+    offset_pose = pp.Pose(point=[0, 0, cartesian_offset[0]], euler=pp.Euler(roll=1.5708, yaw=cartesian_offset[1]))
+    box_pose = pp.multiply(pose, offset_pose)
+    pp.set_pose(left_box, box_pose)
+    
+    left_sol = left_solver.ik(pp.tform_from_pose(box_pose))
+    if left_sol is not None:
+        pp.set_joint_positions(robot, left_joints, left_sol)
+    
+# pp.wait_for_user()

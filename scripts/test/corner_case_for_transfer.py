@@ -30,8 +30,10 @@ HERE = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(HERE)
 
 import utils.load_multi_tangent as load_multi_tangent
+from model.scene_parse import SceneParser
 from motion_planner.trajectory_curobo_solver import TrajectoryCuroboSolver
 from motion_planner.trajectory_ompl_solver import TrajectoryOMPLSolver
+from motion_planner.trajectory_tampor_solver import TrajectoryTAMPORSolver
 from multi_tangent.collision import create_collision_bodies
 from multi_tangent.convert import flatten_list
 from robot.robot_setup import RobotSetup
@@ -52,7 +54,6 @@ class PlanningThread(threading.Thread):
 
     def run(self):
         try:
-            # 执行传入的函数并保存结果
             self.result = self.func(*self.args, **self.kwargs)
             self.done = True
         except Exception as e:
@@ -61,80 +62,55 @@ class PlanningThread(threading.Thread):
 
 
 if __name__ == "__main__":
-    # seed = 128363
-    # SetSeeds(seed)
-
     parser = argparse.ArgumentParser(description="Corner case for transfer planning")
     parser.add_argument("--birrt", action="store_true", help="Enable BIRRT planning")
     parser.add_argument("--curobo", action="store_true", help="Enable cuRobo planning")
     parser.add_argument("--eitstar", action="store_true", help="Enable OMPL ETIStar planning")
+    parser.add_argument("--tampor", action="store_true", help="Enable TAMPOR planning")
     parser.add_argument("--manual", action="store_true", help="Enable manual control")
     parser.add_argument("--repeat", type=int, default=1, help="Number of repetitions for the planning")
     parser.add_argument("--save", action="store_true", help="Whether to save the results")
     parser.add_argument("--visualize", action="store_true", help="Whether to visualize the results")
     parser.add_argument("--random", action="store_true", help="Enable random planning")
+    parser.add_argument("--scene", type=str, default="cuboid_1", help="Scene name")
+    parser.add_argument("--task", type=str, default="task_1", help="Task number")
     args = parser.parse_args()
 
     init_pb()
-    line_pts_flattened = [
-        # 4根竖着的棍子
-        np.array([0, 0, 0]),
-        np.array([0, 0, 1]),
-        np.array([0, 1, 0]),
-        np.array([0, 1, 1]),
-        np.array([1, 1, 0]),
-        np.array([1, 1, 1]),
-        np.array([1, 0, 0]),
-        np.array([1, 0, 1]),
-        # 4根横着的棍子
-        np.array([0, 0, 1]),
-        np.array([1, 0, 1]),
-        np.array([1, 0, 1]),
-        np.array([1, 1, 1]),
-        np.array([1, 1, 1]),
-        np.array([0, 1, 1]),
-        np.array([0, 1, 1]),
-        np.array([0, 0, 1]),
-        # 4根内部横着的棍子
-        np.array([0, 0.2, 1]),
-        np.array([1, 0.2, 1]),
-        np.array([0.6, 0, 1]),
-        np.array([0.6, 1, 1]),
-        np.array([1, 0.8, 1]),
-        np.array([0, 0.8, 1]),
-        np.array([0.2, 1, 1]),
-        np.array([0.2, 0, 1]),
-    ]
 
-    radius_per_edge = [0.01] * int(len(line_pts_flattened) / 2)
+    # 使用SceneParser加载场景
+    scene_parser = SceneParser(os.path.join(HERE, "model", "scenes", f"{args.scene}", f"{args.task}.yml"))
+    scene_parser.load_scene()
+
+    # 获取场景信息
+    line_pts_flattened, radius_per_edge = scene_parser.get_element_info()
     element_bodies = create_collision_bodies(line_pts_flattened, radius_per_edge, viewer=True)
+    channel_info = scene_parser.get_channel_info()
+    grasp_offset = scene_parser.get_robot_grasp_offset()
+    pose_2d = scene_parser.get_robot_pose_2d(output_type="array")
+    start_q = np.array(scene_parser.get_robot_start_pose())
+    target_q = np.array(scene_parser.get_robot_target_pose())
 
-    # for body in element_bodies:
-    #     print(f"body: {body}, pose: {pp.get_pose(body)}")
-
-    # pp.wait_for_user("Press Enter to exit...")
-    # exit()
-
+    # 设置机器人
     rb = RobotSetup("r0")
-    pp.set_pose(rb.robot, pp.Pose(point=(-0.5, 0.5, 0), euler=pp.Euler(0, 0, 0)))
+    pp.set_pose(rb.robot, pp.Pose(point=[pose_2d[0], pose_2d[1], 0], euler=pp.Euler(0, 0, pose_2d[2])))
 
+    # 设置抓取物体
     line_pts_grasped = [np.array([0, 0, 0]), np.array([0, 0, 1])]
     grasped_element = create_collision_bodies(line_pts_grasped, [0.01], viewer=True)[0]
     pp.set_pose(
         grasped_element,
         pp.multiply(
-            pp.get_link_pose(rb.robot, rb.tool_link), pp.Pose(point=(0, 0.1, 0.15), euler=pp.Euler(1.5708, 0, 0))
+            pp.get_link_pose(rb.robot, rb.tool_link),
+            pp.Pose(point=grasp_offset, euler=pp.Euler(1.5708, 0, 0)),
         ),
     )
     grasp_attachment = pp.create_attachment(rb.robot, rb.tool_link, grasped_element)
+    rb.update_attachments([grasp_attachment])
 
-    target_q = np.array([1.323, 0.331, -1.753, -0.397, 1.653, 1.819])
-    init_q = np.array([np.pi / 2, 0.0, 0.0, -np.pi, 0.0, -np.pi / 2])
-
-    results = {"BIRRT": [], "cuRobo": [], "EITStar": []}
+    results = {"BIRRT": [], "cuRobo": [], "EITStar": [], "TAMPOR": []}
 
     for repeat_id in range(args.repeat):
-
         if args.random:
             seed = int.from_bytes(os.urandom(4), byteorder="big")
             SetSeeds(seed)
@@ -149,10 +125,9 @@ if __name__ == "__main__":
             print(f"{repeat_id+1}th BIRRT planning")
             print("========================================\n")
 
-            # 创建并启动规划线程，将计划函数作为参数传入
             planning_thread = PlanningThread(
-                rb.plan_manipulator_path,  # 传入规划函数
-                init_q,
+                rb.plan_manipulator_path,
+                start_q,
                 target_q,
                 [grasp_attachment],
                 element_bodies,
@@ -214,7 +189,7 @@ if __name__ == "__main__":
             curobo_planner = TrajectoryCuroboSolver(rb, TensorDeviceType())
             planning_thread = PlanningThread(
                 curobo_planner.plan,
-                init_q,
+                start_q,
                 target_q,
                 600,
                 10000,
@@ -241,7 +216,6 @@ if __name__ == "__main__":
                 if result["success"]:
                     print(f"\rPlan success! Total time: {elapsed_time:.2f} s! ", flush=True)
                     path = result["path"]
-                    # print("Plan result: \n", path)
                     if args.visualize:
                         input = pp.wait_for_user("\nvisualize planned path?")
                         if input == "y" or input == "Y":
@@ -303,7 +277,7 @@ if __name__ == "__main__":
 
             ompl_planner = TrajectoryOMPLSolver(collision_fn, planner=planner)
 
-            planning_thread = PlanningThread(ompl_planner.plan, init_q, target_q, time=600)
+            planning_thread = PlanningThread(ompl_planner.plan, start_q, target_q, time=600)
 
             planning_thread.start()
 
@@ -346,6 +320,60 @@ if __name__ == "__main__":
                 print("\nexit!")
                 exit()
 
+        # **************************************************************************
+        # TAMPOR plan
+        # **************************************************************************
+
+        if args.tampor:
+            print("\n========================================")
+            print(f"{repeat_id+1}th TAMPOR planning")
+            print("========================================\n")
+
+            tampor_planner = TrajectoryTAMPORSolver(rb, channel_info, grasp_offset, eval_max_attempts=1000)
+            planning_thread = PlanningThread(tampor_planner.plan, start_q, target_q, element_bodies, grasp_attachment, key_frame_num=25, grow_tree_max_nodes=800, max_time=600, step_max_time=30.0, verbose=True)
+
+            planning_thread.start()
+
+            start_time = time.time()
+            try:
+                while not planning_thread.done:
+                    elapsed_time = time.time() - start_time
+                    # print(f"\rPlanning... current time: {elapsed_time:.2f} s ", end="", flush=True)
+                    time.sleep(0.1)
+
+                elapsed_time = time.time() - start_time
+                result = planning_thread.result
+
+                cur_result = (seed, result["success"], elapsed_time)
+                results["TAMPOR"].append(cur_result)
+
+                if result["success"]:
+                    print(f"\rPlan success! Total time: {elapsed_time:.2f} s! ", flush=True)
+                    if args.visualize:
+                        input = pp.wait_for_user("\nvisualize planned path?")
+                        if input == "y" or input == "Y":
+                            replay_slider = p.addUserDebugParameter("replay", 0, 1, 0)
+                            continue_button = p.addUserDebugParameter("continue", 1, 0, 0)
+                            prev_continue_button_value = p.readUserDebugParameter(continue_button)
+                            while True:
+                                replay = p.readUserDebugParameter(replay_slider)
+                                current_continue_button_value = p.readUserDebugParameter(continue_button)
+                                idx = int(replay * (len(path) - 1))
+                                conf = path[idx]
+                                rb.set_joint_positions(rb.arm_joints, conf)
+                                grasp_attachment.assign()
+                                time.sleep(1.0 / 240)
+                                if current_continue_button_value > prev_continue_button_value:
+                                    break
+                                prev_continue_button_value = current_continue_button_value
+                else:
+                    print(f"\rTAMPOR plan failed, total time: {elapsed_time:.2f} s! ", flush=True)
+
+            except KeyboardInterrupt:
+                print("\nexit!")
+                exit()
+
+    # 保存结果到日志文件
     if args.save:
         file_path = os.path.join(LOG_DIR, "corner_case_for_transfer.json")
         with open(file_path, "w") as f:
@@ -356,7 +384,6 @@ if __name__ == "__main__":
     # **************************************************************************
 
     if args.manual:
-
         p.removeAllUserParameters()
 
         j0_slider = p.addUserDebugParameter("joint contorl j0", -2 * np.pi, 2 * np.pi, target_q[0])
@@ -407,9 +434,7 @@ if __name__ == "__main__":
 
             current_replay_button_value = p.readUserDebugParameter(replay_button)
             if current_replay_button_value > prev_replay_button_value:  # replay
-                current_record = np.load(
-                    "/home/jeong/summer_research/eth_ws/src/husky_assembly/scripts/record_corner.npy"
-                )
+                current_record = np.load("/home/jeong/summer_research/eth_ws/src/husky_assembly/scripts/record_corner.npy")
                 for i in range(len(current_record)):
                     rb.set_joint_positions(rb.arm_joints, np.array(current_record[i]))
                     grasp_attachment.assign()

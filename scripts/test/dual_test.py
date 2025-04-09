@@ -16,8 +16,8 @@ from multi_tangent.collision import create_collision_bodies
 from utils.collision import init_pb
 from utils.params import *
 
-CONTROL_JOINT_NAMES = ["left_ur_arm_shoulder_pan_joint", "left_ur_arm_shoulder_lift_joint", "left_ur_arm_elbow_joint", "left_ur_arm_wrist_1_joint", "left_ur_arm_wrist_2_joint", "left_ur_arm_wrist_3_joint"]
-
+LEFT_JOINT_NAMES = ["left_ur_arm_shoulder_pan_joint", "left_ur_arm_shoulder_lift_joint", "left_ur_arm_elbow_joint", "left_ur_arm_wrist_1_joint", "left_ur_arm_wrist_2_joint", "left_ur_arm_wrist_3_joint"]
+RIGHT_JOINT_NAMES = ["right_ur_arm_shoulder_pan_joint", "right_ur_arm_shoulder_lift_joint", "right_ur_arm_elbow_joint", "right_ur_arm_wrist_1_joint", "right_ur_arm_wrist_2_joint", "right_ur_arm_wrist_3_joint"]
 init_pb()
 
 robot_urdf = os.path.join(DATA_DIR, "husky_urdf", "mt_husky_dual_ur5_e_moveit_config", "urdf", "husky_dual_ur5_e.urdf")
@@ -26,7 +26,8 @@ gripper_obj = os.path.join(DATA_DIR, "husky_urdf", "robotiq_85", "meshes", "stat
 
 robot = pp.load_pybullet(robot_urdf, fixed_base=False, cylinder=False)
 
-left_joints = pp.joints_from_names(robot, CONTROL_JOINT_NAMES)
+left_joints = pp.joints_from_names(robot, LEFT_JOINT_NAMES)
+right_joints = pp.joints_from_names(robot, RIGHT_JOINT_NAMES)
 # # 创建6个滑块来控制左臂关节角度
 # sliders = []
 # for i, joint_name in enumerate(CONTROL_JOINT_NAMES):
@@ -40,6 +41,8 @@ left_joints = pp.joints_from_names(robot, CONTROL_JOINT_NAMES)
 line_pts_grasped = [np.array([0, 0, 0]), np.array([0, 0, 1])]
 grasped_element = create_collision_bodies(line_pts_grasped, [0.01], viewer=True)[0]
 left_box = pp.create_box(0.02, 0.02, 0.1)
+right_box = pp.create_box(0.02, 0.02, 0.1)
+pp.set_color(right_box, [0, 0, 1, 1])
 
 # # 主循环中更新关节位置
 # while True:
@@ -51,10 +54,11 @@ left_box = pp.create_box(0.02, 0.02, 0.1)
 #     pp.set_pose(grasped_element, pose)
 
 left_solver = TracIKSolver(robot_urdf, "base_link", "left_ur_arm_tool0")
+right_solver = TracIKSolver(robot_urdf, "base_link", "right_ur_arm_tool0")
 
 box_sliders = []
-names = ["left_y", "left_pitch"]
-for i in range(2):
+names = ["left_y", "left_pitch", "right_y", "right_pitch"]
+for i in range(4):
     slider = p.addUserDebugParameter(f"{names[i]}", -3.14, 3.14, 0)
     box_sliders.append(slider)
     
@@ -75,11 +79,21 @@ while True:
     for slider in box_sliders:
         cartesian_offset.append(p.readUserDebugParameter(slider))
     offset_pose = pp.Pose(point=[0, 0, cartesian_offset[0]], euler=pp.Euler(roll=1.5708, yaw=cartesian_offset[1]))
-    box_pose = pp.multiply(pose, offset_pose)
-    pp.set_pose(left_box, box_pose)
+    left_box_pose = pp.multiply(pose, offset_pose)
+    pp.set_pose(left_box, left_box_pose)
     
-    left_sol = left_solver.ik(pp.tform_from_pose(box_pose))
+    offset_pose = pp.Pose(point=[0, 0, cartesian_offset[2]], euler=pp.Euler(roll=1.5708, yaw=cartesian_offset[3]))
+    right_box_pose = pp.multiply(pose, offset_pose)
+    pp.set_pose(right_box, right_box_pose)
+    
+    left_sol = left_solver.ik(pp.tform_from_pose(left_box_pose))
     if left_sol is not None:
         pp.set_joint_positions(robot, left_joints, left_sol)
+        
+    right_sol = right_solver.ik(pp.tform_from_pose(right_box_pose))
+    if right_sol is not None:
+        pp.set_joint_positions(robot, right_joints, right_sol)
+        
+    
     
 # pp.wait_for_user()

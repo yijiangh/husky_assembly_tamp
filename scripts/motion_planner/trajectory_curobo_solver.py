@@ -27,9 +27,7 @@ class TrajectoryCuroboSolver:
     def __init__(self, robot_setup: RobotSetup, tensor_args: TensorDeviceType) -> None:
         self.robot_setup = robot_setup
         self.tensor_args = tensor_args
-        self.robot_cfg = RobotConfig.from_dict(
-            load_yaml(join_path(get_robot_path(), "husky_ur5_e.yml"))["robot_cfg"], tensor_args
-        )
+        self.robot_cfg = RobotConfig.from_dict(load_yaml(join_path(get_robot_path(), "husky_ur5_e.yml"))["robot_cfg"], tensor_args)
         self.kin_model = CudaRobotModel(self.robot_cfg.kinematics)
         self.logger = setup_logger("error", "trajectory_curobo_solver")
 
@@ -69,9 +67,7 @@ class TrajectoryCuroboSolver:
         if grasped_element is not None and grasped_attachment is not None:
             self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, q_init)
             grasped_attachment.assign()
-            grasp_element_pose = pp.multiply(
-                pp.invert(pp.get_pose(self.robot_setup.robot)), pp.get_pose(grasped_element)
-            )
+            grasp_element_pose = pp.multiply(pp.invert(pp.get_pose(self.robot_setup.robot)), pp.get_pose(grasped_element))
             grasp_pose_point = list(grasp_element_pose[0])
             grasp_pose_quat = [
                 grasp_element_pose[1][3],
@@ -91,11 +87,10 @@ class TrajectoryCuroboSolver:
         # -------------------- create world config --------------------#
         world_config = WorldConfig(cylinder=obstacles)
         world_config_obb = WorldConfig.create_obb_world(world_config)
+        world_config_mesh = WorldConfig.create_mesh_world(world_config)
 
         # -------------------- create motion gen --------------------#
-        motion_gen_config = MotionGenConfig.load_from_robot_config(
-            "husky_ur5_e.yml", world_config_obb, interpolation_dt=0.01
-        )
+        motion_gen_config = MotionGenConfig.load_from_robot_config("husky_ur5_e.yml", world_config_mesh, interpolation_dt=0.001, interpolation_steps=10000)
         motion_gen = MotionGen(motion_gen_config)
         motion_gen.warmup()
 
@@ -108,22 +103,15 @@ class TrajectoryCuroboSolver:
             joint_names=self.robot_cfg.cspace.joint_names,
         )
         if grasped_element is not None and grasped_attachment is not None:
-            motion_gen.attach_objects_to_robot(
-                init_js, ["grasp_element"], sphere_fit_type=SphereFitType.VOXEL_VOLUME_SAMPLE_SURFACE
-            )
+            motion_gen.attach_objects_to_robot(init_js, ["grasp_element"], sphere_fit_type=SphereFitType.VOXEL_VOLUME_SAMPLE_SURFACE)
 
         # -------------------- set target and start --------------------#
         out = self.kin_model.get_state(q_target_tensor)
-        goal_pose = Pose.from_list(
-            out.ee_pose.position.cpu().numpy().flatten().tolist()
-            + out.ee_pose.quaternion.cpu().numpy().flatten().tolist()
-        )
+        goal_pose = Pose.from_list(out.ee_pose.position.cpu().numpy().flatten().tolist() + out.ee_pose.quaternion.cpu().numpy().flatten().tolist())
         start_state = JointState.from_position(q_init_tensor, joint_names=self.robot_cfg.cspace.joint_names)
 
         # -------------------- plan --------------------#
-        result = motion_gen.plan_single(
-            start_state, goal_pose, MotionGenPlanConfig(max_attempts=max_attempts, timeout=max_time)
-        )
+        result = motion_gen.plan_single(start_state, goal_pose, MotionGenPlanConfig(max_attempts=max_attempts, timeout=max_time))
 
         if result.success:
             path = result.get_interpolated_plan().position.cpu().numpy()

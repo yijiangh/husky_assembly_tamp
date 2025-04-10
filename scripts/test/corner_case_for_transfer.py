@@ -65,7 +65,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Corner case for transfer planning")
     parser.add_argument("--birrt", action="store_true", help="Enable BIRRT planning")
     parser.add_argument("--curobo", action="store_true", help="Enable cuRobo planning")
-    parser.add_argument("--eitstar", action="store_true", help="Enable OMPL ETIStar planning")
+    # parser.add_argument("--eitstar", action="store_true", help="Enable OMPL ETIStar planning")
     parser.add_argument("--tampor", action="store_true", help="Enable TAMPOR planning")
     parser.add_argument("--manual", action="store_true", help="Enable manual control")
     parser.add_argument("--repeat", type=int, default=1, help="Number of repetitions for the planning")
@@ -108,7 +108,7 @@ if __name__ == "__main__":
     grasp_attachment = pp.create_attachment(rb.robot, rb.tool_link, grasped_element)
     rb.update_attachments([grasp_attachment])
 
-    results = {"BIRRT": [], "cuRobo": [], "EITStar": [], "TAMPOR": []}
+    results = {"BIRRT": [], "cuRobo": [], "TAMPOR": []}
 
     for repeat_id in range(args.repeat):
         if args.random:
@@ -219,6 +219,8 @@ if __name__ == "__main__":
                     if args.visualize:
                         input = pp.wait_for_user("\nvisualize planned path?")
                         if input == "y" or input == "Y":
+                            # for body in element_bodies[:10]:
+                            #     pp.set_color(body, [0, 0, 1, 1])
                             replay_slider = p.addUserDebugParameter("replay", 0, 1, 0)
                             continue_button = p.addUserDebugParameter("continue", 1, 0, 0)
                             prev_continue_button_value = p.readUserDebugParameter(continue_button)
@@ -233,6 +235,8 @@ if __name__ == "__main__":
                                 if current_continue_button_value > prev_continue_button_value:
                                     break
                                 prev_continue_button_value = current_continue_button_value
+                            # for body in element_bodies[:10]:
+                            #     pp.set_color(body, [1, 0, 0, 1])
                 else:
                     print(f"\rCurobo plan failed, total time: {elapsed_time:.2f} s! ", flush=True)
 
@@ -244,81 +248,89 @@ if __name__ == "__main__":
         # ompl plan
         # **************************************************************************
 
-        planner = "EITstar"
+        # # planner = "EITstar"
+        # planner = "BITstar"
+        # # planner = "RRTConnect"
 
-        if args.eitstar:
-            print("\n========================================")
-            print(f"{repeat_id+1}th EITStar planning")
-            print("========================================\n")
+        # if args.eitstar:
+        #     print("\n========================================")
+        #     print(f"{repeat_id+1}th EITStar planning")
+        #     print("========================================\n")
 
-            p.removeAllUserParameters()
+        #     test_element_bodies = 10
 
-            extra_disabled_collisions = [
-                (
-                    (rb.robot, pp.link_from_name(rb.robot, "ur_arm_wrist_3_link")),
-                    (rb.ee_attachment.child, pp.BASE_LINK),
-                ),
-                (
-                    (rb.ee_attachment.child, pp.BASE_LINK),
-                    (grasp_attachment.child, pp.BASE_LINK),
-                ),
-            ]
+        #     p.removeAllUserParameters()
 
-            collision_fn = pp.get_collision_fn(
-                rb.robot,
-                rb.arm_joints,
-                obstacles=element_bodies,
-                attachments=[grasp_attachment, rb.ee_attachment] + rb.attachments,
-                self_collisions=True,
-                disabled_collisions=rb.disabled_collisions,
-                extra_disabled_collisions=extra_disabled_collisions,
-                max_distance=0.0,
-            )
+        #     extra_disabled_collisions = [
+        #         (
+        #             (rb.robot, pp.link_from_name(rb.robot, "ur_arm_wrist_3_link")),
+        #             (rb.ee_attachment.child, pp.BASE_LINK),
+        #         ),
+        #         (
+        #             (rb.ee_attachment.child, pp.BASE_LINK),
+        #             (grasp_attachment.child, pp.BASE_LINK),
+        #         ),
+        #     ]
 
-            ompl_planner = TrajectoryOMPLSolver(collision_fn, planner=planner)
+        #     collision_fn = pp.get_collision_fn(
+        #         rb.robot,
+        #         rb.arm_joints,
+        #         obstacles=element_bodies[:test_element_bodies],
+        #         attachments=[grasp_attachment, rb.ee_attachment] + rb.attachments,
+        #         self_collisions=True,
+        #         disabled_collisions=rb.disabled_collisions,
+        #         extra_disabled_collisions=extra_disabled_collisions,
+        #         max_distance=0.0,
+        #     )
 
-            planning_thread = PlanningThread(ompl_planner.plan, start_q, target_q, time=600)
+        #     ompl_planner = TrajectoryOMPLSolver(collision_fn, planner=planner, robot_id=rb.robot, arm_joints=rb.arm_joints)
 
-            planning_thread.start()
+        #     planning_thread = PlanningThread(ompl_planner.plan, start_q, target_q, time=100.0)
 
-            start_time = time.time()
-            try:
-                while not planning_thread.done:
-                    elapsed_time = time.time() - start_time
-                    print(f"\rPlanning... current time: {elapsed_time:.2f} s ", end="", flush=True)
-                    time.sleep(0.1)
+        #     planning_thread.start()
 
-                elapsed_time = time.time() - start_time
-                path = planning_thread.result
+        #     start_time = time.time()
+        #     try:
+        #         while not planning_thread.done:
+        #             elapsed_time = time.time() - start_time
+        #             print(f"\rPlanning... current time: {elapsed_time:.2f} s ", end="", flush=True)
+        #             time.sleep(0.1)
 
-                cur_result = (seed, path is not None, elapsed_time)
-                results["EITStar"].append(cur_result)
+        #         elapsed_time = time.time() - start_time
+        #         path = planning_thread.result
 
-                if path is not None:
-                    print(f"\rPlan success! Total time: {elapsed_time:.2f} s!", flush=True)
-                    if args.visualize:
-                        input = pp.wait_for_user("\nvisualize planned path?")
-                        if input == "y" or input == "Y":
-                            replay_slider = p.addUserDebugParameter("replay", 0, 1, 0)
-                            continue_button = p.addUserDebugParameter("continue", 1, 0, 0)
-                            prev_continue_button_value = p.readUserDebugParameter(continue_button)
-                            while True:
-                                replay = p.readUserDebugParameter(replay_slider)
-                                current_continue_button_value = p.readUserDebugParameter(continue_button)
-                                idx = int(replay * (len(path) - 1))
-                                conf = path[idx]
-                                rb.set_joint_positions(rb.arm_joints, conf)
-                                grasp_attachment.assign()
-                                time.sleep(1.0 / 240)
-                                if current_continue_button_value > prev_continue_button_value:
-                                    break
-                                prev_continue_button_value = current_continue_button_value
-                else:
-                    print(f"\r{planner} plan failed, total time: {elapsed_time:.2f} s!", flush=True)
+        #         cur_result = (seed, path is not None, elapsed_time)
+        #         results["EITStar"].append(cur_result)
 
-            except KeyboardInterrupt:
-                print("\nexit!")
-                exit()
+        #         if path is not None:
+        #             print(f"\rPlan success! Total time: {elapsed_time:.2f} s!", flush=True)
+        #             if args.visualize:
+        #                 input = pp.wait_for_user("\nvisualize planned path?")
+        #                 if input == "y" or input == "Y":
+        #                     for body in element_bodies[:test_element_bodies]:
+        #                         pp.set_color(body, [0, 0, 1, 1])
+        #                     replay_slider = p.addUserDebugParameter("replay", 0, 1, 0)
+        #                     continue_button = p.addUserDebugParameter("continue", 1, 0, 0)
+        #                     prev_continue_button_value = p.readUserDebugParameter(continue_button)
+        #                     while True:
+        #                         replay = p.readUserDebugParameter(replay_slider)
+        #                         current_continue_button_value = p.readUserDebugParameter(continue_button)
+        #                         idx = int(replay * (len(path) - 1))
+        #                         conf = path[idx]
+        #                         rb.set_joint_positions(rb.arm_joints, conf)
+        #                         grasp_attachment.assign()
+        #                         time.sleep(1.0 / 240)
+        #                         if current_continue_button_value > prev_continue_button_value:
+        #                             break
+        #                         prev_continue_button_value = current_continue_button_value
+        #                     for body in element_bodies[:test_element_bodies]:
+        #                         pp.set_color(body, [1, 0, 0, 1])
+        #         else:
+        #             print(f"\r{planner} plan failed, total time: {elapsed_time:.2f} s!", flush=True)
+
+        #     except KeyboardInterrupt:
+        #         print("\nexit!")
+        #         exit()
 
         # **************************************************************************
         # TAMPOR plan

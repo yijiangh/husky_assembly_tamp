@@ -54,7 +54,8 @@ class PlanningThread(threading.Thread):
 
     def run(self):
         try:
-            self.result = self.func(*self.args, **self.kwargs)
+            with pp.LockRenderer():
+                self.result = self.func(*self.args, **self.kwargs)
             self.done = True
         except Exception as e:
             print(f"\nPlanning error: {e}")
@@ -65,8 +66,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Corner case for transfer planning")
     parser.add_argument("--birrt", action="store_true", help="Enable BIRRT planning")
     parser.add_argument("--curobo", action="store_true", help="Enable cuRobo planning")
-    # parser.add_argument("--eitstar", action="store_true", help="Enable OMPL ETIStar planning")
+    parser.add_argument("--eitstar", action="store_true", help="Enable OMPL ETIStar planning")
     parser.add_argument("--tampor", action="store_true", help="Enable TAMPOR planning")
+    parser.add_argument("--ompl", nargs="+", default=[], choices=["RRTConnect", "BITstar", "EITstar", "RRTstar", "PRM", "EST", "FMT"], help="OMPL algorithms to use")
     parser.add_argument("--manual", action="store_true", help="Enable manual control")
     parser.add_argument("--repeat", type=int, default=1, help="Number of repetitions for the planning")
     parser.add_argument("--save", action="store_true", help="Whether to save the results")
@@ -74,6 +76,7 @@ if __name__ == "__main__":
     parser.add_argument("--random", action="store_true", help="Enable random planning")
     parser.add_argument("--scene", type=str, default="cuboid_1", help="Scene name")
     parser.add_argument("--task", type=str, default="task_1", help="Task number")
+    parser.add_argument("--max_time", type=float, default=600.0, help="Maximum time for the planning")
     args = parser.parse_args()
 
     init_pb()
@@ -98,22 +101,19 @@ if __name__ == "__main__":
     # 设置抓取物体
     line_pts_grasped = [np.array([0, 0, 0]), np.array([0, 0, 1])]
     grasped_element = create_collision_bodies(line_pts_grasped, [0.01], viewer=True)[0]
-    pp.set_pose(
-        grasped_element,
-        pp.multiply(
-            pp.get_link_pose(rb.robot, rb.tool_link),
-            pp.Pose(point=grasp_offset, euler=pp.Euler(1.5708, 0, 0)),
-        ),
-    )
+    pp.set_pose(grasped_element, pp.multiply(pp.get_link_pose(rb.robot, rb.tool_link), pp.Pose(point=grasp_offset, euler=pp.Euler(1.5708, 0, 0))))
     grasp_attachment = pp.create_attachment(rb.robot, rb.tool_link, grasped_element)
     rb.update_attachments([grasp_attachment])
 
     results = {"BIRRT": [], "cuRobo": [], "TAMPOR": []}
 
+    # 为每个OMPL算法初始化结果存储
+    for algo in args.ompl:
+        results[f"OMPL_{algo}"] = []
+
     for repeat_id in range(args.repeat):
         if args.random:
             seed = int.from_bytes(os.urandom(4), byteorder="big")
-            SetSeeds(seed)
             print(f"\n-------------------- current seed: {seed} --------------------\n")
 
         # **************************************************************************
@@ -124,16 +124,10 @@ if __name__ == "__main__":
             print("\n========================================")
             print(f"{repeat_id+1}th BIRRT planning")
             print("========================================\n")
+            
+            SetSeeds(seed)
 
-            planning_thread = PlanningThread(
-                rb.plan_manipulator_path,
-                start_q,
-                target_q,
-                [grasp_attachment],
-                element_bodies,
-                max_time=600,
-                max_iterations=10000,
-            )
+            planning_thread = PlanningThread(rb.plan_manipulator_path, start_q, target_q, rb.attachments, element_bodies, max_time=args.max_time, max_iterations=10000)
             planning_thread.start()
 
             start_time = time.time()
@@ -146,7 +140,10 @@ if __name__ == "__main__":
                 elapsed_time = time.time() - start_time
                 path = planning_thread.result
 
-                cur_result = (seed, path is not None, elapsed_time)
+                if path is not None:
+                    cur_result = (seed, path is not None, elapsed_time)
+                else:
+                    cur_result = (seed, False, args.max_time)
                 results["BIRRT"].append(cur_result)
 
                 if path is not None:
@@ -183,20 +180,13 @@ if __name__ == "__main__":
             print("\n========================================")
             print(f"{repeat_id+1}th cuRobo planning")
             print("========================================\n")
+            
+            SetSeeds(seed)
 
             p.removeAllUserParameters()
 
             curobo_planner = TrajectoryCuroboSolver(rb, TensorDeviceType())
-            planning_thread = PlanningThread(
-                curobo_planner.plan,
-                start_q,
-                target_q,
-                600,
-                10000,
-                element_bodies,
-                grasped_element=grasped_element,
-                grasped_attachment=grasp_attachment,
-            )
+            planning_thread = PlanningThread(curobo_planner.plan, start_q, target_q, args.max_time, 10000, element_bodies, grasped_element=grasped_element, grasped_attachment=grasp_attachment)
 
             planning_thread.start()
 
@@ -210,7 +200,10 @@ if __name__ == "__main__":
                 elapsed_time = time.time() - start_time
                 result = planning_thread.result
 
-                cur_result = (seed, result["success"], elapsed_time)
+                if result is not None:
+                    cur_result = (seed, result["success"], elapsed_time)
+                else:
+                    cur_result = (seed, False, args.max_time)
                 results["cuRobo"].append(cur_result)
 
                 if result["success"]:
@@ -248,89 +241,75 @@ if __name__ == "__main__":
         # ompl plan
         # **************************************************************************
 
-        # # planner = "EITstar"
-        # planner = "BITstar"
-        # # planner = "RRTConnect"
+        for ompl_algo in args.ompl:
+            print("\n========================================")
+            print(f"{repeat_id+1}th OMPL {ompl_algo} planning")
+            print("========================================\n")
 
-        # if args.eitstar:
-        #     print("\n========================================")
-        #     print(f"{repeat_id+1}th EITStar planning")
-        #     print("========================================\n")
+            SetSeeds(seed)
 
-        #     test_element_bodies = 10
+            p.removeAllUserParameters()
 
-        #     p.removeAllUserParameters()
+            extra_disabled_collisions = [((rb.robot, pp.link_from_name(rb.robot, "ur_arm_wrist_3_link")), (rb.ee_attachment.child, pp.BASE_LINK)), ((rb.ee_attachment.child, pp.BASE_LINK), (grasp_attachment.child, pp.BASE_LINK))]
 
-        #     extra_disabled_collisions = [
-        #         (
-        #             (rb.robot, pp.link_from_name(rb.robot, "ur_arm_wrist_3_link")),
-        #             (rb.ee_attachment.child, pp.BASE_LINK),
-        #         ),
-        #         (
-        #             (rb.ee_attachment.child, pp.BASE_LINK),
-        #             (grasp_attachment.child, pp.BASE_LINK),
-        #         ),
-        #     ]
+            collision_fn = pp.get_collision_fn(
+                rb.robot,
+                rb.arm_joints,
+                obstacles=element_bodies,
+                attachments=[grasp_attachment, rb.ee_attachment] + rb.attachments,
+                self_collisions=True,
+                disabled_collisions=rb.disabled_collisions,
+                extra_disabled_collisions=extra_disabled_collisions,
+                max_distance=0.0,
+            )
 
-        #     collision_fn = pp.get_collision_fn(
-        #         rb.robot,
-        #         rb.arm_joints,
-        #         obstacles=element_bodies[:test_element_bodies],
-        #         attachments=[grasp_attachment, rb.ee_attachment] + rb.attachments,
-        #         self_collisions=True,
-        #         disabled_collisions=rb.disabled_collisions,
-        #         extra_disabled_collisions=extra_disabled_collisions,
-        #         max_distance=0.0,
-        #     )
+            ompl_planner = TrajectoryOMPLSolver(collision_fn, planner=ompl_algo, robot_id=rb.robot, arm_joints=rb.arm_joints)
 
-        #     ompl_planner = TrajectoryOMPLSolver(collision_fn, planner=planner, robot_id=rb.robot, arm_joints=rb.arm_joints)
+            planning_thread = PlanningThread(ompl_planner.plan, start_q, target_q, args.max_time)
 
-        #     planning_thread = PlanningThread(ompl_planner.plan, start_q, target_q, time=100.0)
+            planning_thread.start()
 
-        #     planning_thread.start()
+            start_time = time.time()
+            try:
+                while not planning_thread.done:
+                    elapsed_time = time.time() - start_time
+                    print(f"\rPlanning... current time: {elapsed_time:.2f} s ", end="", flush=True)
+                    time.sleep(0.1)
 
-        #     start_time = time.time()
-        #     try:
-        #         while not planning_thread.done:
-        #             elapsed_time = time.time() - start_time
-        #             print(f"\rPlanning... current time: {elapsed_time:.2f} s ", end="", flush=True)
-        #             time.sleep(0.1)
+                elapsed_time = time.time() - start_time
+                path = planning_thread.result
 
-        #         elapsed_time = time.time() - start_time
-        #         path = planning_thread.result
+                if path is not None:
+                    cur_result = (seed, path is not None, elapsed_time)
+                else:
+                    cur_result = (seed, False, args.max_time)
+                results[f"OMPL_{ompl_algo}"].append(cur_result)
 
-        #         cur_result = (seed, path is not None, elapsed_time)
-        #         results["EITStar"].append(cur_result)
+                if path is not None:
+                    print(f"\rPlan success! Total time: {elapsed_time:.2f} s!", flush=True)
+                    if args.visualize:
+                        input = pp.wait_for_user(f"\nvisualize {ompl_algo} planned path?")
+                        if input == "y" or input == "Y":
+                            replay_slider = p.addUserDebugParameter("replay", 0, 1, 0)
+                            continue_button = p.addUserDebugParameter("continue", 1, 0, 0)
+                            prev_continue_button_value = p.readUserDebugParameter(continue_button)
+                            while True:
+                                replay = p.readUserDebugParameter(replay_slider)
+                                current_continue_button_value = p.readUserDebugParameter(continue_button)
+                                idx = int(replay * (len(path) - 1))
+                                conf = path[idx]
+                                rb.set_joint_positions(rb.arm_joints, conf)
+                                grasp_attachment.assign()
+                                time.sleep(1.0 / 240)
+                                if current_continue_button_value > prev_continue_button_value:
+                                    break
+                                prev_continue_button_value = current_continue_button_value
+                else:
+                    print(f"\rOMPL {ompl_algo} plan failed, total time: {elapsed_time:.2f} s!", flush=True)
 
-        #         if path is not None:
-        #             print(f"\rPlan success! Total time: {elapsed_time:.2f} s!", flush=True)
-        #             if args.visualize:
-        #                 input = pp.wait_for_user("\nvisualize planned path?")
-        #                 if input == "y" or input == "Y":
-        #                     for body in element_bodies[:test_element_bodies]:
-        #                         pp.set_color(body, [0, 0, 1, 1])
-        #                     replay_slider = p.addUserDebugParameter("replay", 0, 1, 0)
-        #                     continue_button = p.addUserDebugParameter("continue", 1, 0, 0)
-        #                     prev_continue_button_value = p.readUserDebugParameter(continue_button)
-        #                     while True:
-        #                         replay = p.readUserDebugParameter(replay_slider)
-        #                         current_continue_button_value = p.readUserDebugParameter(continue_button)
-        #                         idx = int(replay * (len(path) - 1))
-        #                         conf = path[idx]
-        #                         rb.set_joint_positions(rb.arm_joints, conf)
-        #                         grasp_attachment.assign()
-        #                         time.sleep(1.0 / 240)
-        #                         if current_continue_button_value > prev_continue_button_value:
-        #                             break
-        #                         prev_continue_button_value = current_continue_button_value
-        #                     for body in element_bodies[:test_element_bodies]:
-        #                         pp.set_color(body, [1, 0, 0, 1])
-        #         else:
-        #             print(f"\r{planner} plan failed, total time: {elapsed_time:.2f} s!", flush=True)
-
-        #     except KeyboardInterrupt:
-        #         print("\nexit!")
-        #         exit()
+            except KeyboardInterrupt:
+                print("\nexit!")
+                exit()
 
         # **************************************************************************
         # TAMPOR plan
@@ -341,8 +320,10 @@ if __name__ == "__main__":
             print(f"{repeat_id+1}th TAMPOR planning")
             print("========================================\n")
 
+            SetSeeds(seed)
+
             tampor_planner = TrajectoryTAMPORSolver(rb, channel_info, grasp_offset, eval_max_attempts=1000)
-            planning_thread = PlanningThread(tampor_planner.plan, start_q, target_q, element_bodies, grasp_attachment, key_frame_num=25, grow_tree_max_nodes=800, max_time=600, step_max_time=30.0, verbose=True)
+            planning_thread = PlanningThread(tampor_planner.plan, start_q, target_q, element_bodies, grasp_attachment, key_frame_num=25, grow_tree_max_nodes=1000, max_time=args.max_time, step_max_time=30.0, verbose=False)
 
             planning_thread.start()
 
@@ -350,13 +331,16 @@ if __name__ == "__main__":
             try:
                 while not planning_thread.done:
                     elapsed_time = time.time() - start_time
-                    # print(f"\rPlanning... current time: {elapsed_time:.2f} s ", end="", flush=True)
+                    print(f"\rPlanning... current time: {elapsed_time:.2f} s ", end="", flush=True)
                     time.sleep(0.1)
 
                 elapsed_time = time.time() - start_time
                 result = planning_thread.result
 
-                cur_result = (seed, result["success"], elapsed_time)
+                if result is not None:
+                    cur_result = (seed, result["success"], elapsed_time)
+                else:
+                    cur_result = (seed, False, args.max_time)
                 results["TAMPOR"].append(cur_result)
 
                 if result["success"]:
@@ -385,11 +369,11 @@ if __name__ == "__main__":
                 print("\nexit!")
                 exit()
 
-    # 保存结果到日志文件
-    if args.save:
-        file_path = os.path.join(LOG_DIR, "corner_case_for_transfer.json")
-        with open(file_path, "w") as f:
-            json.dump(results, f, indent=4)
+        # 保存结果到日志文件
+        if args.save:
+            file_path = os.path.join(LOG_DIR, "corner_case_for_transfer.json")
+            with open(file_path, "w") as f:
+                json.dump(results, f, indent=4)
 
     # **************************************************************************
     # manual control

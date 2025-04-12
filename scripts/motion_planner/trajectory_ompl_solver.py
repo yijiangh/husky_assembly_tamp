@@ -36,8 +36,8 @@ class PbOMPLRobotWrapper(pb_ompl.PbOMPLRobot):
     def _set_manual_joint_bounds(self):
         # 手动设置每个关节的边界，避免从PyBullet读取
         for _ in range(self.num_dim):
-            self.joint_bounds.append([-2*math.pi, 2*math.pi])
-    
+            self.joint_bounds.append([-2 * math.pi, 2 * math.pi])
+
     def get_joint_bounds(self):
         if not self.joint_bounds:
             self._set_manual_joint_bounds()
@@ -79,6 +79,14 @@ class TrajectoryOMPLSolver:
 
         # 设置规划器
         self.pb_ompl_interface.set_planner(planner_name)
+
+        self.pb_ompl_interface.si.setStateValidityCheckingResolution(0.0005)
+
+        if hasattr(self.pb_ompl_interface.space, "setLongestValidSegmentFraction"):
+            self.pb_ompl_interface.space.setLongestValidSegmentFraction(0.0005)
+
+        if hasattr(self.pb_ompl_interface.planner, "setRange"):
+            self.pb_ompl_interface.planner.setRange(0.01)
 
         # 配置碰撞检测
         if self.collision_fn:
@@ -149,11 +157,13 @@ class TrajectoryOMPLSolver:
             res, path = self.pb_ompl_interface.plan_start_goal(start_angles.tolist(), goal_angles.tolist(), allowed_time=time)
 
             if res:
-                # 如果要求额外插值处理
-                if interp_num > 0:
-                    # 可以在这里添加更细致的插值处理
-                    pass
+                # 将路径转换为numpy数组
+                path_array = np.array(path)
 
+                # 验证路径
+                for conf in path_array:
+                    if self.collision_fn(conf):
+                        return None
                 return np.array(path)
             else:
                 return None
@@ -200,9 +210,3 @@ class TrajectoryOMPLSolver:
                 return path_array
             else:
                 return None
-
-    def execute(self, path, visualize=True):
-        """可选：执行规划好的路径"""
-        if self.use_pb_ompl and visualize:
-            self.pb_ompl_interface.execute(path, dynamics=False)
-        return path

@@ -213,13 +213,7 @@ class RobotSetup:
         for att in [self.ee_attachment] + attachments:
             att.assign()
 
-        base_conf = pp.get_joint_positions(self.robot, self.base_joints)
-        init_conf = np.hstack((base_conf, init_q))
-        target_conf = np.hstack((base_conf, target_q))
-        frozen_joints = self.base_joints
-        frozen_values = [init_conf[self.control_joints.index(j)] for j in frozen_joints]
-
-        path = self.plan_manipulator_motion(init_q, target_q, [self.ee_attachment] + attachments, obstacles, disabled_collisions=self.disabled_collisions, frozen_joints=frozen_joints, frozen_values=frozen_values, **kwargs)
+        path = self.plan_manipulator_motion(init_q, target_q, [self.ee_attachment] + attachments, obstacles, disabled_collisions=self.disabled_collisions, **kwargs)
         return np.array([np.array(conf) for conf in path]) if path else None
 
     def set_base_pose(self, pose: Pose) -> None:
@@ -290,10 +284,10 @@ class RobotSetup:
         smooth = kwargs.get("smooth", 40)
         resolution = kwargs.get("resolution", 1.0)
 
-        resolutions = np.array([resolution if j in frozen_joints else resolution / 180.0 * np.pi for j in self.control_joints])
+        resolutions = np.array([resolution if j in frozen_joints else resolution / 180.0 * np.pi for j in self.arm_joints])
 
         def get_sample_fn():
-            lower, upper = pp.get_custom_limits(self.robot, self.control_joints, circular_limits=pp.CIRCULAR_LIMITS)
+            lower, upper = pp.get_custom_limits(self.robot, self.arm_joints, circular_limits=pp.CIRCULAR_LIMITS)
             generator = pp.interval_generator(lower, upper)
 
             def fn():
@@ -305,11 +299,11 @@ class RobotSetup:
             return fn
 
         default_sample_fn = get_sample_fn()
-        default_distance_fn = pp.get_distance_fn(self.robot, self.control_joints)
-        default_extend_fn = pp.get_extend_fn(self.robot, self.control_joints, resolutions=resolutions)
+        default_distance_fn = pp.get_distance_fn(self.robot, self.arm_joints)
+        default_extend_fn = pp.get_extend_fn(self.robot, self.arm_joints, resolutions=resolutions)
         default_collision_fn = pp.get_collision_fn(
             self.robot,
-            self.control_joints,
+            self.arm_joints,
             obstacles=obstacles,
             attachments=attachments,
             self_collisions=True,

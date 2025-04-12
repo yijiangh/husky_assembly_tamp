@@ -1804,7 +1804,7 @@ class TrajectoryTAMPORSolver:
                 if max_time < key_frame_time + intermediate_trees_time:
                     print("    Warning: No time remained!!!!")
                     return None
-                
+
             def get_sample_fn():
                 lower, upper = pp.get_custom_limits(self.robot_setup.robot, self.robot_setup.arm_joints, circular_limits=pp.CIRCULAR_LIMITS)
                 generator = pp.interval_generator(lower, upper)
@@ -1869,7 +1869,8 @@ class TrajectoryTAMPORSolver:
                     return None
 
                 if success:
-                    print(f"    Path found! Total time: {time.time() - start_time:.2f} seconds")
+                    if verbose:
+                        print(f"    Path found! Total time: {time.time() - start_time:.2f} seconds")
                     return np.concatenate(path, axis=0)
 
             return None

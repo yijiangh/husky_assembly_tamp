@@ -9,7 +9,7 @@ from ompl import util as ou
 
 from . import utils
 
-INTERPOLATE_NUM = 500
+INTERPOLATE_NUM = 10000
 DEFAULT_PLANNING_TIME = 5.0
 
 class PbOMPLRobot():

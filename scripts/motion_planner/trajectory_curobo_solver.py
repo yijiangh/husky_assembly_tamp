@@ -1,7 +1,8 @@
 import os
 import sys
+import time
 from copy import deepcopy
-from typing import Dict, List, Set, Tuple, Union
+from typing import Callable, Dict, List, Set, Tuple, Union
 
 import numpy as np
 import pybullet_planning as pp
@@ -40,7 +41,11 @@ class TrajectoryCuroboSolver:
         element_bodies: List[int],
         grasped_element: Union[None, int] = None,
         grasped_attachment: Union[None, pp.Attachment] = None,
+        collision_fn: Callable = None,
     ) -> Dict:
+
+        start_time = time.time()
+
         # -------------------- load obstacles --------------------#
         obstacles = []
         for element_body in element_bodies:
@@ -111,10 +116,18 @@ class TrajectoryCuroboSolver:
         start_state = JointState.from_position(q_init_tensor, joint_names=self.robot_cfg.cspace.joint_names)
 
         # -------------------- plan --------------------#
-        result = motion_gen.plan_single(start_state, goal_pose, MotionGenPlanConfig(max_attempts=max_attempts, timeout=max_time))
-
-        if result.success:
-            path = result.get_interpolated_plan().position.cpu().numpy()
-            return {"success": True, "path": path}
-        else:
-            return {"success": False, "path": None}
+        while time.time() - start_time < max_time:
+            current_time = time.time()
+            result = motion_gen.plan_single(start_state, goal_pose, MotionGenPlanConfig(max_attempts=max_attempts, timeout=max_time - (current_time - start_time)))
+            if result.success:
+                path = result.get_interpolated_plan().position.cpu().numpy()
+                collision_free = True
+                if collision_fn is not None:
+                    for q in path:
+                        if collision_fn(q):
+                            collision_free = False
+                            break
+                if collision_free:
+                    return {"success": True, "path": path}
+            else:
+                return {"success": False, "path": None}

@@ -15,7 +15,7 @@ from robot.robot_setup import INIT_ARM_JOINT_ANGLES, RobotSetup
 from sampler.grasp_sampler import grasp_sampler
 from sampler.mobile_base_sampler import robot_pose_sampler
 from utils.collision import Element
-from utils.utils import CounterModule, TermPrint, angles_distance, normalize_angles
+from utils.util import CounterModule, TermPrint, angles_distance, normalize_angles
 
 # place retreat
 RETREAT_DISTANCE = 0.035

@@ -9,6 +9,9 @@ from functools import partial
 from typing import Dict, List, Set, Tuple, Union
 import random
 
+HERE = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+sys.path.append(HERE)
+
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
@@ -16,7 +19,7 @@ import pybullet_planning as pp
 from pybullet_planning import Attachment
 from pybullet_planning.utils import CIRCULAR_LIMITS, DEFAULT_RESOLUTION, MAX_DISTANCE
 from termcolor import colored, cprint
-from utils.params import PROJECT_DIR
+from .params import PROJECT_DIR
 
 HUSKYU_JOINT_NAMES = [
     "ur_arm_shoulder_pan_joint",

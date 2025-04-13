@@ -13,7 +13,7 @@ sys.path.append(HERE)
 from pybullet_planning import Attachment, interpolate_poses
 from robot.robot_setup import INIT_ARM_JOINT_ANGLES, RobotSetup
 from utils.collision import Element
-from utils.utils import CounterModule, TermPrint, angles_distance, normalize_angles
+from utils.util import CounterModule, TermPrint, angles_distance, normalize_angles
 
 # place retreat
 RETREAT_DISTANCE = 0.07

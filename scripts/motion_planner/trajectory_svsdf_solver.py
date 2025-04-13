@@ -20,7 +20,7 @@ from motion_planner.svsdf import (
     generate_trajectory,
 )
 from robot.robot_setup import RobotSetup
-from utils.utils import HideOutput, TermPrint
+from utils.util import HideOutput, TermPrint
 from utils.utils_casadi import eval
 
 

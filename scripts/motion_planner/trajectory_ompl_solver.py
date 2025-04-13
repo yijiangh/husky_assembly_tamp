@@ -19,7 +19,7 @@ sys.path.append(HERE)
 
 from utils.params import *
 from motion_planner.pb_ompl import pb_ompl
-from utils.utils import interpolate
+from utils.util import interpolate
 
 
 class PbOMPLRobotWrapper(pb_ompl.PbOMPLRobot):

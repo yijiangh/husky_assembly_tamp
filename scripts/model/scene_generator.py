@@ -26,7 +26,7 @@ from multi_tangent.convert import flatten_list
 from robot.robot_setup import RobotSetup
 from utils.collision import init_pb
 from utils.params import *
-from utils.utils import HideOutput, SetSeeds
+from utils.util import HideOutput, SetSeeds
 
 
 def load_scene_config(scene_path: str) -> Dict:

@@ -2,7 +2,7 @@ import argparse
 import json
 import os
 
-from utils.utils import PROJECT_DIR
+from utils.util import PROJECT_DIR
 
 MT_DATA_PATH = os.path.join(PROJECT_DIR, "ext", "FrameX", "data", "mt_results")
 

@@ -17,14 +17,7 @@ import pybullet_planning as pp
 # Third Party
 import torch
 
-from curobo.cuda_robot_model.cuda_robot_model import CudaRobotModel
-from curobo.geom.sphere_fit import SphereFitType
-from curobo.geom.types import Capsule, Cuboid, Cylinder, Mesh, Sphere, WorldConfig
 from curobo.types.base import TensorDeviceType
-from curobo.types.math import Pose
-from curobo.types.robot import JointState, RobotConfig
-from curobo.util_file import get_robot_path, join_path, load_yaml
-from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig, MotionGenPlanConfig
 
 HERE = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(HERE)
@@ -39,7 +32,7 @@ from multi_tangent.convert import flatten_list
 from robot.robot_setup import RobotSetup
 from utils.collision import Element, create_couplers, init_pb
 from utils.params import *
-from utils.utils import CounterModule, SetSeeds
+from utils.util import CounterModule, SetSeeds
 
 
 class PlanningThread(threading.Thread):
@@ -76,13 +69,16 @@ if __name__ == "__main__":
     parser.add_argument("--scene", type=str, default="cuboid_1", help="Scene name")
     parser.add_argument("--task", type=str, default="task_1", help="Task number")
     parser.add_argument("--max_time", type=float, default=600.0, help="Maximum time for the planning")
+    parser.add_argument("--joint_angles", type=str, help="Joint angles for manual mode (comma-separated, e.g. '1.0,0.5,-1.0,0.8,1.2,0.3')")
     args = parser.parse_args()
+
+    args.manual = True
 
     init_pb()
 
     # 设置保存路径的时间戳
     time_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    
+
     # 使用SceneParser加载场景
     scene_parser = SceneParser(os.path.join(HERE, "model", "scenes", f"{args.scene}", f"{args.task}.yml"))
     scene_parser.load_scene()
@@ -144,7 +140,7 @@ if __name__ == "__main__":
 
                 if path is not None:
                     cur_result = (seed, path is not None, elapsed_time)
-                    
+
                     # 保存路径
                     if args.save:
                         save_dir = os.path.join(LOG_DIR, "corner_case", time_stamp, args.scene, args.task, "BIRRT")
@@ -212,7 +208,7 @@ if __name__ == "__main__":
                 if result["success"]:
                     cur_result = (seed, result["success"], elapsed_time)
                     path = result["path"]
-                    
+
                     # 保存路径
                     if args.save:
                         save_dir = os.path.join(LOG_DIR, "corner_case", time_stamp, args.scene, args.task, "cuRobo")
@@ -266,7 +262,7 @@ if __name__ == "__main__":
             SetSeeds(seed)
 
             p.removeAllUserParameters()
-            
+
             collision_fn = rb.create_collision_fn(element_bodies)
 
             ompl_planner = TrajectoryOMPLSolver(collision_fn, planner=ompl_algo, robot_id=rb.robot, arm_joints=rb.arm_joints)
@@ -287,7 +283,7 @@ if __name__ == "__main__":
 
                 if path["success"]:
                     cur_result = (seed, path["success"], elapsed_time)
-                    
+
                     # 保存路径
                     if args.save:
                         save_dir = os.path.join(LOG_DIR, "corner_case", time_stamp, args.scene, args.task, f"OMPL_{ompl_algo}")
@@ -353,7 +349,7 @@ if __name__ == "__main__":
 
                 if result["success"]:
                     cur_result = (seed, result["success"], elapsed_time)
-                    
+
                     # 保存路径
                     if args.save and "path" in result:
                         path = result["path"]
@@ -406,12 +402,30 @@ if __name__ == "__main__":
     if args.manual:
         p.removeAllUserParameters()
 
-        j0_slider = p.addUserDebugParameter("joint contorl j0", -2 * np.pi, 2 * np.pi, target_q[0])
-        j1_slider = p.addUserDebugParameter("joint contorl j1", -2 * np.pi, 2 * np.pi, target_q[1])
-        j2_slider = p.addUserDebugParameter("joint contorl j2", -2 * np.pi, 2 * np.pi, target_q[2])
-        j3_slider = p.addUserDebugParameter("joint contorl j3", -2 * np.pi, 2 * np.pi, target_q[3])
-        j4_slider = p.addUserDebugParameter("joint contorl j4", -2 * np.pi, 2 * np.pi, target_q[4])
-        j5_slider = p.addUserDebugParameter("joint contorl j5", -2 * np.pi, 2 * np.pi, target_q[5])
+        # 如果提供了关节角度参数，使用它们；否则使用target_q
+        if args.joint_angles:
+            try:
+                # 解析命令行参数中的关节角度
+                initial_angles = np.array([float(angle) for angle in args.joint_angles.split(",")])
+                if len(initial_angles) != 6:
+                    print(f"警告: 提供的关节角度数量不正确，需要6个，但获得了{len(initial_angles)}个。使用target_q代替。")
+                    initial_angles = target_q
+            except Exception as e:
+                print(f"解析关节角度失败: {e}。使用target_q代替。")
+                initial_angles = target_q
+        else:
+            initial_angles = target_q
+
+        print("\n使用初始关节角度:")
+        for i, angle in enumerate(initial_angles):
+            print(f"关节 {i}: {angle:.4f} rad ({np.degrees(angle):.2f}°)")
+
+        j0_slider = p.addUserDebugParameter("joint contorl j0", -2 * np.pi, 2 * np.pi, initial_angles[0])
+        j1_slider = p.addUserDebugParameter("joint contorl j1", -2 * np.pi, 2 * np.pi, initial_angles[1])
+        j2_slider = p.addUserDebugParameter("joint contorl j2", -2 * np.pi, 2 * np.pi, initial_angles[2])
+        j3_slider = p.addUserDebugParameter("joint contorl j3", -2 * np.pi, 2 * np.pi, initial_angles[3])
+        j4_slider = p.addUserDebugParameter("joint contorl j4", -2 * np.pi, 2 * np.pi, initial_angles[4])
+        j5_slider = p.addUserDebugParameter("joint contorl j5", -2 * np.pi, 2 * np.pi, initial_angles[5])
 
         record_button = p.addUserDebugParameter("record", 1, 0, 0)
         prev_record_button_value = p.readUserDebugParameter(record_button)
@@ -422,8 +436,8 @@ if __name__ == "__main__":
         replay_button = p.addUserDebugParameter("replay", 1, 0, 0)
         prev_replay_button_value = p.readUserDebugParameter(replay_button)
 
-        record = [target_q.tolist()]
-        last_conf = target_q
+        record = [initial_angles.tolist()]
+        last_conf = initial_angles
 
         while True:
             j0 = p.readUserDebugParameter(j0_slider)

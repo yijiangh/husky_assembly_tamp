@@ -20,7 +20,7 @@ from symbolic_planner.planner import Planner
 from utils.collision import Element, create_couplers, init_pb
 from utils.params import *
 from utils.parse import parse_mt_geometric
-from utils.utils import CounterModule, SetSeeds
+from utils.util import CounterModule, SetSeeds
 
 log_dir = os.path.join(HERE, f"logs/{MT_FILE_NAME}")
 

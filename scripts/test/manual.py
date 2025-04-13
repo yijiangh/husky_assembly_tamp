@@ -24,41 +24,48 @@ from multi_tangent.convert import flatten_list
 from robot.robot_setup import RobotSetup
 from utils.collision import Element, create_couplers, init_pb
 from utils.params import *
-from utils.utils import CounterModule, SetSeeds
+from utils.util import CounterModule, SetSeeds
+
+
+class PlanningThread(threading.Thread):
+    def __init__(self, func, *args, **kwargs):
+        threading.Thread.__init__(self)
+        self.func = func
+        self.args = args
+        self.kwargs = kwargs
+        self.result = None
+        self.done = False
+        self.daemon = True
+
+    def run(self):
+        try:
+            with pp.LockRenderer():
+                self.result = self.func(*self.args, **self.kwargs)
+            self.done = True
+        except Exception as e:
+            print(f"\nPlanning error: {e}")
+            self.done = True
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Manual control")
     parser.add_argument("--scene", type=str, default="cuboid_1", help="Scene name")
     parser.add_argument("--task", type=str, default="task_1", help="Task number")
+    parser.add_argument("--joint_angles", type=str, help="Joint angles for manual mode (comma-separated, e.g. '1.0,0.5,-1.0,0.8,1.2,0.3')")
     args = parser.parse_args()
 
     init_pb()
-    
-    p.configureDebugVisualizer(p.COV_ENABLE_GUI, 1)             # 关闭右上角 GUI 面板
-    # p.configureDebugVisualizer(p.COV_ENABLE_RGB_BUFFER_PREVIEW, 0)
-    # p.configureDebugVisualizer(p.COV_ENABLE_DEPTH_BUFFER_PREVIEW, 0)
-    # p.configureDebugVisualizer(p.COV_ENABLE_SEGMENTATION_MARK_PREVIEW, 0)
-    # p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 1)          # 保持阴影（可选）
-    # p.configureDebugVisualizer(p.COV_ENABLE_WIREFRAME, 0)        # 关闭线框模式（可选）
 
-    # # 关闭坐标轴
-    # p.configureDebugVisualizer(p.COV_ENABLE_COORDINATE_FRAME, 0)
-
-    # # 启用/禁用地板网格（也会影响一些 debug 模式）
-    # p.configureDebugVisualizer(p.COV_ENABLE_RENDERING, 1)
+    # 设置保存路径的时间戳
+    time_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # 使用SceneParser加载场景
     scene_parser = SceneParser(os.path.join(HERE, "model", "scenes", f"{args.scene}", f"{args.task}.yml"))
     scene_parser.load_scene()
-    
-    # shelf = pp.create_obj("/home/jeong/summer_research/eth_ws/src/husky_assembly/scripts/test/wooden_storage_shelf.stl", scale=0.006)
-    # pp.set_color(shelf, [1.0, 0, 0, 1])
-    # pp.create_obj("/home/jeong/summer_research/eth_ws/src/husky_assembly/scripts/test/wooden_storage_shelf.obj")
 
     # 获取场景信息
-    # line_pts_flattened, radius_per_edge = scene_parser.get_element_info()
-    # element_bodies = create_collision_bodies(line_pts_flattened, radius_per_edge, viewer=True)
+    line_pts_flattened, radius_per_edge = scene_parser.get_element_info()
+    element_bodies = create_collision_bodies(line_pts_flattened, radius_per_edge, viewer=True)
     channel_info = scene_parser.get_channel_info()
     grasp_offset = scene_parser.get_robot_grasp_offset()
     pose_2d = scene_parser.get_robot_pose_2d(output_type="array")
@@ -70,10 +77,9 @@ if __name__ == "__main__":
     pp.set_pose(rb.robot, pp.Pose(point=[pose_2d[0], pose_2d[1], 0], euler=pp.Euler(0, 0, pose_2d[2])))
 
     # 设置抓取物体
-    # line_pts_grasped = [np.array([0, 0, 0]), np.array([0, 0, 1])]
-    # grasped_element = create_collision_bodies(line_pts_grasped, [0.01], viewer=True)[0]
-    grasped_element = pp.create_obj("/home/jeong/summer_research/eth_ws/src/husky_assembly/scripts/test/bar.obj", scale=3)
-    pp.set_pose(grasped_element, pp.multiply(pp.get_link_pose(rb.robot, rb.tool_link), pp.Pose(point=[0, -0.5, 0.15], euler=pp.Euler(0, 0, 0))))
+    line_pts_grasped = [np.array([0, 0, 0]), np.array([0, 0, 1])]
+    grasped_element = create_collision_bodies(line_pts_grasped, [0.01], viewer=True)[0]
+    pp.set_pose(grasped_element, pp.multiply(pp.get_link_pose(rb.robot, rb.tool_link), pp.Pose(point=grasp_offset, euler=pp.Euler(1.5708, 0, 0))))
     grasp_attachment = pp.create_attachment(rb.robot, rb.tool_link, grasped_element)
     rb.update_attachments([grasp_attachment])
 
@@ -82,16 +88,30 @@ if __name__ == "__main__":
     # **************************************************************************
     p.removeAllUserParameters()
 
-    j0_slider = p.addUserDebugParameter("joint contorl j0", -2 * np.pi, 2 * np.pi, target_q[0])
-    j1_slider = p.addUserDebugParameter("joint contorl j1", -2 * np.pi, 2 * np.pi, target_q[1])
-    j2_slider = p.addUserDebugParameter("joint contorl j2", -2 * np.pi, 2 * np.pi, target_q[2])
-    j3_slider = p.addUserDebugParameter("joint contorl j3", -2 * np.pi, 2 * np.pi, target_q[3])
-    j4_slider = p.addUserDebugParameter("joint contorl j4", -2 * np.pi, 2 * np.pi, target_q[4])
-    j5_slider = p.addUserDebugParameter("joint contorl j5", -2 * np.pi, 2 * np.pi, target_q[5])
-    
-    x_slider = p.addUserDebugParameter("x", -1, 1, 0)
-    y_slider = p.addUserDebugParameter("y", -1, 1, 0)
-    yaw_slider = p.addUserDebugParameter("yaw", -np.pi, np.pi, 0)
+    # 如果提供了关节角度参数，使用它们；否则使用target_q
+    if args.joint_angles:
+        try:
+            # 解析命令行参数中的关节角度
+            initial_angles = np.array([float(angle) for angle in args.joint_angles.split(",")])
+            if len(initial_angles) != 6:
+                print(f"警告: 提供的关节角度数量不正确，需要6个，但获得了{len(initial_angles)}个。使用target_q代替。")
+                initial_angles = target_q
+        except Exception as e:
+            print(f"解析关节角度失败: {e}。使用target_q代替。")
+            initial_angles = target_q
+    else:
+        initial_angles = target_q
+
+    print("\n使用初始关节角度:")
+    for i, angle in enumerate(initial_angles):
+        print(f"关节 {i}: {angle:.4f} rad ({np.degrees(angle):.2f}°)")
+
+    j0_slider = p.addUserDebugParameter("joint contorl j0", -2 * np.pi, 2 * np.pi, initial_angles[0])
+    j1_slider = p.addUserDebugParameter("joint contorl j1", -2 * np.pi, 2 * np.pi, initial_angles[1])
+    j2_slider = p.addUserDebugParameter("joint contorl j2", -2 * np.pi, 2 * np.pi, initial_angles[2])
+    j3_slider = p.addUserDebugParameter("joint contorl j3", -2 * np.pi, 2 * np.pi, initial_angles[3])
+    j4_slider = p.addUserDebugParameter("joint contorl j4", -2 * np.pi, 2 * np.pi, initial_angles[4])
+    j5_slider = p.addUserDebugParameter("joint contorl j5", -2 * np.pi, 2 * np.pi, initial_angles[5])
 
     record_button = p.addUserDebugParameter("record", 1, 0, 0)
     prev_record_button_value = p.readUserDebugParameter(record_button)
@@ -102,17 +122,10 @@ if __name__ == "__main__":
     replay_button = p.addUserDebugParameter("replay", 1, 0, 0)
     prev_replay_button_value = p.readUserDebugParameter(replay_button)
 
-    record = [target_q.tolist()]
-    last_conf = target_q
+    record = [initial_angles.tolist()]
+    last_conf = initial_angles
 
     while True:
-        
-        x = p.readUserDebugParameter(x_slider)
-        y = p.readUserDebugParameter(y_slider)
-        yaw = p.readUserDebugParameter(yaw_slider)
-        pose = pp.Pose(point=[x, y, 0], euler=[0, 0, yaw])
-        pp.set_pose(rb.robot, pose)
-        
         j0 = p.readUserDebugParameter(j0_slider)
         j1 = p.readUserDebugParameter(j1_slider)
         j2 = p.readUserDebugParameter(j2_slider)

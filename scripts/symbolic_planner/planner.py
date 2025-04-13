@@ -23,7 +23,7 @@ from symbolic_planner.heuristic import (
 )
 from termcolor import cprint
 from utils.collision import Element
-from utils.utils import TermPrint, flatten, timeit_decorator_counter
+from utils.util import TermPrint, flatten, timeit_decorator_counter
 
 
 class PlanState(object):

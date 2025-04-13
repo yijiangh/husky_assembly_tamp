@@ -2,7 +2,7 @@ from typing import List, Tuple
 
 import numpy as np
 import pybullet_planning as pp
-from utils.utils import angle_distance
+from utils.util import angle_distance
 
 
 class State:

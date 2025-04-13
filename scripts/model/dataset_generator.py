@@ -30,7 +30,7 @@ from multi_tangent.convert import flatten_list
 from robot.robot_setup import RobotSetup
 from utils.collision import init_pb
 from utils.params import *
-from utils.utils import SetSeeds, HideOutput
+from utils.util import SetSeeds, HideOutput
 from model.scene_parse import SceneParser
 
 

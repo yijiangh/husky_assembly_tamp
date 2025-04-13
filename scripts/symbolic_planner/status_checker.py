@@ -10,7 +10,7 @@ import numpy as np
 import pybullet_planning as pp
 from symbolic_planner.element_object import ElementObject
 from symbolic_planner.element_status import ElementStatus
-from utils.utils import closest_points_between_segments
+from utils.util import closest_points_between_segments
 
 Vertex = namedtuple("Vertex", ["id", "point", "element_index"])
 

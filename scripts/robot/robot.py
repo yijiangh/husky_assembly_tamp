@@ -22,7 +22,7 @@ from motion_planner.transfer import get_transfer_gen_fn
 from pybullet_planning import Attachment, Euler, Point, Pose, get_distance, interpolate_poses, invert, multiply
 from robot.robot_setup import INIT_ARM_JOINT_ANGLES, ONBOARD_LINK, ONBOARD_POSE, RobotSetup
 from utils.collision import Element
-from utils.utils import CounterModule, TermPrint, timeit_decorator_counter
+from utils.util import CounterModule, TermPrint, timeit_decorator_counter
 
 ConcretePath = namedtuple("ConcretePath", ["base_path", "manipulator_path", "robot_index", "attachment"])
 

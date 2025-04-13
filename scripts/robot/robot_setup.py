@@ -16,7 +16,7 @@ from compas_fab.robots import RobotSemantics
 from compas_fab.robots.robot import RobotModel
 from pybullet_planning import Attachment, Euler, Point, Pose, multiply
 from solver.ik_pinocchio_solver import PinocchioSolver
-from utils.utils import HUSKYU_JOINT_NAMES
+from utils.util import HUSKYU_JOINT_NAMES
 from utils.params import URDF_PATH
 from utils.utils_casadi import eval
 
@@ -578,6 +578,25 @@ class RobotSetup:
                 ]
             )
 
-        return pp.get_collision_fn(
-            robot_body, arm_joints, obstacles=obstacle_bodies, attachments=attachments, self_collisions=True, disabled_collisions=disabled_collisions, extra_disabled_collisions=extra_disabled_collisions, max_distance=0.0
-        )
+        grasped_collision_fn = pp.get_floating_body_collision_fn(self.attachments[0].child, obstacles=obstacle_bodies + [self.robot])
+        robot_collision_fn = pp.get_collision_fn(
+            robot_body, arm_joints, obstacles=obstacle_bodies, attachments=attachments, self_collisions=True, disabled_collisions=disabled_collisions, extra_disabled_collisions=extra_disabled_collisions, max_distance=0.0)
+        
+        def collision_fn(joint_conf, diagnosis=False):
+            """
+            检查给定关节配置是否发生碰撞
+            
+            Args:
+                joint_conf (np.ndarray): 关节配置
+                diagnosis (bool, False): 是否返回诊断信息
+            
+            Returns:
+                bool: 如果有碰撞返回True，否则返回False
+            """
+            robot_collision = robot_collision_fn(joint_conf, diagnosis=diagnosis)
+            self.set_joint_positions(arm_joints, joint_conf)
+            pose  = pp.get_pose(self.attachments[0].child)
+            grasped_collision = grasped_collision_fn(pose, diagnosis=diagnosis)                
+            return grasped_collision or robot_collision
+        
+        return collision_fn

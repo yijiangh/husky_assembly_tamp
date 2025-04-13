@@ -12,7 +12,7 @@ sys.path.append(HERE)
 import casadi as ca
 import numpy as np
 from robot.robot_setup import RobotSetup
-from utils.utils import HideOutput
+from utils.util import HideOutput
 from utils.collision import collision_info
 
 

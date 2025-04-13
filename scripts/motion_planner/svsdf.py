@@ -12,7 +12,7 @@ sys.path.append(HERE)
 
 from robot.robot_setup import RobotSetup
 from utils.collision import collision_info
-from utils.utils import HideOutput
+from utils.util import HideOutput
 from utils.utils_casadi import eval
 
 Trajectory = List[  # for different joints

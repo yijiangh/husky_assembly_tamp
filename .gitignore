@@ -121,6 +121,7 @@ ENV/
 # coop_assembly
 ###############################
 scripts/logs/
+scripts/recordings/
 scripts/*test*.py
 scripts/model/checkpoints/
 scripts/model/logs/

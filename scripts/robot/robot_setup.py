@@ -117,8 +117,8 @@ class RobotSetup:
         """
         robot_urdf = os.path.join(DATA_DIR, "husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf")
         robot_srdf = os.path.join(DATA_DIR, "husky_urdf/mt_husky_moveit_config/config/husky.srdf")
-        # gripper_obj = os.path.join(DATA_DIR, "husky_urdf/robotiq_85/meshes/static/robotiq_85_close_20mm.obj")
-        gripper_obj = os.path.join(DATA_DIR, "husky_urdf/robotiq_85/meshes/static/robotiq_85_open.obj")
+        gripper_obj = os.path.join(DATA_DIR, "husky_urdf/robotiq_85/meshes/static/robotiq_85_close_20mm.obj")
+        # gripper_obj = os.path.join(DATA_DIR, "husky_urdf/robotiq_85/meshes/static/robotiq_85_open.obj")
 
         if not all(os.path.exists(path) for path in [robot_urdf, robot_srdf, gripper_obj]):
             raise FileNotFoundError("Required robot or gripper files not found.")

@@ -46,7 +46,7 @@ class SceneParser:
         Load and parse the scene data from the YAML file.
         Converts the raw data into a SimpleNamespace object for easier access.
         """
-        with open(self.scene_file, "r") as file:
+        with open(self.scene_file, "r", encoding='utf-8') as file:
             raw_data = yaml.safe_load(file)
             self.scene_data = self._convert_to_namespace(raw_data)
             # Extract robot information

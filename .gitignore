@@ -120,7 +120,7 @@ ENV/
 ###############################
 # coop_assembly
 ###############################
-scripts/logs/**/*.json
+scripts/logs/
 scripts/*test*.py
 scripts/model/checkpoints/
 scripts/model/logs/

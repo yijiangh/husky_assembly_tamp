@@ -76,6 +76,69 @@ def angle_distance(angle1, angle2):
 ###########################################
 
 
+def interpolate(trajectory: np.ndarray, target_length: int) -> np.ndarray:
+    """
+    重新插值轨迹到指定长度，确保原始轨迹中的所有点都被保留
+
+    Args:
+        trajectory: 原始轨迹数据，形状为 [N, D]，其中 N 是时间步数，D 是每步的维度
+        target_length: 目标轨迹长度
+
+    Returns:
+        np.ndarray: 重新插值后的轨迹，形状为 [target_length, D]
+    """
+    # 原始轨迹长度和维度
+    orig_length, dims = trajectory.shape
+
+    # 如果目标长度小于或等于原始长度，需要进行降采样
+    if target_length <= orig_length:
+        # 选择等间隔的点
+        indices = np.round(np.linspace(0, orig_length - 1, target_length)).astype(int)
+        return trajectory[indices]
+
+    # 创建新轨迹数组，初始化为零
+    new_trajectory = np.zeros((target_length, dims))
+
+    # 首先确保原始轨迹中的所有点都被保留
+    # 计算原始点在新轨迹中的索引
+    orig_indices_in_new = np.round(np.linspace(0, target_length - 1, orig_length)).astype(int)
+
+    # 将原始点放入新轨迹
+    for i, idx in enumerate(orig_indices_in_new):
+        new_trajectory[idx] = trajectory[i]
+
+    # 创建掩码标记哪些位置已分配值
+    mask = np.zeros(target_length, dtype=bool)
+    mask[orig_indices_in_new] = True
+
+    # 为没有分配值的位置创建插值
+    for i in range(target_length):
+        if not mask[i]:
+            # 查找两侧最近的已知点
+            left_idx = np.max(orig_indices_in_new[orig_indices_in_new < i]) if any(orig_indices_in_new < i) else 0
+            right_idx = (
+                np.min(orig_indices_in_new[orig_indices_in_new > i])
+                if any(orig_indices_in_new > i)
+                else target_length - 1
+            )
+
+            # 如果左右索引相同，无法进行插值，使用最近点
+            if left_idx == right_idx:
+                new_trajectory[i] = new_trajectory[left_idx]
+                continue
+
+            # 计算插值权重
+            left_orig_idx = np.where(orig_indices_in_new == left_idx)[0][0]
+            right_orig_idx = np.where(orig_indices_in_new == right_idx)[0][0]
+
+            weight = (i - left_idx) / (right_idx - left_idx)
+
+            # 线性插值
+            new_trajectory[i] = (1 - weight) * trajectory[left_orig_idx] + weight * trajectory[right_orig_idx]
+
+    return new_trajectory
+
+
 class CounterValue:
     def __init__(self, name, parent):
         self.name = name

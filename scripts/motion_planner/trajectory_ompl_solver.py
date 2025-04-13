@@ -19,6 +19,7 @@ sys.path.append(HERE)
 
 from utils.params import *
 from motion_planner.pb_ompl import pb_ompl
+from utils.utils import interpolate
 
 
 class PbOMPLRobotWrapper(pb_ompl.PbOMPLRobot):
@@ -104,10 +105,10 @@ class TrajectoryOMPLSolver:
             return True
 
     def plan(
-        self, 
-        q_init: np.ndarray, 
-        q_target: np.ndarray, 
-        max_time: float = 10.0, 
+        self,
+        q_init: np.ndarray,
+        q_target: np.ndarray,
+        max_time: float = 10.0,
         max_attempts: int = 100,
         element_bodies: List[int] = None,
         grasped_element: Union[None, int] = None,
@@ -131,69 +132,71 @@ class TrajectoryOMPLSolver:
             Dictionary containing success status and path
         """
         start_time = time.time()
-        
+
         # Use the provided collision checking function if available
         if collision_fn is not None:
             collision_check = collision_fn
         else:
             collision_check = self.collision_fn
-            
+
         # Validate start and goal configurations
         if collision_check(q_init):
             print("Start configuration is in collision")
             return {"success": False, "path": None}
-        
+
         if collision_check(q_target):
             print("Goal configuration is in collision")
             return {"success": False, "path": None}
-            
+
         # Loop until successful planning or timeout
         attempts = 0
         while time.time() - start_time < max_time and attempts < max_attempts:
             attempts += 1
-            
+
             # Calculate remaining time
             remaining_time = max_time - (time.time() - start_time)
             if remaining_time <= 0:
                 break
-                
+
             # Execute one planning attempt
             res, path = self.pb_ompl_interface.plan_start_goal(q_init.tolist(), q_target.tolist(), allowed_time=remaining_time)
-            
+
             if res:
                 # Convert path to numpy array
                 path_array = np.array(path)
-                
+
                 # Check if the path is empty
                 if len(path_array) == 0:
                     print("Planner returned an empty path")
                     continue
-                    
+
                 # Check if start and end points match the input
                 start_diff = np.linalg.norm(path_array[0] - q_init)
                 goal_diff = np.linalg.norm(path_array[-1] - q_target)
-                
+
                 if start_diff > 1e-6:
                     print(f"Path start point doesn't match input start point, difference: {start_diff}")
                     continue
-                    
+
                 if goal_diff > 1e-6:
                     print(f"Path end point doesn't match input target point, difference: {goal_diff}")
                     continue
-                
+
+                path_array = interpolate(path_array, max(50000, len(path_array)))
+
                 # Verify each configuration in the path
                 collision_free = True
                 for conf in path_array:
                     if collision_check(conf):
                         collision_free = False
                         break
-                        
+
                 if collision_free:
                     return {"success": True, "path": path_array}
                 else:
                     print(f"Found path on attempt {attempts}, but it contains collisions. Retrying...")
             else:
                 print(f"Planning attempt {attempts} failed. Retrying...")
-                
+
         # If all attempts failed
         return {"success": False, "path": None}

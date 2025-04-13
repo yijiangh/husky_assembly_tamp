@@ -23,6 +23,7 @@ pip install numpy pybullet_planning torch matplotlib casadi compas_fab
 
 * install curobo https://curobo.org/get_started/1_install_instructions.html
 
+* install OMPL with python bindings https://ompl.kavrakilab.org/core/installation.html
 
 ## How to Run?
 

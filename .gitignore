@@ -120,17 +120,6 @@ ENV/
 ###############################
 # coop_assembly
 ###############################
-docs/reference/generated/
-src/compas_fab
-src/pychoreo
-
-# pddlstream generated
-temp
-statistics
-visualizations
-
-.idea
-
 scripts/logs/**/*.json
 scripts/*test*.py
 scripts/model/checkpoints/

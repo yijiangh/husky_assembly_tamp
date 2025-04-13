@@ -32,7 +32,7 @@ sys.path.append(HERE)
 import utils.load_multi_tangent as load_multi_tangent
 from model.scene_parse import SceneParser
 from motion_planner.trajectory_curobo_solver import TrajectoryCuroboSolver
-from motion_planner.trajectory_ompl_solver import TrajectoryOMPLSolver
+# from motion_planner.trajectory_ompl_solver import TrajectoryOMPLSolver
 from motion_planner.trajectory_tampor_solver import TrajectoryTAMPORSolver
 from multi_tangent.collision import create_collision_bodies
 from multi_tangent.convert import flatten_list
@@ -68,7 +68,7 @@ if __name__ == "__main__":
     parser.add_argument("--curobo", action="store_true", help="Enable cuRobo planning")
     parser.add_argument("--eitstar", action="store_true", help="Enable OMPL ETIStar planning")
     parser.add_argument("--tampor", action="store_true", help="Enable TAMPOR planning")
-    parser.add_argument("--ompl", nargs="+", default=[], choices=["RRTConnect", "BITstar", "EITstar", "RRTstar", "PRM", "EST", "FMT"], help="OMPL algorithms to use")
+    # parser.add_argument("--ompl", nargs="+", default=[], choices=["RRTConnect", "BITstar", "EITstar", "RRTstar", "PRM", "EST", "FMT"], help="OMPL algorithms to use")
     parser.add_argument("--manual", action="store_true", help="Enable manual control")
     parser.add_argument("--repeat", type=int, default=1, help="Number of repetitions for the planning")
     parser.add_argument("--save", action="store_true", help="Whether to save the results")
@@ -108,8 +108,8 @@ if __name__ == "__main__":
     results = {"BIRRT": [], "cuRobo": [], "TAMPOR": []}
 
     # 为每个OMPL算法初始化结果存储
-    for algo in args.ompl:
-        results[f"OMPL_{algo}"] = []
+    # for algo in args.ompl:
+    #     results[f"OMPL_{algo}"] = []
 
     for repeat_id in range(args.repeat):
         if args.random:
@@ -200,7 +200,7 @@ if __name__ == "__main__":
                 elapsed_time = time.time() - start_time
                 result = planning_thread.result
 
-                if result is not None:
+                if result["success"]:
                     cur_result = (seed, result["success"], elapsed_time)
                 else:
                     cur_result = (seed, False, args.max_time)
@@ -241,75 +241,75 @@ if __name__ == "__main__":
         # ompl plan
         # **************************************************************************
 
-        for ompl_algo in args.ompl:
-            print("\n========================================")
-            print(f"{repeat_id+1}th OMPL {ompl_algo} planning")
-            print("========================================\n")
+        # for ompl_algo in args.ompl:
+        #     print("\n========================================")
+        #     print(f"{repeat_id+1}th OMPL {ompl_algo} planning")
+        #     print("========================================\n")
 
-            SetSeeds(seed)
+        #     SetSeeds(seed)
 
-            p.removeAllUserParameters()
+        #     p.removeAllUserParameters()
 
-            extra_disabled_collisions = [((rb.robot, pp.link_from_name(rb.robot, "ur_arm_wrist_3_link")), (rb.ee_attachment.child, pp.BASE_LINK)), ((rb.ee_attachment.child, pp.BASE_LINK), (grasp_attachment.child, pp.BASE_LINK))]
+        #     extra_disabled_collisions = [((rb.robot, pp.link_from_name(rb.robot, "ur_arm_wrist_3_link")), (rb.ee_attachment.child, pp.BASE_LINK)), ((rb.ee_attachment.child, pp.BASE_LINK), (grasp_attachment.child, pp.BASE_LINK))]
 
-            collision_fn = pp.get_collision_fn(
-                rb.robot,
-                rb.arm_joints,
-                obstacles=element_bodies,
-                attachments=[grasp_attachment, rb.ee_attachment] + rb.attachments,
-                self_collisions=True,
-                disabled_collisions=rb.disabled_collisions,
-                extra_disabled_collisions=extra_disabled_collisions,
-                max_distance=0.0,
-            )
+        #     collision_fn = pp.get_collision_fn(
+        #         rb.robot,
+        #         rb.arm_joints,
+        #         obstacles=element_bodies,
+        #         attachments=[grasp_attachment, rb.ee_attachment] + rb.attachments,
+        #         self_collisions=True,
+        #         disabled_collisions=rb.disabled_collisions,
+        #         extra_disabled_collisions=extra_disabled_collisions,
+        #         max_distance=0.0,
+        #     )
 
-            ompl_planner = TrajectoryOMPLSolver(collision_fn, planner=ompl_algo, robot_id=rb.robot, arm_joints=rb.arm_joints)
+        #     ompl_planner = TrajectoryOMPLSolver(collision_fn, planner=ompl_algo, robot_id=rb.robot, arm_joints=rb.arm_joints)
 
-            planning_thread = PlanningThread(ompl_planner.plan, start_q, target_q, args.max_time)
+        #     planning_thread = PlanningThread(ompl_planner.plan, start_q, target_q, args.max_time)
 
-            planning_thread.start()
+        #     planning_thread.start()
 
-            start_time = time.time()
-            try:
-                while not planning_thread.done:
-                    elapsed_time = time.time() - start_time
-                    print(f"\rPlanning... current time: {elapsed_time:.2f} s ", end="", flush=True)
-                    time.sleep(0.1)
+        #     start_time = time.time()
+        #     try:
+        #         while not planning_thread.done:
+        #             elapsed_time = time.time() - start_time
+        #             print(f"\rPlanning... current time: {elapsed_time:.2f} s ", end="", flush=True)
+        #             time.sleep(0.1)
 
-                elapsed_time = time.time() - start_time
-                path = planning_thread.result
+        #         elapsed_time = time.time() - start_time
+        #         path = planning_thread.result
 
-                if path is not None:
-                    cur_result = (seed, path is not None, elapsed_time)
-                else:
-                    cur_result = (seed, False, args.max_time)
-                results[f"OMPL_{ompl_algo}"].append(cur_result)
+        #         if path is not None:
+        #             cur_result = (seed, path is not None, elapsed_time)
+        #         else:
+        #             cur_result = (seed, False, args.max_time)
+        #         results[f"OMPL_{ompl_algo}"].append(cur_result)
 
-                if path is not None:
-                    print(f"\rPlan success! Total time: {elapsed_time:.2f} s!", flush=True)
-                    if args.visualize:
-                        input = pp.wait_for_user(f"\nvisualize {ompl_algo} planned path?")
-                        if input == "y" or input == "Y":
-                            replay_slider = p.addUserDebugParameter("replay", 0, 1, 0)
-                            continue_button = p.addUserDebugParameter("continue", 1, 0, 0)
-                            prev_continue_button_value = p.readUserDebugParameter(continue_button)
-                            while True:
-                                replay = p.readUserDebugParameter(replay_slider)
-                                current_continue_button_value = p.readUserDebugParameter(continue_button)
-                                idx = int(replay * (len(path) - 1))
-                                conf = path[idx]
-                                rb.set_joint_positions(rb.arm_joints, conf)
-                                grasp_attachment.assign()
-                                time.sleep(1.0 / 240)
-                                if current_continue_button_value > prev_continue_button_value:
-                                    break
-                                prev_continue_button_value = current_continue_button_value
-                else:
-                    print(f"\rOMPL {ompl_algo} plan failed, total time: {elapsed_time:.2f} s!", flush=True)
+        #         if path is not None:
+        #             print(f"\rPlan success! Total time: {elapsed_time:.2f} s!", flush=True)
+        #             if args.visualize:
+        #                 input = pp.wait_for_user(f"\nvisualize {ompl_algo} planned path?")
+        #                 if input == "y" or input == "Y":
+        #                     replay_slider = p.addUserDebugParameter("replay", 0, 1, 0)
+        #                     continue_button = p.addUserDebugParameter("continue", 1, 0, 0)
+        #                     prev_continue_button_value = p.readUserDebugParameter(continue_button)
+        #                     while True:
+        #                         replay = p.readUserDebugParameter(replay_slider)
+        #                         current_continue_button_value = p.readUserDebugParameter(continue_button)
+        #                         idx = int(replay * (len(path) - 1))
+        #                         conf = path[idx]
+        #                         rb.set_joint_positions(rb.arm_joints, conf)
+        #                         grasp_attachment.assign()
+        #                         time.sleep(1.0 / 240)
+        #                         if current_continue_button_value > prev_continue_button_value:
+        #                             break
+        #                         prev_continue_button_value = current_continue_button_value
+        #         else:
+        #             print(f"\rOMPL {ompl_algo} plan failed, total time: {elapsed_time:.2f} s!", flush=True)
 
-            except KeyboardInterrupt:
-                print("\nexit!")
-                exit()
+        #     except KeyboardInterrupt:
+        #         print("\nexit!")
+        #         exit()
 
         # **************************************************************************
         # TAMPOR plan
@@ -337,7 +337,7 @@ if __name__ == "__main__":
                 elapsed_time = time.time() - start_time
                 result = planning_thread.result
 
-                if result is not None:
+                if result["success"]:
                     cur_result = (seed, result["success"], elapsed_time)
                 else:
                     cur_result = (seed, False, args.max_time)

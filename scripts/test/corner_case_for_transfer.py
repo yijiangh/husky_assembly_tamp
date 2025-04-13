@@ -32,7 +32,7 @@ sys.path.append(HERE)
 import utils.load_multi_tangent as load_multi_tangent
 from model.scene_parse import SceneParser
 from motion_planner.trajectory_curobo_solver import TrajectoryCuroboSolver
-# from motion_planner.trajectory_ompl_solver import TrajectoryOMPLSolver
+from motion_planner.trajectory_ompl_solver import TrajectoryOMPLSolver
 from motion_planner.trajectory_tampor_solver import TrajectoryTAMPORSolver
 from multi_tangent.collision import create_collision_bodies
 from multi_tangent.convert import flatten_list
@@ -66,9 +66,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Corner case for transfer planning")
     parser.add_argument("--birrt", action="store_true", help="Enable BIRRT planning")
     parser.add_argument("--curobo", action="store_true", help="Enable cuRobo planning")
-    parser.add_argument("--eitstar", action="store_true", help="Enable OMPL ETIStar planning")
     parser.add_argument("--tampor", action="store_true", help="Enable TAMPOR planning")
-    # parser.add_argument("--ompl", nargs="+", default=[], choices=["RRTConnect", "BITstar", "EITstar", "RRTstar", "PRM", "EST", "FMT"], help="OMPL algorithms to use")
+    parser.add_argument("--ompl", nargs="+", default=[], choices=["RRTConnect", "BITstar", "EITstar", "RRTstar", "PRM", "EST", "FMT"], help="OMPL algorithms to use")
     parser.add_argument("--manual", action="store_true", help="Enable manual control")
     parser.add_argument("--repeat", type=int, default=1, help="Number of repetitions for the planning")
     parser.add_argument("--save", action="store_true", help="Whether to save the results")
@@ -81,6 +80,9 @@ if __name__ == "__main__":
 
     init_pb()
 
+    # 设置保存路径的时间戳
+    time_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
     # 使用SceneParser加载场景
     scene_parser = SceneParser(os.path.join(HERE, "model", "scenes", f"{args.scene}", f"{args.task}.yml"))
     scene_parser.load_scene()
@@ -108,8 +110,8 @@ if __name__ == "__main__":
     results = {"BIRRT": [], "cuRobo": [], "TAMPOR": []}
 
     # 为每个OMPL算法初始化结果存储
-    # for algo in args.ompl:
-    #     results[f"OMPL_{algo}"] = []
+    for algo in args.ompl:
+        results[f"OMPL_{algo}"] = []
 
     for repeat_id in range(args.repeat):
         if args.random:
@@ -124,7 +126,7 @@ if __name__ == "__main__":
             print("\n========================================")
             print(f"{repeat_id+1}th BIRRT planning")
             print("========================================\n")
-            
+
             SetSeeds(seed)
 
             planning_thread = PlanningThread(rb.plan_manipulator_path, start_q, target_q, rb.attachments, element_bodies, max_time=args.max_time, max_iterations=10000)
@@ -142,6 +144,13 @@ if __name__ == "__main__":
 
                 if path is not None:
                     cur_result = (seed, path is not None, elapsed_time)
+                    
+                    # 保存路径
+                    if args.save:
+                        save_dir = os.path.join(LOG_DIR, "corner_case", time_stamp, args.scene, args.task, "BIRRT")
+                        os.makedirs(save_dir, exist_ok=True)
+                        save_path = os.path.join(save_dir, f"{repeat_id}.npy")
+                        np.save(save_path, path)
                 else:
                     cur_result = (seed, False, args.max_time)
                 results["BIRRT"].append(cur_result)
@@ -180,7 +189,7 @@ if __name__ == "__main__":
             print("\n========================================")
             print(f"{repeat_id+1}th cuRobo planning")
             print("========================================\n")
-            
+
             SetSeeds(seed)
 
             p.removeAllUserParameters()
@@ -202,6 +211,14 @@ if __name__ == "__main__":
 
                 if result["success"]:
                     cur_result = (seed, result["success"], elapsed_time)
+                    path = result["path"]
+                    
+                    # 保存路径
+                    if args.save:
+                        save_dir = os.path.join(LOG_DIR, "corner_case", time_stamp, args.scene, args.task, "cuRobo")
+                        os.makedirs(save_dir, exist_ok=True)
+                        save_path = os.path.join(save_dir, f"{repeat_id}.npy")
+                        np.save(save_path, path)
                 else:
                     cur_result = (seed, False, args.max_time)
                 results["cuRobo"].append(cur_result)
@@ -241,75 +258,72 @@ if __name__ == "__main__":
         # ompl plan
         # **************************************************************************
 
-        # for ompl_algo in args.ompl:
-        #     print("\n========================================")
-        #     print(f"{repeat_id+1}th OMPL {ompl_algo} planning")
-        #     print("========================================\n")
+        for ompl_algo in args.ompl:
+            print("\n========================================")
+            print(f"{repeat_id+1}th OMPL {ompl_algo} planning")
+            print("========================================\n")
 
-        #     SetSeeds(seed)
+            SetSeeds(seed)
 
-        #     p.removeAllUserParameters()
+            p.removeAllUserParameters()
+            
+            collision_fn = rb.create_collision_fn(element_bodies)
 
-        #     extra_disabled_collisions = [((rb.robot, pp.link_from_name(rb.robot, "ur_arm_wrist_3_link")), (rb.ee_attachment.child, pp.BASE_LINK)), ((rb.ee_attachment.child, pp.BASE_LINK), (grasp_attachment.child, pp.BASE_LINK))]
+            ompl_planner = TrajectoryOMPLSolver(collision_fn, planner=ompl_algo, robot_id=rb.robot, arm_joints=rb.arm_joints)
 
-        #     collision_fn = pp.get_collision_fn(
-        #         rb.robot,
-        #         rb.arm_joints,
-        #         obstacles=element_bodies,
-        #         attachments=[grasp_attachment, rb.ee_attachment] + rb.attachments,
-        #         self_collisions=True,
-        #         disabled_collisions=rb.disabled_collisions,
-        #         extra_disabled_collisions=extra_disabled_collisions,
-        #         max_distance=0.0,
-        #     )
+            planning_thread = PlanningThread(ompl_planner.plan, start_q, target_q, max_time=args.max_time)
 
-        #     ompl_planner = TrajectoryOMPLSolver(collision_fn, planner=ompl_algo, robot_id=rb.robot, arm_joints=rb.arm_joints)
+            planning_thread.start()
 
-        #     planning_thread = PlanningThread(ompl_planner.plan, start_q, target_q, args.max_time)
+            start_time = time.time()
+            try:
+                while not planning_thread.done:
+                    elapsed_time = time.time() - start_time
+                    print(f"\rPlanning... current time: {elapsed_time:.2f} s ", end="", flush=True)
+                    time.sleep(0.1)
 
-        #     planning_thread.start()
+                elapsed_time = time.time() - start_time
+                path = planning_thread.result
 
-        #     start_time = time.time()
-        #     try:
-        #         while not planning_thread.done:
-        #             elapsed_time = time.time() - start_time
-        #             print(f"\rPlanning... current time: {elapsed_time:.2f} s ", end="", flush=True)
-        #             time.sleep(0.1)
+                if path["success"]:
+                    cur_result = (seed, path["success"], elapsed_time)
+                    
+                    # 保存路径
+                    if args.save:
+                        save_dir = os.path.join(LOG_DIR, "corner_case", time_stamp, args.scene, args.task, f"OMPL_{ompl_algo}")
+                        os.makedirs(save_dir, exist_ok=True)
+                        save_path = os.path.join(save_dir, f"{repeat_id}.npy")
+                        np.save(save_path, path["path"])
+                else:
+                    cur_result = (seed, False, args.max_time)
+                results[f"OMPL_{ompl_algo}"].append(cur_result)
 
-        #         elapsed_time = time.time() - start_time
-        #         path = planning_thread.result
+                if path["success"]:
+                    print(f"\rPlan success! Total time: {elapsed_time:.2f} s!", flush=True)
+                    if args.visualize:
+                        input = pp.wait_for_user(f"\nvisualize {ompl_algo} planned path?")
+                        if input == "y" or input == "Y":
+                            replay_slider = p.addUserDebugParameter("replay", 0, 1, 0)
+                            continue_button = p.addUserDebugParameter("continue", 1, 0, 0)
+                            prev_continue_button_value = p.readUserDebugParameter(continue_button)
+                            while True:
+                                replay = p.readUserDebugParameter(replay_slider)
+                                current_continue_button_value = p.readUserDebugParameter(continue_button)
+                                idx = int(replay * (len(path["path"]) - 1))
+                                conf = path["path"][idx]
+                                rb.set_joint_positions(rb.arm_joints, conf)
+                                grasp_attachment.assign()
+                                print(f"collision_fn: {collision_fn(conf)}, joint_positions: {conf}")
+                                time.sleep(1.0 / 240)
+                                if current_continue_button_value > prev_continue_button_value:
+                                    break
+                                prev_continue_button_value = current_continue_button_value
+                else:
+                    print(f"\rOMPL {ompl_algo} plan failed, total time: {elapsed_time:.2f} s!", flush=True)
 
-        #         if path is not None:
-        #             cur_result = (seed, path is not None, elapsed_time)
-        #         else:
-        #             cur_result = (seed, False, args.max_time)
-        #         results[f"OMPL_{ompl_algo}"].append(cur_result)
-
-        #         if path is not None:
-        #             print(f"\rPlan success! Total time: {elapsed_time:.2f} s!", flush=True)
-        #             if args.visualize:
-        #                 input = pp.wait_for_user(f"\nvisualize {ompl_algo} planned path?")
-        #                 if input == "y" or input == "Y":
-        #                     replay_slider = p.addUserDebugParameter("replay", 0, 1, 0)
-        #                     continue_button = p.addUserDebugParameter("continue", 1, 0, 0)
-        #                     prev_continue_button_value = p.readUserDebugParameter(continue_button)
-        #                     while True:
-        #                         replay = p.readUserDebugParameter(replay_slider)
-        #                         current_continue_button_value = p.readUserDebugParameter(continue_button)
-        #                         idx = int(replay * (len(path) - 1))
-        #                         conf = path[idx]
-        #                         rb.set_joint_positions(rb.arm_joints, conf)
-        #                         grasp_attachment.assign()
-        #                         time.sleep(1.0 / 240)
-        #                         if current_continue_button_value > prev_continue_button_value:
-        #                             break
-        #                         prev_continue_button_value = current_continue_button_value
-        #         else:
-        #             print(f"\rOMPL {ompl_algo} plan failed, total time: {elapsed_time:.2f} s!", flush=True)
-
-        #     except KeyboardInterrupt:
-        #         print("\nexit!")
-        #         exit()
+            except KeyboardInterrupt:
+                print("\nexit!")
+                exit()
 
         # **************************************************************************
         # TAMPOR plan
@@ -339,6 +353,14 @@ if __name__ == "__main__":
 
                 if result["success"]:
                     cur_result = (seed, result["success"], elapsed_time)
+                    
+                    # 保存路径
+                    if args.save and "path" in result:
+                        path = result["path"]
+                        save_dir = os.path.join(LOG_DIR, "corner_case", time_stamp, args.scene, args.task, "TAMPOR")
+                        os.makedirs(save_dir, exist_ok=True)
+                        save_path = os.path.join(save_dir, f"{repeat_id}.npy")
+                        np.save(save_path, path)
                 else:
                     cur_result = (seed, False, args.max_time)
                 results["TAMPOR"].append(cur_result)
@@ -371,7 +393,9 @@ if __name__ == "__main__":
 
         # 保存结果到日志文件
         if args.save:
-            file_path = os.path.join(LOG_DIR, "corner_case_for_transfer.json")
+            log_dir = os.path.join(LOG_DIR, "corner_case", time_stamp)
+            os.makedirs(log_dir, exist_ok=True)
+            file_path = os.path.join(log_dir, "log.json")
             with open(file_path, "w") as f:
                 json.dump(results, f, indent=4)
 

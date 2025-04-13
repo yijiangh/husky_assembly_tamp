@@ -121,6 +121,17 @@ class TrajectoryCuroboSolver:
             result = motion_gen.plan_single(start_state, goal_pose, MotionGenPlanConfig(max_attempts=max_attempts, timeout=max_time - (current_time - start_time)))
             if result.success:
                 path = result.get_interpolated_plan().position.cpu().numpy()
+                # Check start and end points
+                if len(path) > 0:
+                    start_diff = np.linalg.norm(path[0] - q_init_tensor.cpu().numpy())
+                    end_diff = np.linalg.norm(path[-1] - q_target_tensor.cpu().numpy())
+                    
+                    print(f"Start point difference: {start_diff:.6f}, End point difference: {end_diff:.6f}")
+                    
+                    # If the start or end point difference is too large, consider planning failed
+                    if start_diff > 1e-6 or end_diff > 1e-6:
+                        print("Planning failed due to large start or end point difference")
+                        continue
                 collision_free = True
                 if collision_fn is not None:
                     for q in path:

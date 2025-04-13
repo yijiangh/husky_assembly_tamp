@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import os
 
 # Read JSON file
-log_path = os.path.join(os.path.dirname(__file__), 'logs/corner_case_for_transfer.json')
+log_path = os.path.join(os.path.dirname(__file__), 'logs/corner_case_for_transfer_250413_1740.json')
 with open(log_path, 'r') as f:
     data = json.load(f)
 
@@ -44,7 +44,7 @@ for alg in algorithms:
     planning_times_std.append(time_std)
 
 # Define colors for each algorithm
-colors = ['#1f77b4', '#ff7f0e', '#2ca02c']  # Blue, Orange, Green
+colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f']  # 蓝色, 橙色, 绿色, 红色, 紫色, 棕色, 粉色, 灰色
 
 # Set up figure
 plt.figure(figsize=(12, 5))

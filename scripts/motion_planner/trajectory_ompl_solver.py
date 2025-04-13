@@ -1,14 +1,15 @@
 import math
 import os
 import sys
+import time
 from copy import deepcopy
-from typing import Callable, List, Union
+from typing import Callable, Dict, List, Union
 
 import numpy as np
 import pybullet as p
 
 # OMPL
-# 添加pb_ompl导入
+# Import pb_ompl
 from ompl import base as ob
 from ompl import geometric as og
 from ompl import util as ou
@@ -22,7 +23,7 @@ from motion_planner.pb_ompl import pb_ompl
 
 class PbOMPLRobotWrapper(pb_ompl.PbOMPLRobot):
     """
-    包装PbOMPLRobot类，使其适配我们的碰撞检测函数
+    Wrapper for PbOMPLRobot class to adapt it to our collision checking function
     """
 
     def __init__(self, robot_id, joint_indices):
@@ -34,7 +35,7 @@ class PbOMPLRobotWrapper(pb_ompl.PbOMPLRobot):
         self._set_manual_joint_bounds()
 
     def _set_manual_joint_bounds(self):
-        # 手动设置每个关节的边界，避免从PyBullet读取
+        # Manually set joint boundaries to avoid reading from PyBullet
         for _ in range(self.num_dim):
             self.joint_bounds.append([-2 * math.pi, 2 * math.pi])
 
@@ -44,40 +45,33 @@ class PbOMPLRobotWrapper(pb_ompl.PbOMPLRobot):
         return self.joint_bounds
 
     def _is_not_fixed(self, joint_idx):
-        return True  # 我们已经预先过滤了固定关节
+        return True  # We have already filtered fixed joints
 
 
 class TrajectoryOMPLSolver:
     def __init__(
         self,
         collision_fn: Callable[[np.ndarray], bool],
-        planner: str = "RRTConnect",
-        robot_id: int = None,
-        arm_joints: List[int] = None,
+        robot_id: int,
+        arm_joints: List[int],
         obstacles: List[int] = None,
+        planner: str = "RRTConnect",
     ):
         self.collision_fn = collision_fn
         self.robot_id = robot_id
         self.arm_joints = arm_joints
         self.obstacles = obstacles if obstacles else []
-
-        # 如果提供了机器人ID和关节索引，使用pb_ompl
-        if robot_id is not None and arm_joints is not None:
-            self.use_pb_ompl = True
-            self.setup_pb_ompl(planner)
-        else:
-            self.use_pb_ompl = False
-            self.setup_regular_ompl(planner)
+        self.setup_pb_ompl(planner)
 
     def setup_pb_ompl(self, planner_name):
-        """设置pb_ompl规划器"""
-        # 创建机器人包装器
+        """Setup pb_ompl planner"""
+        # Create robot wrapper
         self.robot = PbOMPLRobotWrapper(self.robot_id, self.arm_joints)
 
-        # 初始化pb_ompl接口
+        # Initialize pb_ompl interface
         self.pb_ompl_interface = pb_ompl.PbOMPL(self.robot, self.obstacles)
 
-        # 设置规划器
+        # Set planner
         self.pb_ompl_interface.set_planner(planner_name)
 
         self.pb_ompl_interface.si.setStateValidityCheckingResolution(0.0005)
@@ -88,48 +82,18 @@ class TrajectoryOMPLSolver:
         if hasattr(self.pb_ompl_interface.planner, "setRange"):
             self.pb_ompl_interface.planner.setRange(0.01)
 
-        # 配置碰撞检测
+        # Configure collision detection
         if self.collision_fn:
-            # 替换默认的碰撞检测为自定义函数
+            # Replace default collision detection with custom function
             def custom_is_state_valid(state):
                 state_arr = np.array([state[i] for i in range(self.robot.num_dim)])
                 return not self.collision_fn(state_arr)
 
             self.pb_ompl_interface.ss.setStateValidityChecker(ob.StateValidityCheckerFn(custom_is_state_valid))
 
-    def setup_regular_ompl(self, planner_name):
-        """设置常规OMPL规划器（保留原有实现）"""
-        ou.setLogLevel(ou.LOG_ERROR)
-
-        self.space = ob.RealVectorStateSpace(6)
-        self.space.setLongestValidSegmentFraction(0.01)
-
-        # 设置每个关节的边界
-        bounds = ob.RealVectorBounds(6)
-        bounds.setLow(-2 * math.pi)
-        bounds.setHigh(2 * math.pi)
-        self.space.setBounds(bounds)
-
-        # 创建空间信息对象
-        self.si = ob.SpaceInformation(self.space)
-
-        # 设置状态有效性检查器
-        self.si.setStateValidityChecker(ob.StateValidityCheckerFn(self.isStateValid))
-        self.si.setStateValidityCheckingResolution(0.001)  # 0.005
-
-        # 配置规划器
-        if planner_name == "RRTConnect":
-            self.planner = og.RRTConnect(self.si)
-        elif planner_name == "AITstar":
-            self.planner = og.AITstar(self.si)
-        elif planner_name == "EITstar":
-            self.planner = og.EITstar(self.si)
-        else:
-            self.planner = og.RRTConnect(self.si)
-
     def isStateValid(self, state):
         """
-        常规OMPL的状态有效性检查
+        Regular OMPL state validity check
         """
         state_arr = np.zeros(6)
         for i in range(6):
@@ -139,74 +103,97 @@ class TrajectoryOMPLSolver:
         else:
             return True
 
-    def plan(self, start_angles: np.ndarray, goal_angles: np.ndarray, interp_num: int = 1000, time: float = 10.0) -> np.ndarray:
+    def plan(
+        self, 
+        q_init: np.ndarray, 
+        q_target: np.ndarray, 
+        max_time: float = 10.0, 
+        max_attempts: int = 100,
+        element_bodies: List[int] = None,
+        grasped_element: Union[None, int] = None,
+        grasped_attachment: Union[None, object] = None,
+        collision_fn: Callable = None,
+    ) -> Dict:
         """
-        规划路径
+        Plan a path
 
-        参数:
-            start_angles: 起始关节角度
-            goal_angles: 目标关节角度
-            interp_num: 插值数量
-            time: 最大规划时间（秒）
+        Parameters:
+            q_init: Initial joint configuration
+            q_target: Target joint configuration
+            max_time: Maximum planning time (seconds)
+            max_attempts: Maximum number of planning attempts
+            element_bodies: List of object bodies in the environment
+            grasped_element: ID of the grasped object
+            grasped_attachment: Attachment information for the grasped object
+            collision_fn: Collision checking function
 
-        返回:
-            规划出的路径（如果成功）或None（如果失败）
+        Returns:
+            Dictionary containing success status and path
         """
-        if self.use_pb_ompl:
-            # 使用pb_ompl进行规划
-            res, path = self.pb_ompl_interface.plan_start_goal(start_angles.tolist(), goal_angles.tolist(), allowed_time=time)
-
-            if res:
-                # 将路径转换为numpy数组
-                path_array = np.array(path)
-
-                # 验证路径
-                for conf in path_array:
-                    if self.collision_fn(conf):
-                        return None
-                return np.array(path)
-            else:
-                return None
+        start_time = time.time()
+        
+        # Use the provided collision checking function if available
+        if collision_fn is not None:
+            collision_check = collision_fn
         else:
-            # 使用原始OMPL方法
-            # 定义起始状态
-            start = ob.State(self.space)
-            for i in range(6):
-                start()[i] = start_angles[i]
-
-            # 定义目标状态
-            goal = ob.State(self.space)
-            for i in range(6):
-                goal()[i] = goal_angles[i]
-
-            # 创建问题定义
-            pdef = ob.ProblemDefinition(self.si)
-            pdef.setStartAndGoalStates(start, goal)
-
-            # 设置规划器的问题定义
-            self.planner.setProblemDefinition(pdef)
-
-            # 求解路径规划问题
-            solved = self.planner.solve(time)
-
-            if solved:
-                path = pdef.getSolutionPath()
-                num_states = path.getStateCount()
-
-                # 添加插值
-                path.interpolate(interp_num)
-                num_states = path.getStateCount()
-
-                path_array = np.zeros((num_states, 6))
-                for i in range(num_states):
-                    state = path.getState(i)
-                    for j in range(6):
-                        path_array[i, j] = state[j]
-
-                # 验证路径
+            collision_check = self.collision_fn
+            
+        # Validate start and goal configurations
+        if collision_check(q_init):
+            print("Start configuration is in collision")
+            return {"success": False, "path": None}
+        
+        if collision_check(q_target):
+            print("Goal configuration is in collision")
+            return {"success": False, "path": None}
+            
+        # Loop until successful planning or timeout
+        attempts = 0
+        while time.time() - start_time < max_time and attempts < max_attempts:
+            attempts += 1
+            
+            # Calculate remaining time
+            remaining_time = max_time - (time.time() - start_time)
+            if remaining_time <= 0:
+                break
+                
+            # Execute one planning attempt
+            res, path = self.pb_ompl_interface.plan_start_goal(q_init.tolist(), q_target.tolist(), allowed_time=remaining_time)
+            
+            if res:
+                # Convert path to numpy array
+                path_array = np.array(path)
+                
+                # Check if the path is empty
+                if len(path_array) == 0:
+                    print("Planner returned an empty path")
+                    continue
+                    
+                # Check if start and end points match the input
+                start_diff = np.linalg.norm(path_array[0] - q_init)
+                goal_diff = np.linalg.norm(path_array[-1] - q_target)
+                
+                if start_diff > 1e-6:
+                    print(f"Path start point doesn't match input start point, difference: {start_diff}")
+                    continue
+                    
+                if goal_diff > 1e-6:
+                    print(f"Path end point doesn't match input target point, difference: {goal_diff}")
+                    continue
+                
+                # Verify each configuration in the path
+                collision_free = True
                 for conf in path_array:
-                    if self.collision_fn(conf):
-                        return None
-                return path_array
+                    if collision_check(conf):
+                        collision_free = False
+                        break
+                        
+                if collision_free:
+                    return {"success": True, "path": path_array}
+                else:
+                    print(f"Found path on attempt {attempts}, but it contains collisions. Retrying...")
             else:
-                return None
+                print(f"Planning attempt {attempts} failed. Retrying...")
+                
+        # If all attempts failed
+        return {"success": False, "path": None}

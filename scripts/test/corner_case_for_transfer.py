@@ -191,7 +191,9 @@ if __name__ == "__main__":
             p.removeAllUserParameters()
 
             curobo_planner = TrajectoryCuroboSolver(rb, TensorDeviceType())
-            planning_thread = PlanningThread(curobo_planner.plan, start_q, target_q, args.max_time, 10000, element_bodies, grasped_element=grasped_element, grasped_attachment=grasp_attachment)
+            planning_thread = PlanningThread(
+                curobo_planner.plan, start_q, target_q, args.max_time, 10000, element_bodies, grasped_element=grasped_element, grasped_attachment=grasp_attachment, collision_fn=rb.create_collision_fn(element_bodies)
+            )
 
             planning_thread.start()
 

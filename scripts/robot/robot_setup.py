@@ -302,15 +302,7 @@ class RobotSetup:
         default_sample_fn = get_sample_fn()
         default_distance_fn = pp.get_distance_fn(self.robot, self.arm_joints)
         default_extend_fn = pp.get_extend_fn(self.robot, self.arm_joints, resolutions=resolutions)
-        default_collision_fn = pp.get_collision_fn(
-            self.robot,
-            self.arm_joints,
-            obstacles=obstacles,
-            attachments=attachments,
-            self_collisions=True,
-            disabled_collisions=disabled_collisions,
-            extra_disabled_collisions=[((self.robot, pp.link_from_name(self.robot, "ur_arm_wrist_3_link")), (attachments[0].child, pp.BASE_LINK))],
-        )
+        default_collision_fn = self.create_collision_fn(obstacles)
 
         sample_fn = kwargs.get("sample_fn", default_sample_fn)
         distance_fn = kwargs.get("distance_fn", default_distance_fn)
@@ -580,23 +572,24 @@ class RobotSetup:
 
         grasped_collision_fn = pp.get_floating_body_collision_fn(self.attachments[0].child, obstacles=obstacle_bodies + [self.robot])
         robot_collision_fn = pp.get_collision_fn(
-            robot_body, arm_joints, obstacles=obstacle_bodies, attachments=attachments, self_collisions=True, disabled_collisions=disabled_collisions, extra_disabled_collisions=extra_disabled_collisions, max_distance=0.0)
-        
+            robot_body, arm_joints, obstacles=obstacle_bodies, attachments=attachments, self_collisions=True, disabled_collisions=disabled_collisions, extra_disabled_collisions=extra_disabled_collisions, max_distance=0.0
+        )
+
         def collision_fn(joint_conf, diagnosis=False):
             """
             检查给定关节配置是否发生碰撞
-            
+
             Args:
                 joint_conf (np.ndarray): 关节配置
                 diagnosis (bool, False): 是否返回诊断信息
-            
+
             Returns:
                 bool: 如果有碰撞返回True，否则返回False
             """
             robot_collision = robot_collision_fn(joint_conf, diagnosis=diagnosis)
             self.set_joint_positions(arm_joints, joint_conf)
-            pose  = pp.get_pose(self.attachments[0].child)
-            grasped_collision = grasped_collision_fn(pose, diagnosis=diagnosis)                
+            pose = pp.get_pose(self.attachments[0].child)
+            grasped_collision = grasped_collision_fn(pose, diagnosis=diagnosis)
             return grasped_collision or robot_collision
-        
+
         return collision_fn

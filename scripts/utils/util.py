@@ -261,6 +261,154 @@ class TermPrint(object):
             cls.last_empty_line = False
 
 
+class PrintManager:
+    """打印控制模块，用于统一管理终端输出并控制缩进级别"""
+    
+    # 预定义的颜色映射，便于使用不同颜色打印不同类型的消息
+    COLORS = {
+        "info": "white",
+        "success": "green",
+        "warning": "yellow",
+        "error": "red",
+        "debug": "cyan",
+        "highlight": "magenta"
+    }
+    
+    # 单例模式，确保只有一个打印管理器实例
+    _instance = None
+    
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super(PrintManager, cls).__new__(cls)
+        return cls._instance
+    
+    def __init__(self, indent_size: int = 4, tab_char: str = ' ', use_color: bool = True, default_color: str = "white"):
+        """
+        初始化打印管理器
+        
+        Args:
+            indent_size: 每级缩进的空格数
+            tab_char: 缩进使用的字符
+            use_color: 是否使用彩色输出
+            default_color: 默认输出颜色
+        """
+        # 避免重复初始化
+        if hasattr(self, 'indent_level'):
+            return
+            
+        self.indent_size = indent_size
+        self.tab_char = tab_char
+        self.indent_level = 0
+        self.use_color = use_color
+        self.default_color = default_color
+    
+    def _get_indent(self, level: int = None) -> str:
+        """
+        获取当前缩进级别下的缩进字符串
+        
+        Args:
+            level: 指定的缩进级别，若不指定则使用当前级别
+            
+        Returns:
+            缩进字符串
+        """
+        if level is None:
+            level = self.indent_level
+        return self.tab_char * self.indent_size * level
+    
+    def print(self, message: str, indent_level: int = None, color: str = None, end: str = "\n", flush: bool = True):
+        """
+        按照指定的缩进级别打印消息
+        
+        Args:
+            message: 要打印的消息
+            indent_level: 指定的缩进级别，若不指定则使用当前级别
+            color: 指定的颜色，若不指定则使用默认颜色
+            end: 行结束符
+            flush: 是否立即刷新输出
+        """
+        if indent_level is None:
+            indent_level = self.indent_level
+            
+        if color is None:
+            color = self.default_color
+            
+        indent_str = self._get_indent(indent_level)
+        formatted_message = f"{indent_str}{message}"
+        
+        if self.use_color:
+            cprint(formatted_message, color, end=end, flush=flush)
+        else:
+            print(formatted_message, end=end, flush=flush)
+    
+    def info(self, message: str, indent_level: int = None):
+        """打印普通信息"""
+        self.print(message, indent_level, self.COLORS["info"])
+    
+    def success(self, message: str, indent_level: int = None):
+        """打印成功信息"""
+        self.print(message, indent_level, self.COLORS["success"])
+    
+    def warning(self, message: str, indent_level: int = None):
+        """打印警告信息"""
+        self.print(message, indent_level, self.COLORS["warning"])
+    
+    def error(self, message: str, indent_level: int = None):
+        """打印错误信息"""
+        self.print(message, indent_level, self.COLORS["error"])
+    
+    def debug(self, message: str, indent_level: int = None):
+        """打印调试信息"""
+        self.print(message, indent_level, self.COLORS["debug"])
+    
+    def highlight(self, message: str, indent_level: int = None):
+        """打印高亮信息"""
+        self.print(message, indent_level, self.COLORS["highlight"])
+    
+    def indent(self, levels: int = 1):
+        """增加缩进级别"""
+        self.indent_level += levels
+        return self
+    
+    def dedent(self, levels: int = 1):
+        """减少缩进级别"""
+        self.indent_level = max(0, self.indent_level - levels)
+        return self
+    
+    def reset_indent(self):
+        """重置缩进级别为0"""
+        self.indent_level = 0
+        return self
+    
+    def set_indent(self, level: int):
+        """直接设置缩进级别"""
+        self.indent_level = max(0, level)
+        return self
+    
+    @contextmanager
+    def indented(self, levels: int = 1):
+        """
+        临时增加缩进级别的上下文管理器
+        
+        Args:
+            levels: 增加的缩进级别数量
+            
+        示例:
+            printer = PrintManager()
+            printer.info("主层级消息")
+            with printer.indented():
+                printer.info("缩进一级的消息")
+                with printer.indented(2):
+                    printer.info("缩进三级的消息")
+            printer.info("回到主层级")
+        """
+        self.indent(levels)
+        try:
+            yield self
+        finally:
+            self.dedent(levels)
+
+
 def flatten(nested_list):
     result = []
     for element in nested_list:

@@ -32,8 +32,10 @@ from multi_tangent.convert import flatten_list
 from robot.robot_setup import RobotSetup
 from utils.collision import Element, create_couplers, init_pb
 from utils.params import *
-from utils.util import CounterModule, SetSeeds
+from utils.util import CounterModule, SetSeeds, PrintManager
 
+# 初始化PrintManager实例
+printer = PrintManager()
 
 class PlanningThread(threading.Thread):
     def __init__(self, func, *args, **kwargs):
@@ -51,7 +53,7 @@ class PlanningThread(threading.Thread):
                 self.result = self.func(*self.args, **self.kwargs)
             self.done = True
         except Exception as e:
-            print(f"\nPlanning error: {e}")
+            printer.error(f"\n规划错误: {e}")
             self.done = True
 
 
@@ -70,9 +72,8 @@ if __name__ == "__main__":
     parser.add_argument("--task", type=str, default="task_1", help="Task number")
     parser.add_argument("--max_time", type=float, default=600.0, help="Maximum time for the planning")
     parser.add_argument("--joint_angles", type=str, help="Joint angles for manual mode (comma-separated, e.g. '1.0,0.5,-1.0,0.8,1.2,0.3')")
+    parser.add_argument("--time_stamp", type=str, help="Timestamp of the log file to use seeds from")
     args = parser.parse_args()
-
-    args.manual = True
 
     init_pb()
 
@@ -109,21 +110,79 @@ if __name__ == "__main__":
     for algo in args.ompl:
         results[f"OMPL_{algo}"] = []
 
-    for repeat_id in range(args.repeat):
-        if args.random:
-            seed = int.from_bytes(os.urandom(4), byteorder="big")
-            print(f"\n-------------------- current seed: {seed} --------------------\n")
+    # 从日志文件中加载seeds（如果提供了time_stamp）
+    seeds = []
+    if args.time_stamp:
+        log_file_path = os.path.join(LOG_DIR, "corner_case", args.time_stamp, "log.json")
+        printer.info(f"尝试从 {log_file_path} 读取seeds")
+        
+        if os.path.exists(log_file_path):
+            try:
+                with open(log_file_path, 'r') as f:
+                    log_data = json.load(f)
+                
+                # 从所有算法结果中提取seeds
+                for algo, algo_results in log_data.items():
+                    for result in algo_results:
+                        if result and len(result) > 0:
+                            seed = result[0]  # seed是结果元组的第一个元素
+                            if seed not in seeds:
+                                seeds.append(seed)
+                
+                printer.success(f"成功从日志文件加载了 {len(seeds)} 个seeds")
+                
+                # 加载现有结果到results字典
+                results = log_data
+                
+                # 确保所有必要的算法键存在
+                for algo_key in ["BIRRT", "cuRobo", "TAMPOR"]:
+                    if algo_key not in results:
+                        results[algo_key] = []
+                
+                # 确保所有OMPL算法键存在
+                for algo in args.ompl:
+                    algo_key = f"OMPL_{algo}"
+                    if algo_key not in results:
+                        results[algo_key] = []
+            except Exception as e:
+                printer.error(f"读取日志文件失败: {e}")
+                seeds = []
+        else:
+            printer.warning(f"日志文件 {log_file_path} 不存在")
+            seeds = []
+    
+    # 如果没有从日志文件中读取到seeds或者没有提供time_stamp
+    if not seeds:
+        if args.time_stamp:
+            printer.warning("未找到seeds，将使用随机seeds")
+        # 继续使用随机seeds
+        for i in range(args.repeat):
+            if args.random:
+                seed = int.from_bytes(os.urandom(4), byteorder="big")
+                seeds.append(seed)
+            else:
+                seeds.append(None)
+
+    # 如果使用了--time_stamp，覆盖time_stamp变量值
+    if args.time_stamp:
+        time_stamp = args.time_stamp
+
+    # 执行规划
+    for repeat_id, seed in enumerate(seeds):
+        if seed is not None:
+            printer.info(f"\n-------------------- 当前seed: {seed} --------------------\n")
 
         # **************************************************************************
         # BIRRT plan
         # **************************************************************************
 
         if args.birrt:
-            print("\n========================================")
-            print(f"{repeat_id+1}th BIRRT planning")
-            print("========================================\n")
+            printer.info("\n========================================")
+            printer.info(f"{repeat_id+1}th BIRRT planning")
+            printer.info("========================================\n")
 
-            SetSeeds(seed)
+            if seed is not None:
+                SetSeeds(seed)
 
             planning_thread = PlanningThread(rb.plan_manipulator_path, start_q, target_q, rb.attachments, element_bodies, max_time=args.max_time, max_iterations=10000)
             planning_thread.start()
@@ -149,12 +208,22 @@ if __name__ == "__main__":
                         np.save(save_path, path)
                 else:
                     cur_result = (seed, False, args.max_time)
-                results["BIRRT"].append(cur_result)
+                
+                # 添加结果（避免重复添加同一个seed的结果）
+                append_result = True
+                if "BIRRT" not in results:
+                    results["BIRRT"] = []
+                for existing_result in results["BIRRT"]:
+                    if existing_result[0] == seed:
+                        append_result = False
+                        break
+                if append_result:
+                    results["BIRRT"].append(cur_result)
 
                 if path is not None:
-                    print(f"\rPlan success! Total time: {elapsed_time:.2f} s!", flush=True)
+                    printer.success(f"\rPlanning success! Total time: {elapsed_time:.2f} s!")
                     if args.visualize:
-                        input = pp.wait_for_user("\nvisualize planned path?")
+                        input = pp.wait_for_user("\nVisualize planned path?")
                         if input == "y" or input == "Y":
                             replay_slider = p.addUserDebugParameter("replay", 0, 1, 0)
                             continue_button = p.addUserDebugParameter("continue", 1, 0, 0)
@@ -171,10 +240,10 @@ if __name__ == "__main__":
                                     break
                                 prev_continue_button_value = current_continue_button_value
                 else:
-                    print(f"\rBIRRT plan failed, total time: {elapsed_time:.2f} s!", flush=True)
+                    printer.warning(f"\rBIRRT planning failed, total time: {elapsed_time:.2f} s!")
 
             except KeyboardInterrupt:
-                print("\nexit!")
+                printer.warning("\nExit!")
                 exit()
 
         # **************************************************************************
@@ -182,11 +251,12 @@ if __name__ == "__main__":
         # **************************************************************************
 
         if args.curobo:
-            print("\n========================================")
-            print(f"{repeat_id+1}th cuRobo planning")
-            print("========================================\n")
+            printer.info("\n========================================")
+            printer.info(f"{repeat_id+1}th cuRobo planning")
+            printer.info("========================================\n")
 
-            SetSeeds(seed)
+            if seed is not None:
+                SetSeeds(seed)
 
             p.removeAllUserParameters()
 
@@ -201,7 +271,7 @@ if __name__ == "__main__":
             try:
                 while not planning_thread.done:
                     elapsed_time = time.time() - start_time
-                    print(f"\rPlanning... current time: {elapsed_time:.2f} s ", end="", flush=True)
+                    print(f"\rPlanning... current time: {elapsed_time:.2f} s", end="", flush=True)
                     time.sleep(0.1)
 
                 elapsed_time = time.time() - start_time
@@ -219,13 +289,23 @@ if __name__ == "__main__":
                         np.save(save_path, path)
                 else:
                     cur_result = (seed, False, args.max_time)
-                results["cuRobo"].append(cur_result)
+                
+                # 添加结果（避免重复添加同一个seed的结果）
+                append_result = True
+                if "cuRobo" not in results:
+                    results["cuRobo"] = []
+                for existing_result in results["cuRobo"]:
+                    if existing_result[0] == seed:
+                        append_result = False
+                        break
+                if append_result:
+                    results["cuRobo"].append(cur_result)
 
                 if result["success"]:
-                    print(f"\rPlan success! Total time: {elapsed_time:.2f} s! ", flush=True)
+                    printer.success(f"\rPlanning success! Total time: {elapsed_time:.2f} s! ")
                     path = result["path"]
                     if args.visualize:
-                        input = pp.wait_for_user("\nvisualize planned path?")
+                        input = pp.wait_for_user("\nVisualize planned path?")
                         if input == "y" or input == "Y":
                             # for body in element_bodies[:10]:
                             #     pp.set_color(body, [0, 0, 1, 1])
@@ -246,10 +326,10 @@ if __name__ == "__main__":
                             # for body in element_bodies[:10]:
                             #     pp.set_color(body, [1, 0, 0, 1])
                 else:
-                    print(f"\rCurobo plan failed, total time: {elapsed_time:.2f} s! ", flush=True)
+                    printer.warning(f"\rCurobo planning failed, total time: {elapsed_time:.2f} s! ")
 
             except KeyboardInterrupt:
-                print("\nexit!")
+                printer.warning("\nExit!")
                 exit()
 
         # **************************************************************************
@@ -257,11 +337,12 @@ if __name__ == "__main__":
         # **************************************************************************
 
         for ompl_algo in args.ompl:
-            print("\n========================================")
-            print(f"{repeat_id+1}th OMPL {ompl_algo} planning")
-            print("========================================\n")
+            printer.info("\n========================================")
+            printer.info(f"{repeat_id+1}th OMPL {ompl_algo} planning")
+            printer.info("========================================\n")
 
-            SetSeeds(seed)
+            if seed is not None:
+                SetSeeds(seed)
 
             p.removeAllUserParameters()
 
@@ -277,7 +358,7 @@ if __name__ == "__main__":
             try:
                 while not planning_thread.done:
                     elapsed_time = time.time() - start_time
-                    print(f"\rPlanning... current time: {elapsed_time:.2f} s ", end="", flush=True)
+                    print(f"\rPlanning... current time: {elapsed_time:.2f} s", end="", flush=True)
                     time.sleep(0.1)
 
                 elapsed_time = time.time() - start_time
@@ -294,12 +375,25 @@ if __name__ == "__main__":
                         np.save(save_path, path["path"])
                 else:
                     cur_result = (seed, False, args.max_time)
-                results[f"OMPL_{ompl_algo}"].append(cur_result)
+                
+                # 添加结果（避免重复添加同一个seed的结果）
+                algo_key = f"OMPL_{ompl_algo}"
+                append_result = True
+                if algo_key in results:
+                    for existing_result in results[algo_key]:
+                        if existing_result[0] == seed:
+                            append_result = False
+                            break
+                else:
+                    results[algo_key] = []
+                
+                if append_result:
+                    results[algo_key].append(cur_result)
 
                 if path["success"]:
-                    print(f"\rPlan success! Total time: {elapsed_time:.2f} s!", flush=True)
+                    printer.success(f"\rPlanning success! Total time: {elapsed_time:.2f} s!")
                     if args.visualize:
-                        input = pp.wait_for_user(f"\nvisualize {ompl_algo} planned path?")
+                        input = pp.wait_for_user(f"\nVisualize {ompl_algo} planning path?")
                         if input == "y" or input == "Y":
                             replay_slider = p.addUserDebugParameter("replay", 0, 1, 0)
                             continue_button = p.addUserDebugParameter("continue", 1, 0, 0)
@@ -317,10 +411,10 @@ if __name__ == "__main__":
                                     break
                                 prev_continue_button_value = current_continue_button_value
                 else:
-                    print(f"\rOMPL {ompl_algo} plan failed, total time: {elapsed_time:.2f} s!", flush=True)
+                    printer.warning(f"\rOMPL {ompl_algo} planning failed, total time: {elapsed_time:.2f} s!")
 
             except KeyboardInterrupt:
-                print("\nexit!")
+                printer.warning("\nExit!")
                 exit()
 
         # **************************************************************************
@@ -328,14 +422,15 @@ if __name__ == "__main__":
         # **************************************************************************
 
         if args.tampor:
-            print("\n========================================")
-            print(f"{repeat_id+1}th TAMPOR planning")
-            print("========================================\n")
+            printer.info("\n========================================")
+            printer.info(f"{repeat_id+1}th TAMPOR planning")
+            printer.info("========================================\n")
 
-            SetSeeds(seed)
+            if seed is not None:
+                SetSeeds(seed)
 
             tampor_planner = TrajectoryTAMPORSolver(rb, channel_info, grasp_offset, eval_max_attempts=1000)
-            planning_thread = PlanningThread(tampor_planner.plan, start_q, target_q, element_bodies, grasp_attachment, key_frame_num=25, grow_tree_max_nodes=1000, max_time=args.max_time, step_max_time=30.0, verbose=False)
+            planning_thread = PlanningThread(tampor_planner.plan, start_q, target_q, element_bodies, grasp_attachment, max_time=args.max_time, init_step_max_time=args.max_time / 3.0, step_max_time=20.0, key_frame_num=20, verbose=True)
 
             planning_thread.start()
 
@@ -343,7 +438,7 @@ if __name__ == "__main__":
             try:
                 while not planning_thread.done:
                     elapsed_time = time.time() - start_time
-                    print(f"\rPlanning... current time: {elapsed_time:.2f} s ", end="", flush=True)
+                    # print(f"\rPlanning... current time: {elapsed_time:.2f} s ", end="", flush=True)
                     time.sleep(0.1)
 
                 elapsed_time = time.time() - start_time
@@ -361,12 +456,22 @@ if __name__ == "__main__":
                         np.save(save_path, path)
                 else:
                     cur_result = (seed, False, args.max_time)
-                results["TAMPOR"].append(cur_result)
+                
+                # 添加结果（避免重复添加同一个seed的结果）
+                append_result = True
+                if "TAMPOR" not in results:
+                    results["TAMPOR"] = []
+                for existing_result in results["TAMPOR"]:
+                    if existing_result[0] == seed:
+                        append_result = False
+                        break
+                if append_result:
+                    results["TAMPOR"].append(cur_result)
 
                 if result["success"]:
-                    print(f"\rPlan success! Total time: {elapsed_time:.2f} s! ", flush=True)
+                    printer.success(f"\rPlanning success! Total time: {elapsed_time:.2f} s! ")
                     if args.visualize:
-                        input = pp.wait_for_user("\nvisualize planned path?")
+                        input = pp.wait_for_user("\nVisualize planned path?")
                         if input == "y" or input == "Y":
                             replay_slider = p.addUserDebugParameter("replay", 0, 1, 0)
                             continue_button = p.addUserDebugParameter("continue", 1, 0, 0)
@@ -383,10 +488,10 @@ if __name__ == "__main__":
                                     break
                                 prev_continue_button_value = current_continue_button_value
                 else:
-                    print(f"\rTAMPOR plan failed, total time: {elapsed_time:.2f} s! ", flush=True)
+                    printer.warning(f"\rTAMPOR planning failed, total time: {elapsed_time:.2f} s! ")
 
             except KeyboardInterrupt:
-                print("\nexit!")
+                printer.warning("\nExit!")
                 exit()
 
         # 保存结果到日志文件
@@ -410,17 +515,17 @@ if __name__ == "__main__":
                 # 解析命令行参数中的关节角度
                 initial_angles = np.array([float(angle) for angle in args.joint_angles.split(",")])
                 if len(initial_angles) != 6:
-                    print(f"警告: 提供的关节角度数量不正确，需要6个，但获得了{len(initial_angles)}个。使用target_q代替。")
+                    printer.warning(f"警告: 提供的关节角度数量不正确，需要6个，但获得了{len(initial_angles)}个。使用target_q代替。")
                     initial_angles = target_q
             except Exception as e:
-                print(f"解析关节角度失败: {e}。使用target_q代替。")
+                printer.warning(f"解析关节角度失败: {e}。使用target_q代替。")
                 initial_angles = target_q
         else:
             initial_angles = target_q
 
-        print("\n使用初始关节角度:")
+        printer.info("\n使用初始关节角度:")
         for i, angle in enumerate(initial_angles):
-            print(f"关节 {i}: {angle:.4f} rad ({np.degrees(angle):.2f}°)")
+            printer.info(f"joint {i}: {angle:.4f} rad ({np.degrees(angle):.2f}°)")
 
         j0_slider = p.addUserDebugParameter("joint contorl j0", -2 * np.pi, 2 * np.pi, initial_angles[0])
         j1_slider = p.addUserDebugParameter("joint contorl j1", -2 * np.pi, 2 * np.pi, initial_angles[1])
@@ -458,14 +563,14 @@ if __name__ == "__main__":
                 confs = np.linspace(last_conf, cur_conf, 120)
                 for conf in confs:
                     record.append(conf.tolist())
-                print("record success!")
+                printer.success("Record success!")
                 last_conf = cur_conf
             prev_record_button_value = current_record_button_value
 
             current_save_button_value = p.readUserDebugParameter(save_button)
             if current_save_button_value > prev_save_button_value:
                 np.save("record.npy", np.array(record))
-                print("save record success!")
+                printer.success("Save record success!")
             prev_save_button_value = current_save_button_value
 
             current_replay_button_value = p.readUserDebugParameter(replay_button)

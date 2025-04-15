@@ -8,8 +8,6 @@ from typing import Callable, Dict, List, Union
 import numpy as np
 import pybullet as p
 
-# OMPL
-# Import pb_ompl
 from ompl import base as ob
 from ompl import geometric as og
 from ompl import util as ou
@@ -62,6 +60,8 @@ class TrajectoryOMPLSolver:
         self.robot_id = robot_id
         self.arm_joints = arm_joints
         self.obstacles = obstacles if obstacles else []
+        self.planner = planner
+        
         self.setup_pb_ompl(planner)
 
     def setup_pb_ompl(self, planner_name):
@@ -159,6 +159,7 @@ class TrajectoryOMPLSolver:
                 break
 
             # Execute one planning attempt
+            self.setup_pb_ompl(self.planner)
             res, path = self.pb_ompl_interface.plan_start_goal(q_init.tolist(), q_target.tolist(), allowed_time=remaining_time)
 
             if res:

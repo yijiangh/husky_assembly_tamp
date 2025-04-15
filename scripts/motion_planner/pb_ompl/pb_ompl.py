@@ -9,7 +9,7 @@ from ompl import util as ou
 
 from . import utils
 
-INTERPOLATE_NUM = 1000
+INTERPOLATE_NUM = 50000
 DEFAULT_PLANNING_TIME = 5.0
 
 class PbOMPLRobot():
@@ -113,7 +113,6 @@ class PbOMPL():
         self.robot = robot
         self.robot_id = robot.id
         self.obstacles = obstacles
-        print(self.obstacles)
 
         self.space = PbStateSpace(robot.num_dim)
 
@@ -198,12 +197,10 @@ class PbOMPL():
 
         self.ss.setPlanner(self.planner)
 
-    def plan_start_goal(self, start, goal, allowed_time = DEFAULT_PLANNING_TIME):
+    def plan_start_goal(self, start, goal, allowed_time = DEFAULT_PLANNING_TIME, interpolate_num = INTERPOLATE_NUM, verbose = True):
         '''
         plan a path to gaol from the given robot start state
         '''
-        print("start_planning")
-        print(self.planner.params())
 
         orig_robot_state = self.robot.get_cur_state()
 
@@ -221,19 +218,14 @@ class PbOMPL():
         res = False
         sol_path_list = []
         if solved:
-            print("Found solution: interpolating into {} segments".format(INTERPOLATE_NUM))
             # print the path to screen
             sol_path_geometric = self.ss.getSolutionPath()
-            sol_path_geometric.interpolate(INTERPOLATE_NUM)
+            sol_path_geometric.interpolate(interpolate_num)
             sol_path_states = sol_path_geometric.getStates()
             sol_path_list = [self.state_to_list(state) for state in sol_path_states]
-            # print(len(sol_path_list))
-            # print(sol_path_list)
             for sol_path in sol_path_list:
                 self.is_state_valid(sol_path)
             res = True
-        else:
-            print("No solution found")
 
         # reset robot state
         self.robot.set_state(orig_robot_state)

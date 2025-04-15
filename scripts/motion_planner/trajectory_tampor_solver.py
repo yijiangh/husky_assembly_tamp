@@ -7,842 +7,32 @@ import time
 import warnings
 from collections import deque
 from copy import deepcopy
-from typing import Callable, Dict, List, Optional, Tuple, Union, Any
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pybullet as p
 import pybullet_planning as pp
+from ompl import base as ob
+from ompl import util as ou
 from pybullet_planning import Attachment
-from scipy.spatial.transform import Rotation
 from scipy.spatial import cKDTree
+from scipy.spatial.transform import Rotation
 
 HERE = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(HERE)
 
 import utils.load_multi_tangent as load_multi_tangent
 from model.scene_parse import SceneParser
+from motion_planner.pb_ompl import pb_ompl
+from motion_planner.trajectory_ompl_solver import PbOMPLRobotWrapper
 from multi_tangent.collision import create_collision_bodies
 from robot.robot_setup import RobotSetup
 from utils.collision import init_pb
 from utils.params import URDF_PATH
+from utils.util import interpolate, PrintManager
 
-
-class RRTTree:
-    """RRT树数据结构，使用唯一ID标识节点以避免浮点数舍入误差"""
-
-    def __init__(self, root_config: np.ndarray):
-        """初始化RRT树
-
-        Args:
-            root_config: 根节点配置
-        """
-        self.next_id = 0
-        self.nodes = {}  # id -> 配置
-        self.parents = {}  # id -> 父节点id
-        self.children = {}  # id -> 子节点id列表
-        self.root_id = None  # 记录根节点ID
-        self._kdtree = None  # KDTree缓存
-        self._node_configs = None  # 节点配置缓存
-        self._node_ids = None  # 节点ID缓存
-
-        # 添加根节点
-        self.add_node(root_config, None)
-
-    def add_node(self, config: np.ndarray, parent_id: Optional[int]) -> int:
-        """添加节点到树中
-
-        Args:
-            config: 节点配置
-            parent_id: 父节点ID，如果是根节点则为None
-
-        Returns:
-            新节点的ID
-        """
-        node_id = self.next_id
-        self.next_id += 1
-
-        # 存储节点配置
-        self.nodes[node_id] = np.array(config)
-
-        # 设置父子关系
-        self.parents[node_id] = parent_id
-        if parent_id is not None:
-            if parent_id not in self.children:
-                self.children[parent_id] = []
-            self.children[parent_id].append(node_id)
-        else:
-            # 如果是根节点（没有父节点），记录根节点ID
-            self.root_id = node_id
-
-        return node_id
-
-    def get_node_config(self, node_id: int) -> np.ndarray:
-        """获取节点配置
-
-        Args:
-            node_id: 节点ID
-
-        Returns:
-            节点配置
-        """
-        return self.nodes[node_id]
-
-    def get_nearest_node(self, target_config: np.ndarray, distance_fn: Callable) -> int:
-        """找到距离目标配置最近的节点
-
-        Args:
-            target_config: 目标配置
-            distance_fn: 距离函数
-
-        Returns:
-            最近节点的ID
-        """
-        min_dist = float("inf")
-        nearest_id = None
-
-        for node_id, config in self.nodes.items():
-            dist = distance_fn(config, target_config)
-            if dist < min_dist:
-                min_dist = dist
-                nearest_id = node_id
-
-        return nearest_id
-
-    def get_path_to_root(self, node_id: int) -> List[np.ndarray]:
-        """获取从指定节点到根节点的路径
-
-        Args:
-            node_id: 起始节点ID
-
-        Returns:
-            从根节点到指定节点的配置列表
-        """
-        path = []
-        current_id = node_id
-
-        while current_id is not None:
-            path.append(self.nodes[current_id])
-            current_id = self.parents[current_id]
-
-        # 反转路径，从根到叶
-        path.reverse()
-        return path
-
-    def get_node_count(self) -> int:
-        """获取树中的节点数量
-
-        Returns:
-            节点数量
-        """
-        return len(self.nodes)
-
-    def get_root_node(self) -> np.ndarray:
-        """获取树的根节点配置
-
-        Returns:
-            根节点配置
-        """
-        if self.root_id is not None:
-            return self.nodes[self.root_id]
-        return None
-
-    def get_parent(self, node_id: int) -> Optional[int]:
-        """获取节点的父节点ID
-
-        Args:
-            node_id: 节点ID
-
-        Returns:
-            父节点ID，如果没有父节点则返回None
-        """
-        return self.parents.get(node_id)
-
-    def set_parent(self, node_id: int, parent_id: Optional[int]) -> None:
-        """设置节点的父节点ID
-
-        Args:
-            node_id: 节点ID
-            parent_id: 父节点ID，如果没有父节点则设置为None
-        """
-        self.parents[node_id] = parent_id
-
-    def is_connected(self, node_id: int) -> bool:
-        """检查节点是否与根节点连接
-
-        Args:
-            node_id: 节点ID
-
-        Returns:
-            如果节点与根节点连接则返回True，否则返回False
-        """
-        return node_id in self.parents
-
-    def get_path(self, node_id: int) -> List[np.ndarray]:
-        """获取从根节点到指定节点的路径
-
-        Args:
-            node_id: 节点ID
-
-        Returns:
-            从根节点到指定节点的配置列表
-        """
-        path = []
-        current_id = node_id
-
-        while current_id is not None:
-            path.append(self.nodes[current_id])
-            current_id = self.parents[current_id]
-
-        # 反转路径，从根到叶
-        path.reverse()
-        return path
-
-    def set_root(self, root_id: int) -> None:
-        """设置根节点ID
-
-        Args:
-            root_id: 根节点ID
-        """
-        self.root_id = root_id
-        self.set_parent(root_id, None)
-
-    def remove_child(self, parent_id: int, child_id: int) -> None:
-        """删除子节点
-
-        Args:
-            parent_id: 父节点ID
-            child_id: 子节点ID
-        """
-        if parent_id not in self.children:
-            return
-        self.children[parent_id].remove(child_id)
-
-    def add_child(self, parent_id: int, child_id: int) -> None:
-        """添加子节点
-
-        Args:
-            parent_id: 父节点ID
-            child_id: 子节点ID
-        """
-        if parent_id not in self.children:
-            self.children[parent_id] = []
-        self.children[parent_id].append(child_id)
-
-    @staticmethod
-    def reverse_father(tree: "RRTTree", node_id: int) -> None:
-        """更新节点的父节点ID
-
-        Args:
-            tree: 树
-            node_id: 节点ID
-        """
-        if tree.get_parent(node_id) is None:
-            return
-
-        # 使用栈来存储需要处理的节点路径
-        node_stack = []
-        current = node_id
-
-        # 沿着父节点路径向上遍历，将每个节点放入栈中
-        while tree.get_parent(current) is not None:
-            parent_id = tree.get_parent(current)
-            tree.remove_child(parent_id, current)
-            node_stack.append((current, parent_id))
-            current = parent_id
-
-        # 反转每条边的方向
-        for child, parent in node_stack:
-            tree.set_parent(parent, child)
-            tree.add_child(child, parent)
-
-        # 设置最初的节点为新的根节点
-        tree.set_root(node_id)
-
-    @staticmethod
-    def merge(source_tree: "RRTTree", target_tree: "RRTTree", source_connect_node_id: int, target_connect_node_id: int) -> "RRTTree":
-        """合并另一棵树
-
-        Args:
-            source_tree: 源树
-            target_tree: 目标树
-            source_connect_node_id: 连接点ID
-            target_connect_node_id: 目标树的连接点ID
-
-        Returns:
-            合并后的树
-        """
-        source_tree = deepcopy(source_tree)
-        target_tree = deepcopy(target_tree)
-        target_tree.reverse_father(target_tree, target_connect_node_id)
-
-        # -------------------- 使用广度优先搜索将target_tree中的节点加入source_tree --------------------#
-        queue = deque([target_tree.root_id])
-        source_tree.add_node(target_tree.get_node_config(target_tree.root_id), source_connect_node_id)
-        id_mapping = {target_tree.root_id: source_tree.next_id - 1}
-        while queue:
-            current_id = queue.popleft()
-            new_parent_id = id_mapping[current_id]
-            if current_id in target_tree.children:
-                for child_id in target_tree.children[current_id]:
-                    child_config = target_tree.get_node_config(child_id)
-                    new_child_id = source_tree.add_node(child_config, new_parent_id)
-                    id_mapping[child_id] = new_child_id
-                    queue.append(child_id)
-        return source_tree
-
-
-class BiRRTPlanner:
-    """双向快速随机探索树(BiRRT)规划器，使用RRTTree类管理树结构"""
-
-    def __init__(self, robot_setup: RobotSetup, step_size: float = 0.05, goal_bias: float = 0.2, max_iterations: int = 10000, goal_threshold: float = 0.05):
-        """初始化BiRRT规划器
-
-        Args:
-            robot_setup: 机器人配置
-            step_size: 每次扩展的步长
-            goal_bias: 朝向目标采样的概率
-            max_iterations: 最大迭代次数
-            goal_threshold: 目标阈值，当两棵树距离小于此值时视为连接
-        """
-        self.robot = robot_setup
-        self.step_size = step_size
-        self.goal_bias = goal_bias
-        self.max_iterations = max_iterations
-        self.goal_threshold = goal_threshold
-
-        # 保存RRT树的私有变量
-        self._start_tree = None
-        self._end_tree = None
-
-    def _extract_path(self, start_tree: RRTTree, start_node_id: int, end_tree: RRTTree, end_node_id: int) -> List[np.ndarray]:
-        """从两棵树中提取完整路径
-
-        Args:
-            start_tree: 起点树
-            start_node_id: 起点树中连接点的ID
-            end_tree: 终点树
-            end_node_id: 终点树中连接点的ID
-
-        Returns:
-            完整路径，配置列表
-        """
-        # 从起点树获取路径
-        start_path = start_tree.get_path_to_root(start_node_id)
-
-        # 从终点树获取路径并反转
-        end_path = end_tree.get_path_to_root(end_node_id)
-        end_path.reverse()  # 反转以获得从连接点到终点的路径
-
-        # 连接两部分路径
-        return start_path + end_path[1:]  # 去掉重复的连接点
-
-    def _smooth_path(self, path: List[np.ndarray], collision_fn: Callable, extend_fn: Callable, distance_fn: Callable, iterations: int, diagnosis: bool) -> List[np.ndarray]:
-        """对路径进行平滑处理
-
-        Args:
-            path: 原始路径
-            collision_fn: 碰撞检测函数
-            extend_fn: 扩展函数
-            distance_fn: 距离函数
-            iterations: 平滑迭代次数
-            diagnosis: 是否启用诊断
-
-        Returns:
-            平滑后的路径
-        """
-        if len(path) <= 2:
-            return path
-
-        smoothed_path = list(path)  # 复制原始路径
-
-        for _ in range(iterations):
-            if len(smoothed_path) <= 2:
-                break  # 路径已经不能再简化
-
-            # 随机选择两个点
-            i = random.randint(0, len(smoothed_path) - 1)
-            j = random.randint(0, len(smoothed_path) - 1)
-
-            if abs(i - j) <= 1:
-                continue  # 跳过相邻点
-
-            if i > j:
-                i, j = j, i  # 确保 i < j
-
-            # 检查i和j之间是否可以直接连接
-            direct_path = list(extend_fn(smoothed_path[i], smoothed_path[j]))
-
-            # 检查直接路径是否有碰撞
-            path_valid = True
-            for q in direct_path[1:-1]:  # 跳过起点和终点
-                if collision_fn(q, diagnosis=diagnosis):
-                    path_valid = False
-                    break
-
-            if path_valid:
-                # 替换i和j之间的路径为直接连接
-                smoothed_path = smoothed_path[: i + 1] + direct_path[1:] + smoothed_path[j + 1 :]
-
-        return smoothed_path
-
-    def _check_direct_connection(self, start_tree: RRTTree, end_tree: RRTTree, collision_fn: Callable, extend_fn: Callable) -> Optional[Tuple[List[np.ndarray], int, int]]:
-        """检查两棵树是否可以直接连接
-
-        Args:
-            start_tree: 起点树
-            end_tree: 终点树
-            collision_fn: 碰撞检测函数
-            extend_fn: 路径扩展函数
-
-        Returns:
-            如果可以直接连接，返回路径、起点ID、终点ID；否则返回None
-        """
-        from scipy.spatial import cKDTree
-
-        # 构建起点树的KDTree
-        start_configs = []
-        start_ids = []
-        for node_id in start_tree.nodes:
-            start_configs.append(start_tree.get_node_config(node_id))
-            start_ids.append(node_id)
-        start_configs = np.array(start_configs)
-        start_tree_kd = cKDTree(start_configs)
-
-        # 构建终点树的KDTree
-        end_configs = []
-        end_ids = []
-        for node_id in end_tree.nodes:
-            end_configs.append(end_tree.get_node_config(node_id))
-            end_ids.append(node_id)
-        end_configs = np.array(end_configs)
-        end_tree_kd = cKDTree(end_configs)
-
-        # 计算两棵树之间的最近邻距离
-        distances, indices = start_tree_kd.query(end_configs, k=1)
-
-        # 按距离排序，取前10%的节点对
-        sorted_indices = np.argsort(distances)
-        num_pairs_to_check = max(1, int(len(distances) * 0.1))  # 至少检查1对
-        closest_pairs = sorted_indices[:num_pairs_to_check]
-
-        # 检查最近的节点对
-        for idx in closest_pairs:
-            start_id = start_ids[indices[idx]]
-            end_id = end_ids[idx]
-            start_config = start_tree.get_node_config(start_id)
-            end_config = end_tree.get_node_config(end_id)
-
-            # 检查路径是否无碰撞
-            path = extend_fn(start_config, end_config)
-            if path is not None and not any(collision_fn(q) for q in path):
-                # 找到可连接的节点对，构建完整路径
-                start_path = start_tree.get_path(start_id)
-                end_path = end_tree.get_path(end_id)
-                end_path.reverse()  # 反转终点路径，因为是从根到目标节点
-                return start_path + end_path, start_id, end_id
-
-        return None, None, None
-
-    def get_trees(self) -> Tuple[RRTTree, RRTTree]:
-        """获取当前保存的RRT树
-
-        Returns:
-            起点树和终点树的元组
-        """
-        return self._start_tree, self._end_tree
-
-    def set_trees(self, start_tree: RRTTree, end_tree: RRTTree):
-        """设置当前保存的RRT树
-
-        Args:
-            start_tree: 起点树
-            end_tree: 终点树
-        """
-        self._start_tree = start_tree
-        self._end_tree = end_tree
-
-    def plan(
-        self,
-        start_conf: np.ndarray,
-        end_conf: np.ndarray,
-        collision_fn: Callable,
-        distance_fn: Optional[Callable] = None,
-        sample_fn: Optional[Callable] = None,
-        extend_fn: Optional[Callable] = None,
-        max_time: float = 10.0,
-        diagnosis: bool = False,
-        smooth: int = 40,
-        resolution: float = 1.0,
-        start_tree: Optional[RRTTree] = None,
-        end_tree: Optional[RRTTree] = None,
-        verbose: bool = False,
-    ) -> Tuple[Optional[np.ndarray], Optional[int], Optional[int]]:
-        """执行BiRRT规划
-
-        Args:
-            start_conf: 起始配置
-            end_conf: 目标配置
-            collision_fn: 碰撞检测函数
-            distance_fn: 距离函数
-            sample_fn: 采样函数
-            extend_fn: 路径扩展函数
-            max_time: 最大规划时间
-            diagnosis: 是否进行诊断
-            smooth: 平滑迭代次数
-            resolution: 分辨率
-            start_tree: 起始树
-            end_tree: 目标树
-            verbose: 是否打印详细信息
-
-        Returns:
-            Tuple[Optional[np.ndarray], Optional[int], Optional[int]]: (规划路径, 起点树连接点ID, 终点树连接点ID)
-        """
-        if verbose:
-            print("                Starting BiRRT planning...")
-
-        # 检查是否可以直接连接
-        if start_tree is not None and end_tree is not None:
-            if verbose:
-                print(f"                初始树大小 - 起点树: {start_tree.get_node_count()}, 终点树: {end_tree.get_node_count()}")
-                print("                Checking for direct connection between trees...")
-            path, start_id, end_id = self._check_direct_connection(start_tree, end_tree, collision_fn, extend_fn)
-            if path is not None:
-                self._start_tree = start_tree
-                self._end_tree = end_tree
-                if verbose:
-                    print("                Found direct connection between trees!")
-                return np.array(path), start_id, end_id
-
-        # 如果无法直接连接，继续执行原来的BiRRT规划
-        if verbose:
-            print("                No direct connection found, proceeding with BiRRT planning...")
-
-        start_time = time.time()
-
-        # 检查目标配置是否有效
-        if collision_fn(end_conf, diagnosis=diagnosis):
-            if verbose:
-                print("                目标配置处于碰撞状态")
-            return None, None, None
-
-        # 检查起始配置是否有效
-        if collision_fn(start_conf, diagnosis=diagnosis):
-            if verbose:
-                print("                起始配置处于碰撞状态")
-            return None, None, None
-
-        # 初始化默认函数
-        if distance_fn is None:
-            distance_fn = pp.get_distance_fn(self.robot.robot, self.robot.arm_joints)
-
-        if sample_fn is None:
-
-            def get_sample_fn():
-                lower, upper = pp.get_custom_limits(self.robot.robot, self.robot.arm_joints, circular_limits=pp.CIRCULAR_LIMITS)
-                generator = pp.interval_generator(lower, upper)
-
-                def fn():
-                    sample = list(next(generator))
-                    return tuple(sample)
-
-                return fn
-
-            sample_fn = get_sample_fn()
-
-        if extend_fn is None:
-            resolutions = np.array([resolution / 180.0 * np.pi for j in self.robot.arm_joints])
-            extend_fn = pp.get_extend_fn(self.robot.robot, self.robot.arm_joints, resolutions=resolutions)
-
-        # 初始化树，如果提供了树则使用，否则创建新的
-        start_tree = start_tree if start_tree is not None else RRTTree(start_conf)
-        end_tree = end_tree if end_tree is not None else RRTTree(end_conf)
-
-        # 交替扩展两棵树
-        start_to_end = True
-
-        try:
-            for iteration in range(self.max_iterations):
-                if time.time() - start_time > max_time:
-                    if verbose:
-                        print(f"                规划超时，已用时 {time.time() - start_time:.2f}s")
-                        print(f"                树大小 - 起点树: {start_tree.get_node_count()}, 终点树: {end_tree.get_node_count()}")
-                    # 保存当前树
-                    self._start_tree = start_tree
-                    self._end_tree = end_tree
-                    return None, None, None
-
-                # 采样一个随机配置或朝向目标偏置
-                if start_to_end and random.random() < self.goal_bias:
-                    rand_conf = end_tree.get_root_node()
-                elif not start_to_end and random.random() < self.goal_bias:
-                    rand_conf = start_tree.get_root_node()
-                else:
-                    rand_conf = sample_fn()
-
-                # 根据当前扩展方向选择树
-                active_tree = start_tree if start_to_end else end_tree
-                inactive_tree = end_tree if start_to_end else start_tree
-
-                # 找到活动树中最近的节点
-                nearest_id = active_tree.get_nearest_node(rand_conf, distance_fn)
-                nearest_config = active_tree.get_node_config(nearest_id)
-
-                # 获取从nearest_config到rand_conf的扩展路径
-                extension_path = list(extend_fn(nearest_config, rand_conf))
-                if len(extension_path) <= 1:  # 只有起点，没有生成新的配置
-                    continue
-
-                # 尝试扩展活动树，直到碰撞或者达到目标
-                last_valid_id = nearest_id
-                for i, new_config in enumerate(extension_path[1:], 1):  # 跳过第一个点(与nearest_config相同)
-                    if collision_fn(new_config, diagnosis=diagnosis):
-                        break  # 在这一点发生碰撞，停止扩展
-
-                    # 将新节点添加到活动树
-                    new_id = active_tree.add_node(new_config, last_valid_id)
-                    last_valid_id = new_id
-
-                    # 找到非活动树中最近的节点
-                    connect_id = inactive_tree.get_nearest_node(new_config, distance_fn)
-                    connect_config = inactive_tree.get_node_config(connect_id)
-
-                    # 检查是否可以直接连接两棵树
-                    if distance_fn(new_config, connect_config) < self.goal_threshold:
-                        # 构建路径
-                        if start_to_end:
-                            path = self._extract_path(start_tree, new_id, end_tree, connect_id)
-                            start_connect_id = new_id
-                            end_connect_id = connect_id
-                        else:
-                            path = self._extract_path(start_tree, connect_id, end_tree, new_id)
-                            start_connect_id = connect_id
-                            end_connect_id = new_id
-
-                        if verbose:
-                            print(f"                找到路径，迭代次数: {iteration+1}, 扩展点数: {i}, 用时: {time.time() - start_time:.2f}s")
-                            print(f"                树大小 - 起点树: {start_tree.get_node_count()}, 终点树: {end_tree.get_node_count()}")
-
-                        # 保存当前树
-                        self._start_tree = start_tree
-                        self._end_tree = end_tree
-
-                        # 应用路径平滑
-                        if smooth > 0:
-                            path = self._smooth_path(path, collision_fn, extend_fn, distance_fn, smooth, diagnosis)
-
-                        return np.array(path), start_connect_id, end_connect_id
-
-                    # 尝试连接两棵树
-                    connection_path = list(extend_fn(connect_config, new_config))
-
-                    # 检查连接路径是否有碰撞
-                    connection_valid = True
-                    last_connect_id = connect_id
-                    connecting_nodes = []  # 保存连接过程中添加的节点ID
-
-                    for connect_config in connection_path[1:]:  # 跳过第一个点
-                        if collision_fn(connect_config, diagnosis=diagnosis):
-                            connection_valid = False
-                            break  # 连接路径中发生碰撞
-
-                        # 向inactive_tree添加新节点
-                        new_connect_id = inactive_tree.add_node(connect_config, last_connect_id)
-                        last_connect_id = new_connect_id
-                        connecting_nodes.append(new_connect_id)
-
-                        # 检查是否足够接近以完成连接
-                        if distance_fn(connect_config, new_config) < self.goal_threshold:
-                            # 构建路径
-                            if start_to_end:
-                                path = self._extract_path(start_tree, new_id, end_tree, new_connect_id)
-                                start_connect_id = new_id
-                                end_connect_id = new_connect_id
-                            else:
-                                path = self._extract_path(start_tree, new_connect_id, end_tree, new_id)
-                                start_connect_id = new_connect_id
-                                end_connect_id = new_id
-
-                            if verbose:
-                                print(f"                找到路径(通过连接)，迭代次数: {iteration+1}, 用时: {time.time() - start_time:.2f}s")
-                                print(f"                树大小 - 起点树: {start_tree.get_node_count()}, 终点树: {end_tree.get_node_count()}")
-
-                            # 保存当前树
-                            self._start_tree = start_tree
-                            self._end_tree = end_tree
-
-                            # 应用路径平滑
-                            if smooth > 0:
-                                path = self._smooth_path(path, collision_fn, extend_fn, distance_fn, smooth, diagnosis)
-
-                            return np.array(path), start_connect_id, end_connect_id
-
-                    if connection_valid:
-                        # 如果整个连接路径都是有效的，但没有足够接近，保留最后的连接点继续尝试
-                        continue
-
-                # 切换扩展的树
-                start_to_end = not start_to_end
-
-            if verbose:
-                print(f"                达到最大迭代次数 {self.max_iterations}，规划失败")
-            # 保存当前树，尽管规划失败
-            self._start_tree = start_tree
-            self._end_tree = end_tree
-            return None, None, None
-
-        except Exception as e:
-            if verbose:
-                print(f"                规划过程中出现异常: {e}")
-            # 保存当前树，即使发生异常
-            self._start_tree = start_tree
-            self._end_tree = end_tree
-            return None, None, None
-
-    def grow_tree(
-        self, root: np.ndarray, collision_fn: Callable, sample_fn: Optional[Callable] = None, extend_fn: Optional[Callable] = None, max_nodes: int = 500, max_time: float = 10.0, additional_configs: List[np.ndarray] = []
-    ) -> Union[RRTTree, np.ndarray]:
-        """在根节点处生长RRT树，并尝试加入额外配置点
-
-        Args:
-            root: 根节点配置
-            collision_fn: 碰撞检测函数
-            sample_fn: 采样函数，可选
-            extend_fn: 扩展函数，可选
-            max_nodes: 最大节点数量
-            additional_configs: 额外要加入的配置点列表
-
-        Returns:
-            Tuple[RRTTree, np.ndarray]: (生成的树, 额外配置点是否成功加入的掩码)
-        """
-        # 初始化树
-        tree = RRTTree(root)
-
-        # 如果没有提供采样函数，使用默认的
-        if sample_fn is None:
-
-            def get_sample_fn():
-                lower, upper = pp.get_custom_limits(self.robot.robot, self.robot.arm_joints, circular_limits=pp.CIRCULAR_LIMITS)
-                generator = pp.interval_generator(lower, upper)
-                return lambda: tuple(next(generator))
-
-            sample_fn = get_sample_fn()
-
-        # 如果没有提供扩展函数，使用默认的
-        if extend_fn is None:
-            resolutions = np.array([1.0 / 180.0 * np.pi for j in self.robot.arm_joints])
-            extend_fn = pp.get_extend_fn(self.robot.robot, self.robot.arm_joints, resolutions=resolutions)
-
-        start_time = time.time()
-        # 生长树直到达到最大节点数
-        while tree.get_node_count() < max_nodes and time.time() - start_time < max_time:
-            # 采样一个随机配置
-            rand_conf = sample_fn()
-
-            # 找到最近的节点
-            nearest_id = tree.get_nearest_node(rand_conf, pp.get_distance_fn(self.robot.robot, self.robot.arm_joints))
-            nearest_config = tree.get_node_config(nearest_id)
-
-            # 尝试扩展
-            extension_path = list(extend_fn(nearest_config, rand_conf))
-            if len(extension_path) <= 1:
-                continue
-
-            # 检查路径是否无碰撞
-            last_valid_id = nearest_id
-            for new_config in extension_path[1:]:
-                if collision_fn(new_config):
-                    break
-
-                # 添加新节点
-                new_id = tree.add_node(new_config, last_valid_id)
-                last_valid_id = new_id
-
-        # 尝试加入额外配置点
-        success_mask = np.zeros(len(additional_configs), dtype=bool)
-        for i, config in enumerate(additional_configs):
-            # 找到最近的节点
-            nearest_id = tree.get_nearest_node(config, pp.get_distance_fn(self.robot.robot, self.robot.arm_joints))
-            nearest_config = tree.get_node_config(nearest_id)
-
-            # 尝试连接
-            connection_path = list(extend_fn(nearest_config, config))
-            if len(connection_path) <= 1:
-                continue
-
-            # 检查路径是否无碰撞
-            path_valid = True
-            for q in connection_path[1:]:
-                if collision_fn(q):
-                    path_valid = False
-                    break
-
-            if path_valid:
-                # 成功加入配置点
-                last_id = nearest_id
-                for q in connection_path[1:]:
-                    last_id = tree.add_node(q, last_id)
-                success_mask[i] = True
-
-        return tree, success_mask
-
-    def merge_trees(self, trees: List[RRTTree], collision_fn: Callable, extend_fn: Optional[Callable] = None, verbose: bool = False) -> List[RRTTree]:
-        """合并多个RRT树
-
-        Args:
-            trees: 要合并的RRT树列表
-            collision_fn: 碰撞检测函数
-            extend_fn: 扩展函数，可选
-            verbose: 是否打印详细信息
-
-        Returns:
-            无法继续合并的RRT树列表
-        """
-        if not trees:
-            return []
-
-        if len(trees) == 1:
-            return trees
-
-        if extend_fn is None:
-            resolutions = np.array([1.0 / 180.0 * np.pi for j in self.robot.arm_joints])
-            extend_fn = pp.get_extend_fn(self.robot.robot, self.robot.arm_joints, resolutions=resolutions)
-
-        trees_new: List[RRTTree] = deepcopy(trees)
-        trees_set = deque(trees_new)
-        trees_set_new = deque()
-        while True:
-            start_tree = trees_set.popleft()
-
-            merged_idx = []
-            for tree_idx, end_tree in enumerate(trees_set):
-                path, start_id, end_id = self._check_direct_connection(start_tree, end_tree, collision_fn, extend_fn)
-                if path is not None:
-                    merged_idx.append(tree_idx)
-                    start_tree = RRTTree.merge(start_tree, end_tree, start_id, end_id)
-            for tree_idx in merged_idx[::-1]:
-                trees_set.remove(trees_set[tree_idx])
-            if verbose:
-                print(f"                merge trees: {len(merged_idx)}")
-
-            # merged_idx = []
-            # for tree_idx, end_tree in enumerate(trees_set_new):
-            #     path, start_id, end_id = self._check_direct_connection(start_tree, end_tree, collision_fn, extend_fn)
-            #     if path is not None:
-            #         merged_idx.append(tree_idx)
-            #         start_tree = RRTTree.merge(start_tree, end_tree, start_id, end_id)
-            # for tree_idx in merged_idx[::-1]:
-            #     trees_set_new.remove(trees_set_new[tree_idx])
-            # if verbose:
-            #     print(f"                remerge trees: {len(merged_idx)}")
-
-            trees_set_new.append(start_tree)
-
-            if verbose:
-                print(f"                current trees: {len(trees_set)}, merged trees: {len(trees_set_new)}")
-
-            if len(trees_set) == 0:
-                break
-        return list(trees_set_new)
+# 初始化PrintManager实例
+printer = PrintManager()
 
 
 class TrajectoryTAMPORSolver:
@@ -881,13 +71,106 @@ class TrajectoryTAMPORSolver:
         """
         self.topology_planner = self._TopologyPlanner(self.robot_setup, self.channel_info, bodies, self.object_size, self.eval_max_attempts)
 
-    def _init_path_planner(self, collision_fn: Callable[[np.ndarray], bool]) -> None:
+    def _init_path_planner(self, collision_fn: Callable[[np.ndarray], bool], verbose: bool = False) -> None:
         """初始化路径规划器
 
         Args:
             collision_fn: 碰撞检测函数
         """
-        self.path_planner = self._Planner(self.robot_setup, self.channel_info, collision_fn, self.object_size, self.obstacle_size)
+        self.path_planner = self._Planner(self.robot_setup, self.channel_info, collision_fn, self.object_size, self.obstacle_size, verbose=verbose)
+
+    def plan(
+        self,
+        start_conf: np.ndarray,
+        target_conf: np.ndarray,
+        element_bodies: List[int],
+        grasp_attachment: Attachment,
+        max_time: float = 600.0,
+        init_step_max_time: float = 200.0,
+        step_max_time: float = 15.0,
+        key_frame_num: int = 20,
+        verbose: bool = False,
+    ) -> Dict:
+        """Execute the complete planning process
+
+        Combine topology planning and path planning to find the optimal path from start to goal.
+
+        Args:
+            start_conf: Initial joint configuration
+            target_conf: Target joint configuration
+            element_bodies: List of collision bodies
+            grasp_attachment: Grasp attachment
+            max_time: Maximum planning time
+            init_step_max_time: Maximum initial step time
+            step_max_time: Maximum step time
+            key_frame_num: Number of key frames
+            verbose: Whether to print verbose information
+
+        Returns:
+            Dictionary containing planning results {"success": bool, "path": np.ndarray}
+        """
+        if verbose:
+            printer.info("\n========== TAMPOR TRAJECTORY PLANNING ==========")
+
+        # 保存当前机器人状态
+        self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, start_conf)
+
+        # 获取起点和终点位置
+        start_point = np.array(pp.get_point(grasp_attachment.child))
+        self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, target_conf)
+        target_point = np.array(pp.get_point(grasp_attachment.child))
+
+        # 恢复起始位置
+        self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, start_conf)
+
+        # 创建碰撞检测函数
+        collision_fn = self.robot_setup.create_collision_fn(element_bodies)
+
+        # 初始化规划器
+        with pp.LockRenderer():
+            if verbose:
+                printer.info("TAMPOR: Initializing topology planner...")
+            self._init_topology_planner(element_bodies)
+            if verbose:
+                printer.info("TAMPOR: Initializing path planner...")
+            self._init_path_planner(collision_fn, verbose)
+
+        # 1. Topology Planning
+        if verbose:
+            printer.info("TAMPOR: Starting topology planning...")
+        start_time = time.time()
+        best_path = self.topology_planner.plan(start_point, target_point, verbose=verbose, verbose_level=1)
+        topology_time = time.time() - start_time
+        if verbose:
+            printer.info(f"TAMPOR: Topology planning completed in {topology_time:.2f} seconds")
+
+        if not best_path:
+            if verbose:
+                printer.warning("TAMPOR: Failed to find a valid topology path")
+            return {"success": False, "path": None}
+
+        # 2. Path Planning
+        if verbose:
+            printer.info("TAMPOR: Starting path planning...")
+        start_time = time.time()
+        with pp.LockRenderer():
+            path = self.path_planner.plan(
+                start_conf, target_conf, best_path, max_time=max_time - topology_time, init_step_max_time=init_step_max_time, single_plan_max_time=step_max_time, num_points=key_frame_num, verbose=verbose, verbose_level=1
+            )
+        path_time = time.time() - start_time
+        if verbose:
+            printer.info(f"TAMPOR: Path planning completed in {path_time:.2f} seconds")
+
+        if path is None:
+            if verbose:
+                printer.warning("TAMPOR: Failed to find a valid trajectory path")
+            return {"success": False, "path": None}
+
+        if verbose:
+            printer.info("\n========== TAMPOR PLANNING SUCCESSFUL ==========")
+            printer.info(f"TAMPOR: Total planning time: {topology_time + path_time:.2f} seconds")
+
+        return {"success": True, "path": path}
 
     class _TopologyPlanner:
         """内部拓扑规划器类，用于高层路径规划
@@ -1368,14 +651,17 @@ class TrajectoryTAMPORSolver:
 
                 # 将通道中心作为节点位置
                 node_positions[i] = center
+                
+                sphere = pp.create_sphere(0.02)
+                pp.set_point(sphere, center)
 
                 # 绘制通道
-                channel_body = SceneParser.load_channel(channel)
-                pp.set_color(channel_body, self.channel_colors[i] + [0.3])  # 使用通道色彩，半透明
-                node_bodies[i] = channel_body
+                # channel_body = SceneParser.load_channel(channel)
+                # pp.set_color(channel_body, self.channel_colors[i] + [0.3])  # 使用通道色彩，半透明
+                # node_bodies[i] = channel_body
 
                 # 绘制节点编号
-                pp.add_text(str(i), center + np.array([0, 0, 0.1]))
+                # pp.add_text(str(i), center + np.array([0, 0, 0.1]))
 
             # 检查图中是否有起点(-1)和终点(-2)
             if -1 in graph:
@@ -1400,7 +686,7 @@ class TrajectoryTAMPORSolver:
                         node_bodies[-1] = start_marker
 
                         # 添加标签
-                        pp.add_text("START", start_pos + np.array([0, 0, 0.1]))
+                        # pp.add_text("START", start_pos + np.array([0, 0, 0.1]))
 
             if -2 in graph:
                 # 找出终点连接的第一个通道，用于确定终点位置
@@ -1424,7 +710,33 @@ class TrajectoryTAMPORSolver:
                         node_bodies[-2] = target_marker
 
                         # 添加标签
-                        pp.add_text("TARGET", target_pos + np.array([0, 0, 0.1]))
+                        # pp.add_text("TARGET", target_pos + np.array([0, 0, 0.1]))
+
+            # 收集所有边的权重，用于归一化
+            all_weights = []
+            edge_info = []  # 用于存储边的信息：(node_from, node_to, weight)
+            for node_from, neighbors in graph.items():
+                for node_to, weight in neighbors.items():
+                    if node_from in node_positions and node_to in node_positions:
+                        all_weights.append(weight)
+                        edge_info.append((node_from, node_to, weight))
+            
+            # 如果没有边，无需继续
+            if not all_weights:
+                return
+            
+            # 按照权重从大到小排序边的信息
+            edge_info.sort(key=lambda x: x[2], reverse=True)
+            
+            # 创建从边到归一化权重的映射
+            edge_to_normalized_weight = {}
+            total_edges = len(edge_info)
+            
+            # 将排序后的边均匀映射到[1,0]范围
+            for i, (node_from, node_to, weight) in enumerate(edge_info):
+                # 排名第一的边映射到1，排名最后的边映射到0
+                normalized_weight = 1.0 - (i / (total_edges - 1)) if total_edges > 1 else 0.5
+                edge_to_normalized_weight[(node_from, node_to)] = normalized_weight
 
             # 绘制图中的边
             for node_from, neighbors in graph.items():
@@ -1441,9 +753,12 @@ class TrajectoryTAMPORSolver:
 
                     pos_to = node_positions[node_to]
 
-                    # 边的颜色基于权重
-                    # 权重越高（连接成功率越高），颜色越绿
-                    edge_color = [1.0 - weight, weight, 0.0, 1.0]  # RGBA, 半透明
+                    # 获取预先计算的归一化权重
+                    normalized_weight = edge_to_normalized_weight.get((node_from, node_to), 0.5)
+                    
+                    # 从绿色(0,1,0)到蓝色(0,0,1)的颜色映射
+                    # 权重越高，越偏向绿色；权重越低，越偏向蓝色
+                    edge_color = [0.0, normalized_weight, 1.0 - normalized_weight, 1.0]  # RGBA格式：[R, G, B, A]
 
                     # 绘制线段
                     pp.add_line(pos_from, pos_to, color=edge_color, width=2)
@@ -1451,7 +766,7 @@ class TrajectoryTAMPORSolver:
                     # 在边的中间显示权重
                     mid_point = (pos_from + pos_to) / 2
                     weight_text = f"{weight:.2f}"
-                    pp.add_text(weight_text, mid_point)
+                    # pp.add_text(weight_text, mid_point)
 
             # 高亮显示特定路径（如果提供）
             if highlight_path and len(highlight_path) > 1:
@@ -1467,15 +782,16 @@ class TrajectoryTAMPORSolver:
                     pos_to = node_positions[node_to]
 
                     # 使用醒目的黄色高亮显示
-                    pp.add_line(pos_from, pos_to, color=[1.0, 1.0, 0.0, 1.0], width=6)
+                    pp.add_line(pos_from, pos_to, color=[1.0, 0.0, 0.0, 1.0], width=10)
 
-        def plan(self, start_xyz: np.ndarray, target_xyz: np.ndarray, verbose: bool = False) -> List[int]:
+        def plan(self, start_xyz: np.ndarray, target_xyz: np.ndarray, verbose: bool = False, verbose_level: int = 1) -> List[int]:
             """执行拓扑规划
 
             Args:
                 start_xyz: 起点坐标
                 target_xyz: 终点坐标
                 verbose: 是否打印详细信息
+                verbose_level: 打印详细信息级别
 
             Returns:
                 最优通道路径
@@ -1492,10 +808,12 @@ class TrajectoryTAMPORSolver:
 
             # 打印排序后的路径
             if verbose:
-                print("    找到的路径（按优先级排序）:")
-                for idx, (path, priority) in enumerate(paths_with_priority):
-                    path_str = " -> ".join([str(node) if node >= 0 else ("起点" if node == -1 else "终点") for node in path])
-                    print(f"        路径 {idx+1}: {path_str}, 优先级: {priority:.4f}")
+                with printer.indented(verbose_level):
+                    printer.info("找到的路径（按优先级排序）:")
+                with printer.indented(verbose_level + 1):
+                    for idx, (path, priority) in enumerate(paths_with_priority):
+                        path_str = " -> ".join([str(node) if node >= 0 else ("起点" if node == -1 else "终点") for node in path])
+                        printer.info(f"路径 {idx+1}: {path_str}, 优先级: {priority:.4f}")
 
             # 选择最优路径
             if paths_with_priority:
@@ -1503,7 +821,8 @@ class TrajectoryTAMPORSolver:
                 return best_path
             else:
                 if verbose:
-                    print("    未找到可行路径!")
+                    with printer.indented(verbose_level):
+                        printer.info("未找到可行路径!")
                 return []
 
     class _Planner:
@@ -1512,7 +831,7 @@ class TrajectoryTAMPORSolver:
         通过采样和排序关键帧，规划通过指定通道序列的路径。
         """
 
-        def __init__(self, robot_setup: RobotSetup, channel_info: List[Dict], collision_fn: Callable[[np.ndarray], bool], object_size: List[float] = [1.0, 0.02], obstacle_size: List[float] = [1.0, 0.02]):
+        def __init__(self, robot_setup: RobotSetup, channel_info: List[Dict], collision_fn: Callable[[np.ndarray], bool], object_size: List[float] = [1.0, 0.02], obstacle_size: List[float] = [1.0, 0.02], verbose: bool = False):
             """初始化路径规划器
 
             Args:
@@ -1528,7 +847,74 @@ class TrajectoryTAMPORSolver:
             self.object_size = object_size
             self.obstacle_size = obstacle_size
 
-            self.planner = BiRRTPlanner(self.robot_setup)
+            def plan_fn(start_conf: np.ndarray, target_conf: np.ndarray, max_time: float = 10.0, interpolate_num: int = 10000, enable_reset: bool = False, verbose: bool = False, verbose_level: int = 2):
+                start_time = time.time()
+                while time.time() - start_time < max_time:
+                    res, path = self.pb_ompl_interface.plan_start_goal(start_conf.tolist(), target_conf.tolist(), allowed_time=max_time - (time.time() - start_time), interpolate_num=interpolate_num, verbose=verbose)
+                    if res:
+                        path_array = np.array(path)
+                        if len(path_array) == 0:
+                            if enable_reset:
+                                self.setup_pb_ompl(verbose)
+                            if verbose:
+                                with printer.indented(verbose_level):
+                                    printer.warning("Planner returned an empty path")
+                            continue
+                        start_diff = np.linalg.norm(path_array[0] - start_conf)
+                        goal_diff = np.linalg.norm(path_array[-1] - target_conf)
+                        if start_diff > 1e-6:
+                            if enable_reset:
+                                self.setup_pb_ompl(verbose)
+                            if verbose:
+                                with printer.indented(verbose_level):
+                                    printer.warning(f"Path start point doesn't match input start point, difference: {start_diff}")
+                            continue
+                        if goal_diff > 1e-6:
+                            if enable_reset:
+                                self.setup_pb_ompl(verbose)
+                            if verbose:
+                                with printer.indented(verbose_level):
+                                    printer.warning(f"Path end point doesn't match input target point, difference: {goal_diff}")
+                            continue
+                        path_array = interpolate(path_array, max(interpolate_num, len(path_array)))
+                        collision_free = True
+                        for conf in path_array:
+                            if self.collision_fn(conf):
+                                collision_free = False
+                                break
+                        if collision_free:
+                            return path_array
+                        else:
+                            if enable_reset:
+                                self.setup_pb_ompl(verbose)
+                            if verbose:
+                                with printer.indented(verbose_level):
+                                    printer.warning("Path is not collision free, trying again...")
+                return None
+
+            self.planner = plan_fn
+
+        def setup_pb_ompl(self, verbose: bool = False):
+            verbose = False  # TODO: 当可以调整plan的缩进时，这里可以去掉
+            self.robot = PbOMPLRobotWrapper(self.robot_setup.robot, self.robot_setup.arm_joints)
+            self.pb_ompl_interface = pb_ompl.PbOMPL(self.robot, [])
+            self.pb_ompl_interface.set_planner("RRTConnect")
+            self.pb_ompl_interface.si.setStateValidityCheckingResolution(0.0005)
+            if hasattr(self.pb_ompl_interface.space, "setLongestValidSegmentFraction"):
+                self.pb_ompl_interface.space.setLongestValidSegmentFraction(0.0005)
+            if hasattr(self.pb_ompl_interface.planner, "setRange"):
+                self.pb_ompl_interface.planner.setRange(0.01)
+
+            if not verbose:
+                ou.setLogLevel(ou.LOG_ERROR)
+            else:
+                ou.setLogLevel(ou.LOG_DEBUG)
+
+            def custom_is_state_valid(state):
+                state_arr = np.array([state[i] for i in range(self.robot.num_dim)])
+                return not self.collision_fn(state_arr)
+
+            self.pb_ompl_interface.ss.setStateValidityChecker(ob.StateValidityCheckerFn(custom_is_state_valid))
 
         def _generate_key_frames(self, channel_id: int, num_points: int = 10, max_attempts: int = 1000) -> List[np.ndarray]:
             """在指定通道内生成关键帧
@@ -1562,9 +948,9 @@ class TrajectoryTAMPORSolver:
             attempt = 0
             while attempt < max_attempts:
                 attempt += 1
-                dx = np.random.uniform(-length / 8, length / 8)
-                dy = np.random.uniform(-width / 8, width / 8)
-                dz = np.random.uniform(-thickness * 2, thickness * 2)
+                dx = np.random.uniform(-length / 6, length / 6)
+                dy = np.random.uniform(-width / 6, width / 6)
+                dz = np.random.uniform(-thickness * 4, thickness * 4)
                 roll = np.random.uniform(-np.pi, np.pi)
                 pitch = np.random.uniform(-np.pi, np.pi)
                 yaw = np.random.uniform(-np.pi, np.pi)
@@ -1625,7 +1011,8 @@ class TrajectoryTAMPORSolver:
                 collision_score = 0 if self.collision_fn(frame) else 1
 
                 # 计算最终评分 (距离越近、越对齐方向、无碰撞越好)
-                score = collision_score * (alignment + 1.0 / (distance_to_center + 0.1))
+                # score = collision_score * (alignment + 1.0 / (distance_to_center + 0.1))
+                score = collision_score * (alignment + 1.0)
 
                 frame_scores.append((frame, score))
 
@@ -1682,11 +1069,11 @@ class TrajectoryTAMPORSolver:
             target_conf: np.ndarray,
             channel_path: List[int],
             max_time: float = 600.0,
+            init_step_max_time: float = 200.0,
             single_plan_max_time: float = 15.0,
-            grow_max_time: float = 200.0,
             num_points: int = 20,
-            grow_tree_max_nodes: int = 200,
             verbose: bool = False,
+            verbose_level: int = 1,
         ) -> List[np.ndarray]:
             """规划从起始配置到目标配置的路径
 
@@ -1700,23 +1087,39 @@ class TrajectoryTAMPORSolver:
                 num_points: 每个通道生成的关键帧数量
                 grow_tree_max_nodes: 每个树生长的最大节点数量
                 verbose: 是否打印详细信息
+                verbose_level: 打印详细信息级别
 
             Returns:
                 规划路径，如果失败则返回None
             """
+
             # **************************************************************************
-            # 1. 生成关键帧
+            # 1. 尝试直接使用pb_ompl规划
+            # **************************************************************************
+            self.setup_pb_ompl(verbose)
+            path = self.planner(start_conf, target_conf, max_time=init_step_max_time, enable_reset=True, verbose=verbose, verbose_level=verbose_level)
+            if path is not None:
+                return path
+            with printer.indented(verbose_level):
+                printer.warning("Warning: No path found in the first step, trying to find a path in the second step...")
+
+            init_step_time = init_step_max_time
+
+            # **************************************************************************
+            # 2. 生成关键帧
             # **************************************************************************
 
             if verbose:
-                print("    Generating key frames...")
+                with printer.indented(verbose_level):
+                    printer.info("Generating key frames...")
             start_time = time.time()
             key_frames_list = [[start_conf]]
             for channel_id in channel_path:
                 if channel_id == -1 or channel_id == -2:
                     continue
                 if verbose:
-                    print(f"        Generating key frames for channel {channel_id}...")
+                    with printer.indented(verbose_level + 1):
+                        printer.info(f"Generating key frames for channel {channel_id}...")
                 key_frames = self._generate_key_frames(channel_id, num_points=num_points)
                 if key_frames is not None:
                     # 排序关键帧
@@ -1725,144 +1128,67 @@ class TrajectoryTAMPORSolver:
             key_frames_list.append([target_conf])
             key_frame_time = time.time() - start_time
             if verbose:
-                print(f"    Key frames generated in {key_frame_time:.2f} seconds")
+                with printer.indented(verbose_level):
+                    printer.info(f"Key frames generated in {key_frame_time:.2f} seconds")
 
-            # **************************************************************************
-            # 2. 构建中间树
-            # **************************************************************************
-
-            if verbose:
-                print("    Building intermediate trees...")
-
-            start_time = time.time()
-            grow_current_time = 0
-            intermediate_trees = []
+            key_frames_idx = []
             for i in range(len(key_frames_list)):
-                step_trees = []
-                key_frames = key_frames_list[i]
+                key_frames_idx.append(list(range(len(key_frames_list[i]))))
 
-                # 统计每个关节的最大值和最小值
-                key_frames_array = np.array(key_frames)
-                lower = np.min(key_frames_array, axis=0)
-                upper = np.max(key_frames_array, axis=0)
-
-                # 对区间进行扩展
-                range_extension = 2.5
-                range_size = upper - lower
-                min_range = 45.0 / 180.0 * np.pi
-                range_size = np.maximum(range_size, min_range)
-                lower = lower - range_extension * range_size
-                upper = upper + range_extension * range_size
-
-                # 获取关节限制
-                original_lower, original_upper = pp.get_custom_limits(self.robot_setup.robot, self.robot_setup.arm_joints, circular_limits=pp.CIRCULAR_LIMITS)
-
-                # 对扩展后的范围进行裁剪
-                lower = np.clip(lower, original_lower, original_upper)
-                upper = np.clip(upper, original_lower, original_upper)
-
-                # 创建采样函数
-                def sample_fn():
-                    return tuple(np.random.uniform(lower, upper))
-
-                while len(key_frames) > 0:
-                    if verbose:
-                        print(f"        Growing tree for step {i+1} / {len(key_frames_list)} key frame {len(step_trees) + 1}...")
-                    step_time = time.time()
-                    tree, mask = self.planner.grow_tree(key_frames[0], self.collision_fn, sample_fn=sample_fn, max_nodes=grow_tree_max_nodes, max_time=(grow_max_time - grow_current_time) / len(key_frames), additional_configs=key_frames[1:])
-                    tree: RRTTree
-                    if verbose:
-                        print(f"            Tree nodes: {tree.get_node_count()}")
-                    step_time = time.time() - step_time
-                    grow_current_time += step_time
-                    step_trees.append(tree)
-                    # 根据mask过滤掉已经成功加入树的配置点
-                    key_frames = [frame for i, frame in enumerate(key_frames[1:]) if not mask[i]]
-
-                if verbose:
-                    print("        Merging trees...")
-                step_trees = self.planner.merge_trees(step_trees, self.collision_fn, verbose=verbose)
-                step_trees.sort(key=lambda tree: tree.get_node_count(), reverse=True)  # 按照节点数量从大到小排序
-
-                intermediate_trees.append(step_trees)
-
-            intermediate_trees_idx = []
-            for i in range(len(intermediate_trees)):
-                step_idx = list(range(len(intermediate_trees[i])))
-                intermediate_trees_idx.append(step_idx)
-
-            intermediate_trees_time = time.time() - start_time
-            if verbose:
-                print(f"    Intermediate trees built in {intermediate_trees_time:.2f} seconds")
+            init_step_time += key_frame_time
 
             # **************************************************************************
-            # 3. 生成所有可能的路径
+            # 3. 构建中间树
+            # **************************************************************************
+
+            intermediate_trees_time = 0.0
+            init_step_time += intermediate_trees_time
+
+            # **************************************************************************
+            # 4. 生成所有可能的路径
             # **************************************************************************
 
             if verbose:
-                print("    Generating all possible paths...")
-                if max_time < key_frame_time + intermediate_trees_time:
-                    print("    Warning: No time remained!!!!")
-                    return None
-
-            def get_sample_fn():
-                lower, upper = pp.get_custom_limits(self.robot_setup.robot, self.robot_setup.arm_joints, circular_limits=pp.CIRCULAR_LIMITS)
-                generator = pp.interval_generator(lower, upper)
-
-                def fn():
-                    sample = list(next(generator))
-                    return tuple(sample)
-
-                return fn
-
-            sample_fn = get_sample_fn()
-            resolutions = np.array([1.0 / 180.0 * np.pi for j in self.robot_setup.arm_joints])
-            extend_fn = pp.get_extend_fn(self.robot_setup.robot, self.robot_setup.arm_joints, resolutions=resolutions)
-            distance_fn = pp.get_distance_fn(self.robot_setup.robot, self.robot_setup.arm_joints)
+                with printer.indented(verbose_level):
+                    printer.info("Generating all possible paths...")
+                    if max_time < init_step_time:
+                        printer.warning("Warning: No time remained!!!!")
+                        return None
 
             start_time = time.time()
             timeout = False
-            for idx, temp_channel_path in enumerate(self._stratified_sampling(intermediate_trees_idx)):
+            for idx, temp_channel_path in enumerate(self._stratified_sampling(key_frames_idx)):
                 path = []
                 success = True
                 if verbose:
-                    print(f"        Attempting path {idx+1} / {len(list(self._stratified_sampling(intermediate_trees_idx)))}...")
+                    with printer.indented(verbose_level + 1):
+                        printer.info(f"Attempting path {idx+1} / {len(list(self._stratified_sampling(key_frames_idx)))}...")
                 for i in range(len(temp_channel_path) - 1):
                     if verbose:
-                        print(f"            Planning segment {i+1} / {len(temp_channel_path) - 1}...")
-                    start_tree: RRTTree = deepcopy(intermediate_trees[i][temp_channel_path[i]])
-                    end_tree: RRTTree = deepcopy(intermediate_trees[i + 1][temp_channel_path[i + 1]])
-                    temp_path, start_connect_id, end_connect_id = self.planner.plan(
-                        start_tree.get_root_node(), end_tree.get_root_node(), self.collision_fn, extend_fn=extend_fn, distance_fn=distance_fn, max_time=single_plan_max_time, start_tree=start_tree, end_tree=end_tree, verbose=verbose
-                    )
-
-                    current_time = time.time()
-                    if current_time - start_time > max_time - key_frame_time - intermediate_trees_time:
-                        if verbose:
-                            print(f"            Time out! {current_time - start_time:.2f} seconds")
-                        success = False
-                        timeout = True
-                        break
+                        with printer.indented(verbose_level + 2):
+                            printer.info(f"Planning segment {i+1} / {len(temp_channel_path) - 1}...")
+                    temp_start_conf = key_frames_list[i][temp_channel_path[i]]
+                    temp_end_conf = key_frames_list[i + 1][temp_channel_path[i + 1]]
+                    self.setup_pb_ompl(verbose)
+                    temp_path = self.planner(temp_start_conf, temp_end_conf, max_time=min(single_plan_max_time * (i + 1), max_time - init_step_time - (time.time() - start_time)), verbose=verbose, verbose_level=verbose_level + 3)
 
                     if temp_path is not None:
-                        # 保存当前段的路径
                         path.append(temp_path)
-
-                        if verbose:
-                            print("            Found path, merging trees...")
-                        # 合并树，分别以start_tree和end_tree的根节点作为新树的根
-                        start_root_tree = RRTTree.merge(start_tree, end_tree, start_connect_id, end_connect_id)
-                        end_root_tree = RRTTree.merge(end_tree, start_tree, end_connect_id, start_connect_id)
-
-                        # 更新中间树列表
-                        intermediate_trees[i][temp_channel_path[i]] = start_root_tree
-                        intermediate_trees[i + 1][temp_channel_path[i + 1]] = end_root_tree
-
-                        if verbose:
-                            print(f"                Trees merged successfully!")
-                            print(f"                Start tree nodes: {start_root_tree.get_node_count()}, End tree nodes: {end_root_tree.get_node_count()}")
+                        with printer.indented(verbose_level + 3):
+                            printer.info(f"Total target conf: {target_conf}")
+                            printer.info(f"Step target conf: {temp_end_conf}")
+                            printer.info(f"Solution end conf: {temp_path[-1]}")
                     else:
                         success = False
+                        break
+
+                    current_time = time.time()
+                    if current_time - start_time > max_time - init_step_time:
+                        if verbose:
+                            with printer.indented(verbose_level + 2):
+                                printer.warning(f"Time out! {current_time - start_time:.2f} seconds")
+                        success = False
+                        timeout = True
                         break
 
                 if timeout:
@@ -1870,119 +1196,16 @@ class TrajectoryTAMPORSolver:
 
                 if success:
                     if verbose:
-                        print(f"    Path found! Total time: {time.time() - start_time:.2f} seconds")
+                        with printer.indented(verbose_level + 1):
+                            printer.success(f"Path found! Total time: {time.time() - start_time:.2f} seconds")
                     return np.concatenate(path, axis=0)
 
             return None
-
-    def plan(
-        self,
-        start_conf: np.ndarray,
-        target_conf: np.ndarray,
-        element_bodies: List[int],
-        grasp_attachment: Attachment,
-        max_time: float = 600.0,
-        step_max_time: float = 15.0,
-        key_frame_num: int = 20,
-        grow_tree_max_nodes: int = 200,
-        verbose: bool = False,
-    ) -> Dict:
-        """Execute the complete planning process
-
-        Combine topology planning and path planning to find the optimal path from start to goal.
-
-        Args:
-            start_conf: Initial joint configuration
-            target_conf: Target joint configuration
-            element_bodies: List of collision bodies
-            grasp_attachment: Grasp attachment
-            max_time: Maximum planning time
-            key_frame_num: Number of key frames
-            grow_tree_max_nodes: Maximum number of nodes for each tree
-            verbose: Whether to print verbose information
-
-        Returns:
-            Dictionary containing planning results {"success": bool, "path": np.ndarray}
-        """
-        if verbose:
-            print("\n========== TAMPOR TRAJECTORY PLANNING ==========")
-
-        # 保存当前机器人状态
-        self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, start_conf)
-
-        # 获取起点和终点位置
-        start_point = np.array(pp.get_point(grasp_attachment.child))
-        self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, target_conf)
-        target_point = np.array(pp.get_point(grasp_attachment.child))
-
-        # 恢复起始位置
-        self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, start_conf)
-
-        # 创建碰撞检测函数
-        collision_fn = self.robot_setup.create_collision_fn(element_bodies)
-
-        # 初始化规划器
-        with pp.LockRenderer():
-            if verbose:
-                print("TAMPOR: Initializing topology planner...")
-            self._init_topology_planner(element_bodies)
-            if verbose:
-                print("TAMPOR: Initializing path planner...")
-            self._init_path_planner(collision_fn)
-
-        # 1. Topology Planning
-        if verbose:
-            print("TAMPOR: Starting topology planning...")
-        start_time = time.time()
-        best_path = self.topology_planner.plan(start_point, target_point, verbose=verbose)
-        topology_time = time.time() - start_time
-        if verbose:
-            print(f"TAMPOR: Topology planning completed in {topology_time:.2f} seconds")
-
-        if not best_path:
-            if verbose:
-                print("TAMPOR: Failed to find a valid topology path")
-            return {"success": False, "path": None}
-
-        # 2. Path Planning
-        if verbose:
-            print("TAMPOR: Starting path planning...")
-        start_time = time.time()
-        with pp.LockRenderer():
-            path = self.path_planner.plan(start_conf, target_conf, best_path, num_points=key_frame_num, max_time=max_time - topology_time, single_plan_max_time=step_max_time, grow_tree_max_nodes=grow_tree_max_nodes, verbose=verbose)
-        path_time = time.time() - start_time
-        if verbose:
-            print(f"TAMPOR: Path planning completed in {path_time:.2f} seconds")
-
-        if path is None:
-            if verbose:
-                print("TAMPOR: Failed to find a valid trajectory path")
-            return {"success": False, "path": None}
-
-        if verbose:
-            print("\n========== TAMPOR PLANNING SUCCESSFUL ==========")
-            print(f"TAMPOR: Total planning time: {topology_time + path_time:.2f} seconds")
-
-        return {"success": True, "path": path}
 
 
 if __name__ == "__main__":
     # 示例用法
     init_pb()
-
-    source_tree = RRTTree(np.array([0, 0]))
-    source_tree.add_node(np.array([-1, 1]), 0)
-    source_tree.add_node(np.array([1, 1]), 0)
-    source_tree.add_node(np.array([1, 2]), 2)
-    source_tree.add_node(np.array([0, 2]), 3)
-    source_tree.add_node(np.array([2, 1]), 2)
-    source_tree.add_node(np.array([2, 2]), 5)
-
-    target_tree = RRTTree(np.array([3, 0]))
-    target_tree.add_node(np.array([4, 0]), 0)
-    target_tree.add_node(np.array([3, 1]), 0)
-    target_tree.add_node(np.array([3, 2]), 2)
-    target_tree.add_node(np.array([4, 1]), 2)
 
     scene_file = os.path.join(HERE, "model", "scenes", "cuboid_1", "task_1.yml")
     scene_parser = SceneParser(scene_file)
@@ -2006,20 +1229,34 @@ if __name__ == "__main__":
     grasped_attachment = pp.create_attachment(rb.robot, rb.tool_link, grasped_element)
     rb.update_attachments([grasped_attachment])
 
+    rb.set_joint_positions(rb.arm_joints, start_q)
+    start_point = np.array(pp.get_point(grasped_element))
+
+    rb.set_joint_positions(rb.arm_joints, target_q)
+    target_point = np.array(pp.get_point(grasped_element))
+    
+    rb.set_base_pose_2d(10, 10, 0)
+
     # 创建TAMPOR规划器并进行规划
     solver = TrajectoryTAMPORSolver(rb, channel_info, grasp_offset, eval_max_attempts=1000)
-    plan_result = solver.plan(start_q, target_q, bodies, grasped_attachment, key_frame_num=10, max_time=600, grow_tree_max_nodes=50, verbose=True)
+    solver._init_topology_planner(bodies)
+    best_path = solver.topology_planner.plan(start_point, target_point, verbose=True, verbose_level=0)
+    solver.topology_planner.plot_graph(solver.topology_planner.full_graph, highlight_path=best_path, start_point=start_point, target_point=target_point)
+    
+    pp.wait_for_user()
 
-    if plan_result["success"]:
-        path = plan_result["path"]
+    # plan_result = solver.plan(start_q, target_q, bodies, grasped_attachment, key_frame_num=10, max_time=600, grow_tree_max_nodes=50, verbose=True)
 
-        # 可视化路径
-        slider = p.addUserDebugParameter("replay", 0, 1, 0)
-        while True:
-            slider_value = p.readUserDebugParameter(slider)
-            time_idx = int(slider_value * (path.shape[0] - 1))
-            joint_val = path[time_idx]
-            rb.set_joint_positions(rb.arm_joints, joint_val)
-            time.sleep(1.0 / 60)
-    else:
-        print("规划失败")
+    # if plan_result["success"]:
+    #     path = plan_result["path"]
+
+    #     # 可视化路径
+    #     slider = p.addUserDebugParameter("replay", 0, 1, 0)
+    #     while True:
+    #         slider_value = p.readUserDebugParameter(slider)
+    #         time_idx = int(slider_value * (path.shape[0] - 1))
+    #         joint_val = path[time_idx]
+    #         rb.set_joint_positions(rb.arm_joints, joint_val)
+    #         time.sleep(1.0 / 60)
+    # else:
+    #     printer.error("规划失败")

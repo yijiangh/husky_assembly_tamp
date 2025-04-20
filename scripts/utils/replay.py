@@ -95,7 +95,7 @@ class TrajectoryPlayer:
             raise FileNotFoundError(f"场景配置文件不存在: {scene_file}")
         
         self.parser = SceneParser(scene_file)
-        self.parser.load_scene()
+        self.parser._load_scene()
         
         # 获取场景元素信息
         line_pts, radius_per_edge = self.parser.get_element_info()

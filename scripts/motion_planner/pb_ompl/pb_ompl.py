@@ -191,6 +191,12 @@ class PbOMPL():
             self.planner = og.BITstar(self.ss.getSpaceInformation())
         elif planner_name == "EITstar":
             self.planner = og.EITstar(self.ss.getSpaceInformation())
+        elif planner_name == "LazyRRT":
+            self.planner = og.LazyRRT(self.ss.getSpaceInformation())
+        elif planner_name == "STRIDE":
+            self.planner = og.STRIDE(self.ss.getSpaceInformation())
+        elif planner_name == "BFMT":
+            self.planner = og.BFMT(self.ss.getSpaceInformation())
         else:
             print("{} not recognized, please add it first".format(planner_name))
             return

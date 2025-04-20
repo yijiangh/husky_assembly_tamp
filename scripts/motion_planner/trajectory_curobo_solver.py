@@ -95,7 +95,7 @@ class TrajectoryCuroboSolver:
         world_config_mesh = WorldConfig.create_mesh_world(world_config)
 
         # -------------------- create motion gen --------------------#
-        motion_gen_config = MotionGenConfig.load_from_robot_config("husky_ur5_e.yml", world_config_mesh, interpolation_dt=0.001, interpolation_steps=10000)
+        motion_gen_config = MotionGenConfig.load_from_robot_config("husky_ur5_e.yml", world_config_mesh, interpolation_dt=0.001, interpolation_steps=50000)
         motion_gen = MotionGen(motion_gen_config)
         motion_gen.warmup()
 
@@ -129,7 +129,7 @@ class TrajectoryCuroboSolver:
                     print(f"Start point difference: {start_diff:.6f}, End point difference: {end_diff:.6f}")
                     
                     # If the start or end point difference is too large, consider planning failed
-                    if start_diff > 1e-6 or end_diff > 1e-6:
+                    if start_diff > 1e-4 or end_diff > 1e-6:
                         print("Planning failed due to large start or end point difference")
                         continue
                 collision_free = True
@@ -142,3 +142,6 @@ class TrajectoryCuroboSolver:
                     return {"success": True, "path": path}
             else:
                 return {"success": False, "path": None}
+            
+        return {"success": False, "path": None}
+

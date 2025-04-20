@@ -27,4 +27,37 @@ pip install numpy pybullet_planning torch matplotlib casadi compas_fab
 
 ## How to Run?
 
+* corner case
+
+```bash
+cd scripts
+python test/corner_case_for_transfer [--birrt] [--curobo] [--tampor] [--ompl RRTConnect PRM ...] [--save] [--random] [--visualize] [--manual] [--repeat {int}] [--scene {scene_name}] [--task {task_name}] [--max_time {float}] [--time_stamp {time_stamp}]
+```
+
 ## TODO List
+
+* cuboid_1
+  - [ ] BiRRT
+  - [ ] RRTConnect
+  - [ ] PRM
+  - [ ] LazyRRT
+  - [ ] EST
+  - [ ] STRIDE 
+  - [ ] BIT*
+  - [ ] EIT*
+  - [ ] BFMT
+  - [ ] cuRobo
+  - [ ] TAPOM
+
+* shelf_1
+  - [ ] BiRRT
+  - [ ] RRTConnect
+  - [ ] PRM
+  - [ ] LazyRRT
+  - [ ] EST
+  - [ ] STRIDE 
+  - [ ] BIT*
+  - [ ] EIT*
+  - [ ] BFMT
+  - [ ] cuRobo
+  - [ ] TAPOM

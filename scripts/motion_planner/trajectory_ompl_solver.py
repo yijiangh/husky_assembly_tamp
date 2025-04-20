@@ -61,7 +61,7 @@ class TrajectoryOMPLSolver:
         self.arm_joints = arm_joints
         self.obstacles = obstacles if obstacles else []
         self.planner = planner
-        
+
         self.setup_pb_ompl(planner)
 
     def setup_pb_ompl(self, planner_name):
@@ -104,17 +104,7 @@ class TrajectoryOMPLSolver:
         else:
             return True
 
-    def plan(
-        self,
-        q_init: np.ndarray,
-        q_target: np.ndarray,
-        max_time: float = 10.0,
-        max_attempts: int = 100,
-        element_bodies: List[int] = None,
-        grasped_element: Union[None, int] = None,
-        grasped_attachment: Union[None, object] = None,
-        collision_fn: Callable = None,
-    ) -> Dict:
+    def plan(self, q_init: np.ndarray, q_target: np.ndarray, max_time: float = 10.0, max_attempts: int = 100, collision_fn: Callable = None) -> Dict:
         """
         Plan a path
 
@@ -123,9 +113,6 @@ class TrajectoryOMPLSolver:
             q_target: Target joint configuration
             max_time: Maximum planning time (seconds)
             max_attempts: Maximum number of planning attempts
-            element_bodies: List of object bodies in the environment
-            grasped_element: ID of the grasped object
-            grasped_attachment: Attachment information for the grasped object
             collision_fn: Collision checking function
 
         Returns:

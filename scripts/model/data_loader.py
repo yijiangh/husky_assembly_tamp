@@ -474,7 +474,7 @@ class SceneDataLoader:
             raise FileNotFoundError(f"Scene configuration file does not exist: {scene_file}")
 
         parser = SceneParser(scene_file)
-        parser.load_scene()
+        parser._load_scene()
         return parser
 
     def prepare_point_cloud_data(

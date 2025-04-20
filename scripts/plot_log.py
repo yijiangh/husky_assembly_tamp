@@ -13,6 +13,8 @@ def main():
     parser.add_argument('--timestamp', type=str, default=None, 
                         help='Timestamp of the log directory to plot (format: YYYYMMDD_HHMMSS)')
     args = parser.parse_args()
+    
+    args.timestamp = '20250414_192413'
 
     # 获取时间戳
     if args.timestamp:

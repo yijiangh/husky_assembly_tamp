@@ -223,7 +223,7 @@ def main():
 
     # 加载基准配置文件
     scene_parser = SceneParser(os.path.join(HERE, "model", "scenes", f"{args.scene}", f"{args.task}.yml"))
-    scene_parser.load_scene()
+    scene_parser._load_scene()
 
     line_pts_flattened, radius_per_edge = scene_parser.get_element_info()
     element_bodies = create_collision_bodies(line_pts_flattened, radius_per_edge, viewer=True)

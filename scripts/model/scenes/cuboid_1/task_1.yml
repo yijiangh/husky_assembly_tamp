@@ -4,8 +4,13 @@ num_elements: 12
 robot:
   start: [1.5708, 0.0, 0.0, -3.1416, 0.0, -1.5708]
   target: [1.323, 0.331, -1.753, -0.397, 1.653, 1.819]
-  grasp_offset: [0.0, 0.1, 0.15] # [x, y, z] in tool_link
   pose_2d: [-0.5, 0.5, 0.0] # [x, y, yaw]
+  grasp:
+    type: "element"
+    offset: [0.0, 0.1, 0.15] # [x, y, z] in tool_link
+    rotation: [1.5708, 0.0, 0.0]
+    file: ""
+    size: [0.01, 1.0] # radius, height
 
 channels_info:
   - center: [0.1, 0.1, 1.0] # 通道中心位置

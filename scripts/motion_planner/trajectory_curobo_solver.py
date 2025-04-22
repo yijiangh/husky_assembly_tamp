@@ -39,8 +39,10 @@ class TrajectoryCuroboSolver:
         max_time: int,
         max_attempts: int,
         element_bodies: List[int],
-        grasped_element: Union[None, int] = None,
-        grasped_attachment: Union[None, pp.Attachment] = None,
+        element_infos: Dict,
+        grasped_approximate_info: Union[None, Dict] = None,
+        grasped_approximate_body: Union[None, int] = None,
+        grasped_approximate_attachment: Union[None, pp.Attachment] = None,
         collision_fn: Callable = None,
     ) -> Dict:
 
@@ -49,16 +51,11 @@ class TrajectoryCuroboSolver:
         # -------------------- load obstacles --------------------#
         obstacles = []
         for element_body in element_bodies:
+            info = element_infos[element_body]
             pose = pp.multiply(pp.invert(pp.get_pose(self.robot_setup.robot)), pp.get_pose(element_body))
             point = list(pose[0])
             quat = [pose[1][3], pose[1][0], pose[1][1], pose[1][2]]
-            obstacle = Cylinder(
-                name=f"element_{element_body}",
-                radius=0.01,
-                height=1.0,
-                pose=point + quat,
-                color=[1.0, 0, 0, 1.0],
-            )
+            obstacle = Cylinder(name=f"element_{element_body}", radius=info["shape_parameters"]["radius"], height=info["shape_parameters"]["height"], pose=point + quat, color=[1.0, 0, 0, 1.0])
             obstacles.append(obstacle)
 
         # -------------------- init joint states --------------------#
@@ -69,24 +66,15 @@ class TrajectoryCuroboSolver:
         q_target_tensor = torch.tensor(q_target, dtype=torch.float32).reshape(1, 6).cuda()
 
         # -------------------- load grasp object --------------------#
-        if grasped_element is not None and grasped_attachment is not None:
+        if grasped_approximate_info is not None:
             self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, q_init)
-            grasped_attachment.assign()
-            grasp_element_pose = pp.multiply(pp.invert(pp.get_pose(self.robot_setup.robot)), pp.get_pose(grasped_element))
-            grasp_pose_point = list(grasp_element_pose[0])
-            grasp_pose_quat = [
-                grasp_element_pose[1][3],
-                grasp_element_pose[1][0],
-                grasp_element_pose[1][1],
-                grasp_element_pose[1][2],
-            ]
-            grasp_object = Cylinder(
-                name="grasp_element",
-                radius=0.01,
-                height=1.0,
-                pose=grasp_pose_point + grasp_pose_quat,
-                color=[1.0, 0, 0, 1.0],
-            )
+            grasped_approximate_attachment.assign()
+            approximate_delta_pose = pp.Pose(point=grasped_approximate_info["offset"], euler=grasped_approximate_info["rotation"])
+            approximate_pose = pp.multiply(pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link), approximate_delta_pose)
+            pp.set_pose(grasped_approximate_body, approximate_pose)
+            grasp_pose_point = list(approximate_pose[0])
+            grasp_pose_quat = [approximate_pose[1][3], approximate_pose[1][0], approximate_pose[1][1], approximate_pose[1][2]]
+            grasp_object = Cylinder(name="grasp_element", radius=grasped_approximate_info["radius"], height=grasped_approximate_info["height"], pose=grasp_pose_point + grasp_pose_quat, color=[1.0, 0, 0, 1.0])
             obstacles.append(grasp_object)
 
         # -------------------- create world config --------------------#
@@ -100,14 +88,8 @@ class TrajectoryCuroboSolver:
         motion_gen.warmup()
 
         # -------------------- attach element --------------------#
-        init_js = JointState(
-            position=q_init_tensor,
-            velocity=dq_init_tensor,
-            acceleration=ddq_init_tensor,
-            jerk=dddq_init_tensor,
-            joint_names=self.robot_cfg.cspace.joint_names,
-        )
-        if grasped_element is not None and grasped_attachment is not None:
+        init_js = JointState(position=q_init_tensor, velocity=dq_init_tensor, acceleration=ddq_init_tensor, jerk=dddq_init_tensor, joint_names=self.robot_cfg.cspace.joint_names)
+        if grasped_approximate_info is not None:
             motion_gen.attach_objects_to_robot(init_js, ["grasp_element"], sphere_fit_type=SphereFitType.VOXEL_VOLUME_SAMPLE_SURFACE)
 
         # -------------------- set target and start --------------------#
@@ -125,13 +107,17 @@ class TrajectoryCuroboSolver:
                 if len(path) > 0:
                     start_diff = np.linalg.norm(path[0] - q_init_tensor.cpu().numpy())
                     end_diff = np.linalg.norm(path[-1] - q_target_tensor.cpu().numpy())
-                    
+
                     print(f"Start point difference: {start_diff:.6f}, End point difference: {end_diff:.6f}")
-                    
+
                     # If the start or end point difference is too large, consider planning failed
-                    if start_diff > 1e-4 or end_diff > 1e-6:
-                        print("Planning failed due to large start or end point difference")
+                    if start_diff > 1e-4:
+                        print("Planning failed due to large start difference")
                         continue
+                    if end_diff > 1e-6:
+                        print("Planning failed due to large end difference")
+                        continue
+
                 collision_free = True
                 if collision_fn is not None:
                     for q in path:
@@ -142,6 +128,5 @@ class TrajectoryCuroboSolver:
                     return {"success": True, "path": path}
             else:
                 return {"success": False, "path": None}
-            
-        return {"success": False, "path": None}
 
+        return {"success": False, "path": None}

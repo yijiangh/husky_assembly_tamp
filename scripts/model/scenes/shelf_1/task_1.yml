@@ -3,17 +3,25 @@
 
 scene_name: "shelf_1_task_1"
 num_elements: 39
+env_obj: "wooden_storage_shelf.stl"
+env_scale: 0.006
 
 robot:
   start: [1.5708, -2.976, 1.984, -1.587, -1.455, 1.587]
   target: [1.5708, -1.257, 1.058, -1.587, -1.455, 1.587]
-  pose_2d: [-0.25, -0.75, 1.5708000000000002]
+  pose_2d: [-0.25, -0.75, 1.5708]
   grasp:
     type: "mesh"
     offset: [0.0, -0.20, 0.15] # offset: [0.0, -0.475, 0.15]
     rotation: [0.0, 0.0, 0.0]
     file: "bar.obj"
     size: 1.0 # size: 1.75
+    approximate:
+      type: "cylinder"
+      radius: 0.02
+      height: 0.33
+      rotation: [1.5708, 0.0, 0.0]
+      offset: [0.0, -0.035, 0.15]
 
 channels_info:
   # ---------- 前面 ----------

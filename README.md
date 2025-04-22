@@ -9,11 +9,6 @@ conda create -n husky_assembly python==3.9.19
 conda activate husky_assembly
 ```
 
-```bash
-pip install matplotlib torch rich pybullet_planning pyyaml casadi compas_fab pysdtw pynvml
-conda install pinocchio -c conda-forge
-```
-
 * install python dependencies
 
 ```bash
@@ -27,37 +22,44 @@ pip install numpy pybullet_planning torch matplotlib casadi compas_fab
 
 ## How to Run?
 
-* corner case
+* corner case: Method 1
 
 ```bash
 cd scripts
-python test/corner_case_for_transfer [--birrt] [--curobo] [--tampor] [--ompl RRTConnect PRM ...] [--save] [--random] [--visualize] [--manual] [--repeat {int}] [--scene {scene_name}] [--task {task_name}] [--max_time {float}] [--time_stamp {time_stamp}]
+python test/corner_case_for_transfer [--birrt] [--curobo] [--tampor] [--ompl RRTConnect PRM ...] [--save] [--manual] [--visualize] [--scene {scene_name}] [--task {task_name}] [--seed {int}] [--random] [--repeat {int}]  [--max_time {float}] [--joint_angles {str}]
 ```
+
+* corner case: Method 2
+
+```bash
+bash bash/generate_data.sh
+```
+
 
 ## TODO List
 
 * cuboid_1
   - [ ] BiRRT
-  - [ ] RRTConnect
-  - [ ] PRM
-  - [ ] LazyRRT
-  - [ ] EST
-  - [ ] STRIDE 
-  - [ ] BIT*
-  - [ ] EIT*
-  - [ ] BFMT
+  - [x] RRTConnect
+  - [x] PRM
+  - [x] LazyRRT
+  - [x] EST
+  - [x] STRIDE 
+  - [x] BIT*
+  - [x] EIT*
+  - [x] BFMT
   - [ ] cuRobo
-  - [ ] TAPOM
+  - [x] TAPOM
 
 * shelf_1
   - [ ] BiRRT
-  - [ ] RRTConnect
-  - [ ] PRM
-  - [ ] LazyRRT
-  - [ ] EST
-  - [ ] STRIDE 
-  - [ ] BIT*
-  - [ ] EIT*
-  - [ ] BFMT
+  - [x] RRTConnect
+  - [x] PRM
+  - [x] LazyRRT
+  - [x] EST
+  - [x] STRIDE 
+  - [x] BIT*
+  - [x] EIT*
+  - [x] BFMT
   - [ ] cuRobo
-  - [ ] TAPOM
+  - [x] TAPOM

@@ -44,7 +44,7 @@ class PlanningThread(threading.Thread):
         self.func = func
         self.args = args
         self.kwargs = kwargs
-        self.result = None
+        self.result = {"success": False, "path": None}
         self.done = False
         self.daemon = True
 
@@ -52,48 +52,57 @@ class PlanningThread(threading.Thread):
         try:
             with pp.LockRenderer():
                 self.result = self.func(*self.args, **self.kwargs)
+                if isinstance(self.result, dict):
+                    pass
+                elif isinstance(self.result, np.ndarray):
+                    self.result = {"success": True, "path": self.result}
+                elif self.result is None:
+                    self.result = {"success": False, "path": None}
             self.done = True
         except Exception as e:
             printer.error(f"\n规划错误: {e}")
             self.done = True
+            self.result = {"success": False, "path": None}
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Corner case for transfer planning")
+
     parser.add_argument("--birrt", action="store_true", help="Enable BIRRT planning")
     parser.add_argument("--curobo", action="store_true", help="Enable cuRobo planning")
     parser.add_argument("--tampor", action="store_true", help="Enable TAMPOR planning")
     parser.add_argument("--ompl", nargs="+", default=[], choices=["RRTConnect", "BITstar", "EITstar", "RRTstar", "PRM", "EST", "FMT", "BFMT", "LazyRRT", "STRIDE"], help="OMPL algorithms to use")
-    parser.add_argument("--manual", action="store_true", help="Enable manual control")
-    parser.add_argument("--repeat", type=int, default=1, help="Number of repetitions for the planning")
+
     parser.add_argument("--save", action="store_true", help="Whether to save the results")
+
+    parser.add_argument("--manual", action="store_true", help="Enable manual control")
+
     parser.add_argument("--visualize", action="store_true", help="Whether to visualize the results")
-    parser.add_argument("--random", action="store_true", help="Enable random planning")
+
     parser.add_argument("--scene", type=str, default="cuboid_1", help="Scene name")
     parser.add_argument("--task", type=str, default="task_1", help="Task number")
+
+    parser.add_argument("--seed", type=int, default=None, help="Fixed seed value for reproducible results")
+    parser.add_argument("--repeat", type=int, default=1, help="Number of repetitions for the planning")
+    parser.add_argument("--random", action="store_true", help="Enable random planning")
+
     parser.add_argument("--max_time", type=float, default=600.0, help="Maximum time for the planning")
     parser.add_argument("--joint_angles", type=str, help="Joint angles for manual mode (comma-separated, e.g. '1.0,0.5,-1.0,0.8,1.2,0.3')")
-    parser.add_argument("--time_stamp", type=str, help="Timestamp of the log file to use seeds from")
-    parser.add_argument("--seed", type=int, default=None, help="Fixed seed value for reproducible results")
     args = parser.parse_args()
 
     init_pb()
 
-    # 设置保存路径的时间戳
-    time_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
     # 使用SceneParser加载场景
     scene_parser = SceneParser(os.path.join(HERE, "model", "scenes", f"{args.scene}", f"{args.task}.yml"))
-    scene_parser._load_scene()
-    
+
     with pp.LockRenderer():
         # 设置机器人
         rb = scene_parser.create_robot("r0")
         # 设置抓取物体
-        attachment_body, grasp_attachment = scene_parser.create_attachment(rb)
+        attachment_body, grasp_attachment, approximate_attachment_body, approximate_attachment = scene_parser.create_attachment(rb, approximate=True)
         rb.update_attachments([grasp_attachment])
         # 加载场景元素
-        element_bodies = scene_parser.create_elements(color=[1, 0, 0, 1])
+        element_bodies, element_infos = scene_parser.create_elements(color=[1, 0, 0, 1])
 
     # 获取场景信息
     start_q = np.array(scene_parser.get_robot_start_pose())
@@ -101,91 +110,66 @@ if __name__ == "__main__":
     pose_2d = scene_parser.get_robot_pose_2d(output_type="array")
     channel_info = scene_parser.get_channel_info()
     grasp_pose = scene_parser.get_robot_grasp_pose()
-    
-    results = {"BIRRT": [], "cuRobo": [], "TAMPOR": []}
 
-    # 为每个OMPL算法初始化结果存储
-    for algo in args.ompl:
-        results[f"OMPL_{algo}"] = []
+    # 定义要执行的seeds
+    seeds_to_run = []
 
-    # 从日志文件中加载seeds（如果提供了time_stamp）
-    seeds = []
-    if args.time_stamp:
-        log_file_path = os.path.join(LOG_DIR, "corner_case", args.time_stamp, "log.json")
-        printer.info(f"尝试从 {log_file_path} 读取seeds")
+    # 如果提供了seed参数
+    if args.seed is not None:
+        printer.info(f"将使用指定的seed: {args.seed}")
+        seeds_to_run = [args.seed]
+    # 如果提供了random和repeat参数
+    elif args.random and args.repeat > 0:
+        printer.info(f"将生成 {args.repeat} 个随机seed")
+        for i in range(args.repeat):
+            seed = int.from_bytes(os.urandom(4), byteorder="big")
+            seeds_to_run.append(seed)
+    # 如果是手动模式
+    elif args.manual:
+        seeds_to_run = []
+    # 如果都不满足则退出
+    else:
+        parser.error("必须提供--seed 或 同时提供--random和--repeat参数")
+        sys.exit(1)
 
-        if os.path.exists(log_file_path):
-            try:
-                with open(log_file_path, "r") as f:
-                    log_data = json.load(f)
+    # 加载已有日志文件中的结果（如果存在）
+    log_dir = os.path.join(HERE, "logs", args.scene, args.task)
+    log_file_path = os.path.join(log_dir, "log.json")
+    if os.path.exists(log_file_path):
+        printer.info(f"从 {log_file_path} 加载已有结果")
+        try:
+            with open(log_file_path, "r") as f:
+                results = json.load(f)
 
-                # 从所有算法结果中提取seeds
-                for algo, algo_results in log_data.items():
-                    for result in algo_results:
-                        if result and len(result) > 0:
-                            seed = result[0]  # seed是结果元组的第一个元素
-                            if seed not in seeds:
-                                seeds.append(seed)
+            # 确保所有必要的算法键存在
+            for algo_key in ["BIRRT", "cuRobo", "TAMPOR"]:
+                if algo_key not in results:
+                    results[algo_key] = []
 
-                printer.success(f"成功从日志文件加载了 {len(seeds)} 个seeds")
-
-                # 加载现有结果到results字典
-                results = log_data
-
-                # 确保所有必要的算法键存在
-                for algo_key in ["BIRRT", "cuRobo", "TAMPOR"]:
-                    if algo_key not in results:
-                        results[algo_key] = []
-
-                # 确保所有OMPL算法键存在
-                for algo in args.ompl:
-                    algo_key = f"OMPL_{algo}"
-                    if algo_key not in results:
-                        results[algo_key] = []
-            except Exception as e:
-                printer.error(f"读取日志文件失败: {e}")
-                seeds = []
-        else:
-            printer.warning(f"日志文件 {log_file_path} 不存在")
-            seeds = []
-
-    # 如果没有从日志文件中读取到seeds或者没有提供time_stamp
-    if not seeds:
-        if args.time_stamp:
-            printer.warning("未找到seeds，将使用随机seeds")
-        
-        # 检查seed生成方式
-        if args.random:
-            # 使用随机seeds
-            printer.info("使用随机seeds")
-            for i in range(args.repeat):
-                seed = int.from_bytes(os.urandom(4), byteorder="big")
-                seeds.append(seed)
-        elif args.seed is not None:
-            # 使用指定的seed
-            printer.info(f"使用固定seed: {args.seed}")
-            for i in range(args.repeat):
-                seeds.append(args.seed)
-        elif args.manual:
-            seeds = [0]
-        else:
-            # 既没有指定random也没有指定time_stamp，又没有提供seed
-            parser.error("必须提供--random、--time_stamp或--seed参数之一")
-            sys.exit(1)
-
-    # 如果使用了--time_stamp，覆盖time_stamp变量值
-    if args.time_stamp:
-        time_stamp = args.time_stamp
+            # 确保所有OMPL算法键存在
+            for algo in args.ompl:
+                algo_key = f"OMPL_{algo}"
+                if algo_key not in results:
+                    results[algo_key] = []
+        except Exception as e:
+            printer.error(f"读取日志文件失败: {e}，将创建新的日志文件")
+            results = {"BIRRT": [], "cuRobo": [], "TAMPOR": []}
+            for algo in args.ompl:
+                results[f"OMPL_{algo}"] = []
+    else:
+        printer.info(f"日志文件 {log_file_path} 不存在，将创建新的日志文件")
+        results = {"BIRRT": [], "cuRobo": [], "TAMPOR": []}
+        for algo in args.ompl:
+            results[f"OMPL_{algo}"] = []
 
     # 执行规划
-    for repeat_id, seed in enumerate(seeds):
+    for repeat_id, seed in enumerate(seeds_to_run):
         if seed is not None:
             printer.info(f"\n-------------------- 当前seed: {seed} --------------------\n")
 
         # **************************************************************************
         # BIRRT plan
         # **************************************************************************
-
         if args.birrt:
             printer.info("\n========================================")
             printer.info(f"{repeat_id+1}th BIRRT planning")
@@ -193,15 +177,12 @@ if __name__ == "__main__":
 
             # 检查是否已存在此seed的结果
             skip_planning = False
-            if args.time_stamp and "BIRRT" in results:
+            if "BIRRT" in results:
                 for existing_result in results["BIRRT"]:
                     if existing_result and len(existing_result) > 0 and existing_result[0] == seed:
                         printer.info(f"Seed {seed} for BIRRT already exists in log, skipping.")
                         skip_planning = True
                         break
-
-            if seed is not None:
-                SetSeeds(seed)
 
             # 只有在需要规划时才执行
             if not skip_planning:
@@ -216,17 +197,17 @@ if __name__ == "__main__":
                         time.sleep(0.1)
 
                     elapsed_time = time.time() - start_time
-                    path = planning_thread.result
+                    result = planning_thread.result
 
-                    if path is not None:
-                        cur_result = (seed, path is not None, elapsed_time)
+                    if result["success"]:
+                        cur_result = (seed, result["success"], elapsed_time)
 
                         # 保存路径
                         if args.save:
-                            save_dir = os.path.join(LOG_DIR, "corner_case", time_stamp, args.scene, args.task, "BIRRT")
+                            save_dir = os.path.join(log_dir, "BIRRT")
                             os.makedirs(save_dir, exist_ok=True)
-                            save_path = os.path.join(save_dir, f"{repeat_id}.npy")
-                            np.save(save_path, path)
+                            save_path = os.path.join(save_dir, f"{seed}.npy")
+                            np.save(save_path, result["path"])
                     else:
                         cur_result = (seed, False, args.max_time)
 
@@ -241,7 +222,7 @@ if __name__ == "__main__":
                     if append_result:
                         results["BIRRT"].append(cur_result)
 
-                    if path is not None:
+                    if result["success"]:
                         printer.success(f"\rPlanning success! Total time: {elapsed_time:.2f} s!")
                         if args.visualize:
                             input = pp.wait_for_user("\nVisualize planned path?")
@@ -252,8 +233,8 @@ if __name__ == "__main__":
                                 while True:
                                     replay = p.readUserDebugParameter(replay_slider)
                                     current_continue_button_value = p.readUserDebugParameter(continue_button)
-                                    idx = int(replay * (len(path) - 1))
-                                    conf = path[idx]
+                                    idx = int(replay * (len(result["path"]) - 1))
+                                    conf = result["path"][idx]
                                     rb.set_joint_positions(rb.arm_joints, conf)
                                     time.sleep(1.0 / 240)
                                     if current_continue_button_value > prev_continue_button_value:
@@ -277,26 +258,31 @@ if __name__ == "__main__":
 
             # 检查是否已存在此seed的结果
             skip_planning = False
-            if args.time_stamp and "cuRobo" in results:
+            if "cuRobo" in results:
                 for existing_result in results["cuRobo"]:
                     if existing_result and len(existing_result) > 0 and existing_result[0] == seed:
                         printer.info(f"Seed {seed} for cuRobo already exists in log, skipping.")
                         skip_planning = True
                         break
 
-            if seed is not None:
-                SetSeeds(seed)
-
             # 只有在需要规划时才执行
             if not skip_planning:
-                if seed is not None:
-                    SetSeeds(seed)
 
                 p.removeAllUserParameters()
 
                 curobo_planner = TrajectoryCuroboSolver(rb, TensorDeviceType())
                 planning_thread = PlanningThread(
-                    curobo_planner.plan, start_q, target_q, args.max_time, 10000, element_bodies, collision_fn=rb.create_collision_fn(element_bodies)
+                    curobo_planner.plan,
+                    start_q,
+                    target_q,
+                    args.max_time,
+                    10000,
+                    element_bodies,
+                    element_infos,
+                    grasped_approximate_info=scene_parser.get_robot_grasp_approximate(),
+                    grasped_approximate_body=approximate_attachment_body,
+                    grasped_approximate_attachment=approximate_attachment,
+                    collision_fn=rb.create_collision_fn(element_bodies),
                 )
 
                 planning_thread.start()
@@ -317,9 +303,9 @@ if __name__ == "__main__":
 
                         # 保存路径
                         if args.save:
-                            save_dir = os.path.join(LOG_DIR, "corner_case", time_stamp, args.scene, args.task, "cuRobo")
+                            save_dir = os.path.join(log_dir, "cuRobo")
                             os.makedirs(save_dir, exist_ok=True)
-                            save_path = os.path.join(save_dir, f"{repeat_id}.npy")
+                            save_path = os.path.join(save_dir, f"{seed}.npy")
                             np.save(save_path, path)
                     else:
                         cur_result = (seed, False, args.max_time)
@@ -377,20 +363,17 @@ if __name__ == "__main__":
             # 检查是否已存在此seed的结果
             algo_key = f"OMPL_{ompl_algo}"
             skip_planning = False
-            if args.time_stamp and algo_key in results:
+            if algo_key in results:
                 for existing_result in results[algo_key]:
                     if existing_result and len(existing_result) > 0 and existing_result[0] == seed:
                         printer.info(f"Seed {seed} for {algo_key} already exists in log, skipping.")
                         skip_planning = True
                         break
 
-            if seed is not None:
-                SetSeeds(seed)
-
-                # 只有在需要规划时才执行
-                if not skip_planning:
-                    if seed is not None:
-                        SetSeeds(seed)
+            # 只有在需要规划时才执行
+            if not skip_planning:
+                if seed is not None:
+                    SetSeeds(seed)
 
                 p.removeAllUserParameters()
 
@@ -417,9 +400,9 @@ if __name__ == "__main__":
 
                         # 保存路径
                         if args.save:
-                            save_dir = os.path.join(LOG_DIR, "corner_case", time_stamp, args.scene, args.task, f"OMPL_{ompl_algo}")
+                            save_dir = os.path.join(log_dir, f"OMPL_{ompl_algo}")
                             os.makedirs(save_dir, exist_ok=True)
-                            save_path = os.path.join(save_dir, f"{repeat_id}.npy")
+                            save_path = os.path.join(save_dir, f"{seed}.npy")
                             np.save(save_path, path["path"])
                     else:
                         cur_result = (seed, False, args.max_time)
@@ -474,20 +457,17 @@ if __name__ == "__main__":
 
             # 检查是否已存在此seed的结果
             skip_planning = False
-            if args.time_stamp and "TAMPOR" in results:
+            if "TAMPOR" in results:
                 for existing_result in results["TAMPOR"]:
                     if existing_result and len(existing_result) > 0 and existing_result[0] == seed:
                         printer.info(f"Seed {seed} for TAMPOR already exists in log, skipping.")
                         skip_planning = True
                         break
 
-            if seed is not None:
-                SetSeeds(seed)
-
-                # 只有在需要规划时才执行
-                if not skip_planning:
-                    if seed is not None:
-                        SetSeeds(seed)
+            # 只有在需要规划时才执行
+            if not skip_planning:
+                if seed is not None:
+                    SetSeeds(seed)
 
                 tampor_planner = TrajectoryTAMPORSolver(rb, channel_info, grasp_pose, eval_max_attempts=1000)
                 planning_thread = PlanningThread(tampor_planner.plan, start_q, target_q, element_bodies, grasp_attachment, max_time=args.max_time, init_step_max_time=args.max_time / 3.0, step_max_time=20.0, key_frame_num=20, verbose=True)
@@ -510,9 +490,9 @@ if __name__ == "__main__":
                         # 保存路径
                         if args.save and "path" in result:
                             path = result["path"]
-                            save_dir = os.path.join(LOG_DIR, "corner_case", time_stamp, args.scene, args.task, "TAMPOR")
+                            save_dir = os.path.join(log_dir, "TAMPOR")
                             os.makedirs(save_dir, exist_ok=True)
-                            save_path = os.path.join(save_dir, f"{repeat_id}.npy")
+                            save_path = os.path.join(save_dir, f"{seed}.npy")
                             np.save(save_path, path)
                     else:
                         cur_result = (seed, False, args.max_time)
@@ -556,7 +536,6 @@ if __name__ == "__main__":
 
         # 保存结果到日志文件
         if args.save:
-            log_dir = os.path.join(LOG_DIR, "corner_case", time_stamp)
             os.makedirs(log_dir, exist_ok=True)
             file_path = os.path.join(log_dir, "log.json")
             with open(file_path, "w") as f:

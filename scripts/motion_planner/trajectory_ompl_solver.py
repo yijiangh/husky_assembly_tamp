@@ -62,8 +62,6 @@ class TrajectoryOMPLSolver:
         self.obstacles = obstacles if obstacles else []
         self.planner = planner
 
-        self.setup_pb_ompl(planner)
-
     def setup_pb_ompl(self, planner_name):
         """Setup pb_ompl planner"""
         # Create robot wrapper

@@ -1006,6 +1006,14 @@ class SceneParser:
             raise ValueError("Robot information not loaded")
         return self.robot_info.grasp.offset
 
+    def get_robot_grasp_approximate_offset(self) -> List[float]:
+        """
+        Get the robot's grasp approximate offset in tool_link frame.
+        """
+        if not self.robot_info:
+            raise ValueError("Robot information not loaded")
+        return self.robot_info.grasp.approximate.offset
+
     def get_robot_grasp_type(self) -> str:
         """
         Get the robot's grasp type.
@@ -1028,6 +1036,17 @@ class SceneParser:
             raise ValueError("Robot information not loaded")
         return self.robot_info.grasp.rotation
 
+    def get_robot_grasp_approximate_rotation(self) -> List[float]:
+        """
+        Get the robot's grasp approximate rotation.
+
+        Returns:
+            List[float]: Grasp approximate rotation [x, y, z]
+        """
+        if not self.robot_info:
+            raise ValueError("Robot information not loaded")
+        return self.robot_info.grasp.approximate.rotation
+
     def get_robot_grasp_file(self) -> str:
         """
         Get the robot's grasp file.
@@ -1043,6 +1062,18 @@ class SceneParser:
         if not self.robot_info:
             raise ValueError("Robot information not loaded")
         return self.robot_info.grasp.size
+
+    def get_robot_grasp_approximate(self) -> Dict:
+        """
+        Get the robot's grasp approximate.
+
+        Returns:
+            Dict: Dictionary containing grasp approximation information
+        """
+        if not self.robot_info:
+            raise ValueError("Robot information not loaded")
+        approximate_info = self.robot_info.grasp.approximate
+        return {"type": approximate_info.type, "radius": approximate_info.radius, "height": approximate_info.height, "rotation": approximate_info.rotation, "offset": approximate_info.offset}
 
     def get_robot_grasp_pose(self):
         """
@@ -1148,7 +1179,7 @@ class SceneParser:
 
         return channel_info
 
-    def create_elements(self, color=None) -> List[int]:
+    def create_elements(self, color=None) -> Tuple[List[int], Dict]:
         """
         创建并返回场景中定义的所有圆柱体元素的PyBullet物理对象列表。
 
@@ -1162,6 +1193,7 @@ class SceneParser:
             raise ValueError("Scene data is not loaded. Call load_scene() first.")
 
         element_bodies = []
+        element_infos = {}
 
         for element in self.scene_data.elements:
             if element.shape.type == "cylinder":
@@ -1186,17 +1218,22 @@ class SceneParser:
 
                 # 保存圆柱体ID
                 element_bodies.append(cylinder_id)
+                element_infos[cylinder_id] = {"position": position, "orientation": orientation, "shape_type": "cylinder", "shape_parameters": {"radius": radius, "height": height}}
 
             # 注意：如果需要支持其他形状如立方体或球体，可以在这里添加更多的条件分支
 
-        return element_bodies
+        return element_bodies, element_infos
 
-    def create_attachment(self, robot: RobotSetup) -> Tuple[int, pp.Attachment]:
+    def create_attachment(self, robot: RobotSetup, approximate: bool = False) -> Union[Tuple[int, pp.Attachment], Tuple[int, pp.Attachment, int, pp.Attachment]]:
         """
         创建并返回场景中定义的所有连接器元素的PyBullet物理对象列表。
 
+        Args:
+            robot (RobotSetup): 机器人对象
+            approximate (bool, optional): 是否使用近似形状. Defaults to False.
+
         Returns:
-            List[int]: 创建的连接器物理对象ID列表
+            Union[Tuple[int, pp.Attachment], Tuple[int, pp.Attachment, int, pp.Attachment]]: 创建的连接器物理对象ID列表
         """
         if not self.scene_data:
             raise ValueError("Scene data is not loaded. Call load_scene() first.")
@@ -1207,16 +1244,29 @@ class SceneParser:
             pose = pp.multiply(pp.get_link_pose(robot.robot, robot.tool_link), delta_pose)
             pp.set_pose(attachment_body, pose)
             attachment = pp.create_attachment(robot.robot, robot.tool_link, attachment_body)
-            return attachment_body, attachment
         elif self.get_robot_grasp_type() == "mesh":
             attachment_body = pp.create_obj(self.get_robot_grasp_file(), scale=self.get_robot_grasp_size())
             delta_pose = pp.Pose(point=self.get_robot_grasp_offset(), euler=self.get_robot_grasp_rotation())
             pose = pp.multiply(pp.get_link_pose(robot.robot, robot.tool_link), delta_pose)
             pp.set_pose(attachment_body, pose)
             attachment = pp.create_attachment(robot.robot, robot.tool_link, attachment_body)
-            return attachment_body, attachment
         else:
             raise ValueError(f"Unknown grasp type: {self.get_robot_grasp_type()}")
+
+        if approximate:
+            approximate_info = self.get_robot_grasp_approximate()
+            if approximate_info["type"] == "cylinder":
+                approximate_attachment_body = pp.create_cylinder(approximate_info["radius"], approximate_info["height"], color=[1, 0, 0, 1])
+            elif approximate_info["type"] == "sphere":
+                approximate_attachment_body = pp.create_sphere(approximate_info["radius"], color=[1, 0, 0, 1])
+            pp.set_color(approximate_attachment_body, [1, 0, 0, 0.75])
+            approximate_delta_pose = pp.Pose(point=self.get_robot_grasp_approximate_offset(), euler=self.get_robot_grasp_approximate_rotation())
+            approximate_pose = pp.multiply(pp.get_link_pose(robot.robot, robot.tool_link), approximate_delta_pose)
+            pp.set_pose(approximate_attachment_body, approximate_pose)
+            approximate_attachment = pp.create_attachment(robot.robot, robot.tool_link, approximate_attachment_body)
+            return attachment_body, attachment, approximate_attachment_body, approximate_attachment
+
+        return attachment_body, attachment
 
     def create_robot(self, name: str) -> RobotSetup:
         """

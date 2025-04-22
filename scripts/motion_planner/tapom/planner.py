@@ -142,10 +142,10 @@ class Planner:
         attempt = 0
         while attempt < max_attempts:
             attempt += 1
-            pose = SceneParser.sample_pose_in_channel(channel["type"], channel, channel["thickness"], num_samples=1, ratio=0.5).flatten()
+            pose = SceneParser.sample_pose_in_channel(channel["type"], channel, channel["thickness"], num_samples=1, ratio=0.1).flatten()
             world_from_element = pp.Pose(point=pose[:3].tolist(), euler=pp.Euler(pose[3], pose[4], pose[5]))  # world_from_element
             world_from_tool = pp.multiply(world_from_element, pp.invert(self.grasp_pose))
-            
+
             # 获取运动学解
             joint_val = self.robot_setup.get_relative_ik_solution(world_from_tool, q_init=np.random.uniform(-np.pi, np.pi, size=6).tolist())
             if joint_val is not None:
@@ -382,7 +382,7 @@ class Planner:
                     success = False
                     timeout = True
                     break
-            
+
             if timeout:
                 if verbose:
                     with printer.indented(verbose_level + 2):

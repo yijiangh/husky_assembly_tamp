@@ -121,3 +121,4 @@ ENV/
 # coop_assembly
 ###############################
 scripts/*test*.py
+scripts/logs/**/*.npy

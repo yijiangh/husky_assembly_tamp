@@ -1250,6 +1250,12 @@ class SceneParser:
             pose = pp.multiply(pp.get_link_pose(robot.robot, robot.tool_link), delta_pose)
             pp.set_pose(attachment_body, pose)
             attachment = pp.create_attachment(robot.robot, robot.tool_link, attachment_body)
+        elif self.get_robot_grasp_type() == "box":
+            attachment_body = pp.create_box(*self.get_robot_grasp_size())
+            delta_pose = pp.Pose(point=self.get_robot_grasp_offset(), euler=self.get_robot_grasp_rotation())
+            pose = pp.multiply(pp.get_link_pose(robot.robot, robot.tool_link), delta_pose)
+            pp.set_pose(attachment_body, pose)
+            attachment = pp.create_attachment(robot.robot, robot.tool_link, attachment_body)
         else:
             raise ValueError(f"Unknown grasp type: {self.get_robot_grasp_type()}")
 
@@ -1259,6 +1265,8 @@ class SceneParser:
                 approximate_attachment_body = pp.create_cylinder(approximate_info["radius"], approximate_info["height"], color=[1, 0, 0, 1])
             elif approximate_info["type"] == "sphere":
                 approximate_attachment_body = pp.create_sphere(approximate_info["radius"], color=[1, 0, 0, 1])
+            elif approximate_info["type"] == "box":
+                approximate_attachment_body = pp.create_box(*approximate_info["size"])
             pp.set_color(approximate_attachment_body, [1, 0, 0, 0.75])
             approximate_delta_pose = pp.Pose(point=self.get_robot_grasp_approximate_offset(), euler=self.get_robot_grasp_approximate_rotation())
             approximate_pose = pp.multiply(pp.get_link_pose(robot.robot, robot.tool_link), approximate_delta_pose)
@@ -1405,7 +1413,7 @@ if __name__ == "__main__":
             attachment_body, attachment = scene_parser.create_attachment(robot)
             robot.update_attachments([attachment])
             channel_bodies = SceneParser.load_channels(scene_parser.get_channel_info())
-            points = SceneParser.sample_points_in_channel(scene_parser.get_channel_info()[1]["type"], scene_parser.get_channel_info()[1], scene_parser.get_channel_info()[1]["thickness"], ratio=0.5)
+            points = SceneParser.sample_points_in_channel(scene_parser.get_channel_info()[0]["type"], scene_parser.get_channel_info()[0], scene_parser.get_channel_info()[0]["thickness"], ratio=0.5)
             # points = SceneParser.sample_points_in_polgon(scene_parser.get_channel_info()[7]["points"])
             for point in points:
                 pp.draw_point(point, size=0.05)

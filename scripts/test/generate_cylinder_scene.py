@@ -33,9 +33,9 @@ def create_sliders(init_pos=[0.5, 0, 0.5], init_orient=[0, 0, 0], init_length=0.
     sliders = {}
     
     # 主滑块 - 粗调整
-    sliders['x'] = p.addUserDebugParameter("X Coarse", -2, 2, init_pos[0])
-    sliders['y'] = p.addUserDebugParameter("Y Coarse", -2, 2, init_pos[1])
-    sliders['z'] = p.addUserDebugParameter("Z Coarse", 0, 2, init_pos[2])
+    sliders['x'] = p.addUserDebugParameter("X Coarse", -3, 3, init_pos[0])
+    sliders['y'] = p.addUserDebugParameter("Y Coarse", -3, 3, init_pos[1])
+    sliders['z'] = p.addUserDebugParameter("Z Coarse", -1, 3, init_pos[2])
     
     # Fine sliders - for precise position adjustments (±0.1 range)
     sliders['x_fine'] = p.addUserDebugParameter("X Fine", -0.1, 0.1, 0)
@@ -208,7 +208,7 @@ def save_scene_to_yaml(robot_setup: RobotSetup, added_cylinders):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Test")
-    parser.add_argument("--env", type=str, default="wooden_storage_shelf.stl", help="env object")
+    parser.add_argument("--env", type=str, default="unfinished_building.stl", help="env object")
     parser.add_argument("--grasp", type=str, default="element_1", help="grasp element")
     parser.add_argument("--cylinder_file", type=str, help="Specific cylinder JSON file to load")
     args = parser.parse_args()
@@ -216,16 +216,17 @@ if __name__ == "__main__":
     init_pb()
     
     env_obj_path = os.path.join(HERE, "model", "obj", "env", args.env)
-    env_obj = pp.create_obj(env_obj_path, scale=0.006)
+    env_obj = pp.create_obj(env_obj_path, scale=0.5)
     pp.set_pose(env_obj, pp.Pose(point=[0, 0, 0], euler=[0, 0, 0]))
     
     rb = RobotSetup("r0")
-    pp.set_pose(rb.robot, pp.Pose(point=[-0.25, -0.75, 0], euler=[0, 0, 1.5708]))
+    pp.set_pose(rb.robot, pp.Pose(point=[-1, -3, 0], euler=[0, 0, 1.5708]))
     
     # 设置抓取物体
     grasp_offset = [0.0, 0.0, 0.15]
-    line_pts_grasped = [np.array([0, 0, 0]), np.array([0, 0, 0.75])]
-    grasped_element = create_collision_bodies(line_pts_grasped, [0.02], viewer=True)[0]
+    # line_pts_grasped = [np.array([0, 0, 0]), np.array([0, 0, 2.75631])]
+    # grasped_element = create_collision_bodies(line_pts_grasped, [0.05], viewer=True)[0]
+    grasped_element = pp.create_box(0.045, 0.1033, 2.75631)
     pp.set_pose(grasped_element, pp.multiply(pp.get_link_pose(rb.robot, rb.tool_link), pp.Pose(point=grasp_offset, euler=pp.Euler(1.5708, 0, 0))))
     grasp_attachment = pp.create_attachment(rb.robot, rb.tool_link, grasped_element)
     rb.update_attachments([grasp_attachment])
@@ -234,7 +235,7 @@ if __name__ == "__main__":
     # 关节角控制
     # **************************************************************************
     
-    initial_angles = [1.5708, -1.257, 1.058, -1.587, -1.455, 1.587]
+    initial_angles = [1.5708, -0.992, 0.926, -1.5708, -1.5708, 1.5708]
     j0_slider = p.addUserDebugParameter("joint contorl j0", -2 * np.pi, 2 * np.pi, initial_angles[0])
     j1_slider = p.addUserDebugParameter("joint contorl j1", -2 * np.pi, 2 * np.pi, initial_angles[1])
     j2_slider = p.addUserDebugParameter("joint contorl j2", -2 * np.pi, 2 * np.pi, initial_angles[2])
@@ -256,7 +257,6 @@ if __name__ == "__main__":
     # **************************************************************************
     # 碰撞体设置
     # **************************************************************************
-    # pp.create_cylinder # This line was incomplete
 
     # --- Cylinder Interaction Setup ---
     # 尝试加载cylinder数据

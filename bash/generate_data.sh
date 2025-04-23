@@ -1,7 +1,7 @@
 #!/bin/bash
 
 seeds=(78543287 19802734 37485620 92013201 19491001 53011314 67081201 37475620 21920132 75492013)
-scene=shelf_1
+scene=cuboid_1
 task=task_1
 
 for seed in "${seeds[@]}"; do

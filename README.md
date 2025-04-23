@@ -38,8 +38,8 @@ bash bash/generate_data.sh
 
 ## TODO List
 
-* cuboid_1
-  - [ ] BiRRT
+* cuboid_1_task_1
+  - [x] BiRRT
   - [x] RRTConnect
   - [x] PRM
   - [x] LazyRRT
@@ -48,11 +48,11 @@ bash bash/generate_data.sh
   - [x] BIT*
   - [x] EIT*
   - [x] BFMT
-  - [ ] cuRobo
+  - [x] cuRobo
   - [x] TAPOM
 
-* shelf_1
-  - [ ] BiRRT
+* shelf_1_task_1
+  - [x] BiRRT
   - [x] RRTConnect
   - [x] PRM
   - [x] LazyRRT
@@ -61,5 +61,18 @@ bash bash/generate_data.sh
   - [x] BIT*
   - [x] EIT*
   - [x] BFMT
-  - [ ] cuRobo
+  - [x] cuRobo
   - [x] TAPOM
+
+* house_1_task_1
+  - [ ] BiRRT
+  - [ ] RRTConnect
+  - [ ] PRM
+  - [ ] LazyRRT
+  - [ ] EST
+  - [ ] STRIDE 
+  - [ ] BIT*
+  - [ ] EIT*
+  - [ ] BFMT
+  - [ ] cuRobo
+  - [ ] TAPOM

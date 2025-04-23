@@ -50,7 +50,7 @@ class PlanningThread(threading.Thread):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Test script")
 
-    parser.add_argument("--scene", type=str, default="shelf_1", help="Scene name")
+    parser.add_argument("--scene", type=str, default="cuboid_1", help="Scene name")
     parser.add_argument("--task", type=str, default="task_1", help="Task number")
     
     parser.add_argument("--joint_angles", type=str, help="Joint angles for manual mode (comma-separated, e.g. '1.0,0.5,-1.0,0.8,1.2,0.3')")

@@ -587,8 +587,7 @@ class TopologyPlanner:
             最优通道路径
         """
         # 1. 建立完整的图
-        with pp.LockRenderer():
-            self.full_graph = self._build_full_graph(start_xyz, target_xyz, sample_attempts=self.sample_attempts, connect_threshold=self.connect_threshold)
+        self.full_graph = self._build_full_graph(start_xyz, target_xyz, sample_attempts=self.sample_attempts, connect_threshold=self.connect_threshold)
 
         # 2. 计算所有可行路径，并按照优先级排序
         self.all_paths = self._find_all_paths(self.full_graph, start_node=-1, target_node=-2)

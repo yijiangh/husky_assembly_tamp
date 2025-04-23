@@ -570,7 +570,9 @@ class RobotSetup:
                 ]
             )
 
-        grasped_collision_fn = pp.get_floating_body_collision_fn(self.attachments[0].child, obstacles=obstacle_bodies + [self.robot])
+        grasped_collision_fn_list = []
+        for attachment in self.attachments:
+            grasped_collision_fn_list.append(pp.get_floating_body_collision_fn(attachment.child, obstacles=obstacle_bodies + [self.robot]))
         robot_collision_fn = pp.get_collision_fn(
             robot_body, arm_joints, obstacles=obstacle_bodies, attachments=attachments, self_collisions=True, disabled_collisions=disabled_collisions, extra_disabled_collisions=extra_disabled_collisions, max_distance=0.0
         )
@@ -588,8 +590,10 @@ class RobotSetup:
             """
             robot_collision = robot_collision_fn(joint_conf, diagnosis=diagnosis)
             self.set_joint_positions(arm_joints, joint_conf)
-            pose = pp.get_pose(self.attachments[0].child)
-            grasped_collision = grasped_collision_fn(pose, diagnosis=diagnosis)
+            grasped_collision = False
+            for idx, grasped_collision_fn in enumerate(grasped_collision_fn_list):
+                pose = pp.get_pose(self.attachments[idx].child)
+                grasped_collision = grasped_collision or grasped_collision_fn(pose, diagnosis=diagnosis)
             return grasped_collision or robot_collision
 
         return collision_fn

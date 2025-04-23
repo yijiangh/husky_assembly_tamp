@@ -1072,8 +1072,8 @@ class SceneParser:
         """
         if not self.robot_info:
             raise ValueError("Robot information not loaded")
-        approximate_info = self.robot_info.grasp.approximate
-        return {"type": approximate_info.type, "radius": approximate_info.radius, "height": approximate_info.height, "rotation": approximate_info.rotation, "offset": approximate_info.offset}
+        approximate_info = self.robot_info.grasp.approximate.__dict__
+        return approximate_info
 
     def get_robot_grasp_pose(self):
         """

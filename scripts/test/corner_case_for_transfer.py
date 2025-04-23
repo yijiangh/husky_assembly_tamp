@@ -100,7 +100,7 @@ if __name__ == "__main__":
         rb = scene_parser.create_robot("r0")
         # 设置抓取物体
         attachment_body, grasp_attachment, approximate_attachment_body, approximate_attachment = scene_parser.create_attachment(rb, approximate=True)
-        rb.update_attachments([grasp_attachment])
+        rb.update_attachments([grasp_attachment, approximate_attachment])
         # 加载场景元素
         element_bodies, element_infos = scene_parser.create_elements(color=[1, 0, 0, 1])
 

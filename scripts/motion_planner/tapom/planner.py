@@ -124,11 +124,12 @@ class Planner:
 
         self.pb_ompl_interface.ss.setStateValidityChecker(ob.StateValidityCheckerFn(custom_is_state_valid))
 
-    def _generate_key_frames(self, channel_id: int, num_points: int = 10, max_attempts: int = 1000) -> List[np.ndarray]:
+    def _generate_key_frames(self, channel_id: int, grasps: List = None, grasp_weights: List[float] = None, num_points: int = 10, max_attempts: int = 1000) -> List[np.ndarray]:
         """在指定通道内生成关键帧
 
         Args:
             channel_id: 通道ID
+            grasps: 可能的抓取位姿列表
             num_points: 生成的关键帧数量
             max_attempts: 最大尝试次数
 
@@ -137,14 +138,24 @@ class Planner:
         """
         key_frames = []
         channel = self.channel_info[channel_id]
-
         # 生成关键帧
         attempt = 0
         while attempt < max_attempts:
             attempt += 1
             pose = SceneParser.sample_pose_in_channel(channel["type"], channel, channel["thickness"], num_samples=1, ratio=0.1).flatten()
-            world_from_element = pp.Pose(point=pose[:3].tolist(), euler=pp.Euler(pose[3], pose[4], pose[5]))  # world_from_element
-            world_from_tool = pp.multiply(world_from_element, pp.invert(self.grasp_pose))
+            
+            # 设置世界坐标系下元素的位姿
+            world_from_element = pp.Pose(point=pose[:3].tolist(), euler=pp.Euler(pose[3], pose[4], pose[5]))
+            
+            # 如果提供了grasps，随机选择一个用于计算
+            if grasps and len(grasps) > 0:
+                if grasp_weights and len(grasp_weights) > 0:
+                    grasp_pose = random.choices(grasps, weights=grasp_weights, k=1)[0]
+                else:
+                    grasp_pose = random.choice(grasps)
+                world_from_tool = pp.multiply(world_from_element, pp.invert(grasp_pose))
+            else:
+                world_from_tool = pp.multiply(world_from_element, pp.invert(self.grasp_pose))
 
             # 获取运动学解
             joint_val = self.robot_setup.get_relative_ik_solution(world_from_tool, q_init=np.random.uniform(-np.pi, np.pi, size=6).tolist())
@@ -194,14 +205,23 @@ class Planner:
             # 计算与通道方向的夹角
             tool_direction = np.array(pp.tform_from_pose(tool_pose))
             tool_direction = Rotation.from_matrix(tool_direction[:3, :3]).as_rotvec()
-            alignment = np.abs(np.dot(tool_direction, channel_direction)) / (np.linalg.norm(tool_direction) * np.linalg.norm(channel_direction))
+            
+            # 计算两个方向向量的点积，得到cos(theta)
+            cos_theta = np.dot(tool_direction, channel_direction) / (np.linalg.norm(tool_direction) * np.linalg.norm(channel_direction))
+            # 确保我们处理的是锐角(取绝对值，处理可能的反向情况)
+            cos_theta = abs(cos_theta)
+            # 计算与90度的接近程度：sin(theta) = sqrt(1 - cos^2(theta))
+            # 越接近90度，sin_theta越接近1
+            sin_theta = np.sqrt(1 - cos_theta * cos_theta)
+            
+            # 使用sin_theta作为评分依据，越接近90度(sin_theta接近1)，评分越高
+            angle_score = sin_theta
 
             # 检查碰撞情况
             collision_score = 0 if self.collision_fn(frame) else 1
 
-            # 计算最终评分 (距离越近、越对齐方向、无碰撞越好)
-            # score = collision_score * (alignment + 1.0 / (distance_to_center + 0.1))
-            score = collision_score * (alignment + 1.0)
+            # 计算最终评分 (角度越接近90度、无碰撞越好)
+            score = collision_score * (angle_score + 1.0)
 
             frame_scores.append((frame, score))
 
@@ -257,6 +277,8 @@ class Planner:
         start_conf: np.ndarray,
         target_conf: np.ndarray,
         channel_path: List[int],
+        grasps: List = None,
+        grasp_weights: List[float] = None,
         max_time: float = 600.0,
         init_step_max_time: float = 200.0,
         single_plan_max_time: float = 15.0,
@@ -270,6 +292,7 @@ class Planner:
             start_conf: 起始关节配置
             target_conf: 目标关节配置
             channel_path: 通道路径
+            grasps: 可能的抓取位姿列表
             max_time: 最大规划时间(秒)
             single_plan_max_time: 每个步骤的最大规划时间(秒)
             grow_max_time: 树生长的最大时间(秒)
@@ -309,7 +332,7 @@ class Planner:
             if verbose:
                 with printer.indented(verbose_level + 1):
                     printer.info(f"Generating key frames for channel {channel_id}...")
-            key_frames = self._generate_key_frames(channel_id, num_points=num_points)
+            key_frames = self._generate_key_frames(channel_id, grasps=grasps, grasp_weights=grasp_weights, num_points=num_points)
             if key_frames is not None:
                 # 排序关键帧
                 # key_frames = self._sort_key_frames(channel_id, key_frames)
@@ -364,7 +387,7 @@ class Planner:
                 temp_start_conf = key_frames_list[i][temp_channel_path[i]]
                 temp_end_conf = key_frames_list[i + 1][temp_channel_path[i + 1]]
                 self.setup_pb_ompl(verbose)
-                temp_path = self.planner(temp_start_conf, temp_end_conf, max_time=min(single_plan_max_time * (i + 1), max_time - init_step_time - (time.time() - start_time)), verbose=verbose, verbose_level=verbose_level + 3)
+                temp_path = self.planner(temp_start_conf, temp_end_conf, max_time=min(single_plan_max_time * (i + 1), max_time - init_step_time - (time.time() - start_time)), enable_reset=True, verbose=verbose, verbose_level=verbose_level + 3)
 
                 if temp_path is not None:
                     path.append(temp_path)

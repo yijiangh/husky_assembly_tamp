@@ -102,7 +102,7 @@ class TrajectoryPlayer:
         self.rb = self.parser.create_robot("r0")
 
         self.grasped_element, self.grasp_attachment = self.parser.create_attachment(self.rb)
-        self.rb.update_attachments([self.grasp_attachment])
+        self.rb.update_attachments(self.grasp_attachment)
         self.collision_fn = self.rb.create_collision_fn(self.element_bodies)
 
     def _load_trajectories(self):
@@ -336,7 +336,6 @@ class TrajectoryPlayer:
             conf: 关节配置
         """
         self.rb.set_joint_positions(self.rb.arm_joints, conf)
-        self.grasp_attachment.assign()
 
     def _smooth_trajectory(self):
         """平滑当前轨迹"""
@@ -358,22 +357,24 @@ class TrajectoryPlayer:
             interpolated_trajectory = self._interpolate_trajectory(shortcut_trajectory, 10000)
             print(f"   插值完成, 帧数: {len(interpolated_trajectory)}")
             
-            # 步骤3: 平滑轨迹
-            print("3. 正在平滑轨迹...")
-            smoothed_trajectory = self._apply_smoothing(interpolated_trajectory)
-            print(f"   平滑完成, 帧数: {len(smoothed_trajectory)}")
+            # # 步骤3: 平滑轨迹
+            # print("3. 正在平滑轨迹...")
+            # smoothed_trajectory = self._apply_smoothing(interpolated_trajectory)
+            # print(f"   平滑完成, 帧数: {len(smoothed_trajectory)}")
             
-            # 步骤4: 碰撞检查
-            print("4. 正在进行碰撞检查...")
-            collision_free = self._check_trajectory_collision(smoothed_trajectory)
+            # # 步骤4: 碰撞检查
+            # print("4. 正在进行碰撞检查...")
+            # collision_free = self._check_trajectory_collision(smoothed_trajectory)
             
-            # 根据碰撞检查结果选择最终轨迹
-            if collision_free:
-                print("   碰撞检查通过，使用平滑后的轨迹")
-                final_trajectory = smoothed_trajectory
-            else:
-                print("   碰撞检查未通过，使用插值轨迹（未平滑）")
-                final_trajectory = interpolated_trajectory
+            # # 根据碰撞检查结果选择最终轨迹
+            # if collision_free:
+            #     print("   碰撞检查通过，使用平滑后的轨迹")
+            #     final_trajectory = smoothed_trajectory
+            # else:
+            #     print("   碰撞检查未通过，使用插值轨迹（未平滑）")
+            #     final_trajectory = interpolated_trajectory
+                
+            final_trajectory = interpolated_trajectory
             
             # 存储平滑后的轨迹
             self.smoothed_trajectory = final_trajectory
@@ -408,7 +409,7 @@ class TrajectoryPlayer:
         num_points = len(result)
         
         # 最大迭代次数
-        max_iterations = 1000
+        max_iterations = 100
         successful_shortcuts = 0
         
         for iteration in range(max_iterations):
@@ -440,9 +441,31 @@ class TrajectoryPlayer:
         return result
 
     def _interpolate_trajectory(self, trajectory, num_points):
-        """将轨迹插值到指定数量的点"""
-        # 创建时间序列（等间隔）
-        t_original = np.linspace(0, 1, len(trajectory))
+        """将轨迹插值到指定数量的点，使用基于距离的线性插值"""
+        if len(trajectory) <= 1:
+            return trajectory
+            
+        # 计算相邻构型之间的距离
+        distances = []
+        total_distance = 0.0
+        
+        for i in range(1, len(trajectory)):
+            dist = np.linalg.norm(trajectory[i] - trajectory[i-1])
+            distances.append(dist)
+            total_distance += dist
+        
+        # 基于距离创建非均匀时间参数
+        t_original = [0.0]
+        cumulative_dist = 0.0
+        
+        for dist in distances:
+            cumulative_dist += dist
+            t_original.append(cumulative_dist / total_distance)
+        
+        # 确保t_original是numpy数组
+        t_original = np.array(t_original)
+        
+        # 创建新的时间序列，用于目标点数
         t_new = np.linspace(0, 1, num_points)
         
         # 对每个关节单独进行插值
@@ -452,12 +475,10 @@ class TrajectoryPlayer:
         for joint_idx in range(joint_count):
             joint_values = trajectory[:, joint_idx]
             
-            # 创建插值样条
-            cs = CubicSpline(t_original, joint_values)
-            
-            # 对新的时间点进行采样
-            interpolated[:, joint_idx] = cs(t_new)
+            # 使用线性插值
+            interpolated[:, joint_idx] = np.interp(t_new, t_original, joint_values)
         
+        print(f"   插值完成: 原始轨迹点数={len(trajectory)}, 基于距离插值后点数={num_points}")
         return interpolated
 
     def _apply_smoothing(self, trajectory):
@@ -485,7 +506,7 @@ class TrajectoryPlayer:
         # 获取两个构型之间的插值点数量
         # 这里简单地根据构型间距离来确定测试点数量
         distance = np.linalg.norm(conf2 - conf1)
-        num_checks = max(2, int(distance * 500))  # 至少检查2个点，最多检查距离*10个点
+        num_checks = 1000
         
         # 检查插值路径上的点
         for i in range(num_checks):
@@ -519,7 +540,6 @@ class TrajectoryPlayer:
         finally:
             # 恢复原始位姿
             self.rb.set_joint_positions(self.rb.arm_joints, original_joint_positions)
-            self.grasp_attachment.assign()
         
         return collision_free
 

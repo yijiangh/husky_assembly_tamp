@@ -216,14 +216,14 @@ if __name__ == "__main__":
     init_pb()
     
     env_obj_path = os.path.join(HERE, "model", "obj", "env", args.env)
-    env_obj = pp.create_obj(env_obj_path, scale=0.5)
+    env_obj = pp.create_obj(env_obj_path, scale=1.0)
     pp.set_pose(env_obj, pp.Pose(point=[0, 0, 0], euler=[0, 0, 0]))
     
     rb = RobotSetup("r0")
     pp.set_pose(rb.robot, pp.Pose(point=[-1, -3, 0], euler=[0, 0, 1.5708]))
     
     # 设置抓取物体
-    grasp_offset = [0.0, 0.0, 0.15]
+    grasp_offset = [0.0, 0.2, 0.15]
     # line_pts_grasped = [np.array([0, 0, 0]), np.array([0, 0, 2.75631])]
     # grasped_element = create_collision_bodies(line_pts_grasped, [0.05], viewer=True)[0]
     grasped_element = pp.create_box(0.045, 0.1033, 2.75631)

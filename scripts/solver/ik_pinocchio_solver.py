@@ -1,5 +1,5 @@
 from collections import namedtuple
-from typing import Tuple, Union
+from typing import Tuple, Union, List
 
 import numpy as np
 import pinocchio
@@ -12,7 +12,7 @@ DHParam = namedtuple("DHParam", ["theta", "d", "a", "alpha"])
 
 class PinocchioSolver(object):
 
-    CONTROL_JOINT_NAMES = [
+    DEFAULT_CONTROL_JOINT_NAMES = [
         "x",
         "y",
         "theta",
@@ -24,7 +24,7 @@ class PinocchioSolver(object):
         "ur_arm_wrist_3_joint",
     ]
 
-    MANIPULATOR_JOINT_NAMES = [
+    DEFAULT_MANIPULATOR_JOINT_NAMES = [
         "ur_arm_shoulder_pan_joint",
         "ur_arm_shoulder_lift_joint",
         "ur_arm_elbow_joint",
@@ -33,21 +33,67 @@ class PinocchioSolver(object):
         "ur_arm_wrist_3_joint",
     ]
 
-    def __init__(self, urdf_path: str) -> None:
+    def __init__(self, urdf_path: str, 
+                 manipulator_joint_names: List[str] = None, 
+                 control_joint_names: List[str] = None,
+                 base_link_name: str = "ur_arm_base_link") -> None:
+        """Initialize the PinocchioSolver with specified joint names.
+        
+        Args:
+            urdf_path: Path to the URDF file
+            manipulator_joint_names: Names of manipulator joints to control
+            control_joint_names: Names of all control joints
+            base_link_name: Name of the robot base link
+        """
+        # Set joint names using provided values or defaults
+        self.MANIPULATOR_JOINT_NAMES = manipulator_joint_names or self.DEFAULT_MANIPULATOR_JOINT_NAMES
+        self.CONTROL_JOINT_NAMES = control_joint_names or self.DEFAULT_CONTROL_JOINT_NAMES
+        self.BASE_LINK_NAME = base_link_name
+        
+        # Build the complete model
         self.whole_model = pinocchio.buildModelFromUrdf(urdf_path)
         self.whole_data = self.whole_model.createData()
 
-        # self.model = self.whole_model
-        # self.data = self.whole_data
+        # Determine if we need to build a reduced model
+        self.build_reduced_model = False
+        all_joint_names = [self.whole_model.names[i] for i in range(1, self.whole_model.njoints)]
+        
+        # Check if manipulator joints are a subset of all joints
+        if not all(joint in all_joint_names for joint in self.MANIPULATOR_JOINT_NAMES):
+            print(f"Warning: Some manipulator joints are not found in the model. Using full model.")
+            self.model = self.whole_model
+            self.data = self.whole_data
+        else:
+            # Get joint IDs for manipulator joints
+            try:
+                manipulator_joint_ids = [self.whole_model.getJointId(name) for name in self.MANIPULATOR_JOINT_NAMES]
+                
+                # Only build reduced model if manipulator joints are a proper subset
+                if len(manipulator_joint_ids) < len(all_joint_names):
+                    self.build_reduced_model = True
+                    all_joint_ids = list(range(1, self.whole_model.njoints))
+                    joints_to_lock = list(set(all_joint_ids) - set(manipulator_joint_ids))
+                    
+                    # Build reduced model by locking non-manipulator joints
+                    self.model = pinocchio.buildReducedModel(
+                        self.whole_model, 
+                        joints_to_lock, 
+                        pinocchio.neutral(self.whole_model)
+                    )
+                    self.data = self.model.createData()
+                    print(f"Built reduced model with {len(manipulator_joint_ids)} active joints")
+                else:
+                    # If all joints are manipulator joints, use the full model
+                    self.model = self.whole_model
+                    self.data = self.whole_data
+                    print("Using full model as all joints are manipulator joints")
+            except Exception as e:
+                # Fall back to full model if any error occurs
+                print(f"Error building reduced model: {e}. Using full model.")
+                self.model = self.whole_model
+                self.data = self.whole_data
 
-        manipulator_joint_ids = [self.whole_model.getJointId(name) for name in self.MANIPULATOR_JOINT_NAMES]
-
-        all_joint_ids = list(range(1, self.whole_model.njoints))
-        joints_to_lock = list(set(all_joint_ids) - set(manipulator_joint_ids))
-
-        self.model = pinocchio.buildReducedModel(self.whole_model, joints_to_lock, pinocchio.neutral(self.whole_model))
-        self.data = self.model.createData()
-
+        # Initialize joint information
         self.InitJointInfo()
 
     def PrintTest(self):
@@ -110,7 +156,13 @@ class PinocchioSolver(object):
         else:
             tip_joint_id = self.model.getJointId(tip_name)
 
-        world_from_base = self.whole_data.oMf[self.whole_model.getFrameId("ur_arm_base_link")].homogeneous
+        # Get the base link transformation using the specified base link name
+        try:
+            world_from_base = self.whole_data.oMf[self.whole_model.getFrameId(self.BASE_LINK_NAME)].homogeneous
+        except Exception as e:
+            print(f"Warning: Could not find frame {self.BASE_LINK_NAME}. Using identity transformation. Error: {e}")
+            world_from_base = np.eye(4)
+            
         world_from_tip = world_from_base @ pose
 
         i = 0
@@ -171,10 +223,14 @@ class PinocchioSolver(object):
             world_from_tip = self.whole_data.oMi[self.whole_model.getJointId(tip_name)].homogeneous
 
         if relative_output:
-            world_from_base_SE3: pinocchio.SE3 = self.whole_data.oMf[self.whole_model.getFrameId("ur_arm_base_link")]
-            base_from_world = world_from_base_SE3.inverse().homogeneous
-            base_from_tip = base_from_world @ world_from_tip
-            return base_from_tip
+            try:
+                world_from_base_SE3: pinocchio.SE3 = self.whole_data.oMf[self.whole_model.getFrameId(self.BASE_LINK_NAME)]
+                base_from_world = world_from_base_SE3.inverse().homogeneous
+                base_from_tip = base_from_world @ world_from_tip
+                return base_from_tip
+            except Exception as e:
+                print(f"Warning: Could not find frame {self.BASE_LINK_NAME}. Using world frame. Error: {e}")
+                return world_from_tip
         else:
             return world_from_tip
 
@@ -202,7 +258,6 @@ class PinocchioSolver(object):
             self.whole_joint_info[name] = Joint(i, type, idx_qs, nq)
 
     def Pinocchio2Joints(self, q_pin, is_whole: bool = False) -> np.ndarray:
-
         q_joint = np.zeros(len(self.MANIPULATOR_JOINT_NAMES))
 
         if not is_whole:

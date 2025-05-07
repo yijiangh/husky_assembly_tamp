@@ -8,7 +8,7 @@ import numpy as np
 import pybullet_planning as pp
 from matplotlib import pyplot as plt
 from matplotlib.patches import Circle, Rectangle
-from robot.robot_setup import INIT_ARM_JOINT_ANGLES, RobotSetup
+from robot.robot_setup import HUSKY_INIT_ARM_JOINT_ANGLES, RobotSetup
 from scipy.interpolate import CubicSpline
 
 
@@ -159,7 +159,7 @@ class RRTStar(object):
         end_point = np.array([x_end, y_end])
         points = np.linspace(start_point, end_point, steps)
         for point in points:
-            conf = point.tolist() + [0] + INIT_ARM_JOINT_ANGLES.tolist()
+            conf = point.tolist() + [0] + HUSKY_INIT_ARM_JOINT_ANGLES.tolist()
             # pp.wait_for_user(f"path plan break 2.1: {conf}")
             if collision_fn(conf, diagnosis):
                 return False
@@ -170,7 +170,7 @@ class RRTStar(object):
         end_point = np.array([x_end, y_end])
         points = np.linspace(start_point, end_point, steps)
         for point in points:
-            conf = point.tolist() + [0] + INIT_ARM_JOINT_ANGLES.tolist()
+            conf = point.tolist() + [0] + HUSKY_INIT_ARM_JOINT_ANGLES.tolist()
             if collision_fn(conf, diagnosis):
                 return False
         return True

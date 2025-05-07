@@ -973,6 +973,14 @@ class SceneParser:
         # Placeholder for cuboid approximation
         return []
 
+    def get_robot_type(self) -> str:
+        """
+        Get the robot type.
+        """
+        if not self.robot_info:
+            raise ValueError("Robot information not loaded")
+        return self.robot_info.type
+
     def get_robot_start_pose(self) -> List[float]:
         """
         Get the robot's start joint configuration.
@@ -995,91 +1003,202 @@ class SceneParser:
             raise ValueError("Robot information not loaded")
         return self.robot_info.target
 
-    def get_robot_grasp_offset(self) -> List[float]:
+    def get_robot_grasp_type(self, index: int = 0) -> str:
         """
-        Get the robot's grasp offset in tool_link frame.
+        获取机器人抓取类型
+
+        Args:
+            index (int, optional): 抓取索引. Defaults to 0.
 
         Returns:
-            List[float]: Grasp offset [x, y, z] in tool_link frame
+            str: 抓取类型
         """
-        if not self.robot_info:
-            raise ValueError("Robot information not loaded")
-        return self.robot_info.grasp.offset
+        if not self.scene_data:
+            raise ValueError("Scene data is not loaded. Call load_scene() first.")
 
-    def get_robot_grasp_approximate_offset(self) -> List[float]:
-        """
-        Get the robot's grasp approximate offset in tool_link frame.
-        """
-        if not self.robot_info:
-            raise ValueError("Robot information not loaded")
-        return self.robot_info.grasp.approximate.offset
+        # 支持新的grasps列表和旧的grasp单例
+        if hasattr(self.scene_data.robot, "grasps"):
+            return self.scene_data.robot.grasps[index].type
+        elif hasattr(self.scene_data.robot, "grasp"):
+            return self.scene_data.robot.grasp.type
+        else:
+            raise ValueError("No grasp information found in the scene data.")
 
-    def get_robot_grasp_type(self) -> str:
+    def get_robot_grasp_offset(self, index: int = 0) -> List[float]:
         """
-        Get the robot's grasp type.
+        获取机器人抓取偏移量
 
-        Returns:
-            str: Grasp type
-        """
-        if not self.robot_info:
-            raise ValueError("Robot information not loaded")
-        return self.robot_info.grasp.type
-
-    def get_robot_grasp_rotation(self) -> List[float]:
-        """
-        Get the robot's grasp rotation.
+        Args:
+            index (int, optional): 抓取索引. Defaults to 0.
 
         Returns:
-            List[float]: Grasp rotation [x, y, z]
+            List[float]: 偏移量
         """
-        if not self.robot_info:
-            raise ValueError("Robot information not loaded")
-        return self.robot_info.grasp.rotation
+        if not self.scene_data:
+            raise ValueError("Scene data is not loaded. Call load_scene() first.")
 
-    def get_robot_grasp_approximate_rotation(self) -> List[float]:
-        """
-        Get the robot's grasp approximate rotation.
+        # 支持新的grasps列表和旧的grasp单例
+        if hasattr(self.scene_data.robot, "grasps"):
+            return self.scene_data.robot.grasps[index].offset
+        elif hasattr(self.scene_data.robot, "grasp"):
+            return self.scene_data.robot.grasp.offset
+        else:
+            raise ValueError("No grasp information found in the scene data.")
 
-        Returns:
-            List[float]: Grasp approximate rotation [x, y, z]
+    def get_robot_grasp_approximate_offset(self, index: int = 0) -> List[float]:
         """
-        if not self.robot_info:
-            raise ValueError("Robot information not loaded")
-        return self.robot_info.grasp.approximate.rotation
+        获取机器人抓取近似偏移量
 
-    def get_robot_grasp_file(self) -> str:
-        """
-        Get the robot's grasp file.
-        """
-        if not self.robot_info:
-            raise ValueError("Robot information not loaded")
-        return os.path.join(HERE, "model", "obj", "grasp", self.robot_info.grasp.file)
-
-    def get_robot_grasp_size(self) -> Union[List[float], float]:
-        """
-        Get the robot's grasp size.
-        """
-        if not self.robot_info:
-            raise ValueError("Robot information not loaded")
-        return self.robot_info.grasp.size
-
-    def get_robot_grasp_approximate(self) -> Dict:
-        """
-        Get the robot's grasp approximate.
+        Args:
+            index (int, optional): 抓取索引. Defaults to 0.
 
         Returns:
-            Dict: Dictionary containing grasp approximation information
+            List[float]: 近似偏移量
         """
-        if not self.robot_info:
-            raise ValueError("Robot information not loaded")
-        approximate_info = self.robot_info.grasp.approximate.__dict__
-        return approximate_info
+        if not self.scene_data:
+            raise ValueError("Scene data is not loaded. Call load_scene() first.")
 
-    def get_robot_grasp_pose(self):
+        # 支持新的grasps列表和旧的grasp单例
+        if hasattr(self.scene_data.robot, "grasps"):
+            return self.scene_data.robot.grasps[index].approximate.offset
+        elif hasattr(self.scene_data.robot, "grasp"):
+            return self.scene_data.robot.grasp.approximate.offset
+        else:
+            raise ValueError("No grasp information found in the scene data.")
+
+    def get_robot_grasp_rotation(self, index: int = 0) -> List[float]:
         """
-        Get the robot's grasp pose.
+        获取机器人抓取旋转角
+
+        Args:
+            index (int, optional): 抓取索引. Defaults to 0.
+
+        Returns:
+            List[float]: 旋转角
         """
-        return pp.Pose(point=self.get_robot_grasp_offset(), euler=self.get_robot_grasp_rotation())
+        if not self.scene_data:
+            raise ValueError("Scene data is not loaded. Call load_scene() first.")
+
+        # 支持新的grasps列表和旧的grasp单例
+        if hasattr(self.scene_data.robot, "grasps"):
+            return self.scene_data.robot.grasps[index].rotation
+        elif hasattr(self.scene_data.robot, "grasp"):
+            return self.scene_data.robot.grasp.rotation
+        else:
+            raise ValueError("No grasp information found in the scene data.")
+
+    def get_robot_grasp_approximate_rotation(self, index: int = 0) -> List[float]:
+        """
+        获取机器人抓取近似旋转角
+
+        Args:
+            index (int, optional): 抓取索引. Defaults to 0.
+
+        Returns:
+            List[float]: 近似旋转角
+        """
+        if not self.scene_data:
+            raise ValueError("Scene data is not loaded. Call load_scene() first.")
+
+        # 支持新的grasps列表和旧的grasp单例
+        if hasattr(self.scene_data.robot, "grasps"):
+            return self.scene_data.robot.grasps[index].approximate.rotation
+        elif hasattr(self.scene_data.robot, "grasp"):
+            return self.scene_data.robot.grasp.approximate.rotation
+        else:
+            raise ValueError("No grasp information found in the scene data.")
+
+    def get_robot_grasp_file(self, index: int = 0) -> str:
+        """
+        获取机器人抓取文件名
+
+        Args:
+            index (int, optional): 抓取索引. Defaults to 0.
+
+        Returns:
+            str: 文件名
+        """
+        if not self.scene_data:
+            raise ValueError("Scene data is not loaded. Call load_scene() first.")
+
+        # 支持新的grasps列表和旧的grasp单例
+        if hasattr(self.scene_data.robot, "grasps"):
+            return self.scene_data.robot.grasps[index].file
+        elif hasattr(self.scene_data.robot, "grasp"):
+            return self.scene_data.robot.grasp.file
+        else:
+            raise ValueError("No grasp information found in the scene data.")
+
+    def get_robot_grasp_size(self, index: int = 0) -> Union[List[float], float]:
+        """
+        获取机器人抓取尺寸
+
+        Args:
+            index (int, optional): 抓取索引. Defaults to 0.
+
+        Returns:
+            Union[List[float], float]: 尺寸
+        """
+        if not self.scene_data:
+            raise ValueError("Scene data is not loaded. Call load_scene() first.")
+
+        # 支持新的grasps列表和旧的grasp单例
+        if hasattr(self.scene_data.robot, "grasps"):
+            return self.scene_data.robot.grasps[index].size
+        elif hasattr(self.scene_data.robot, "grasp"):
+            return self.scene_data.robot.grasp.size
+        else:
+            raise ValueError("No grasp information found in the scene data.")
+
+    def get_robot_grasp_approximate(self, index: int = 0) -> Dict:
+        """
+        获取机器人抓取近似信息
+
+        Args:
+            index (int, optional): 抓取索引. Defaults to 0.
+
+        Returns:
+            Dict: 近似信息
+        """
+        if not self.scene_data:
+            raise ValueError("Scene data is not loaded. Call load_scene() first.")
+
+        # 支持新的grasps列表和旧的grasp单例
+        if hasattr(self.scene_data.robot, "grasps"):
+            return vars(self.scene_data.robot.grasps[index].approximate)
+        elif hasattr(self.scene_data.robot, "grasp"):
+            return vars(self.scene_data.robot.grasp.approximate)
+        else:
+            raise ValueError("No grasp information found in the scene data.")
+
+    def get_num_grasps(self) -> int:
+        """
+        获取抓取数量
+
+        Returns:
+            int: 抓取数量
+        """
+        if not self.scene_data:
+            raise ValueError("Scene data is not loaded. Call load_scene() first.")
+
+        if hasattr(self.scene_data.robot, "grasps"):
+            return len(self.scene_data.robot.grasps)
+        elif hasattr(self.scene_data.robot, "grasp"):
+            return 1
+        else:
+            return 0
+
+    def get_robot_grasp_pose(self, index: int = 0):
+        """
+        获取机器人抓取姿态
+
+        Args:
+            index (int, optional): 抓取索引. Defaults to 0.
+
+        Returns:
+            pp.Pose: 抓取姿态
+        """
+        return self.get_combined_grasp_pose(index)
 
     def get_robot_pose_2d(self, output_type: str = "list") -> Union[List[float], np.ndarray]:
         """
@@ -1224,57 +1343,253 @@ class SceneParser:
 
         return element_bodies, element_infos
 
-    def create_attachment(self, robot: RobotSetup, approximate: bool = False) -> Union[Tuple[int, pp.Attachment], Tuple[int, pp.Attachment, int, pp.Attachment]]:
+    def get_grasp_weights(self, normalize: bool = True) -> List[float]:
+        """
+        获取每个抓取的权重
+
+        Args:
+            normalize (bool, optional): 是否归一化权重. Defaults to True.
+
+        Returns:
+            List[float]: 每个抓取的权重
+        """
+        if not self.scene_data:
+            raise ValueError("Scene data is not loaded. Call load_scene() first.")
+
+        grasp_indices = list(range(self.get_num_grasps()))
+
+        # 获取每个抓取的权重
+        weights = []
+        for idx in grasp_indices:
+            weights.append(self.get_robot_grasp_volume(idx))
+
+        # 归一化权重
+        if normalize:
+            total_weight = sum(weights)
+            weights = [w / total_weight for w in weights]
+
+        return weights
+
+    def get_robot_grasp_volume(self, index: int = 0) -> float:
+        """
+        获取机器人抓取的体积
+
+        Returns:
+            float: 抓取的体积
+        """
+        if not self.scene_data:
+            raise ValueError("Scene data is not loaded. Call load_scene() first.")
+
+        grasp_type = self.get_robot_grasp_type(index)
+        if grasp_type == "cylinder":
+            return 0.5 * np.pi * self.get_robot_grasp_size(index)[0] ** 2 * self.get_robot_grasp_size(index)[1]
+        elif grasp_type == "box":
+            return self.get_robot_grasp_size(index)[0] * self.get_robot_grasp_size(index)[1] * self.get_robot_grasp_size(index)[2]
+        elif grasp_type == "sphere":
+            return 4.0 / 3.0 * np.pi * self.get_robot_grasp_size(index)[0] ** 3
+        else:
+            raise ValueError(f"Unknown grasp type: {grasp_type}")
+
+    def get_robot_base_grasp_offset(self) -> List[float]:
+        """
+        获取机器人基础抓取偏移量
+
+        Returns:
+            List[float]: 基础偏移量
+        """
+        if not self.scene_data:
+            raise ValueError("Scene data is not loaded. Call load_scene() first.")
+
+        if hasattr(self.scene_data.robot, "grasp_offset"):
+            return self.scene_data.robot.grasp_offset
+        else:
+            return [0.0, 0.0, 0.0]  # 默认无偏移
+
+    def get_robot_base_grasp_rotation(self) -> List[float]:
+        """
+        获取机器人基础抓取旋转角
+
+        Returns:
+            List[float]: 基础旋转角
+        """
+        if not self.scene_data:
+            raise ValueError("Scene data is not loaded. Call load_scene() first.")
+
+        if hasattr(self.scene_data.robot, "grasp_rotation"):
+            return self.scene_data.robot.grasp_rotation
+        else:
+            return [0.0, 0.0, 0.0]  # 默认无旋转
+
+    def get_robot_base_grasp_pose(self) -> Tuple[List[float], List[float]]:
+        """
+        获取机器人基础抓取姿态
+
+        Returns:
+            Tuple[List[float], List[float]]: 基础抓取姿态
+        """
+        if not self.scene_data:
+            raise ValueError("Scene data is not loaded. Call load_scene() first.")
+
+        point = self.get_robot_base_grasp_offset()
+        rotation = self.get_robot_base_grasp_rotation()
+        return pp.Pose(point=point, euler=pp.Euler(*rotation))
+
+    def get_combined_grasp_pose(self, index: int = 0) -> pp.Pose:
+        """
+        获取组合后的抓取姿态（基础姿态+特定抓取姿态）
+
+        Args:
+            index (int, optional): 抓取索引. Defaults to 0.
+
+        Returns:
+            pp.Pose: 组合后的抓取姿态
+        """
+        # 获取基础偏移和旋转
+        base_offset = self.get_robot_base_grasp_offset()
+        base_rotation = self.get_robot_base_grasp_rotation()
+
+        # 获取特定抓取的偏移和旋转
+        grasp_offset = self.get_robot_grasp_offset(index)
+        grasp_rotation = self.get_robot_grasp_rotation(index)
+
+        # 创建基础姿态
+        base_pose = pp.Pose(point=base_offset, euler=base_rotation)
+
+        # 创建特定抓取姿态
+        grasp_pose = pp.Pose(point=grasp_offset, euler=grasp_rotation)
+
+        # 组合姿态（基础姿态乘以特定抓取姿态）
+        combined_pose = pp.multiply(base_pose, grasp_pose)
+
+        return combined_pose
+
+    def get_combined_grasp_approximate_pose(self, index: int = 0) -> pp.Pose:
+        """
+        获取组合后的抓取近似姿态（基础姿态+特定近似抓取姿态）
+
+        Args:
+            index (int, optional): 抓取索引. Defaults to 0.
+
+        Returns:
+            pp.Pose: 组合后的抓取近似姿态
+        """
+        # 获取基础偏移和旋转
+        base_offset = self.get_robot_base_grasp_offset()
+        base_rotation = self.get_robot_base_grasp_rotation()
+
+        # 获取近似抓取的偏移和旋转
+        approximate_offset = self.get_robot_grasp_approximate_offset(index)
+        approximate_rotation = self.get_robot_grasp_approximate_rotation(index)
+
+        # 创建基础姿态
+        base_pose = pp.Pose(point=base_offset, euler=base_rotation)
+
+        # 创建近似抓取姿态
+        approximate_pose = pp.Pose(point=approximate_offset, euler=approximate_rotation)
+
+        # 组合姿态（基础姿态乘以近似抓取姿态）
+        combined_pose = pp.multiply(base_pose, approximate_pose)
+
+        return combined_pose
+
+    def get_grasps(self, use_weights: bool = False, normalize: bool = True) -> Union[List[Tuple], Tuple[List[Tuple], List[float]]]:
+        """
+        获取所有抓取姿态
+
+        Returns:
+            List[pp.Pose]: 抓取姿态列表
+            Tuple[List[pp.Pose], List[float]]: 抓取姿态列表和权重
+        """
+        if use_weights:
+            return [self.get_combined_grasp_pose(i) for i in range(self.get_num_grasps())], self.get_grasp_weights(normalize)
+        else:
+            return [self.get_combined_grasp_pose(i) for i in range(self.get_num_grasps())]
+
+    def create_attachment(self, robot: RobotSetup, approximate: bool = False, grasp_indices: List[int] = None) -> Union[Tuple[int, pp.Attachment, int, pp.Attachment], Tuple[List[int], List[pp.Attachment], List[int], List[pp.Attachment]]]:
         """
         创建并返回场景中定义的所有连接器元素的PyBullet物理对象列表。
 
         Args:
             robot (RobotSetup): 机器人对象
             approximate (bool, optional): 是否使用近似形状. Defaults to False.
+            grasp_indices (List[int], optional): 要创建的抓取索引列表. Defaults to None，表示创建所有抓取.
 
         Returns:
-            Union[Tuple[int, pp.Attachment], Tuple[int, pp.Attachment, int, pp.Attachment]]: 创建的连接器物理对象ID列表
+            Union[Tuple[int, pp.Attachment, int, pp.Attachment], Tuple[List[int], List[pp.Attachment], List[int], List[pp.Attachment]]]:
+                如果只有一个抓取，返回元组 (attachment_body, grasp_attachment, approximate_attachment_body, approximate_attachment)
+                如果有多个抓取，返回元组 (attachment_bodies, grasp_attachments, approximate_attachment_bodies, approximate_attachments)
+                其中每个元素都是对应的列表
         """
         if not self.scene_data:
             raise ValueError("Scene data is not loaded. Call load_scene() first.")
 
-        if self.get_robot_grasp_type() == "element":
-            attachment_body = pp.create_cylinder(self.get_robot_grasp_size()[0], self.get_robot_grasp_size()[1])
-            delta_pose = pp.Pose(point=self.get_robot_grasp_offset(), euler=self.get_robot_grasp_rotation())
-            pose = pp.multiply(pp.get_link_pose(robot.robot, robot.tool_link), delta_pose)
-            pp.set_pose(attachment_body, pose)
-            attachment = pp.create_attachment(robot.robot, robot.tool_link, attachment_body)
-        elif self.get_robot_grasp_type() == "mesh":
-            attachment_body = pp.create_obj(self.get_robot_grasp_file(), scale=self.get_robot_grasp_size())
-            delta_pose = pp.Pose(point=self.get_robot_grasp_offset(), euler=self.get_robot_grasp_rotation())
-            pose = pp.multiply(pp.get_link_pose(robot.robot, robot.tool_link), delta_pose)
-            pp.set_pose(attachment_body, pose)
-            attachment = pp.create_attachment(robot.robot, robot.tool_link, attachment_body)
-        elif self.get_robot_grasp_type() == "box":
-            attachment_body = pp.create_box(*self.get_robot_grasp_size())
-            delta_pose = pp.Pose(point=self.get_robot_grasp_offset(), euler=self.get_robot_grasp_rotation())
-            pose = pp.multiply(pp.get_link_pose(robot.robot, robot.tool_link), delta_pose)
-            pp.set_pose(attachment_body, pose)
-            attachment = pp.create_attachment(robot.robot, robot.tool_link, attachment_body)
-        else:
-            raise ValueError(f"Unknown grasp type: {self.get_robot_grasp_type()}")
+        # 如果没有指定索引，则创建所有抓取
+        if grasp_indices is None:
+            grasp_indices = list(range(self.get_num_grasps()))
+
+        attachment_bodies = []
+        grasp_attachments = []
+        approximate_attachment_bodies = []
+        approximate_attachments = []
+
+        for idx in grasp_indices:
+            grasp_type = self.get_robot_grasp_type(idx)
+
+            if grasp_type == "cylinder":
+                attachment_body = pp.create_cylinder(self.get_robot_grasp_size(idx)[0], self.get_robot_grasp_size(idx)[1])
+                combined_pose = self.get_combined_grasp_pose(idx)
+                tool_pose = pp.get_link_pose(robot.robot, robot.tool_link)
+                pose = pp.multiply(tool_pose, combined_pose)
+                pp.set_pose(attachment_body, pose)
+                attachment = pp.create_attachment(robot.robot, robot.tool_link, attachment_body)
+            elif grasp_type == "mesh":
+                attachment_body = pp.create_obj(self.get_robot_grasp_file(idx), scale=self.get_robot_grasp_size(idx))
+                combined_pose = self.get_combined_grasp_pose(idx)
+                tool_pose = pp.get_link_pose(robot.robot, robot.tool_link)
+                pose = pp.multiply(tool_pose, combined_pose)
+                pp.set_pose(attachment_body, pose)
+                attachment = pp.create_attachment(robot.robot, robot.tool_link, attachment_body)
+            elif grasp_type == "box":
+                attachment_body = pp.create_box(*self.get_robot_grasp_size(idx))
+                combined_pose = self.get_combined_grasp_pose(idx)
+                tool_pose = pp.get_link_pose(robot.robot, robot.tool_link)
+                pose = pp.multiply(tool_pose, combined_pose)
+                pp.set_pose(attachment_body, pose)
+                attachment = pp.create_attachment(robot.robot, robot.tool_link, attachment_body)
+            else:
+                raise ValueError(f"Unknown grasp type: {grasp_type}")
+
+            attachment_bodies.append(attachment_body)
+            grasp_attachments.append(attachment)
+
+            if approximate:
+                approximate_info = self.get_robot_grasp_approximate(idx)
+                if approximate_info["type"] == "cylinder":
+                    approximate_attachment_body = pp.create_cylinder(approximate_info["radius"], approximate_info["height"], color=[1, 0, 0, 1])
+                elif approximate_info["type"] == "sphere":
+                    approximate_attachment_body = pp.create_sphere(approximate_info["radius"], color=[1, 0, 0, 1])
+                elif approximate_info["type"] == "box":
+                    approximate_attachment_body = pp.create_box(*approximate_info["size"])
+                pp.set_color(approximate_attachment_body, [1, 0, 0, 0.75])
+
+                combined_approximate_pose = self.get_combined_grasp_approximate_pose(idx)
+                tool_pose = pp.get_link_pose(robot.robot, robot.tool_link)
+                approximate_pose = pp.multiply(tool_pose, combined_approximate_pose)
+
+                pp.set_pose(approximate_attachment_body, approximate_pose)
+                approximate_attachment = pp.create_attachment(robot.robot, robot.tool_link, approximate_attachment_body)
+
+                approximate_attachment_bodies.append(approximate_attachment_body)
+                approximate_attachments.append(approximate_attachment)
+            else:
+                # 如果不需要近似形状，仍然添加None以保持返回格式一致
+                approximate_attachment_bodies.append(None)
+                approximate_attachments.append(None)
 
         if approximate:
-            approximate_info = self.get_robot_grasp_approximate()
-            if approximate_info["type"] == "cylinder":
-                approximate_attachment_body = pp.create_cylinder(approximate_info["radius"], approximate_info["height"], color=[1, 0, 0, 1])
-            elif approximate_info["type"] == "sphere":
-                approximate_attachment_body = pp.create_sphere(approximate_info["radius"], color=[1, 0, 0, 1])
-            elif approximate_info["type"] == "box":
-                approximate_attachment_body = pp.create_box(*approximate_info["size"])
-            pp.set_color(approximate_attachment_body, [1, 0, 0, 0.75])
-            approximate_delta_pose = pp.Pose(point=self.get_robot_grasp_approximate_offset(), euler=self.get_robot_grasp_approximate_rotation())
-            approximate_pose = pp.multiply(pp.get_link_pose(robot.robot, robot.tool_link), approximate_delta_pose)
-            pp.set_pose(approximate_attachment_body, approximate_pose)
-            approximate_attachment = pp.create_attachment(robot.robot, robot.tool_link, approximate_attachment_body)
-            return attachment_body, attachment, approximate_attachment_body, approximate_attachment
-
-        return attachment_body, attachment
+            return (attachment_bodies, grasp_attachments, approximate_attachment_bodies, approximate_attachments)
+        else:
+            return (attachment_bodies, grasp_attachments)
 
     def create_robot(self, name: str) -> RobotSetup:
         """
@@ -1283,7 +1598,7 @@ class SceneParser:
         Returns:
             RobotSetup: 创建的机器人对象
         """
-        rb = RobotSetup(name)
+        rb = RobotSetup(name, robot_type=self.get_robot_type())
         rb.set_base_pose_2d(*self.get_robot_pose_2d())
         rb.set_joint_positions(rb.arm_joints, self.get_robot_start_pose())
         return rb
@@ -1411,12 +1726,12 @@ if __name__ == "__main__":
             robot = scene_parser.create_robot("r0")
             element_bodies = scene_parser.create_elements()
             attachment_body, attachment = scene_parser.create_attachment(robot)
-            robot.update_attachments([attachment])
-            channel_bodies = SceneParser.load_channels(scene_parser.get_channel_info())
-            points = SceneParser.sample_points_in_channel(scene_parser.get_channel_info()[0]["type"], scene_parser.get_channel_info()[0], scene_parser.get_channel_info()[0]["thickness"], ratio=0.5)
+            robot.update_attachments(attachment)
+            # channel_bodies = SceneParser.load_channels(scene_parser.get_channel_info())
+            # points = SceneParser.sample_points_in_channel(scene_parser.get_channel_info()[0]["type"], scene_parser.get_channel_info()[0], scene_parser.get_channel_info()[0]["thickness"], ratio=0.5)
             # points = SceneParser.sample_points_in_polgon(scene_parser.get_channel_info()[7]["points"])
-            for point in points:
-                pp.draw_point(point, size=0.05)
+            # for point in points:
+            #     pp.draw_point(point, size=0.05)
 
         start_pose = scene_parser.get_robot_start_pose()
         target_pose = scene_parser.get_robot_target_pose()
@@ -1424,14 +1739,16 @@ if __name__ == "__main__":
         # 添加按钮来切换机器人姿态
         start_button = p.addUserDebugParameter("start", 1, 0, 1)
         target_button = p.addUserDebugParameter("target", 1, 0, 1)
+        control_button = p.addUserDebugParameter("control", 1, 0, 1)
 
         # 初始化按钮状态
         prev_start_button_value = p.readUserDebugParameter(start_button)
         prev_target_button_value = p.readUserDebugParameter(target_button)
-
+        prev_control_button_value = p.readUserDebugParameter(control_button)
         while True:
             start_button_value = p.readUserDebugParameter(start_button)
             target_button_value = p.readUserDebugParameter(target_button)
+            control_button_value = p.readUserDebugParameter(control_button)
 
             if start_button_value != prev_start_button_value:
                 robot.set_joint_positions(robot.arm_joints, start_pose)
@@ -1439,7 +1756,44 @@ if __name__ == "__main__":
             if target_button_value != prev_target_button_value:
                 robot.set_joint_positions(robot.arm_joints, target_pose)
                 prev_target_button_value = target_button_value
+            if control_button_value != prev_control_button_value:
+                prev_control_button_value = control_button_value
+                break
+
             time.sleep(1.0 / 240)
+
+        initial_angles = target_pose
+        j0_slider = p.addUserDebugParameter("joint contorl j0", -2 * np.pi, 2 * np.pi, initial_angles[0])
+        j1_slider = p.addUserDebugParameter("joint contorl j1", -2 * np.pi, 2 * np.pi, initial_angles[1])
+        j2_slider = p.addUserDebugParameter("joint contorl j2", -2 * np.pi, 2 * np.pi, initial_angles[2])
+        j3_slider = p.addUserDebugParameter("joint contorl j3", -2 * np.pi, 2 * np.pi, initial_angles[3])
+        j4_slider = p.addUserDebugParameter("joint contorl j4", -2 * np.pi, 2 * np.pi, initial_angles[4])
+        j5_slider = p.addUserDebugParameter("joint contorl j5", -2 * np.pi, 2 * np.pi, initial_angles[5])
+        robot.set_joint_positions(robot.arm_joints, np.array(initial_angles))
+        while True:
+            j0 = p.readUserDebugParameter(j0_slider)
+            j1 = p.readUserDebugParameter(j1_slider)
+            j2 = p.readUserDebugParameter(j2_slider)
+            j3 = p.readUserDebugParameter(j3_slider)
+            j4 = p.readUserDebugParameter(j4_slider)
+            j5 = p.readUserDebugParameter(j5_slider)
+            robot.set_joint_positions(robot.arm_joints, np.array([j0, j1, j2, j3, j4, j5]))
+            time.sleep(1.0 / 240)
+
+        # initial_pose = [1.053, 1.158, 0.368]
+        # x_slider = p.addUserDebugParameter("x", -5, 5, initial_pose[0])
+        # y_slider = p.addUserDebugParameter("y", -5, 5, initial_pose[1])
+        # z_slider = p.addUserDebugParameter("z", -5, 5, initial_pose[2])
+
+        # sphere_id = pp.create_sphere(0.02)
+        # pp.set_pose(sphere_id, pp.Pose(point=[target_pose[0], target_pose[1], target_pose[2]]))
+
+        # while True:
+        #     x = p.readUserDebugParameter(x_slider)
+        #     y = p.readUserDebugParameter(y_slider)
+        #     z = p.readUserDebugParameter(z_slider)
+        #     pp.set_pose(sphere_id, pp.Pose(point=[x, y, z]))
+        #     time.sleep(1.0 / 240)
 
     else:  # reorganize mode
         if not args.target_scene:

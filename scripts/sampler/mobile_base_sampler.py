@@ -10,7 +10,7 @@ from utils.params import *
 
 sys.path.append(PROJECT_DIR)
 
-from robot.robot_setup import INIT_ARM_JOINT_ANGLES
+from robot.robot_setup import HUSKY_INIT_ARM_JOINT_ANGLES
 
 
 def is_point_in_polygon(point, polygon):
@@ -183,7 +183,7 @@ def is_valid_pose(
     #         return False
 
     if collision_fn is not None:
-        conf = np.hstack((candidate_point[:2], np.array([candidate_orientation]), INIT_ARM_JOINT_ANGLES))
+        conf = np.hstack((candidate_point[:2], np.array([candidate_orientation]), HUSKY_INIT_ARM_JOINT_ANGLES))
         collision = collision_fn(conf, diagnosis=False)
         if collision:
             return False

@@ -7,6 +7,7 @@ env_obj: "wooden_storage_shelf.stl"
 env_scale: 0.006
 
 robot:
+  type: "husky"
   start: [1.5708, -2.976, 1.984, -1.587, -1.455, 1.587]
   target: [1.5708, -1.257, 1.058, -1.587, -1.455, 1.587]
   pose_2d: [-0.25, -0.75, 1.5708]

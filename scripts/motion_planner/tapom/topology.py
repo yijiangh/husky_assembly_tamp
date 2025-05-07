@@ -41,7 +41,7 @@ class TopologyPlanner:
     基于通道信息进行拓扑规划，找出最优的通道通过顺序。
     """
 
-    def __init__(self, robot_setup: RobotSetup, channel_info: List[Dict], bodies: List[int], eval_max_attempts: int = 50000, sample_attempts: int = 100, connect_threshold: float = 0.25):
+    def __init__(self, robot_setup: RobotSetup, channel_info: List[Dict], bodies: List[int], eval_max_attempts: int = 50000, sample_attempts: int = 100, connect_threshold: float = 0.25, alpha: float = 1.0, beta: float = 2.0, gamma: float = 3.0):
         """初始化拓扑规划器
 
         Args:
@@ -56,6 +56,9 @@ class TopologyPlanner:
         self.eval_max_attempts = eval_max_attempts
         self.sample_attempts = sample_attempts
         self.connect_threshold = connect_threshold
+        self.alpha = alpha
+        self.beta = beta
+        self.gamma = gamma
 
         with pp.LockRenderer():
             self.channel_info = self._evaluate_channel_priority()
@@ -120,7 +123,7 @@ class TopologyPlanner:
 
         # 计算总优先级
         for channel in self.channel_info:
-            channel["priority"] = channel["reachability_weight"] + 2.0 * channel["passability"]
+            channel["priority"] = self.alpha * channel["reachability_weight"] + self.beta * channel["passability"]
 
         return self.channel_info
 
@@ -409,7 +412,7 @@ class TopologyPlanner:
             if path[-1] >= 0:
                 priority += self.channel_info[path[-1]].get("priority", 1.0)
 
-            norm_priority = priority / (len(path) ** 3.0)
+            norm_priority = priority / (len(path) ** self.gamma)
 
             path_priorities.append((path, norm_priority))
 

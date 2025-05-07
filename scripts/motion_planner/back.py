@@ -11,7 +11,7 @@ from utils.params import *
 sys.path.append(HERE)
 
 from pybullet_planning import Attachment, interpolate_poses
-from robot.robot_setup import INIT_ARM_JOINT_ANGLES, RobotSetup
+from robot.robot_setup import HUSKY_INIT_ARM_JOINT_ANGLES, RobotSetup
 from sampler.grasp_sampler import grasp_sampler
 from sampler.mobile_base_sampler import robot_pose_sampler
 from utils.collision import Element
@@ -341,7 +341,7 @@ def get_back_gen_fn(
             TermPrint.print("Back E#{} | Attempts: {} | Command: {}".format(index, attempt, len(command)), "green")
 
             # -------------------- back to init position --------------------#
-            robot_setup.set_joint_positions(robot_setup.arm_joints, INIT_ARM_JOINT_ANGLES)
+            robot_setup.set_joint_positions(robot_setup.arm_joints, HUSKY_INIT_ARM_JOINT_ANGLES)
 
             yield command, mask
             break

@@ -11,7 +11,7 @@ from utils.params import *
 sys.path.append(HERE)
 
 from pybullet_planning import Attachment, interpolate_poses
-from robot.robot_setup import INIT_ARM_JOINT_ANGLES, RobotSetup
+from robot.robot_setup import HUSKY_INIT_ARM_JOINT_ANGLES, RobotSetup
 from utils.collision import Element
 from utils.util import CounterModule, TermPrint, angles_distance, normalize_angles
 
@@ -129,7 +129,7 @@ def compute_pick_path(
 
     # -------------------- generate ik solution for pick --------------------#
     fail_flag = True
-    robot_joint_conf_last = INIT_ARM_JOINT_ANGLES.tolist()
+    robot_joint_conf_last = HUSKY_INIT_ARM_JOINT_ANGLES.tolist()
     for ik_search_num in range(ik_search_max_attempt):
         pick_joint_conf = robot_setup.get_relative_ik_solution(pick_tool0_pose, robot_joint_conf_last)
         if pick_joint_conf is None:

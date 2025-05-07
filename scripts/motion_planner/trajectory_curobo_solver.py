@@ -70,17 +70,21 @@ class TrajectoryCuroboSolver:
             self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, q_init)
             grasped_approximate_attachment.assign()
             approximate_delta_pose = pp.Pose(point=grasped_approximate_info["offset"], euler=grasped_approximate_info["rotation"])
-            approximate_pose = pp.multiply(pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link), approximate_delta_pose)
-            pp.set_pose(grasped_approximate_body, approximate_pose)
+            approximate_pose_world = pp.multiply(pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link), approximate_delta_pose) # world_from_element
+            approximate_pose = pp.multiply(pp.invert(pp.get_pose(self.robot_setup.robot)), approximate_pose_world) # robot_from_element
             grasp_pose_point = list(approximate_pose[0])
             grasp_pose_quat = [approximate_pose[1][3], approximate_pose[1][0], approximate_pose[1][1], approximate_pose[1][2]]
-            grasp_object = Cylinder(name="grasp_element", radius=grasped_approximate_info["radius"], height=grasped_approximate_info["height"], pose=grasp_pose_point + grasp_pose_quat, color=[1.0, 0, 0, 1.0])
+            if grasped_approximate_info["type"] == "cylinder":
+                grasp_object = Cylinder(name="grasp_element", radius=grasped_approximate_info["radius"], height=grasped_approximate_info["height"], pose=grasp_pose_point + grasp_pose_quat, color=[1.0, 0, 0, 1.0])
+            elif grasped_approximate_info["type"] == "box":
+                grasp_object = Cuboid(name="grasp_element", dims=grasped_approximate_info["size"], pose=grasp_pose_point + grasp_pose_quat, color=[1.0, 0, 0, 1.0])
             obstacles.append(grasp_object)
 
         # -------------------- create world config --------------------#
         world_config = WorldConfig(cylinder=obstacles)
         world_config_obb = WorldConfig.create_obb_world(world_config)
         world_config_mesh = WorldConfig.create_mesh_world(world_config)
+        world_config_mesh.save_world_as_mesh(join_path(HERE, "world_config_mesh.obj"))
 
         # -------------------- create motion gen --------------------#
         motion_gen_config = MotionGenConfig.load_from_robot_config("husky_ur5_e.yml", world_config_mesh, interpolation_dt=0.001, interpolation_steps=50000)
@@ -93,30 +97,44 @@ class TrajectoryCuroboSolver:
             motion_gen.attach_objects_to_robot(init_js, ["grasp_element"], sphere_fit_type=SphereFitType.VOXEL_VOLUME_SAMPLE_SURFACE)
 
         # -------------------- set target and start --------------------#
-        out = self.kin_model.get_state(q_target_tensor)
-        goal_pose = Pose.from_list(out.ee_pose.position.cpu().numpy().flatten().tolist() + out.ee_pose.quaternion.cpu().numpy().flatten().tolist())
+        # out = self.kin_model.get_state(q_target_tensor)
+        # goal_pose = Pose.from_list(out.ee_pose.position.cpu().numpy().flatten().tolist() + out.ee_pose.quaternion.cpu().numpy().flatten().tolist())
         start_state = JointState.from_position(q_init_tensor, joint_names=self.robot_cfg.cspace.joint_names)
+        goal_state = JointState.from_position(q_target_tensor, joint_names=self.robot_cfg.cspace.joint_names)
+        
 
         # -------------------- plan --------------------#
         while time.time() - start_time < max_time:
             current_time = time.time()
-            result = motion_gen.plan_single(start_state, goal_pose, MotionGenPlanConfig(max_attempts=max_attempts, timeout=max_time - (current_time - start_time)))
+            result = motion_gen.plan_single_js(start_state, goal_state, MotionGenPlanConfig(max_attempts=max_attempts, timeout=max_time - (current_time - start_time)))
             if result.success:
                 path = result.get_interpolated_plan().position.cpu().numpy()
                 # Check start and end points
                 if len(path) > 0:
-                    start_diff = np.linalg.norm(path[0] - q_init_tensor.cpu().numpy())
-                    end_diff = np.linalg.norm(path[-1] - q_target_tensor.cpu().numpy())
+                    
+                    # Normalize angles to -pi to pi range
+                    path_start_normalized = np.array([(angle + np.pi) % (2 * np.pi) - np.pi for angle in path[0]])
+                    path_end_normalized = np.array([(angle + np.pi) % (2 * np.pi) - np.pi for angle in path[-1]])
+                    q_init_normalized = np.array([(angle + np.pi) % (2 * np.pi) - np.pi for angle in q_init_tensor.cpu().numpy()[0]])
+                    q_target_normalized = np.array([(angle + np.pi) % (2 * np.pi) - np.pi for angle in q_target_tensor.cpu().numpy()[0]])
+                    
+                    start_diff = np.linalg.norm(path_start_normalized - q_init_normalized)
+                    end_diff = np.linalg.norm(path_end_normalized - q_target_normalized)
 
                     print(f"Start point difference: {start_diff:.6f}, End point difference: {end_diff:.6f}")
+                    print(f"Start point by curobo: {path_start_normalized}, End point by curobo: {path_end_normalized}")
+                    print(f"Start point by init: {q_init_normalized}, End point by target: {q_target_normalized}")
 
                     # If the start or end point difference is too large, consider planning failed
                     if start_diff > 1e-4:
                         print("Planning failed due to large start difference")
                         continue
-                    if end_diff > 1e-6:
+                    if end_diff > 1e-4:
                         print("Planning failed due to large end difference")
                         continue
+                else:
+                    print("Planning failed due to no path")
+                    continue
 
                 collision_free = True
                 if collision_fn is not None:
@@ -126,7 +144,11 @@ class TrajectoryCuroboSolver:
                             break
                 if collision_free:
                     return {"success": True, "path": path}
+                else:
+                    print("Planning failed due to collision")
+                    continue
             else:
-                return {"success": False, "path": None}
+                print("Planning failed due to no path")
+                continue
 
         return {"success": False, "path": None}

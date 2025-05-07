@@ -20,7 +20,7 @@ from motion_planner.pick import get_pick_gen_fn
 from motion_planner.place import get_place_gen_fn
 from motion_planner.transfer import get_transfer_gen_fn
 from pybullet_planning import Attachment, Euler, Point, Pose, get_distance, interpolate_poses, invert, multiply
-from robot.robot_setup import INIT_ARM_JOINT_ANGLES, ONBOARD_LINK, ONBOARD_POSE, RobotSetup
+from robot.robot_setup import HUSKY_INIT_ARM_JOINT_ANGLES, HUSKY_ONBOARD_LINK, HUSKY_ONBOARD_POSE, RobotSetup
 from utils.collision import Element
 from utils.util import CounterModule, TermPrint, timeit_decorator_counter
 
@@ -433,7 +433,7 @@ class Robot(object):
                                 manipulator_path: PathItem = path.manipulator_path
                                 manipulator_path.Append(back_cmd, back_grasp_mask)
                                 robot.path_storage.update_manipulator(element_index, robot.index, manipulator_path)
-                            robot.robot_setup.set_joint_positions(robot.robot_setup.arm_joints, INIT_ARM_JOINT_ANGLES)
+                            robot.robot_setup.set_joint_positions(robot.robot_setup.arm_joints, HUSKY_INIT_ARM_JOINT_ANGLES)
                             break
 
                     if fail_flag:
@@ -498,10 +498,10 @@ class Robot(object):
         # 设置当前element到机器人上的托盘
         with pp.LockRenderer():
             ipad_link_pose = pp.get_link_pose(
-                self.robot_setup.robot, pp.link_from_name(self.robot_setup.robot, ONBOARD_LINK)
+                self.robot_setup.robot, pp.link_from_name(self.robot_setup.robot, HUSKY_ONBOARD_LINK)
             )
             delta_pose = Pose(
-                point=ONBOARD_POSE[:3], euler=Euler(roll=ONBOARD_POSE[3], pitch=ONBOARD_POSE[4], yaw=ONBOARD_POSE[5])
+                point=HUSKY_ONBOARD_POSE[:3], euler=Euler(roll=HUSKY_ONBOARD_POSE[3], pitch=HUSKY_ONBOARD_POSE[4], yaw=HUSKY_ONBOARD_POSE[5])
             )
             bar_pose = multiply(ipad_link_pose, delta_pose)
             pp.set_pose(self.element_from_index[element_index].body, bar_pose)

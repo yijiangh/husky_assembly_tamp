@@ -2,10 +2,302 @@ scene_name: "cuboid_1_task_2"
 num_elements: 12
 
 robot:
+  type: "husky"
   start: [1.5708, 0.0, 0.0, -3.1416, 0.0, -1.5708]
-  target: [1.587, 0.331, -1.984, -0.397, 1.587, 1.587]
-  grasp_offset: [0.0, 0.1, 0.15] # [x, y, z] in tool_link
-  pose_2d: [1.5, 0.5, 3.1416] # [x, y, yaw]
+  target: [1.257, 0.331, -1.918, 0.0, 1.5708, 0.331]
+  pose_2d: [-0.5, 0.5, 0.0] # [x, y, yaw]
+  grasp_offset: [0.0, 0.0, 0.15] # [x, y, z] in tool_link
+  grasp_rotation: [-1.5708, 0.0, 0.0] # [x, y, z] in tool_link
+  grasps:
+    # 把手
+    - type: "cylinder"
+      offset: [0.0, 0.02, 0.0]
+      rotation: [0.0, 0.0, 0.0]
+      file: ""
+      size: [0.01, 0.3] # r, h
+      approximate:
+        type: "cylinder"
+        radius: 0.01
+        height: 0.3
+        rotation: [0.0, 0.0, 0.0]
+        offset: [0.0, 0.0, 0.0]
+
+    - type: "cylinder"
+      offset: [0.0, -0.005, 0.15]
+      rotation: [-1.5708, 0.0, 0.0]
+      file: ""
+      size: [0.01, 0.05] # r, h
+      approximate:
+        type: "cylinder"
+        radius: 0.01
+        height: 0.05
+        rotation: [0.0, 0.0, 0.0]
+        offset: [0.0, 0.0, 0.0]
+
+    - type: "cylinder"
+      offset: [0.0, -0.005, -0.15]
+      rotation: [-1.5708, 0.0, 0.0]
+      file: ""
+      size: [0.01, 0.05] # r, h
+      approximate:
+        type: "cylinder"
+        radius: 0.01
+        height: 0.05
+        rotation: [0.0, 0.0, 0.0]
+        offset: [0.0, 0.0, 0.0]
+
+    # 板子
+    - type: "cylinder"
+      offset: [0.0, -0.025, 0.0]
+      rotation: [0.0, 0.0, 0.0]
+      file: ""
+      size: [0.01, 0.5] # r, h
+      approximate:
+        type: "cylinder"
+        radius: 0.01
+        height: 0.5
+        rotation: [0.0, 0.0, 0.0]
+        offset: [0.0, -0.025, 0.0]
+
+    - type: "cylinder"
+      offset: [0.02, -0.025, 0.0]
+      rotation: [0.0, 0.0, 0.0]
+      file: ""
+      size: [0.01, 0.5] # r, h
+      approximate:
+        type: "cylinder"
+        radius: 0.01
+        height: 0.5
+        rotation: [0.0, 0.0, 0.0]
+        offset: [0.02, -0.025, 0.0]
+
+    - type: "cylinder"
+      offset: [0.04, -0.025, 0.0]
+      rotation: [0.0, 0.0, 0.0]
+      file: ""
+      size: [0.01, 0.5] # r, h
+      approximate:
+        type: "cylinder"
+        radius: 0.01
+        height: 0.5
+        rotation: [0.0, 0.0, 0.0]
+        offset: [0.04, -0.025, 0.0]
+
+    - type: "cylinder"
+      offset: [0.06, -0.025, 0.0]
+      rotation: [0.0, 0.0, 0.0]
+      file: ""
+      size: [0.01, 0.5] # r, h
+      approximate:
+        type: "cylinder"
+        radius: 0.01
+        height: 0.5
+        rotation: [0.0, 0.0, 0.0]
+        offset: [0.06, -0.025, 0.0]
+
+    - type: "cylinder"
+      offset: [0.08, -0.025, 0.0]
+      rotation: [0.0, 0.0, 0.0]
+      file: ""
+      size: [0.01, 0.5] # r, h
+      approximate:
+        type: "cylinder"
+        radius: 0.01
+        height: 0.5
+        rotation: [0.0, 0.0, 0.0]
+        offset: [0.08, -0.025, 0.0]
+
+    - type: "cylinder"
+      offset: [0.1, -0.025, 0.0]
+      rotation: [0.0, 0.0, 0.0]
+      file: ""
+      size: [0.01, 0.5] # r, h
+      approximate:
+        type: "cylinder"
+        radius: 0.01
+        height: 0.5
+        rotation: [0.0, 0.0, 0.0]
+        offset: [0.1, -0.025, 0.0]
+
+    - type: "cylinder"
+      offset: [0.12, -0.025, 0.0]
+      rotation: [0.0, 0.0, 0.0]
+      file: ""
+      size: [0.01, 0.5] # r, h
+      approximate:
+        type: "cylinder"
+        radius: 0.01
+        height: 0.5
+        rotation: [0.0, 0.0, 0.0]
+        offset: [0.12, -0.025, 0.0]
+
+    - type: "cylinder"
+      offset: [0.14, -0.025, 0.0]
+      rotation: [0.0, 0.0, 0.0]
+      file: ""
+      size: [0.01, 0.5] # r, h
+      approximate:
+        type: "cylinder"
+        radius: 0.01
+        height: 0.5
+        rotation: [0.0, 0.0, 0.0]
+        offset: [0.14, -0.025, 0.0]
+
+    # - type: "cylinder"
+    #   offset: [0.16, -0.025, 0.0]
+    #   rotation: [0.0, 0.0, 0.0]
+    #   file: ""
+    #   size: [0.01, 0.5] # r, h
+    #   approximate:
+    #     type: "cylinder"
+    #     radius: 0.01
+    #     height: 0.5
+    #     rotation: [0.0, 0.0, 0.0]
+    #     offset: [0.16, -0.025, 0.0]
+
+    # - type: "cylinder"
+    #   offset: [0.18, -0.025, 0.0]
+    #   rotation: [0.0, 0.0, 0.0]
+    #   file: ""
+    #   size: [0.01, 0.5] # r, h
+    #   approximate:
+    #     type: "cylinder"
+    #     radius: 0.01
+    #     height: 0.5
+    #     rotation: [0.0, 0.0, 0.0]
+    #     offset: [0.18, -0.025, 0.0]
+
+    # - type: "cylinder"
+    #   offset: [0.2, -0.025, 0.0]
+    #   rotation: [0.0, 0.0, 0.0]
+    #   file: ""
+    #   size: [0.01, 0.5] # r, h
+    #   approximate:
+    #     type: "cylinder"
+    #     radius: 0.01
+    #     height: 0.5
+    #     rotation: [0.0, 0.0, 0.0]
+    #     offset: [0.2, -0.025, 0.0]
+
+    - type: "cylinder"
+      offset: [-0.02, -0.025, 0.0]
+      rotation: [0.0, 0.0, 0.0]
+      file: ""
+      size: [0.01, 0.5] # r, h
+      approximate:
+        type: "cylinder"
+        radius: 0.01
+        height: 0.5
+        rotation: [0.0, 0.0, 0.0]
+        offset: [-0.02, -0.025, 0.0]
+
+    - type: "cylinder"
+      offset: [-0.04, -0.025, 0.0]
+      rotation: [0.0, 0.0, 0.0]
+      file: ""
+      size: [0.01, 0.5] # r, h
+      approximate:
+        type: "cylinder"
+        radius: 0.01
+        height: 0.5
+        rotation: [0.0, 0.0, 0.0]
+        offset: [-0.04, -0.025, 0.0]
+
+    - type: "cylinder"
+      offset: [-0.06, -0.025, 0.0]
+      rotation: [0.0, 0.0, 0.0]
+      file: ""
+      size: [0.01, 0.5] # r, h
+      approximate:
+        type: "cylinder"
+        radius: 0.01
+        height: 0.5
+        rotation: [0.0, 0.0, 0.0]
+        offset: [-0.06, -0.025, 0.0]
+
+    - type: "cylinder"
+      offset: [-0.08, -0.025, 0.0]
+      rotation: [0.0, 0.0, 0.0]
+      file: ""
+      size: [0.01, 0.5] # r, h
+      approximate:
+        type: "cylinder"
+        radius: 0.01
+        height: 0.5
+        rotation: [0.0, 0.0, 0.0]
+        offset: [-0.08, -0.025, 0.0]
+
+    - type: "cylinder"
+      offset: [-0.1, -0.025, 0.0]
+      rotation: [0.0, 0.0, 0.0]
+      file: ""
+      size: [0.01, 0.5] # r, h
+      approximate:
+        type: "cylinder"
+        radius: 0.01
+        height: 0.5
+        rotation: [0.0, 0.0, 0.0]
+        offset: [-0.1, -0.025, 0.0]
+
+    - type: "cylinder"
+      offset: [-0.12, -0.025, 0.0]
+      rotation: [0.0, 0.0, 0.0]
+      file: ""
+      size: [0.01, 0.5] # r, h
+      approximate:
+        type: "cylinder"
+        radius: 0.01
+        height: 0.5
+        rotation: [0.0, 0.0, 0.0]
+        offset: [-0.12, -0.025, 0.0]
+
+    - type: "cylinder"
+      offset: [-0.14, -0.025, 0.0]
+      rotation: [0.0, 0.0, 0.0]
+      file: ""
+      size: [0.01, 0.5] # r, h
+      approximate:
+        type: "cylinder"
+        radius: 0.01
+        height: 0.5
+        rotation: [0.0, 0.0, 0.0]
+        offset: [-0.14, -0.025, 0.0]
+
+    # - type: "cylinder"
+    #   offset: [-0.16, -0.025, 0.0]
+    #   rotation: [0.0, 0.0, 0.0]
+    #   file: ""
+    #   size: [0.01, 0.5] # r, h
+    #   approximate:
+    #     type: "cylinder"
+    #     radius: 0.01
+    #     height: 0.5
+    #     rotation: [0.0, 0.0, 0.0]
+    #     offset: [-0.16, -0.025, 0.0]
+
+    # - type: "cylinder"
+    #   offset: [-0.18, -0.025, 0.0]
+    #   rotation: [0.0, 0.0, 0.0]
+    #   file: ""
+    #   size: [0.01, 0.5] # r, h
+    #   approximate:
+    #     type: "cylinder"
+    #     radius: 0.01
+    #     height: 0.5
+    #     rotation: [0.0, 0.0, 0.0]
+    #     offset: [-0.18, -0.025, 0.0]
+
+    # - type: "cylinder"
+    #   offset: [-0.2, -0.025, 0.0]
+    #   rotation: [0.0, 0.0, 0.0]
+    #   file: ""
+    #   size: [0.01, 0.5 # r, h
+    #   approximate:
+    #     type: "cylinder"
+    #     radius: 0.01
+    #     height: 0.5
+    #     rotation: [0.0, 0.0, 0.0]
+    #     offset: [-0.2, -0.025, 0.0]
 
 channels_info:
   - center: [0.1, 0.1, 1.0] # 通道中心位置

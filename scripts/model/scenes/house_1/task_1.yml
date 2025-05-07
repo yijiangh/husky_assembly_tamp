@@ -7,6 +7,7 @@ env_obj: "unfinished_building.stl"
 env_scale: 0.5
 
 robot:
+  type: "husky"
   start: [1.5708, -2.513, 0.926, -1.5708, -1.5708, 1.5708]
   target: [1.5708, -0.992, 0.926, -1.5708, -1.5708, 1.5708]
   pose_2d: [-1.0, -3.0, 1.5708]
@@ -282,17 +283,17 @@ elements:
       radius: 0.04999999701976776
       count: 100
 
-  - id: "element_22"
-    position: [-0.9778945297002792, -2.4589471891522408, 0.09473681449890137]
-    orientation: [0.0, 0.7073702206639348, 0.0, 0.7068432435256463]
-    shape:
-      type: "cylinder"
-      parameters:
-        radius: 0.04999999701976776
-        height: 3.0
-    sphere_fit:
-      radius: 0.04999999701976776
-      count: 100
+  # - id: "element_22"
+  #   position: [-0.9778945297002792, -2.4589471891522408, 0.09473681449890137]
+  #   orientation: [0.0, 0.7073702206639348, 0.0, 0.7068432435256463]
+  #   shape:
+  #     type: "cylinder"
+  #     parameters:
+  #       radius: 0.04999999701976776
+  #       height: 5.0
+  #   sphere_fit:
+  #     radius: 0.04999999701976776
+  #     count: 100
 
   - id: "element_23"
     position: [-0.9778945446014404, -2.395789384841919, 0.09473681449890137]
@@ -301,7 +302,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -313,7 +314,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -325,7 +326,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -337,7 +338,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -349,7 +350,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -361,7 +362,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -373,7 +374,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -385,7 +386,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -397,7 +398,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -409,7 +410,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -421,7 +422,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -433,7 +434,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -445,7 +446,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -457,7 +458,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -469,7 +470,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -481,7 +482,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -493,7 +494,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -505,7 +506,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -517,7 +518,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -529,7 +530,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -541,7 +542,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -553,7 +554,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -565,7 +566,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -577,7 +578,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -589,7 +590,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -601,7 +602,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -613,7 +614,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -625,7 +626,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -637,7 +638,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -649,7 +650,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100
@@ -661,7 +662,7 @@ elements:
       type: "cylinder"
       parameters:
         radius: 0.04999999701976776
-        height: 3.0
+        height: 5.0
     sphere_fit:
       radius: 0.04999999701976776
       count: 100

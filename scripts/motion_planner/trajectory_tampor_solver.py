@@ -64,13 +64,13 @@ class TrajectoryTAMPORSolver:
         self.topology_planner = None
         self.path_planner = None
 
-    def _init_topology_planner(self, bodies: List[int]) -> None:
+    def _init_topology_planner(self, bodies: List[int], alpha: float = 1.0, beta: float = 2.0, gamma: float = 3.0) -> None:
         """初始化拓扑规划器
 
         Args:
             bodies: 碰撞体列表
         """
-        self.topology_planner = TopologyPlanner(self.robot_setup, self.channel_info, bodies, eval_max_attempts=self.eval_max_attempts)
+        self.topology_planner = TopologyPlanner(self.robot_setup, self.channel_info, bodies, eval_max_attempts=self.eval_max_attempts, alpha=alpha, beta=beta, gamma=gamma)
 
     def _init_path_planner(self, collision_fn: Callable[[np.ndarray], bool], verbose: bool = False) -> None:
         """初始化路径规划器
@@ -85,11 +85,16 @@ class TrajectoryTAMPORSolver:
         start_conf: np.ndarray,
         target_conf: np.ndarray,
         element_bodies: List[int],
-        grasp_attachment: Attachment,
+        grasp_attachments: List[Attachment],
+        grasps: List,
+        grasp_weights: List[float] = None,
         max_time: float = 600.0,
         init_step_max_time: float = 200.0,
         step_max_time: float = 15.0,
         key_frame_num: int = 20,
+        alpha: float = 1.0,
+        beta: float = 2.0,
+        gamma: float = 3.0,
         verbose: bool = False,
     ) -> Dict:
         """Execute the complete planning process
@@ -100,7 +105,7 @@ class TrajectoryTAMPORSolver:
             start_conf: Initial joint configuration
             target_conf: Target joint configuration
             element_bodies: List of collision bodies
-            grasp_attachment: Grasp attachment
+            grasp_attachments: List of grasp attachments
             max_time: Maximum planning time
             init_step_max_time: Maximum initial step time
             step_max_time: Maximum step time
@@ -113,13 +118,20 @@ class TrajectoryTAMPORSolver:
         if verbose:
             printer.info("\n========== TAMPOR TRAJECTORY PLANNING ==========")
 
-        # 保存当前机器人状态
-        self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, start_conf)
-
         # 获取起点和终点位置
-        start_point = np.array(pp.get_point(grasp_attachment.child))
+        self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, start_conf)
+        # 计算所有grasp_attachment的平均位置作为起点
+        start_points = []
+        for attachment in grasp_attachments:
+            start_points.append(np.array(pp.get_point(attachment.child)))
+        start_point = np.mean(start_points, axis=0)
+
         self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, target_conf)
-        target_point = np.array(pp.get_point(grasp_attachment.child))
+        # 计算所有grasp_attachment的平均位置作为终点
+        target_points = []
+        for attachment in grasp_attachments:
+            target_points.append(np.array(pp.get_point(attachment.child)))
+        target_point = np.mean(target_points, axis=0)
 
         # 恢复起始位置
         self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, start_conf)
@@ -131,7 +143,7 @@ class TrajectoryTAMPORSolver:
         with pp.LockRenderer():
             if verbose:
                 printer.info("TAMPOR: Initializing topology planner...")
-            self._init_topology_planner(element_bodies)
+            self._init_topology_planner(element_bodies, alpha, beta, gamma)
             if verbose:
                 printer.info("TAMPOR: Initializing path planner...")
             self._init_path_planner(collision_fn, verbose)
@@ -150,14 +162,20 @@ class TrajectoryTAMPORSolver:
                 printer.warning("TAMPOR: Failed to find a valid topology path")
             return {"success": False, "path": None}
 
+        # if best_path == [-1, 4, -2]: # cuboid_1, task_1
+        # if best_path == [-1, 2, 11, -2]: # shelf_1, task_1
+        #     return {"success": True, "path": best_path}
+        # else:
+        #     return {"success": False, "path": None}
+
         # 2. Path Planning
         if verbose:
             printer.info("TAMPOR: Starting path planning...")
         start_time = time.time()
-        with pp.LockRenderer():
-            path = self.path_planner.plan(
-                start_conf, target_conf, best_path, max_time=max_time - topology_time, init_step_max_time=init_step_max_time, single_plan_max_time=step_max_time, num_points=key_frame_num, verbose=verbose, verbose_level=1
-            )
+        # with pp.LockRenderer():
+        path = self.path_planner.plan(
+            start_conf, target_conf, best_path, grasps=grasps, grasp_weights=grasp_weights, max_time=max_time - topology_time, init_step_max_time=init_step_max_time, single_plan_max_time=step_max_time, num_points=key_frame_num, verbose=verbose, verbose_level=1
+        )
         path_time = time.time() - start_time
         if verbose:
             printer.info(f"TAMPOR: Path planning completed in {path_time:.2f} seconds")
@@ -178,7 +196,7 @@ if __name__ == "__main__":
     # 示例用法
     init_pb()
 
-    scene_file = os.path.join(HERE, "model", "scenes", "cuboid_1", "task_1.yml")
+    scene_file = os.path.join(HERE, "model", "scenes", "rebar_1", "task_1.yml")
     scene_parser = SceneParser(scene_file)
     bodies = scene_parser.create_elements()
 

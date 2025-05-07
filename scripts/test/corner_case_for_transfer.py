@@ -71,6 +71,9 @@ if __name__ == "__main__":
     parser.add_argument("--birrt", action="store_true", help="Enable BIRRT planning")
     parser.add_argument("--curobo", action="store_true", help="Enable cuRobo planning")
     parser.add_argument("--tampor", action="store_true", help="Enable TAMPOR planning")
+    parser.add_argument("--tampor_alpha", type=float, default=1.0, help="TAMPOR alpha")
+    parser.add_argument("--tampor_beta", type=float, default=2.0, help="TAMPOR beta")
+    parser.add_argument("--tampor_gamma", type=float, default=3.0, help="TAMPOR gamma")
     parser.add_argument("--ompl", nargs="+", default=[], choices=["RRTConnect", "BITstar", "EITstar", "RRTstar", "PRM", "EST", "FMT", "BFMT", "LazyRRT", "STRIDE"], help="OMPL algorithms to use")
 
     parser.add_argument("--save", action="store_true", help="Whether to save the results")
@@ -100,7 +103,7 @@ if __name__ == "__main__":
         rb = scene_parser.create_robot("r0")
         # 设置抓取物体
         attachment_body, grasp_attachment, approximate_attachment_body, approximate_attachment = scene_parser.create_attachment(rb, approximate=True)
-        rb.update_attachments([grasp_attachment, approximate_attachment])
+        rb.update_attachments(grasp_attachment + approximate_attachment)
         # 加载场景元素
         element_bodies, element_infos = scene_parser.create_elements(color=[1, 0, 0, 1])
 
@@ -109,7 +112,8 @@ if __name__ == "__main__":
     target_q = np.array(scene_parser.get_robot_target_pose())
     pose_2d = scene_parser.get_robot_pose_2d(output_type="array")
     channel_info = scene_parser.get_channel_info()
-    grasp_pose = scene_parser.get_robot_grasp_pose()
+    grasp_pose = scene_parser.get_robot_base_grasp_pose()
+    grasps, grasp_weights = scene_parser.get_grasps(use_weights=True)
 
     # 定义要执行的seeds
     seeds_to_run = []
@@ -248,7 +252,7 @@ if __name__ == "__main__":
                     exit()
 
         # **************************************************************************
-        # curobo plan TODO: 需要修改
+        # curobo plan
         # **************************************************************************
 
         if args.curobo:
@@ -270,6 +274,8 @@ if __name__ == "__main__":
 
                 p.removeAllUserParameters()
 
+                rb.set_base_pose_2d(*pose_2d)
+                
                 curobo_planner = TrajectoryCuroboSolver(rb, TensorDeviceType())
                 planning_thread = PlanningThread(
                     curobo_planner.plan,
@@ -395,7 +401,7 @@ if __name__ == "__main__":
                     elapsed_time = time.time() - start_time
                     path = planning_thread.result
 
-                    if path["success"]:
+                    if path["success"] and elapsed_time <= args.max_time:
                         cur_result = (seed, path["success"], elapsed_time)
 
                         # 保存路径
@@ -451,16 +457,24 @@ if __name__ == "__main__":
         # **************************************************************************
 
         if args.tampor:
+            
+            alpha = args.tampor_alpha
+            beta = args.tampor_beta
+            gamma = args.tampor_gamma
+            name = f"TAMPOR_a_{alpha}_b_{beta}_y_{gamma}"
+            
+            name = "TAMPOR_wo_Prioritization"
+            
             printer.info("\n========================================")
-            printer.info(f"{repeat_id+1}th TAMPOR planning")
-            printer.info("========================================\n")
+            printer.info(f"{repeat_id+1}th {name} planning")
+            printer.info("========================================\n")            
 
             # 检查是否已存在此seed的结果
             skip_planning = False
-            if "TAMPOR" in results:
-                for existing_result in results["TAMPOR"]:
+            if name in results:
+                for existing_result in results[name]:
                     if existing_result and len(existing_result) > 0 and existing_result[0] == seed:
-                        printer.info(f"Seed {seed} for TAMPOR already exists in log, skipping.")
+                        printer.info(f"Seed {seed} for {name} already exists in log, skipping.")
                         skip_planning = True
                         break
 
@@ -470,7 +484,7 @@ if __name__ == "__main__":
                     SetSeeds(seed)
 
                 tampor_planner = TrajectoryTAMPORSolver(rb, channel_info, grasp_pose, eval_max_attempts=1000)
-                planning_thread = PlanningThread(tampor_planner.plan, start_q, target_q, element_bodies, grasp_attachment, max_time=args.max_time, init_step_max_time=args.max_time / 3.0, step_max_time=20.0, key_frame_num=20, verbose=True)
+                planning_thread = PlanningThread(tampor_planner.plan, start_q, target_q, element_bodies, grasp_attachment, grasps, grasp_weights=grasp_weights, max_time=args.max_time, init_step_max_time=args.max_time / 6.0, step_max_time=20.0, key_frame_num=20, alpha=alpha, beta=beta, gamma=gamma, verbose=True)
 
                 planning_thread.start()
 
@@ -490,7 +504,7 @@ if __name__ == "__main__":
                         # 保存路径
                         if args.save and "path" in result:
                             path = result["path"]
-                            save_dir = os.path.join(log_dir, "TAMPOR")
+                            save_dir = os.path.join(log_dir, name)
                             os.makedirs(save_dir, exist_ok=True)
                             save_path = os.path.join(save_dir, f"{seed}.npy")
                             np.save(save_path, path)
@@ -499,14 +513,14 @@ if __name__ == "__main__":
 
                     # 添加结果（避免重复添加同一个seed的结果）
                     append_result = True
-                    if "TAMPOR" not in results:
-                        results["TAMPOR"] = []
-                    for existing_result in results["TAMPOR"]:
+                    if name not in results:
+                        results[name] = []
+                    for existing_result in results[name]:
                         if existing_result[0] == seed:
                             append_result = False
                             break
                     if append_result:
-                        results["TAMPOR"].append(cur_result)
+                        results[name].append(cur_result)
 
                     if result["success"]:
                         printer.success(f"\rPlanning success! Total time: {elapsed_time:.2f} s! ")
@@ -528,7 +542,7 @@ if __name__ == "__main__":
                                         break
                                     prev_continue_button_value = current_continue_button_value
                     else:
-                        printer.warning(f"\rTAMPOR planning failed, total time: {elapsed_time:.2f} s! ")
+                        printer.warning(f"\r{name} planning failed, total time: {elapsed_time:.2f} s! ")
 
                 except KeyboardInterrupt:
                     printer.warning("\nExit!")

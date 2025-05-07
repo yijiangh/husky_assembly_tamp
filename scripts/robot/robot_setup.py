@@ -20,91 +20,139 @@ from utils.util import HUSKYU_JOINT_NAMES
 from utils.params import URDF_PATH
 from utils.utils_casadi import eval
 
-# Constants
-TOOL0_FROM_EE_POSE = pp.Pose(point=[0, 0, 0.160])
-CONTROL_JOINT_NAMES = [
-    "x",
-    "y",
-    "theta",
-    "ur_arm_shoulder_pan_joint",
-    "ur_arm_shoulder_lift_joint",
-    "ur_arm_elbow_joint",
-    "ur_arm_wrist_1_joint",
-    "ur_arm_wrist_2_joint",
-    "ur_arm_wrist_3_joint",
-]
-BASE_CONTROL_JOINT_NAMES = ["x", "y", "theta"]
-INIT_ARM_JOINT_ANGLES = np.array([0, -np.pi / 2, 0, 0, 0, 0])
+# Husky specific constants
+HUSKY_TOOL0_FROM_EE_POSE = pp.Pose(point=[0, 0, 0.160])
+HUSKY_TOOL0_NAME = "ur_arm_tool0"
+HUSKY_INIT_ARM_JOINT_ANGLES = np.array([0, -np.pi / 2, 0, 0, 0, 0])
+HUSKY_ONBOARD_LINK = "ur_arm_base_link"
+HUSKY_ONBOARD_POSE = [0.0, -0.5, 0.5, -np.pi / 2, 0.0, np.pi / 2] if PICK_DIRECTION == "left" else [0.4, 0.0, 0.5, -np.pi / 2, 0.0, 0.0]
+HUSKY_GRASP_MASK_LINKS = ["ur_arm_wrist_3_link"]
 
-# Onboard configuration based on pick direction
-ONBOARD_POSE = [0.0, -0.5, 0.5, -np.pi / 2, 0.0, np.pi / 2] if PICK_DIRECTION == "left" else [0.4, 0.0, 0.5, -np.pi / 2, 0.0, 0.0]
-ONBOARD_LINK = "ur_arm_base_link"
+# Husky joint names
+HUSKY_CONTROL_JOINT_NAMES = ["x", "y", "theta", "ur_arm_shoulder_pan_joint", "ur_arm_shoulder_lift_joint", "ur_arm_elbow_joint", "ur_arm_wrist_1_joint", "ur_arm_wrist_2_joint", "ur_arm_wrist_3_joint"]
+HUSKY_BASE_CONTROL_JOINT_NAMES = ["x", "y", "theta"]
+HUSKY_BASE_REDUCED_MODEL_JOINT_NAMES = ["base_footprint_joint", "top_plate_joint", "top_plate_front_joint", "arm_mount_joint"]
+
+# Husky file paths
+HUSKY_URDF_PATH = os.path.join(DATA_DIR, "husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf")
+HUSKY_SRDF_PATH = os.path.join(DATA_DIR, "husky_urdf/mt_husky_moveit_config/config/husky.srdf")
+HUSKY_GRIPPER_OBJ = os.path.join(DATA_DIR, "husky_urdf/robotiq_85/meshes/static/robotiq_85_close_20mm.obj")
+
+# Constants for ABB
+ABB_TOOL0_NAME = "eef_tcp_frame"
+ABB_INIT_ARM_JOINT_ANGLES = np.array([0, 0, 0, 0, 0, 0])
+ABB_ONBOARD_LINK = "world_link"
+ABB_ONBOARD_POSE = [0, 0, 0, 0, 0, 0]
+ABB_GRASP_MASK_LINKS = ["eef_tcp_frame", "eef_base_link"]
+
+# ABB joint names
+ABB_JOINT_NAMES = ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6"]
+ABB_BASE_CONTROL_JOINT_NAMES = []
+ABB_CONTROL_JOINT_NAMES = ABB_JOINT_NAMES
+ABB_BASE_REDUCED_MODEL_JOINT_NAMES = []
+
+# ABB file paths
+ABB_URDF_PATH = os.path.join(DATA_DIR, "abb_irb4600_40_255/urdf/ECL_robot1_with_track.urdf")
+ABB_SRDF_PATH = os.path.join(DATA_DIR, "abb_irb4600_40_255/srdf/ECL_robot1_with_track.srdf")
 
 
 class RobotSetup:
     """Handles robot setup, kinematics, and motion planning using Pinocchio IK solver."""
 
-    MANIPULATOR_CONTROL_JOINT_NAMES = [
-        "ur_arm_shoulder_pan_joint",
-        "ur_arm_shoulder_lift_joint",
-        "ur_arm_elbow_joint",
-        "ur_arm_wrist_1_joint",
-        "ur_arm_wrist_2_joint",
-        "ur_arm_wrist_3_joint",
-    ]
-
-    MANIPULATOR_REDUCED_MODEL_JOINT_NAMES = [
-        "ur_arm_base_link-base_fixed_joint",
-        "ur_arm_shoulder_pan_joint",
-        "ur_arm_shoulder_lift_joint",
-        "ur_arm_elbow_joint",
-        "ur_arm_wrist_1_joint",
-        "ur_arm_wrist_2_joint",
-        "ur_arm_wrist_3_joint",
-        "ur_arm_wrist_3-flange",
-        "ur_arm_flange-tool0",
-        "tool0-bar_tcp_fixed_joint",
-    ]
-
-    BASE_CONTROL_JOINT_NAMES = []
-
-    BASE_REDUCED_MODEL_JOINT_NAMES = [
-        "base_footprint_joint",
-        "top_plate_joint",
-        "top_plate_front_joint",
-        "arm_mount_joint",
-        # "ur_arm_base_link-base_fixed_joint",
-    ]
-
-    def __init__(self, robot_name: str = "r0", attachments: List[Attachment] = None):
+    def __init__(self, robot_name: str = "r0", attachments: List[Attachment] = None, robot_type: str = "husky"):
         """Initialize the RobotSetup instance.
 
         Params:
             robot_name: Name of the robot (default: "r0").
             attachments: List of attachments (default: None).
+            robot_type: Type of robot to setup ("husky" or "abb", default: "husky").
         """
         self.name = robot_name
         self.attachments = attachments or []
+
+        # Initialize robot parameters
+        self._init_robot_params(robot_type)
+
+        # Set up the robot
         self._setup_robot()
+
+    def _init_robot_params(self, robot_type: str) -> None:
+        """Initialize robot-specific parameters based on robot type.
+
+        Params:
+            robot_type: Type of robot ("husky" or "abb")
+        """
+        self.robot_params = {}
+
+        # Common parameters with default values
+        self.robot_params["tool0_from_ee"] = np.eye(4)
+        self.robot_params["base_from_connect"] = np.eye(4)
+
+        if robot_type == "husky":
+            self.robot_params["urdf_path"] = HUSKY_URDF_PATH
+            self.robot_params["srdf_path"] = HUSKY_SRDF_PATH
+            self.robot_params["gripper_obj"] = HUSKY_GRIPPER_OBJ
+            self.robot_params["tool0_name"] = HUSKY_TOOL0_NAME
+            self.robot_params["joint_names"] = HUSKYU_JOINT_NAMES
+            self.robot_params["init_angles"] = HUSKY_INIT_ARM_JOINT_ANGLES
+            self.robot_params["tool0_from_ee"] = HUSKY_TOOL0_FROM_EE_POSE
+            self.robot_params["onboard_link"] = HUSKY_ONBOARD_LINK
+            self.robot_params["onboard_pose"] = HUSKY_ONBOARD_POSE
+            self.robot_params["base_control_joint_names"] = HUSKY_BASE_CONTROL_JOINT_NAMES
+            self.robot_params["control_joint_names"] = HUSKY_CONTROL_JOINT_NAMES
+            self.robot_params["base_reduced_model_joint_names"] = HUSKY_BASE_REDUCED_MODEL_JOINT_NAMES
+            self.robot_params["grasp_mask_links"] = HUSKY_GRASP_MASK_LINKS
+            
+            # Pre-calculate base_from_connect for Husky
+            base_from_connect_sym = RobotSetup.symbolic_forward(URDF_PATH, HUSKY_BASE_REDUCED_MODEL_JOINT_NAMES, [], output_type="matrix")
+            self.robot_params["base_from_connect"] = eval("base_from_connect", base_from_connect_sym, [], [])
+        elif robot_type == "abb":
+            self.robot_params["urdf_path"] = ABB_URDF_PATH
+            self.robot_params["srdf_path"] = ABB_SRDF_PATH
+            self.robot_params["gripper_obj"] = None
+            self.robot_params["tool0_name"] = ABB_TOOL0_NAME
+            self.robot_params["joint_names"] = ABB_JOINT_NAMES
+            self.robot_params["init_angles"] = ABB_INIT_ARM_JOINT_ANGLES
+            self.robot_params["onboard_link"] = ABB_ONBOARD_LINK
+            self.robot_params["onboard_pose"] = ABB_ONBOARD_POSE
+            self.robot_params["base_control_joint_names"] = ABB_BASE_CONTROL_JOINT_NAMES
+            self.robot_params["control_joint_names"] = ABB_CONTROL_JOINT_NAMES
+            self.robot_params["base_reduced_model_joint_names"] = ABB_BASE_REDUCED_MODEL_JOINT_NAMES
+            self.robot_params["grasp_mask_links"] = ABB_GRASP_MASK_LINKS
+            # ABB doesn't need base_from_connect calculation
+        else:
+            raise ValueError(f"Unsupported robot type: {robot_type}")
 
     def _setup_robot(self) -> None:
         """Load robot model and initialize components with Pinocchio IK solver."""
+        # Load the robot data
         robot_data = self._load_robot()
+
+        # Set up the robot and its components
         self.robot = robot_data["robot"]
         self.ee_attachment = robot_data["ee_attachment"]
         self.ik_solver_relative = robot_data["ik_solver_relative"]
         self.disabled_collisions = robot_data["disabled_collisions"]
-        self.tool0_from_ee = TOOL0_FROM_EE_POSE
-        self.tool_link = pp.link_from_name(self.robot, "ur_arm_tool0")
 
-        self.control_joints = pp.joints_from_names(self.robot, CONTROL_JOINT_NAMES)
-        self.arm_joints = pp.joints_from_names(self.robot, HUSKYU_JOINT_NAMES)
-        self.base_joints = pp.joints_from_names(self.robot, BASE_CONTROL_JOINT_NAMES)
-        self.arm_init_angles = INIT_ARM_JOINT_ANGLES
+        # Set up robot links and joints
+        self.tool_link = pp.link_from_name(self.robot, self.robot_params["tool0_name"])
+        self.arm_joints = pp.joints_from_names(self.robot, self.robot_params["joint_names"])
+        self.arm_init_angles = self.robot_params["init_angles"]
+
+        # Set up base joints if they exist
+        if self.robot_params["base_control_joint_names"]:
+            self.base_joints = pp.joints_from_names(self.robot, self.robot_params["base_control_joint_names"])
+        else:
+            self.base_joints = []
+
+        # Set up control joints if they exist
+        if self.robot_params["control_joint_names"]:
+            self.control_joints = pp.joints_from_names(self.robot, self.robot_params["control_joint_names"])
+        else:
+            self.control_joints = []
+
+        # Initialize joint positions
         self.set_joint_positions(self.arm_joints, self.arm_init_angles)
-
-        base_from_connect_sym = RobotSetup.symbolic_forward(URDF_PATH, self.BASE_REDUCED_MODEL_JOINT_NAMES, self.BASE_CONTROL_JOINT_NAMES, output_type="matrix")
-        self.base_from_connect = eval("base_from_connect", base_from_connect_sym, [], [])
 
     def _load_robot(self) -> Dict:
         """Load robot URDF and configure Pinocchio IK solver for relative kinematics.
@@ -115,27 +163,33 @@ class RobotSetup:
         Raises:
             FileNotFoundError: If required files are missing.
         """
-        robot_urdf = os.path.join(DATA_DIR, "husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf")
-        robot_srdf = os.path.join(DATA_DIR, "husky_urdf/mt_husky_moveit_config/config/husky.srdf")
-        gripper_obj = os.path.join(DATA_DIR, "husky_urdf/robotiq_85/meshes/static/robotiq_85_close_20mm.obj")
-        # gripper_obj = os.path.join(DATA_DIR, "husky_urdf/robotiq_85/meshes/static/robotiq_85_open.obj")
+        # Get robot parameters
+        robot_urdf = self.robot_params["urdf_path"]
+        robot_srdf = self.robot_params["srdf_path"]
+        gripper_obj = self.robot_params["gripper_obj"]
+        tool0_name = self.robot_params["tool0_name"]
 
-        if not all(os.path.exists(path) for path in [robot_urdf, robot_srdf, gripper_obj]):
-            raise FileNotFoundError("Required robot or gripper files not found.")
+        # Check if files exist
+        if not os.path.exists(robot_urdf) or not os.path.exists(robot_srdf):
+            raise FileNotFoundError("Required robot files not found.")
 
+        # Load robot and its semantics
         robot = pp.load_pybullet(robot_urdf, fixed_base=False, cylinder=False)
         robot_model = RobotModel.from_urdf_file(robot_urdf)
         semantics = RobotSemantics.from_srdf_file(robot_srdf, robot_model)
         disabled_collisions = self.get_disabled_collisions_from_link_names(robot, semantics.disabled_collisions)
 
-        # Configure Pinocchio IK solver for relative IK only
-        pinocchio_solver = PinocchioSolver(robot_urdf)
-        ik_solver_relative = partial(pinocchio_solver.ik, tip_name="ur_arm_tool0")
+        # Configure Pinocchio IK solver for relative IK
+        pinocchio_solver = PinocchioSolver(robot_urdf, manipulator_joint_names=self.robot_params["joint_names"], control_joint_names=self.robot_params["control_joint_names"], base_link_name=self.robot_params["onboard_link"])
+        ik_solver_relative = partial(pinocchio_solver.ik, tip_name=tool0_name)
 
-        tool0_pose = pp.get_link_pose(robot, pp.link_from_name(robot, "ur_arm_tool0"))
-        ee = pp.create_obj(gripper_obj, scale=1)
-        pp.set_pose(ee, pp.multiply(tool0_pose, pp.Pose(euler=pp.Euler(yaw=-np.pi / 2))))
-        ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, "ur_arm_tool0"), ee)
+        # Create ee attachment if gripper exists
+        ee_attachment = None
+        if gripper_obj and os.path.exists(gripper_obj):
+            tool0_pose = pp.get_link_pose(robot, pp.link_from_name(robot, tool0_name))
+            ee = pp.create_obj(gripper_obj, scale=1)
+            pp.set_pose(ee, pp.multiply(tool0_pose, pp.Pose(euler=pp.Euler(yaw=-np.pi / 2))))
+            ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, tool0_name), ee)
 
         return {
             "robot": robot,
@@ -152,7 +206,8 @@ class RobotSetup:
             conf: Joint configuration array.
         """
         pp.set_joint_positions(self.robot, control_joints, conf)
-        self.ee_attachment.assign()
+        if self.ee_attachment:
+            self.ee_attachment.assign()
         for attachment in self.attachments:
             attachment.assign()
 
@@ -168,16 +223,19 @@ class RobotSetup:
         """
         return {tuple(pp.link_from_name(robot, link) for link in pair if pp.has_link(robot, link)) for pair in link_names}
 
-    def get_relative_pose(self, pose_world: Tuple, link_name: str = "ur_arm_base_link") -> Tuple:
+    def get_relative_pose(self, pose_world: Tuple, link_name: str = None) -> Tuple:
         """Calculate pose relative to a specified link.
 
         Params:
             pose_world: World frame pose as (position, orientation).
-            link_name: Name of the reference link (default: "ur_arm_base_link").
+            link_name: Name of the reference link (default: robot's onboard link).
 
         Returns:
             Relative pose as (position, orientation).
         """
+        if link_name is None:
+            link_name = self.robot_params["onboard_link"]
+
         link_pose = pp.get_link_pose(self.robot, pp.link_from_name(self.robot, link_name))
         return pp.multiply(pp.invert(link_pose), pose_world)
 
@@ -185,18 +243,35 @@ class RobotSetup:
         """Calculate inverse kinematics solution relative to base using Pinocchio.
 
         Params:
-            tool_pose_world: Tool pose in world frame.
+            world_from_tool: Tool pose in world frame.
             q_init: Initial joint configuration guess (default: None).
 
         Returns:
             Joint configuration solving the IK problem.
         """
-        world_from_connect = pp.multiply(pp.get_pose(self.robot), pp.pose_from_tform(self.base_from_connect))
+        # Use the pre-calculated base_from_connect (for all robot types)
+        world_from_connect = pp.multiply(pp.get_pose(self.robot), pp.pose_from_tform(self.robot_params["base_from_connect"]))
         connect_from_tool = pp.multiply(pp.invert(world_from_connect), world_from_tool)
         tform = pp.tform_from_pose(connect_from_tool)
+
         conf = self.ik_solver_relative(tform, qinit=q_init)
-        self.ee_attachment.assign()
+        if self.ee_attachment:
+            self.ee_attachment.assign()
+            
+        if conf is not None:
+            # 将关节角度规范化到 [-pi, pi] 范围内
+            conf = np.array([(angle + np.pi) % (2 * np.pi) - np.pi for angle in conf])
         return conf
+
+    def get_grasp_ik_solution(self, world_from_object: Tuple, tool_from_obj: Tuple, q_init: List[float] = None) -> np.ndarray:
+        """Calculate inverse kinematics solution relative to base using Pinocchio.
+
+        Params:
+            world_from_object: Object pose in world frame.
+            q_init: Initial joint configuration guess (default: None).
+        """
+        world_from_tool = pp.multiply(world_from_object, pp.invert(tool_from_obj))
+        return self.get_relative_ik_solution(world_from_tool, q_init)
 
     def plan_manipulator_path(self, init_q: np.ndarray, target_q: np.ndarray, attachments: List[Attachment], obstacles: Set[int], **kwargs) -> np.ndarray:
         """Plan a manipulator path from initial to target configuration.
@@ -211,10 +286,18 @@ class RobotSetup:
             List of joint configurations forming the path, or None if planning fails.
         """
         self.set_joint_positions(self.arm_joints, init_q)
-        for att in [self.ee_attachment] + attachments:
+
+        # Create a list of all attachments
+        attachments_list = []
+        if self.ee_attachment:
+            attachments_list.append(self.ee_attachment)
+        attachments_list.extend(attachments)
+
+        # Ensure all attachments are assigned
+        for att in attachments_list:
             att.assign()
 
-        path = self.plan_manipulator_motion(init_q, target_q, [self.ee_attachment] + attachments, obstacles, disabled_collisions=self.disabled_collisions, **kwargs)
+        path = self._plan_manipulator_motion(init_q, target_q, attachments_list, obstacles, disabled_collisions=self.disabled_collisions, **kwargs)
         return np.array([np.array(conf) for conf in path]) if path else None
 
     def set_base_pose(self, pose: Pose) -> None:
@@ -224,7 +307,8 @@ class RobotSetup:
             pose: Base pose to set.
         """
         pp.set_pose(self.robot, pose)
-        self.ee_attachment.assign()
+        if self.ee_attachment:
+            self.ee_attachment.assign()
         for attachment in self.attachments:
             attachment.assign()
 
@@ -256,13 +340,13 @@ class RobotSetup:
         Returns:
             Attachment object linking the robot and body.
         """
-        link_pose = pp.get_link_pose(self.robot, pp.link_from_name(self.robot, ONBOARD_LINK))
-        delta_pose = Pose(point=ONBOARD_POSE[:3], euler=Euler(*ONBOARD_POSE[3:]))
+        link_pose = pp.get_link_pose(self.robot, pp.link_from_name(self.robot, self.robot_params["onboard_link"]))
+        delta_pose = Pose(point=self.robot_params["onboard_pose"][:3], euler=Euler(*self.robot_params["onboard_pose"][3:]))
         body_pose = multiply(link_pose, delta_pose)
         pp.set_pose(body, body_pose)
-        return pp.create_attachment(self.robot, pp.link_from_name(self.robot, ONBOARD_LINK), body)
+        return pp.create_attachment(self.robot, pp.link_from_name(self.robot, self.robot_params["onboard_link"]), body)
 
-    def plan_manipulator_motion(self, start_conf: np.ndarray, end_conf: np.ndarray, attachments: List[Attachment], obstacles: Set[int], **kwargs) -> Union[List[Tuple[float]], None]:
+    def _plan_manipulator_motion(self, start_conf: np.ndarray, end_conf: np.ndarray, attachments: List[Attachment], obstacles: Set[int], **kwargs) -> Union[List[Tuple[float]], None]:
         """Plan a motion path for the manipulator.
 
         Params:
@@ -327,6 +411,55 @@ class RobotSetup:
                 )
             print("End configuration in collision.")
             return None
+
+    def create_collision_fn(self, obstacle_bodies: List[int]) -> Callable[[np.ndarray], bool]:
+        """Create PyBullet-based collision function"""
+        robot_body = self.robot
+        arm_joints = self.arm_joints
+        attachments = []
+        if self.ee_attachment:
+            attachments.append(self.ee_attachment)
+        attachments.extend(self.attachments)
+        disabled_collisions = self.disabled_collisions
+
+        # Get tool link and wrist link based on robot type
+        extra_disabled_collisions = []
+        for link_name in self.robot_params["grasp_mask_links"]:
+            link = pp.link_from_name(robot_body, link_name)
+            for attachment in attachments:
+                extra_disabled_collisions.extend(
+                    [
+                        ((robot_body, link), (attachment.child, pp.BASE_LINK)),
+                    ]
+                )
+                
+        grasped_collision_fn_list = []
+        for attachment in self.attachments:
+            grasped_collision_fn_list.append(pp.get_floating_body_collision_fn(attachment.child, obstacles=obstacle_bodies + [self.robot], disabled_collisions=extra_disabled_collisions))
+            
+        robot_collision_fn = pp.get_collision_fn(
+            robot_body, arm_joints, obstacles=obstacle_bodies, attachments=attachments, self_collisions=True, disabled_collisions=disabled_collisions, extra_disabled_collisions=extra_disabled_collisions, max_distance=0.0
+        )
+
+        def collision_fn(joint_conf, diagnosis=False):
+            """Check if a given joint configuration results in a collision.
+
+            Args:
+                joint_conf (np.ndarray): Joint configuration.
+                diagnosis (bool, False): Whether to return diagnosis information.
+
+            Returns:
+                bool: True if there is a collision, False otherwise.
+            """
+            robot_collision = robot_collision_fn(joint_conf, diagnosis=diagnosis)
+            self.set_joint_positions(arm_joints, joint_conf)
+            grasped_collision = False
+            for idx, grasped_collision_fn in enumerate(grasped_collision_fn_list):
+                pose = pp.get_pose(self.attachments[idx].child)
+                grasped_collision = grasped_collision or grasped_collision_fn(pose, diagnosis=diagnosis)
+            return grasped_collision or robot_collision
+
+        return collision_fn
 
     @staticmethod
     def parse_urdf(urdf_path: str) -> Dict:
@@ -432,7 +565,7 @@ class RobotSetup:
         Returns:
             ca.MX: skew-symmetric matrix
         """
-        assert v.size1() == 3, "输入向量必须是三维的"
+        assert v.size1() == 3, "Input vector must be three-dimensional"
 
         x = v[0]
         y = v[1]
@@ -467,7 +600,7 @@ class RobotSetup:
             ca.MX: matrix exp(A)
         """
         if A.size1() != A.size2():
-            raise ValueError("矩阵必须是方阵")
+            raise ValueError("Matrix must be square")
 
         exp_A = ca.MX.eye(A.size1())
         A_power = ca.MX.eye(A.size1())
@@ -552,48 +685,3 @@ class RobotSetup:
         else:
             fk_function = ca.Function("forward_kinematics", [q], [T])
             return fk_function
-
-    def create_collision_fn(self, obstacle_bodies: List[int]) -> Callable[[np.ndarray], bool]:
-        """Create PyBullet-based collision function"""
-        robot_body = self.robot
-        arm_joints = self.arm_joints
-        attachments = [self.ee_attachment] + self.attachments
-        disabled_collisions = self.disabled_collisions
-        tool_link = self.tool_link
-        wrist_link = pp.link_from_name(robot_body, "ur_arm_wrist_3_link")
-
-        extra_disabled_collisions = []
-        if self.ee_attachment is not None:
-            extra_disabled_collisions.extend(
-                [
-                    ((robot_body, wrist_link), (self.ee_attachment.child, pp.BASE_LINK)),
-                ]
-            )
-
-        grasped_collision_fn_list = []
-        for attachment in self.attachments:
-            grasped_collision_fn_list.append(pp.get_floating_body_collision_fn(attachment.child, obstacles=obstacle_bodies + [self.robot]))
-        robot_collision_fn = pp.get_collision_fn(
-            robot_body, arm_joints, obstacles=obstacle_bodies, attachments=attachments, self_collisions=True, disabled_collisions=disabled_collisions, extra_disabled_collisions=extra_disabled_collisions, max_distance=0.0
-        )
-
-        def collision_fn(joint_conf, diagnosis=False):
-            """
-            检查给定关节配置是否发生碰撞
-
-            Args:
-                joint_conf (np.ndarray): 关节配置
-                diagnosis (bool, False): 是否返回诊断信息
-
-            Returns:
-                bool: 如果有碰撞返回True，否则返回False
-            """
-            robot_collision = robot_collision_fn(joint_conf, diagnosis=diagnosis)
-            self.set_joint_positions(arm_joints, joint_conf)
-            grasped_collision = False
-            for idx, grasped_collision_fn in enumerate(grasped_collision_fn_list):
-                pose = pp.get_pose(self.attachments[idx].child)
-                grasped_collision = grasped_collision or grasped_collision_fn(pose, diagnosis=diagnosis)
-            return grasped_collision or robot_collision
-
-        return collision_fn

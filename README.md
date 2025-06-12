@@ -6,7 +6,7 @@ This is the TAPOM source code, but due to time constraints, which run instructio
 ![results](images/results.png)
 ![results main](images/results_main.png)
 
-## Installation (Unfinished)
+## Installation
 
 * create virtual env
 

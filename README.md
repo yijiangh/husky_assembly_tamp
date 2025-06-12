@@ -2,9 +2,9 @@
 
 This is the TAPOM source code, but due to time constraints, which run instructions and installation instructions we will complete later.
 
-![TAPOM Framework](images/depict.pdf)
-![results main](images/results_main.pdf)
-![results](images/results.pdf)
+![TAPOM Framework](images/depict.png)
+![results](images/results.png)
+![results main](images/results_main.png)
 
 ## Installation (Unfinished)
 

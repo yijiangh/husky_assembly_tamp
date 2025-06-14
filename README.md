@@ -5,7 +5,10 @@ This is the TAPOM source code, but due to time constraints, which run instructio
 ![TAPOM Framework](images/depict.png)
 ![results](images/results.png)
 ![results main](images/results_main.png)
-[![[Submitted to RAL 2025] TAPOM - YouTube](https://res.cloudinary.com/marcomontalbano/image/upload/v1749912104/video_to_markdown/images/youtube--G7N8VYgaefw-c05b58ac6eb4c4700831b2b3070cd403.jpg)](https://www.youtube.com/watch?v=G7N8VYgaefw "[Submitted to RAL 2025] TAPOM - YouTube")
+<!-- [![[Submitted to RAL 2025] TAPOM - YouTube](https://res.cloudinary.com/marcomontalbano/image/upload/v1749912104/video_to_markdown/images/youtube--G7N8VYgaefw-c05b58ac6eb4c4700831b2b3070cd403.jpg)](https://www.youtube.com/watch?v=G7N8VYgaefw "[Submitted to RAL 2025] TAPOM - YouTube") -->
+<video width="800" height="400" controls>
+    <source src="tapom.mp4" type="video/mp4">
+</video>
 
 ## Installation
 

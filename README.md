@@ -1,14 +1,25 @@
-# TAPOM: Task-Space Topology-Guided Motion Planning for Manipulating Elongated Object in Cluttered Environments
+# TAPOM: Task-Space Topology-Guided Motion Planning for Manipulating Elongated Objects in Cluttered Environments
 
-This is the TAPOM source code, but due to time constraints, which run instructions and installation instructions we will complete later.
+## Overview
+TAPOM (Task-Space Topology-Guided Motion Planning) is a hierarchical motion planning framework designed for robotic manipulation of elongated objects in cluttered and constrained environments. It leverages task-space topology analysis to navigate narrow passages efficiently, addressing challenges where traditional planners struggle due to sampling inefficiencies or local minima.
 
 ![TAPOM Framework](images/depict.png)
 ![results](images/results.png)
 ![results main](images/results_main.png)
-<!-- [![[Submitted to RAL 2025] TAPOM - YouTube](https://res.cloudinary.com/marcomontalbano/image/upload/v1749912104/video_to_markdown/images/youtube--G7N8VYgaefw-c05b58ac6eb4c4700831b2b3070cd403.jpg)](https://www.youtube.com/watch?v=G7N8VYgaefw "[Submitted to RAL 2025] TAPOM - YouTube") -->
-<iframe width="560" height="315" src="https://www.youtube.com/embed/G7N8VYgaefw?si=S70WwR4zBLXPZTxv" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
 
-## Installation
+<iframe width="560" height="315" src="https://www.youtube.com/embed/G7N8VYgaefw?si=7fkkx5nE2R8jrAa_" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+
+## Key Features
+- **Topology-Aware High-Level Planning**: Analyzes task-space topology to model free space connectivity and identify critical regions, enabling effective path planning through narrow passages.
+- **Keyframe-Guided Low-Level Planning**: Combines topological insights with a sampling-based planner to generate collision-free trajectories in high-dimensional configuration spaces.
+- **Experimental Validation**: Outperforms state-of-the-art baselines in success rate and planning time across simulated and real-world tasks involving elongated objects.
+
+## Repository Structure
+- `scripts/`: Source code for the TAPOM planner implementation.
+- `ext/`: Dependence of TAPOM.
+- `data/`: Environment models used in experiments.
+
+## Installation (Unfinished)
 
 * create virtual env
 

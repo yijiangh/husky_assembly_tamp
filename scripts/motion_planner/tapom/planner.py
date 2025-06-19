@@ -305,17 +305,19 @@ class Planner:
             规划路径，如果失败则返回None
         """
 
-        # **************************************************************************
-        # 1. 尝试直接使用pb_ompl规划
-        # **************************************************************************
-        self.setup_pb_ompl(verbose)
-        path = self.planner(start_conf, target_conf, max_time=init_step_max_time, enable_reset=True, verbose=verbose, verbose_level=verbose_level)
-        if path is not None:
-            return path
-        with printer.indented(verbose_level):
-            printer.warning("Warning: No path found in the first step, trying to find a path in the second step...")
+        # # **************************************************************************
+        # # 1. 尝试直接使用pb_ompl规划
+        # # **************************************************************************
+        # self.setup_pb_ompl(verbose)
+        # path = self.planner(start_conf, target_conf, max_time=init_step_max_time, enable_reset=True, verbose=verbose, verbose_level=verbose_level)
+        # if path is not None:
+        #     return path
+        # with printer.indented(verbose_level):
+        #     printer.warning("Warning: No path found in the first step, trying to find a path in the second step...")
 
-        init_step_time = init_step_max_time
+        # init_step_time = init_step_max_time
+        
+        init_step_time  = 0.0
 
         # **************************************************************************
         # 2. 生成关键帧

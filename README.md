@@ -93,7 +93,7 @@ For reviewers and users interested in the hyperparameters and comparison with OM
   - Script and Hyperparameters: `scripts/motion_planner/trajectory_ompl_solver.py`
 
 - **cuRobo Comparison**:
-  - Script and Hyperparameters: `scripts/motion_planner/curobo.py`
+  - Script and Hyperparameters: `scripts/motion_planner/trajectory_curobo_solver.py`
 
 These scripts allow replication of the experiments presented in the paper, including the specific parameter settings used for each planner.
 

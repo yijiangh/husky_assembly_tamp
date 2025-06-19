@@ -95,6 +95,8 @@ For reviewers and users interested in the hyperparameters and comparison with OM
 - **cuRobo Comparison**:
   - Script and Hyperparameters: `scripts/motion_planner/trajectory_curobo_solver.py`
 
+The script `scripts/test/corner_case_for_transfer.py` calls these classes and uses them.
+
 These scripts allow replication of the experiments presented in the paper, including the specific parameter settings used for each planner.
 
 <!-- ## Contact Information

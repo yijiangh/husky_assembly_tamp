@@ -16,7 +16,7 @@ from compas_fab.robots import RobotSemantics
 from compas_fab.robots.robot import RobotModel
 from pybullet_planning import Attachment, Euler, Point, Pose, multiply
 from solver.ik_pinocchio_solver import PinocchioSolver
-from utils.util import HUSKYU_JOINT_NAMES
+from utils.util import HUSKY_JOINT_NAMES
 from utils.params import URDF_PATH
 from utils.utils_casadi import eval
 
@@ -98,7 +98,7 @@ class RobotSetup:
         self.tool_link = pp.link_from_name(self.robot, "ur_arm_tool0")
 
         self.control_joints = pp.joints_from_names(self.robot, CONTROL_JOINT_NAMES)
-        self.arm_joints = pp.joints_from_names(self.robot, HUSKYU_JOINT_NAMES)
+        self.arm_joints = pp.joints_from_names(self.robot, HUSKY_JOINT_NAMES)
         self.base_joints = pp.joints_from_names(self.robot, BASE_CONTROL_JOINT_NAMES)
         self.arm_init_angles = INIT_ARM_JOINT_ANGLES
         self.set_joint_positions(self.arm_joints, self.arm_init_angles)

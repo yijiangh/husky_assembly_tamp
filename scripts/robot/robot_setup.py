@@ -16,7 +16,7 @@ from compas_fab.robots import RobotSemantics
 from compas_fab.robots.robot import RobotModel
 from pybullet_planning import Attachment, Euler, Point, Pose, multiply
 from solver.ik_pinocchio_solver import PinocchioSolver
-from utils.util import HUSKYU_JOINT_NAMES
+from utils.util import HUSKY_JOINT_NAMES
 from utils.params import URDF_PATH
 from utils.utils_casadi import eval
 
@@ -93,7 +93,7 @@ class RobotSetup:
             self.robot_params["srdf_path"] = HUSKY_SRDF_PATH
             self.robot_params["gripper_obj"] = HUSKY_GRIPPER_OBJ
             self.robot_params["tool0_name"] = HUSKY_TOOL0_NAME
-            self.robot_params["joint_names"] = HUSKYU_JOINT_NAMES
+            self.robot_params["joint_names"] = HUSKY_JOINT_NAMES
             self.robot_params["init_angles"] = HUSKY_INIT_ARM_JOINT_ANGLES
             self.robot_params["tool0_from_ee"] = HUSKY_TOOL0_FROM_EE_POSE
             self.robot_params["onboard_link"] = HUSKY_ONBOARD_LINK

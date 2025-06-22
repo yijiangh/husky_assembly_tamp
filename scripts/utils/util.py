@@ -21,7 +21,7 @@ from pybullet_planning.utils import CIRCULAR_LIMITS, DEFAULT_RESOLUTION, MAX_DIS
 from termcolor import colored, cprint
 from .params import PROJECT_DIR
 
-HUSKYU_JOINT_NAMES = [
+HUSKY_JOINT_NAMES = [
     "ur_arm_shoulder_pan_joint",
     "ur_arm_shoulder_lift_joint",
     "ur_arm_elbow_joint",

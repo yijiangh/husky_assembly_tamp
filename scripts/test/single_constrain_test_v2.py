@@ -31,7 +31,7 @@ sys.path.append(os.path.abspath(os.path.join(HERE, os.pardir)))  # make *scripts
 from ConstrainedPlanningCommon import addAtlasOptions, addConstrainedOptions, addPlannerOption, addSpaceOption  # noqa: E402
 from ompl_planner import OMPLConstrainedPlanner  # noqa: E402
 from robot.robot_setup import (
-    HUSKY_JOINT_NAMES,
+    HUSKY_ARM_JOINT_NAMES,
     HUSKY_TOOL0_NAME,
     RobotSetup,
 )  # noqa: E402
@@ -137,7 +137,7 @@ def main(argv: List[str] | None = None):  # noqa: C901 – keep main cohesive
     # ------------------------------------------------------------------
     # Constraint *function* and *jacobian* as required by OMPL
     # ------------------------------------------------------------------
-    ambient_dim = len(HUSKY_JOINT_NAMES)
+    ambient_dim = len(HUSKY_ARM_JOINT_NAMES)
     codim = 2  # EE constrained to line -> 2 scalar constraints
 
     def constraint_function(x: np.ndarray, out: np.ndarray) -> None:  # noqa: D401

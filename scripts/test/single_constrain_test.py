@@ -36,7 +36,7 @@ import utils.load_multi_tangent as load_multi_tangent
 from multi_tangent.collision import create_collision_bodies
 from utils.collision import init_pb
 from utils.params import *
-from robot.robot_setup import RobotSetup, HUSKY_URDF_PATH, HUSKY_JOINT_NAMES, HUSKY_CONTROL_JOINT_NAMES, HUSKY_TOOL0_NAME
+from robot.robot_setup import RobotSetup, HUSKY_URDF_PATH, HUSKY_ARM_JOINT_NAMES, HUSKY_CONTROL_JOINT_NAMES, HUSKY_TOOL0_NAME
 from ConstrainedPlanningCommon import *
 from utils.util import interpolate
 
@@ -84,7 +84,7 @@ class LinearEndEffectorConstraint(ob.Constraint):
         self.end_effector_link = pp.link_from_name(self.robot_id, HUSKY_TOOL0_NAME)
 
         # 获取可控制的关节索引
-        self.control_joints = [pp.joint_from_name(self.robot_id, joint_name) for joint_name in HUSKY_JOINT_NAMES]
+        self.control_joints = [pp.joint_from_name(self.robot_id, joint_name) for joint_name in HUSKY_ARM_JOINT_NAMES]
         
         # 默认移动距离，可以通过外部设置修改
         self.move_distance = 0.2  # 默认20cm
@@ -502,7 +502,7 @@ def linearConstraintPlanningBench(cp, planners):
 def linearConstraintPlanning(robot_setup, options):
     """主要的线性约束规划函数"""
     # 创建线性约束
-    num_joints = len(HUSKY_JOINT_NAMES)  # 使用实际的关节数量
+    num_joints = len(HUSKY_ARM_JOINT_NAMES)  # 使用实际的关节数量
     
     # 获取当前末端执行器位置作为直线上的一点
     current_pose = pp.get_link_pose(robot_setup.robot, pp.link_from_name(robot_setup.robot, HUSKY_TOOL0_NAME))

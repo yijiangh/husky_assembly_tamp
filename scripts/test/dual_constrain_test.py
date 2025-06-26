@@ -64,6 +64,8 @@ class RelativeEndEffectorConstraint(ob.Constraint):
         # Joint indices that the constraint acts on (all manipulator joints)
         self.control_joints = [pp.joint_from_name(self.robot_id, j) for j in HUSKY_DUAL_ARM_JOINT_NAMES]
 
+        self.collision_fn = robot_setup.create_collision_fn()
+
         # Record the desired relative translation (left - right) at instantiation
         left_pose = pp.get_link_pose(self.robot_id, self.left_tool_link)[0]
         right_pose = pp.get_link_pose(self.robot_id, self.right_tool_link)[0]
@@ -104,12 +106,12 @@ class RelativeEndEffectorConstraint(ob.Constraint):
         # Backup current joint state
         current_conf = pp.get_joint_positions(self.robot_id, self.control_joints)
         try:
-            pp.set_joint_positions(self.robot_id, self.control_joints, joint_angles)
+            self.robot_setup.set_joint_positions(self.control_joints, joint_angles)
             left_pos = pp.get_link_pose(self.robot_id, self.left_tool_link)[0]
             right_pos = pp.get_link_pose(self.robot_id, self.right_tool_link)[0]
             return np.array(left_pos) - np.array(right_pos)
         finally:
-            pp.set_joint_positions(self.robot_id, self.control_joints, current_conf)
+            self.robot_setup.set_joint_positions(self.control_joints, current_conf)
 
     def compute_violation(self, joint_angles: np.ndarray) -> float:
         """Compute constraint violation magnitude for given joint configuration."""
@@ -125,6 +127,8 @@ class RelativeEndEffectorConstraint(ob.Constraint):
         j = np.array([state[i] for i in range(self.getAmbientDimension())])
         # Simple bound check: assume revolute joints within ±2π
         if np.any(j < -2 * np.pi) or np.any(j > 2 * np.pi):
+            return False
+        if self.collision_fn(j):
             return False
         return True
 
@@ -175,85 +179,83 @@ class RelativeEndEffectorConstraint(ob.Constraint):
 # ------------------------------------------------------------------------------------
 
 
-def compute_and_plot_constraint_violations(trajectory: np.ndarray, constraint: RelativeEndEffectorConstraint, 
-                                          output_dir: str = "./") -> np.ndarray:
+def compute_and_plot_constraint_violations(trajectory: np.ndarray, constraint: RelativeEndEffectorConstraint, output_dir: str = "./") -> np.ndarray:
     """
     计算轨迹中每个点的约束违反度，绘制曲线并保存图片。
-    
+
     Args:
         trajectory: 轨迹数组，形状为 (n_points, n_joints)
         constraint: 约束对象
         output_dir: 输出目录
-        
+
     Returns:
         violations: 每个点的违反度数组
     """
     print("Computing constraint violations for trajectory...")
-    
+
     n_points = trajectory.shape[0]
     violations = np.zeros(n_points)
-    
+
     # 计算每个点的违反度
     for i in range(n_points):
         violations[i] = constraint.compute_violation(trajectory[i])
         if (i + 1) % 50 == 0 or i == n_points - 1:
             print(f"  Progress: {i + 1}/{n_points} points processed")
-    
+
     # 统计信息
     max_violation = np.max(violations)
     mean_violation = np.mean(violations)
     final_violation = violations[-1]
-    
+
     print(f"\nConstraint Violation Statistics:")
     print(f"  Max violation: {max_violation:.6f} m")
     print(f"  Mean violation: {mean_violation:.6f} m")
     print(f"  Final violation: {final_violation:.6f} m")
-    
+
     # 绘制违反度曲线
     plt.figure(figsize=(12, 8))
-    
+
     # 主图：违反度随时间变化
     plt.subplot(2, 1, 1)
     time_steps = np.arange(n_points)
-    plt.plot(time_steps, violations, 'b-', linewidth=2, label='Constraint Violation')
-    plt.axhline(y=mean_violation, color='r', linestyle='--', alpha=0.7, label=f'Mean: {mean_violation:.6f} m')
-    plt.xlabel('Trajectory Point Index')
-    plt.ylabel('Violation Magnitude (m)')
-    plt.title('Dual-Arm Relative Position Constraint Violation')
+    plt.plot(time_steps, violations, "b-", linewidth=2, label="Constraint Violation")
+    plt.axhline(y=mean_violation, color="r", linestyle="--", alpha=0.7, label=f"Mean: {mean_violation:.6f} m")
+    plt.xlabel("Trajectory Point Index")
+    plt.ylabel("Violation Magnitude (m)")
+    plt.title("Dual-Arm Relative Position Constraint Violation")
     plt.grid(True, alpha=0.3)
     plt.legend()
-    
+
     # 子图：违反度的对数刻度（如果有很小的值）
     plt.subplot(2, 1, 2)
-    plt.semilogy(time_steps, violations + 1e-10, 'g-', linewidth=2, label='Constraint Violation (log scale)')
-    plt.xlabel('Trajectory Point Index')
-    plt.ylabel('Violation Magnitude (m, log scale)')
-    plt.title('Constraint Violation (Logarithmic Scale)')
+    plt.semilogy(time_steps, violations + 1e-10, "g-", linewidth=2, label="Constraint Violation (log scale)")
+    plt.xlabel("Trajectory Point Index")
+    plt.ylabel("Violation Magnitude (m, log scale)")
+    plt.title("Constraint Violation (Logarithmic Scale)")
     plt.grid(True, alpha=0.3)
     plt.legend()
-    
+
     plt.tight_layout()
-    
+
     # 保存图片
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     filename = f"dual_constraint_violations_{timestamp}.png"
     filepath = os.path.join(output_dir, filename)
-    
-    plt.savefig(filepath, dpi=300, bbox_inches='tight')
+
+    plt.savefig(filepath, dpi=300, bbox_inches="tight")
     print(f"✓ Constraint violation plot saved to: {filepath}")
-    
+
     # 同时保存违反度数据
     data_filename = f"dual_constraint_violations_data_{timestamp}.txt"
     data_filepath = os.path.join(output_dir, data_filename)
-    
+
     # 保存数据：第一列是时间步，第二列是违反度
     violation_data = np.column_stack([time_steps, violations])
-    np.savetxt(data_filepath, violation_data, fmt="%.8f", 
-               header="TimeStep ConstraintViolation(m)")
+    np.savetxt(data_filepath, violation_data, fmt="%.8f", header="TimeStep ConstraintViolation(m)")
     print(f"✓ Constraint violation data saved to: {data_filepath}")
-    
+
     plt.show()
-    
+
     return violations
 
 
@@ -350,35 +352,35 @@ if __name__ == "__main__":
     # ------------------------------------------------------------------
     start_conf = np.array(
         [
-            -1.4548678138205007,
-            2.806129826631413,
-            1.9239958947411795,
-            -3.0441710667741853,
-            2.3495120070784346,
-            -1.4075747303273691,
-            1.4548599509872808,
-            -1.4735124712795662,
-            1.923998966565559,
-            4.1467398248734915,
-            3.9336887890769203,
-            -1.7340265260573324,
+            -1.5021426049088822,
+            2.875807965487516,
+            1.8672209938146547,
+            -3.1037391209227634,
+            2.353848891975927,
+            -1.47385655348834,
+            1.5021347688211746,
+            0.265786601011112,
+            -1.8672242339039837,
+            -0.0378579625998521,
+            -2.353833622287848,
+            -1.6677457011931158,
         ]
     )
 
     target_conf = np.array(
         [
-            -1.9667534100138284,
-            3.6727496494970957,
-            0.6632718565653849,
-            -3.133340988210789,
-            2.281544836882928,
-            -2.104717260954066,
-            1.9667475024595606,
-            -1.1668001609097725,
-            0.6632945460855103,
-            5.583995733861121,
-            4.001651069424526,
-            -1.0368891407855587,
+            -1.8926153301031614,
+            3.487309932900661,
+            1.0134375755152472,
+            -3.236291831601351,
+            2.3060968246509237,
+            -2.0113978398481405,
+            1.89260890974217,
+            -0.34571159289373343,
+            -1.0134519530540729,
+            0.09469383179844693,
+            -2.3060853906423824,
+            -1.1302087699453331,
         ]
     )
 
@@ -397,15 +399,15 @@ if __name__ == "__main__":
     # ------------------------------------------------------------------
     # Motion Planning
     # ------------------------------------------------------------------
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("=== Dual-arm relative constraint planning ===")
-    print("="*60)
+    print("=" * 60)
     print(f"Space type: {args.space}")
     print(f"Planner: {args.planner}")
     print(f"Time limit: {args.time}s")
     print(f"Tolerance: {args.tolerance}")
     print(f"Interpolation points: {args.interpolate_points}")
-    print("-"*60)
+    print("-" * 60)
 
     print("\nPlanning...")
     tic = time.time()
@@ -427,21 +429,21 @@ if __name__ == "__main__":
         # Compute and plot constraint violations (default enabled)
         # ------------------------------------------------------------------
         if args.plot_violations or True:  # 默认启用
-            print("\n" + "-"*60)
+            print("\n" + "-" * 60)
             print("Constraint violation analysis")
-            print("-"*60)
-            
+            print("-" * 60)
+
             # 计算并绘制约束违反度
             violations = compute_and_plot_constraint_violations(result_traj, constraint, output_dir="./")
-            
+
             print("\nConstraint analysis complete.")
 
         # ------------------------------------------------------------------
         # Interactive Visualization
         # ------------------------------------------------------------------
-        print("\n" + "-"*60)
+        print("\n" + "-" * 60)
         print("Interactive trajectory playback")
-        print("-"*60)
+        print("-" * 60)
         print("Use slider to scrub through trajectory, ESC/q to exit...")
 
         # Draw polyline between left EE positions for context
@@ -469,7 +471,7 @@ if __name__ == "__main__":
         # Slider interface
         slider = p.addUserDebugParameter("traj_idx", 0, result_traj.shape[0] - 1, 0)
         current_index = -1
-        
+
         try:
             while True:
                 idx = int(p.readUserDebugParameter(slider))

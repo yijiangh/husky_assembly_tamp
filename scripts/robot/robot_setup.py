@@ -158,7 +158,7 @@ class RobotSetup:
         elif robot_type == "husky_dual":
             self.robot_params["urdf_path"] = HUSKY_DUAL_URDF_PATH
             self.robot_params["srdf_path"] = HUSKY_DUAL_SRDF_PATH
-            self.robot_params["gripper_obj"] = HUSKY_GRIPPER_OBJ
+            self.robot_params["gripper_obj"] = None
             self.robot_params["tool0_name"] = HUSKY_DUAL_TOOL0_LEFT  # default tool reference
             self.robot_params["joint_names"] = HUSKY_DUAL_ARM_JOINT_NAMES
             self.robot_params["init_angles"] = HUSKY_DUAL_INIT_ARM_JOINT_ANGLES
@@ -233,11 +233,10 @@ class RobotSetup:
         ik_solver_relative = lambda *args, **kwargs: None  # default no-op solver
 
         # For non-dual Husky variants we still load semantics and IK solver
+        robot_model = RobotModel.from_urdf_file(robot_urdf)
+        semantics = RobotSemantics.from_srdf_file(robot_srdf, robot_model)
+        disabled_collisions = self.get_disabled_collisions_from_link_names(robot, semantics.disabled_collisions)
         if self.robot_type != "husky_dual":
-            robot_model = RobotModel.from_urdf_file(robot_urdf)
-            semantics = RobotSemantics.from_srdf_file(robot_srdf, robot_model)
-            disabled_collisions = self.get_disabled_collisions_from_link_names(robot, semantics.disabled_collisions)
-
             # Configure Pinocchio IK solver for relative IK
             pinocchio_solver = PinocchioSolver(
                 robot_urdf,
@@ -476,7 +475,7 @@ class RobotSetup:
             print("End configuration in collision.")
             return None
 
-    def create_collision_fn(self, obstacle_bodies: List[int]) -> Callable[[np.ndarray], bool]:
+    def create_collision_fn(self, obstacle_bodies: List[int] = []) -> Callable[[np.ndarray], bool]:
         """Create PyBullet-based collision function"""
         robot_body = self.robot
         arm_joints = self.arm_joints

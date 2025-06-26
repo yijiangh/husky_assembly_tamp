@@ -1,57 +1,54 @@
 #!/usr/bin/env python3
 
+import argparse
 import os
 import sys
+import time
+from functools import partial
+from typing import Tuple
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pybullet as p
 import pybullet_planning as pp
-from compas_fab.robots import RobotSemantics
-from compas_fab.robots.robot import RobotModel
-from tracikpy import TracIKSolver
-import time  # 导入时间模块用于生成文件名和可视化控制
-import argparse
-import math
-from functools import partial
-import matplotlib.pyplot as plt
 
 # Import OMPL libraries
 try:
-    from ompl import util as ou
     from ompl import base as ob
     from ompl import geometric as og
+    from ompl import util as ou
 except ImportError:
     # if the ompl module is not in the PYTHONPATH assume it is installed in a
     # subdirectory of the parent directory called "py-bindings."
-    from os.path import abspath, dirname, join
     import sys
+    from os.path import abspath, dirname, join
 
     sys.path.insert(0, join(dirname(dirname(dirname(abspath(__file__)))), "py-bindings"))
-    from ompl import util as ou
     from ompl import base as ob
     from ompl import geometric as og
+    from ompl import util as ou
 
 HERE = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(HERE)
 
 import utils.load_multi_tangent as load_multi_tangent
-from multi_tangent.collision import create_collision_bodies
+from ConstrainedPlanningCommon import *
+from robot.robot_setup import HUSKY_DUAL_ARM_JOINT_NAMES, HUSKY_DUAL_TOOL0_LEFT, HUSKY_DUAL_TOOL0_RIGHT, RobotSetup
 from utils.collision import init_pb
 from utils.params import *
-from robot.robot_setup import RobotSetup, HUSKY_URDF_PATH, HUSKY_ARM_JOINT_NAMES, HUSKY_CONTROL_JOINT_NAMES, HUSKY_TOOL0_NAME, HUSKY_DUAL_TOOL0_LEFT, HUSKY_DUAL_TOOL0_RIGHT, HUSKY_DUAL_ARM_JOINT_NAMES
-from ConstrainedPlanningCommon import *
 from utils.util import interpolate
 
 
 class RelativeEndEffectorConstraint(ob.Constraint):
-    """Constraint that keeps the relative translation between the two tool0 frames of the dual-arm Husky fixed.
+    """Constraint that keeps the relative position of the left end-effector in the right end-effector's coordinate frame fixed.
 
-    The constraint enforces that the vector connecting the left and right end-effectors stays
-    identical to the one measured when the class is instantiated.
+    The constraint enforces that the left end-effector maintains its position relative to the right
+    end-effector's coordinate frame, which is appropriate for grasping a rigid object like a rod.
     """
 
     def __init__(self, num_joints: int, robot_setup: RobotSetup):
         # 3 positional constraints (dx, dy, dz)
-        super(RelativeEndEffectorConstraint, self).__init__(num_joints, 3)
+        super(RelativeEndEffectorConstraint, self).__init__(num_joints, 6)
 
         self.robot_setup = robot_setup
         self.robot_id = robot_setup.robot
@@ -66,10 +63,16 @@ class RelativeEndEffectorConstraint(ob.Constraint):
 
         self.collision_fn = robot_setup.create_collision_fn()
 
-        # Record the desired relative translation (left - right) at instantiation
-        left_pose = pp.get_link_pose(self.robot_id, self.left_tool_link)[0]
-        right_pose = pp.get_link_pose(self.robot_id, self.right_tool_link)[0]
-        self.desired_delta = np.array(left_pose) - np.array(right_pose)
+        # Record the desired relative position of left EE in right EE's coordinate frame
+        left_pose = pp.get_link_pose(self.robot_id, self.left_tool_link)  # world_from_left
+        right_pose = pp.get_link_pose(self.robot_id, self.right_tool_link)  # world_from_right
+
+        # Get left position in right's coordinate frame
+        right_from_left = pp.multiply(pp.invert(right_pose), left_pose)
+        left_from_right = pp.multiply(pp.invert(left_pose), right_pose)
+
+        self.desired_right_from_left = np.array(right_from_left[0])
+        self.desired_left_from_right = np.array(left_from_right[0])
 
     # ------------------------------------------------------------------
     #   Core OMPL callbacks
@@ -77,16 +80,20 @@ class RelativeEndEffectorConstraint(ob.Constraint):
     def function(self, x, out):
         """Compute constraint residuals given joint configuration *x*.
 
-        out[i] = f_i(x) where f(x) = (current_delta - desired_delta).
+        out[i] = f_i(x) where f(x) = (current_relative_pos - desired_relative_pos).
         """
-        current_delta = self._relative_translation(x)
-        diff = current_delta - self.desired_delta
-        out[0], out[1], out[2] = diff  # dx, dy, dz
+        current_right_from_left, current_left_from_right = self._relative_position(x)
+        diff_right = current_right_from_left - self.desired_right_from_left
+        out[0], out[1], out[2] = diff_right  # dx, dy, dz
+
+        diff_left = current_left_from_right - self.desired_left_from_right
+        out[3], out[4], out[5] = diff_left
+        # out[3], out[4], out[5] = 0, 0, 0
 
     def jacobian(self, x, out):
         """Finite-difference Jacobian of the constraint."""
         epsilon = 1e-6
-        base_delta = self._relative_translation(x)
+        base_relative_right, base_relative_left = self._relative_position(x)
 
         # Initialise jacobian with zeros (codim x ambient)
         out[:, :] = np.zeros((self.getCoDimension(), self.getAmbientDimension()))
@@ -94,30 +101,42 @@ class RelativeEndEffectorConstraint(ob.Constraint):
         for i in range(self.num_joints):
             x_plus = np.array(x)
             x_plus[i] += epsilon
-            delta_plus = self._relative_translation(x_plus)
-            deriv = (delta_plus - base_delta) / epsilon  # 3-vector
+            relative_pos_plus_right, relative_pos_plus_left = self._relative_position(x_plus)
+            deriv = (relative_pos_plus_right - base_relative_right) / epsilon  # 3-vector
             out[0, i], out[1, i], out[2, i] = deriv
+
+            deriv = (relative_pos_plus_left - base_relative_left) / epsilon  # 3-vector
+            out[3, i], out[4, i], out[5, i] = deriv
+            # out[3, i], out[4, i], out[5, i] = 0, 0, 0
 
     # ------------------------------------------------------------------
     #   Helpers
     # ------------------------------------------------------------------
-    def _relative_translation(self, joint_angles: np.ndarray) -> np.ndarray:
-        """Return translation vector (left - right) for given joint angles."""
+    def _relative_position(self, joint_angles: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """Return position of left end-effector in right end-effector's coordinate frame for given joint angles."""
         # Backup current joint state
         current_conf = pp.get_joint_positions(self.robot_id, self.control_joints)
         try:
             self.robot_setup.set_joint_positions(self.control_joints, joint_angles)
-            left_pos = pp.get_link_pose(self.robot_id, self.left_tool_link)[0]
-            right_pos = pp.get_link_pose(self.robot_id, self.right_tool_link)[0]
-            return np.array(left_pos) - np.array(right_pos)
+            left_pose = pp.get_link_pose(self.robot_id, self.left_tool_link)
+            right_pose = pp.get_link_pose(self.robot_id, self.right_tool_link)
+            right_from_left = pp.multiply(pp.invert(right_pose), left_pose)
+            left_from_right = pp.multiply(pp.invert(left_pose), right_pose)
+
+            # Get left position in right's coordinate frame
+            left_in_right_frame = np.array(right_from_left[0])
+            right_in_left_frame = np.array(left_from_right[0])
+
+            return left_in_right_frame, right_in_left_frame
         finally:
             self.robot_setup.set_joint_positions(self.control_joints, current_conf)
 
     def compute_violation(self, joint_angles: np.ndarray) -> float:
         """Compute constraint violation magnitude for given joint configuration."""
-        current_delta = self._relative_translation(joint_angles)
-        diff = current_delta - self.desired_delta
-        return np.linalg.norm(diff)
+        current_right_from_left, current_left_from_right = self._relative_position(joint_angles)
+        diff_right = current_right_from_left - self.desired_right_from_left
+        diff_left = current_left_from_right - self.desired_left_from_right
+        return (np.linalg.norm(diff_right) + np.linalg.norm(diff_left)) / 2
 
     # ------------------------------------------------------------------
     #   Optional helpers for planning convenience
@@ -128,7 +147,7 @@ class RelativeEndEffectorConstraint(ob.Constraint):
         # Simple bound check: assume revolute joints within ±2π
         if np.any(j < -2 * np.pi) or np.any(j > 2 * np.pi):
             return False
-        if self.collision_fn(j):
+        if self.collision_fn(j, diagnosis=False):
             return False
         return True
 
@@ -146,10 +165,6 @@ class RelativeEndEffectorConstraint(ob.Constraint):
         space.setBounds(bounds)
         return space
 
-    def dump(self, outfile):
-        print("RelativeEndEffectorConstraint", file=outfile)
-        print(f"Desired delta: {self.desired_delta}", file=outfile)
-
     def getProjection(self, space):
         """Return a ProjectionEvaluator mapping state -> relative translation (3-D)."""
 
@@ -160,16 +175,17 @@ class RelativeEndEffectorConstraint(ob.Constraint):
                 self.defaultCellSizes()
 
             def getDimension(self):
-                return 3
+                return 6
 
             def defaultCellSizes(self):
                 # Equal cell sizes for each coordinate
-                self.cellSizes_ = list2vec([0.05, 0.05, 0.05])
+                self.cellSizes_ = list2vec([0.05, 0.05, 0.05, 0.05, 0.05, 0.05])
 
             def project(self, state, projection):
                 joint_angles = [state[i] for i in range(self.constraint.num_joints)]
-                delta = self.constraint._relative_translation(joint_angles)
-                projection[0], projection[1], projection[2] = delta
+                relative_right, relative_left = self.constraint._relative_position(joint_angles)
+                projection[0], projection[1], projection[2] = relative_right
+                projection[3], projection[4], projection[5] = relative_left
 
         return RelProjection(space, self)
 
@@ -181,28 +197,28 @@ class RelativeEndEffectorConstraint(ob.Constraint):
 
 def compute_and_plot_constraint_violations(trajectory: np.ndarray, constraint: RelativeEndEffectorConstraint, output_dir: str = "./") -> np.ndarray:
     """
-    计算轨迹中每个点的约束违反度，绘制曲线并保存图片。
+    Compute constraint violation for each point in trajectory, plot curves and save images.
 
     Args:
-        trajectory: 轨迹数组，形状为 (n_points, n_joints)
-        constraint: 约束对象
-        output_dir: 输出目录
+        trajectory: Trajectory array with shape (n_points, n_joints)
+        constraint: Constraint object
+        output_dir: Output directory
 
     Returns:
-        violations: 每个点的违反度数组
+        violations: Array of violation magnitudes for each point
     """
     print("Computing constraint violations for trajectory...")
 
     n_points = trajectory.shape[0]
     violations = np.zeros(n_points)
 
-    # 计算每个点的违反度
+    # Compute violation for each point
     for i in range(n_points):
         violations[i] = constraint.compute_violation(trajectory[i])
         if (i + 1) % 50 == 0 or i == n_points - 1:
             print(f"  Progress: {i + 1}/{n_points} points processed")
 
-    # 统计信息
+    # Statistical information
     max_violation = np.max(violations)
     mean_violation = np.mean(violations)
     final_violation = violations[-1]
@@ -212,10 +228,10 @@ def compute_and_plot_constraint_violations(trajectory: np.ndarray, constraint: R
     print(f"  Mean violation: {mean_violation:.6f} m")
     print(f"  Final violation: {final_violation:.6f} m")
 
-    # 绘制违反度曲线
+    # Plot violation curves
     plt.figure(figsize=(12, 8))
 
-    # 主图：违反度随时间变化
+    # Main plot: violation vs time
     plt.subplot(2, 1, 1)
     time_steps = np.arange(n_points)
     plt.plot(time_steps, violations, "b-", linewidth=2, label="Constraint Violation")
@@ -226,7 +242,7 @@ def compute_and_plot_constraint_violations(trajectory: np.ndarray, constraint: R
     plt.grid(True, alpha=0.3)
     plt.legend()
 
-    # 子图：违反度的对数刻度（如果有很小的值）
+    # Subplot: violation in logarithmic scale (for small values)
     plt.subplot(2, 1, 2)
     plt.semilogy(time_steps, violations + 1e-10, "g-", linewidth=2, label="Constraint Violation (log scale)")
     plt.xlabel("Trajectory Point Index")
@@ -237,7 +253,7 @@ def compute_and_plot_constraint_violations(trajectory: np.ndarray, constraint: R
 
     plt.tight_layout()
 
-    # 保存图片
+    # Save plot
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     filename = f"dual_constraint_violations_{timestamp}.png"
     filepath = os.path.join(output_dir, filename)
@@ -245,11 +261,11 @@ def compute_and_plot_constraint_violations(trajectory: np.ndarray, constraint: R
     plt.savefig(filepath, dpi=300, bbox_inches="tight")
     print(f"✓ Constraint violation plot saved to: {filepath}")
 
-    # 同时保存违反度数据
+    # Also save violation data
     data_filename = f"dual_constraint_violations_data_{timestamp}.txt"
     data_filepath = os.path.join(output_dir, data_filename)
 
-    # 保存数据：第一列是时间步，第二列是违反度
+    # Save data: first column is time step, second column is violation
     violation_data = np.column_stack([time_steps, violations])
     np.savetxt(data_filepath, violation_data, fmt="%.8f", header="TimeStep ConstraintViolation(m)")
     print(f"✓ Constraint violation data saved to: {data_filepath}")
@@ -290,9 +306,10 @@ def relativeConstraintPlanningOnce(cp, planner, output=False, interpolate_points
     return arr
 
 
-def relativeConstraintPlanning(robot_setup: RobotSetup, start_conf: np.ndarray, goal_conf: np.ndarray, options):
+def relativeConstraintPlanning(robot_setup: RobotSetup, start_conf: np.ndarray, goal_conf: np.ndarray, options, constraint=None):
     num_joints = len(robot_setup.arm_joints)
-    constraint = RelativeEndEffectorConstraint(num_joints, robot_setup)
+    if constraint is None:
+        constraint = RelativeEndEffectorConstraint(num_joints, robot_setup)
 
     cp = ConstrainedProblem(options.space, constraint.createSpace(), constraint, options)
 
@@ -352,35 +369,35 @@ if __name__ == "__main__":
     # ------------------------------------------------------------------
     start_conf = np.array(
         [
-            -1.5021426049088822,
-            2.875807965487516,
-            1.8672209938146547,
-            -3.1037391209227634,
-            2.353848891975927,
-            -1.47385655348834,
-            1.5021347688211746,
-            0.265786601011112,
-            -1.8672242339039837,
-            -0.0378579625998521,
-            -2.353833622287848,
-            -1.6677457011931158,
+            -2.000957703613043,
+            -2.8274063096076927,
+            0.7599204916355927,
+            -1.417949677637465,
+            2.247283007586109,
+            -0.9687684451721333,
+            2.0009525404422375,
+            -0.31418100640279406,
+            -0.7599358045326311,
+            -1.7236269235075836,
+            -2.2472696640064473,
+            -2.1728147476121156,
         ]
     )
 
     target_conf = np.array(
         [
-            -1.8926153301031614,
-            3.487309932900661,
-            1.0134375755152472,
-            -3.236291831601351,
-            2.3060968246509237,
-            -2.0113978398481405,
-            1.89260890974217,
-            -0.34571159289373343,
-            -1.0134519530540729,
-            0.09469383179844693,
-            -2.3060853906423824,
-            -1.1302087699453331,
+            -1.8252972693363294,
+            -3.0657951326796105,
+            1.0227352141951294,
+            -1.4044710260259439,
+            2.0807387954828176,
+            -0.9012167418971372,
+            1.8252547582772554,
+            -0.07602775941548445,
+            -1.0227588851777303,
+            -1.7356745249695096,
+            -2.080403151523388,
+            -2.239946767445506,
         ]
     )
 
@@ -397,6 +414,39 @@ if __name__ == "__main__":
     pp.wait_for_user("Goal configuration visualized - press a key to plan…")
 
     # ------------------------------------------------------------------
+    # Pre-planning constraint validation
+    # ------------------------------------------------------------------
+    print("\n" + "-" * 60)
+    print("Pre-planning constraint validation")
+    print("-" * 60)
+
+    # Create constraint object for validation
+    num_joints = len(robot.arm_joints)
+    constraint = RelativeEndEffectorConstraint(num_joints, robot)
+
+    # Check start configuration constraint violation
+    start_violation = constraint.compute_violation(start_conf)
+    print(f"Start configuration constraint violation: {start_violation:.6f} m")
+
+    # Check target configuration constraint violation
+    target_violation = constraint.compute_violation(target_conf)
+    print(f"Target configuration constraint violation: {target_violation:.6f} m")
+
+    # Warn if violations are too large
+    max_acceptable_violation = 0.01  # 1cm threshold
+    if start_violation > max_acceptable_violation:
+        print(f"⚠️  WARNING: Start configuration has large constraint violation ({start_violation:.6f} m > {max_acceptable_violation} m)")
+
+    if target_violation > max_acceptable_violation:
+        print(f"⚠️  WARNING: Target configuration has large constraint violation ({target_violation:.6f} m > {max_acceptable_violation} m)")
+        print("   This may make planning more difficult or result in poor trajectory quality.")
+
+    if start_violation <= max_acceptable_violation and target_violation <= max_acceptable_violation:
+        print("✓ Both start and target configurations have acceptable constraint violations.")
+
+    print("-" * 60)
+
+    # ------------------------------------------------------------------
     # Motion Planning
     # ------------------------------------------------------------------
     print("\n" + "=" * 60)
@@ -411,7 +461,7 @@ if __name__ == "__main__":
 
     print("\nPlanning...")
     tic = time.time()
-    result_traj, constraint = relativeConstraintPlanning(robot, start_conf, target_conf, args)
+    result_traj, constraint = relativeConstraintPlanning(robot, start_conf, target_conf, args, constraint)
     toc = time.time()
 
     if result_traj is not None:
@@ -428,12 +478,12 @@ if __name__ == "__main__":
         # ------------------------------------------------------------------
         # Compute and plot constraint violations (default enabled)
         # ------------------------------------------------------------------
-        if args.plot_violations or True:  # 默认启用
+        if args.plot_violations or True:  # Default enabled
             print("\n" + "-" * 60)
             print("Constraint violation analysis")
             print("-" * 60)
 
-            # 计算并绘制约束违反度
+            # Compute and plot constraint violations
             violations = compute_and_plot_constraint_violations(result_traj, constraint, output_dir="./")
 
             print("\nConstraint analysis complete.")

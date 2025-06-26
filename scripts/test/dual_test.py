@@ -6,7 +6,7 @@ import pybullet_planning as pp
 from compas_fab.robots import RobotSemantics
 from compas_fab.robots.robot import RobotModel
 from tracikpy import TracIKSolver
-import time  # 导入时间模块用于生成文件名
+import time
 
 HERE = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(HERE)
@@ -96,15 +96,15 @@ while True:
     if record_value != last_record_value:
         last_record_value = record_value
         is_recording = True
-        print("开始录制...")
-        recorded_data = []  # 清空之前的录制数据
+        print("Start record...")
+        recorded_data = []
         
     # Check stop button state
     stop_value = p.readUserDebugParameter(stop_button)
     if stop_value != last_stop_value and is_recording:
         last_stop_value = stop_value
         is_recording = False
-        print("停止录制...")
+        print("Stop record...")
         
         # Save recording data
         timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -117,7 +117,7 @@ while True:
         # Convert list to array and save
         data_array = np.array(recorded_data, dtype=object)
         np.savez(save_path, data=data_array)
-        print(f"数据已保存到: {save_path}")
+        print(f"Data saved to: {save_path}")
     
     cartesian_pose = []
     for slider in element_sliders:

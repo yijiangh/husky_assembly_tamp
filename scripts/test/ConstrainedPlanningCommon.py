@@ -62,7 +62,7 @@ def addConstrainedOptions(parser):
                     "than 1.")
     group.add_argument("--tolerance", type=float, default=ob.CONSTRAINT_PROJECTION_TOLERANCE,
                     help="Constraint satisfaction tolerance.")
-    group.add_argument("--time", type=float, default=60.,
+    group.add_argument("--time", type=float, default=120.,
                     help="Planning time allowed.")
     group.add_argument("--tries", type=int, default=ob.CONSTRAINT_PROJECTION_MAX_ITERATIONS,
                     help="Maximum number sample tries per sample.")

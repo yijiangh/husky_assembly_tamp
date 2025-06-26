@@ -47,33 +47,51 @@ pp.set_color(right_box, [0, 0, 1, 1])
 left_solver = TracIKSolver(robot_urdf, "base_link", "left_ur_arm_tool0")
 right_solver = TracIKSolver(robot_urdf, "base_link", "right_ur_arm_tool0")
 
+# Slider for box offset parameters
 box_sliders = []
 names = ["left_y", "left_pitch", "right_y", "right_pitch"]
+# Initial values: left_y=-0.397, right_y=0.397, others 0
+box_initial_values = [-0.397, 0.0, 0.397, 0.0]
 for i in range(4):
-    slider = p.addUserDebugParameter(f"{names[i]}", -3.14, 3.14, 0)
+    slider = p.addUserDebugParameter(f"{names[i]}", -3.14, 3.14, box_initial_values[i])
     box_sliders.append(slider)
-    
+
+# Slider for element pose parameters
 element_sliders = []
 names = ["x", "y", "z", "roll", "pitch", "yaw"]
+# Initial values: x=0.628, z=0.496, roll=1.5708, others 0
+element_initial_values = [0.628, 0.0, 0.496, 1.5708, 0.0, 0.0]
 for i in range(6):
-    slider = p.addUserDebugParameter(f"{names[i]}", -3.14, 3.14, 0)
+    slider = p.addUserDebugParameter(f"{names[i]}", -3.14, 3.14, element_initial_values[i])
     element_sliders.append(slider)
-    
+
 left_q_init = pp.get_joint_positions(robot, left_joints)
 right_q_init = pp.get_joint_positions(robot, right_joints)
 
-# 添加录制和停止按钮
+# Add control buttons: Record, Stop, and Print
 record_button = p.addUserDebugParameter("Record", 1, 0, 0)
 stop_button = p.addUserDebugParameter("Stop", 1, 0, 0)
+print_button = p.addUserDebugParameter("Print", 1, 0, 0)
 
-# 录制相关变量
+# Recording related variables
 is_recording = False
 recorded_data = []
 last_record_value = 0
 last_stop_value = 0
+last_print_value = 0
 
 while True:
-    # 检查录制按钮状态
+    # Check print button state and output joint positions
+    print_value = p.readUserDebugParameter(print_button)
+    if print_value != last_print_value:
+        last_print_value = print_value
+        # Retrieve and print joint positions
+        current_left_q = pp.get_joint_positions(robot, left_joints)
+        current_right_q = pp.get_joint_positions(robot, right_joints)
+        print("Current left joint positions:", current_left_q)
+        print("Current right joint positions:", current_right_q)
+
+    # Check record button state
     record_value = p.readUserDebugParameter(record_button)
     if record_value != last_record_value:
         last_record_value = record_value
@@ -81,22 +99,22 @@ while True:
         print("开始录制...")
         recorded_data = []  # 清空之前的录制数据
         
-    # 检查停止按钮状态
+    # Check stop button state
     stop_value = p.readUserDebugParameter(stop_button)
     if stop_value != last_stop_value and is_recording:
         last_stop_value = stop_value
         is_recording = False
         print("停止录制...")
         
-        # 保存录制的数据
+        # Save recording data
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         filename = f"recorded_data_{timestamp}.npz"
         save_path = os.path.join(HERE, "recordings", filename)
         
-        # 确保目录存在
+        # Ensure directory exists
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         
-        # 将列表转换为数组并保存
+        # Convert list to array and save
         data_array = np.array(recorded_data, dtype=object)
         np.savez(save_path, data=data_array)
         print(f"数据已保存到: {save_path}")
@@ -130,7 +148,7 @@ while True:
         right_q_init = right_sol
         right_ee_attachment.assign()
         
-    # 录制数据
+    # Record data
     if is_recording and left_sol is not None and right_sol is not None:
         frame_data = {
             'box_sliders': cartesian_offset,

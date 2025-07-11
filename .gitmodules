@@ -18,3 +18,10 @@
 	path = ext/FrameX
 	url = https://github.com/yijiangh/FrameX.git
 	branch = master
+[submodule "data/husky_assembly_design_study"]
+	path = data/husky_assembly_design_study
+	url = https://gitlab.inf.ethz.ch/crl/yijiangh/husky_assembly_design_study.git
+	branch = main
+[submodule "ext/compas_fab"]
+	path = ext/compas_fab
+	url = https://github.com/compas-dev/compas_fab.git

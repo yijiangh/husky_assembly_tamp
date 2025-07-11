@@ -94,14 +94,16 @@ class Grasp(object):
         return "{}(E{})".format(self.__class__.__name__, self.element)
 
 
-def init_pb():
+def init_pb() -> int:
     """初始化PyBullet环境，屏蔽版本信息输出"""
     # * start pybullet simulator
-    pp.connect(use_gui=True, shadows=True, color=[0.9, 0.9, 1.0])
+    client = pp.connect(use_gui=True, shadows=True, color=[0.9, 0.9, 1.0])
 
-    p.configureDebugVisualizer(p.COV_ENABLE_GUI, 1, physicsClientId=pp.CLIENT)
+    p.configureDebugVisualizer(p.COV_ENABLE_GUI, 1, physicsClientId=client)
     # pp.set_camera(np.deg2rad(92.0), np.deg2rad(-85), 5.20)
     # pp.set_camera(92.0, -85, 5.20)
+
+    return client
 
 
 def create_couplers(line_pts_flattened, contact_id_pairs):

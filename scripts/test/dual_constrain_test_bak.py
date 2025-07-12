@@ -356,78 +356,50 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    design_study_path = os.path.join(DATA_DIR, "husky_assembly_design_study")
-    design_case = "test"
-    target_cell_state_path = os.path.join(design_study_path, design_case, "RobotCellStates", "robotx_box_A0-G_RobotCellState.json")
-    start_cell_state_path = os.path.join(design_study_path, design_case, "RobotCellStates", "robotx_box_A8-S7_start_state_RobotCellState.json")
-    
-    # ------------------------------------------------------------------
-    # Start Configuration
-    # ------------------------------------------------------------------
-    print("Initializing start configuration...")
-    robot = RobotSetup("r0", robot_type="husky_dual", robot_cell_state_path=start_cell_state_path, use_scene_parser_gui=True, scene_parser_verbose=True)
-    print("✓ Start configuration initialized.")
-
-    start_conf = np.array(robot.arm_target_angles)
-    start_conf = (start_conf + np.pi) % (2 * np.pi) - np.pi
-    print(f"Start configuration: {list(start_conf)}")
-    robot.set_joint_positions(robot.arm_joints, start_conf)
-
-    pp.wait_for_user()
-    
-    pp.disconnect()
-    del robot
-
     # ------------------------------------------------------------------
     # Environment & Robot Setup
     # ------------------------------------------------------------------
     print("Initializing PyBullet environment and robot setup...")
-    robot = RobotSetup("r0", robot_type="husky_dual", robot_cell_state_path=target_cell_state_path, use_scene_parser_gui=True, scene_parser_verbose=True)
+    init_pb()
+    robot = RobotSetup("r0", robot_type="husky_dual")
     print("✓ Robot setup complete.")
-
-    target_conf = np.array(robot.arm_target_angles)
-    target_conf = (target_conf + np.pi) % (2 * np.pi) - np.pi
-    print(f"Target configuration: {list(target_conf)}")
-    robot.set_joint_positions(robot.arm_joints, target_conf)
-
-    pp.wait_for_user()
 
     # ------------------------------------------------------------------
     # Define start & goal configurations (12-DoF – two 6-axis arms)
     # ------------------------------------------------------------------
-    # start_conf = np.array(
-    #     [
-    #         -2.000957703613043,
-    #         -2.8274063096076927,
-    #         0.7599204916355927,
-    #         -1.417949677637465,
-    #         2.247283007586109,
-    #         -0.9687684451721333,
-    #         2.0009525404422375,
-    #         -0.31418100640279406,
-    #         -0.7599358045326311,
-    #         -1.7236269235075836,
-    #         -2.2472696640064473,
-    #         -2.1728147476121156,
-    #     ]
-    # )
+    start_conf = np.array(
+        [
+            -2.000957703613043,
+            -2.8274063096076927,
+            0.7599204916355927,
+            -1.417949677637465,
+            2.247283007586109,
+            -0.9687684451721333,
+            2.0009525404422375,
+            -0.31418100640279406,
+            -0.7599358045326311,
+            -1.7236269235075836,
+            -2.2472696640064473,
+            -2.1728147476121156,
+        ]
+    )
 
-    # target_conf = np.array(
-    #     [
-    #         -1.8252972693363294,
-    #         -3.0657951326796105,
-    #         1.0227352141951294,
-    #         -1.4044710260259439,
-    #         2.0807387954828176,
-    #         -0.9012167418971372,
-    #         1.8252547582772554,
-    #         -0.07602775941548445,
-    #         -1.0227588851777303,
-    #         -1.7356745249695096,
-    #         -2.080403151523388,
-    #         -2.239946767445506,
-    #     ]
-    # )
+    target_conf = np.array(
+        [
+            -1.8252972693363294,
+            -3.0657951326796105,
+            1.0227352141951294,
+            -1.4044710260259439,
+            2.0807387954828176,
+            -0.9012167418971372,
+            1.8252547582772554,
+            -0.07602775941548445,
+            -1.0227588851777303,
+            -1.7356745249695096,
+            -2.080403151523388,
+            -2.239946767445506,
+        ]
+    )
 
     # ------------------------------------------------------------------
     # Visualize start & goal configurations

@@ -274,6 +274,8 @@ class RobotSetup:
         # Create and use SceneParser
         self.scene_parser = SceneParser(robot_cell_state_path=self.robot_cell_state_path, use_gui=self.use_scene_parser_gui, verbose=self.scene_parser_verbose)
 
+        self.arm_target_angles = self.scene_parser.robot_cell_state.robot_configuration.joint_values
+
         # Reconstruct the scene
         client, planner = self.scene_parser.reconstruct_scene()
 

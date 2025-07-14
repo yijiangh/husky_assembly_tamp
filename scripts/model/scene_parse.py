@@ -140,11 +140,6 @@ class SceneParser:
 
         return self.client, self.planner
 
-    def wait_for_interaction(self):
-        """Wait for user interaction if using GUI."""
-        if self.use_gui:
-            pp.wait_if_gui()
-
     def cleanup(self):
         """Clean up PyBullet resources."""
         if self.client is not None:

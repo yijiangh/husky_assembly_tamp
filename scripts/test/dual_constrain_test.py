@@ -40,14 +40,15 @@ from utils.util import interpolate
 
 
 class RelativeEndEffectorConstraint(ob.Constraint):
-    """Constraint that keeps the relative position of the left end-effector in the right end-effector's coordinate frame fixed.
+    """Constraint that keeps the relative position and orientation of the left end-effector 
+    in the right end-effector's coordinate frame fixed, using position difference and axis angles.
 
-    The constraint enforces that the left end-effector maintains its position relative to the right
-    end-effector's coordinate frame, which is appropriate for grasping a rigid object like a rod.
+    The constraint enforces that the left end-effector maintains a constant position and orientation 
+    relative to the right end-effector, suitable for tasks like grasping a rigid object.
     """
 
     def __init__(self, num_joints: int, robot_setup: RobotSetup):
-        # 3 positional constraints (dx, dy, dz)
+        # 6 constraints: 3 for position (dx, dy, dz), 3 for orientation (angle_x, angle_y, angle_z)
         super(RelativeEndEffectorConstraint, self).__init__(num_joints, 6)
 
         self.robot_setup = robot_setup
@@ -68,11 +69,11 @@ class RelativeEndEffectorConstraint(ob.Constraint):
         right_pose = pp.get_link_pose(self.robot_id, self.right_tool_link)  # world_from_right
 
         # Get left position in right's coordinate frame
-        right_from_left = pp.multiply(pp.invert(right_pose), left_pose)
-        left_from_right = pp.multiply(pp.invert(left_pose), right_pose)
+        self.desired_right_from_left = pp.multiply(pp.invert(right_pose), left_pose)
+        self.desired_position_diff = np.array(self.desired_right_from_left[0])
 
-        self.desired_right_from_left = np.array(right_from_left[0])
-        self.desired_left_from_right = np.array(left_from_right[0])
+        # Desired relative orientation (angles between axes, initially 0 for alignment)
+        self.desired_angle_diff = np.zeros(3)  # Assuming desired angles are 0 (aligned)
 
     # ------------------------------------------------------------------
     #   Core OMPL callbacks
@@ -80,63 +81,71 @@ class RelativeEndEffectorConstraint(ob.Constraint):
     def function(self, x, out):
         """Compute constraint residuals given joint configuration *x*.
 
-        out[i] = f_i(x) where f(x) = (current_relative_pos - desired_relative_pos).
+        out[0:3] = current_relative_position - desired_relative_position
+        out[3:6] = current_axis_angles - desired_axis_angles
         """
-        current_right_from_left, current_left_from_right = self._relative_position(x)
-        diff_right = current_right_from_left - self.desired_right_from_left
-        out[0], out[1], out[2] = diff_right  # dx, dy, dz
-
-        diff_left = current_left_from_right - self.desired_left_from_right
-        out[3], out[4], out[5] = diff_left
-        # out[3], out[4], out[5] = 0, 0, 0
+        current_position, current_angles = self._relative_position(x)
+        diff_position = current_position - self.desired_position_diff
+        diff_angles = current_angles - self.desired_angle_diff
+        out[0:3] = diff_position  # dx, dy, dz
+        out[3:6] = diff_angles    # angle_x, angle_y, angle_z
 
     def jacobian(self, x, out):
         """Finite-difference Jacobian of the constraint."""
         epsilon = 1e-6
-        base_relative_right, base_relative_left = self._relative_position(x)
+        base_position, base_angles = self._relative_position(x)
+        base_out = np.concatenate([base_position, base_angles])
 
-        # Initialise jacobian with zeros (codim x ambient)
+        # Initialize jacobian with zeros (codim x ambient)
         out[:, :] = np.zeros((self.getCoDimension(), self.getAmbientDimension()))
 
         for i in range(self.num_joints):
             x_plus = np.array(x)
             x_plus[i] += epsilon
-            relative_pos_plus_right, relative_pos_plus_left = self._relative_position(x_plus)
-            deriv = (relative_pos_plus_right - base_relative_right) / epsilon  # 3-vector
-            out[0, i], out[1, i], out[2, i] = deriv
-
-            deriv = (relative_pos_plus_left - base_relative_left) / epsilon  # 3-vector
-            out[3, i], out[4, i], out[5, i] = deriv
-            # out[3, i], out[4, i], out[5, i] = 0, 0, 0
+            position_plus, angles_plus = self._relative_position(x_plus)
+            out_plus = np.concatenate([position_plus, angles_plus])
+            deriv = (out_plus - base_out) / epsilon
+            out[:, i] = deriv
 
     # ------------------------------------------------------------------
     #   Helpers
     # ------------------------------------------------------------------
     def _relative_position(self, joint_angles: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """Return position of left end-effector in right end-effector's coordinate frame for given joint angles."""
+        """Return position and axis angles of left end-effector in right end-effector's coordinate frame."""
         # Backup current joint state
         current_conf = pp.get_joint_positions(self.robot_id, self.control_joints)
         try:
             self.robot_setup.set_joint_positions(self.control_joints, joint_angles)
             left_pose = pp.get_link_pose(self.robot_id, self.left_tool_link)
             right_pose = pp.get_link_pose(self.robot_id, self.right_tool_link)
+
+            # Relative position
             right_from_left = pp.multiply(pp.invert(right_pose), left_pose)
-            left_from_right = pp.multiply(pp.invert(left_pose), right_pose)
-
-            # Get left position in right's coordinate frame
             left_in_right_frame = np.array(right_from_left[0])
-            right_in_left_frame = np.array(left_from_right[0])
 
-            return left_in_right_frame, right_in_left_frame
+            # Relative orientation (axis angles)
+            left_rot = np.array(pp.tform_from_pose(left_pose)[:3, :3])
+            right_rot = np.array(pp.tform_from_pose(right_pose)[:3, :3])
+
+            angles = np.zeros(3)
+            for i in range(3):  # x, y, z axes
+                axis_left = left_rot[:, i]
+                axis_right = right_rot[:, i]
+                cos_theta = np.dot(axis_left, axis_right) / (np.linalg.norm(axis_left) * np.linalg.norm(axis_right))
+                cos_theta = np.clip(cos_theta, -1.0, 1.0)  # Avoid numerical errors
+                theta = np.arccos(cos_theta)
+                angles[i] = theta
+
+            return left_in_right_frame, angles
         finally:
             self.robot_setup.set_joint_positions(self.control_joints, current_conf)
-
+    
     def compute_violation(self, joint_angles: np.ndarray) -> float:
         """Compute constraint violation magnitude for given joint configuration."""
-        current_right_from_left, current_left_from_right = self._relative_position(joint_angles)
-        diff_right = current_right_from_left - self.desired_right_from_left
-        diff_left = current_left_from_right - self.desired_left_from_right
-        return (np.linalg.norm(diff_right) + np.linalg.norm(diff_left)) / 2
+        current_position, current_angles = self._relative_position(joint_angles)
+        diff_position = current_position - self.desired_position_diff
+        diff_angles = current_angles - self.desired_angle_diff
+        return np.linalg.norm(diff_position) + np.linalg.norm(diff_angles)
 
     # ------------------------------------------------------------------
     #   Optional helpers for planning convenience
@@ -169,7 +178,7 @@ class RelativeEndEffectorConstraint(ob.Constraint):
         """Return a ProjectionEvaluator mapping state -> relative translation (3-D)."""
 
         class RelProjection(ob.ProjectionEvaluator):
-            def __init__(self, space, constraint):
+            def __init__(self, space, constraint: RelativeEndEffectorConstraint):
                 super(RelProjection, self).__init__(space)
                 self.constraint = constraint
                 self.defaultCellSizes()
@@ -183,9 +192,50 @@ class RelativeEndEffectorConstraint(ob.Constraint):
 
             def project(self, state, projection):
                 joint_angles = [state[i] for i in range(self.constraint.num_joints)]
-                relative_right, relative_left = self.constraint._relative_position(joint_angles)
-                projection[0], projection[1], projection[2] = relative_right
-                projection[3], projection[4], projection[5] = relative_left
+                position, angles = self.constraint._relative_position(joint_angles)
+                projection[0:3] = position
+                projection[3:6] = angles
+
+        return RelProjection(space, self)
+
+    def getProjection(self, space):
+        class RelProjection(ob.ProjectionEvaluator):
+            def __init__(self, space, constraint: RelativeEndEffectorConstraint):
+                super(RelProjection, self).__init__(space)
+                self.constraint = constraint
+                self.defaultCellSizes()
+
+            def getDimension(self):
+                return 12
+
+            def defaultCellSizes(self):
+                self.cellSizes_ = list2vec([0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01])
+
+            def project(self, state, projection):
+                joint_angles = np.array([state[i] for i in range(self.constraint.num_joints)])
+                current_conf = pp.get_joint_positions(self.constraint.robot_setup.robot, self.constraint.control_joints)
+                current_conf = [state[0] for state in current_conf]
+
+                try:
+                    half = self.constraint.num_joints // 2
+                    q_left = joint_angles[:half]
+                    q_right = joint_angles[half:]
+
+                    self.constraint.robot_setup.set_joint_positions(self.constraint.robot_setup.arm_joints_right, q_right)
+                    world_from_right = pp.get_link_pose(self.constraint.robot_id, self.constraint.right_tool_link)
+
+                    world_from_left = pp.multiply(world_from_right, self.constraint.desired_right_from_left)
+
+                    q_left_new = self.constraint.robot_setup.get_left_arm_ik_solution(world_from_left, q_left)
+
+                    if q_left_new is None:
+                        raise ValueError("IK failed!")
+
+                    x_proj = np.concatenate([q_left_new, q_right])
+                    projection[:] = x_proj
+
+                finally:
+                    self.constraint.robot_setup.set_joint_positions(self.constraint.control_joints, current_conf)
 
         return RelProjection(space, self)
 
@@ -360,7 +410,7 @@ if __name__ == "__main__":
     design_case = "test"
     target_cell_state_path = os.path.join(design_study_path, design_case, "RobotCellStates", "robotx_box_A0-G_RobotCellState.json")
     start_cell_state_path = os.path.join(design_study_path, design_case, "RobotCellStates", "robotx_box_A8-S7_start_state_RobotCellState.json")
-    
+
     # ------------------------------------------------------------------
     # Start Configuration
     # ------------------------------------------------------------------
@@ -373,8 +423,8 @@ if __name__ == "__main__":
     print(f"Start configuration: {list(start_conf)}")
     robot.set_joint_positions(robot.arm_joints, start_conf)
 
-    pp.wait_for_user()
-    
+    # pp.wait_for_user()
+
     pp.disconnect()
     del robot
 
@@ -390,7 +440,7 @@ if __name__ == "__main__":
     print(f"Target configuration: {list(target_conf)}")
     robot.set_joint_positions(robot.arm_joints, target_conf)
 
-    pp.wait_for_user()
+    # pp.wait_for_user()
 
     # ------------------------------------------------------------------
     # Define start & goal configurations (12-DoF – two 6-axis arms)
@@ -435,11 +485,11 @@ if __name__ == "__main__":
     print("\nVisualizing configurations...")
     robot.set_joint_positions(robot.arm_joints, start_conf)
     print("✓ Start configuration set.")
-    pp.wait_for_user("Start configuration visualized - press a key to continue…")
+    # pp.wait_for_user("Start configuration visualized - press a key to continue…")
 
     robot.set_joint_positions(robot.arm_joints, target_conf)
     print("✓ Goal configuration set.")
-    pp.wait_for_user("Goal configuration visualized - press a key to plan…")
+    # pp.wait_for_user("Goal configuration visualized - press a key to plan…")
 
     # ------------------------------------------------------------------
     # Pre-planning constraint validation

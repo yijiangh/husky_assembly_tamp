@@ -2,6 +2,8 @@ import json
 import os
 import sys
 
+import numpy as np
+import pybullet_planning as pp
 from compas.data import Data
 from compas.geometry import Transformation
 
@@ -54,31 +56,37 @@ def parse_grasp_target_dict(d):
     return GraspTarget(target_type, **kwargs)
 
 
-import json
+class TargetParser:
+    def __init__(self, file_path, state_name):
+        self.targets = self.load_grasp_targets(file_path, state_name)
+        self.parse_targets()
+        self.poses = self.parse_targets()
 
-from compas import json_load, json_loads
+    def load_grasp_targets(self, file_path, state_name):
+        in_path = os.path.join(file_path, "RobotCellStates", state_name + "_GraspTargets.json")
+        with open(in_path, "r") as f:
+            raw = json.load(f)
+
+        targets = []
+        for item in raw:
+            data = item["data"] if "data" in item else item
+            targets.append(parse_grasp_target_dict(data))
+
+        return targets
+
+    def parse_targets(self):
+        poses = []
+        for target in self.targets:
+            world_from_bar: Transformation = target.world_from_bar
+            world_from_tool0: Transformation = target.world_from_tool0
+            world_from_bar = pp.pose_from_tform(np.array(world_from_bar.matrix))
+            world_from_tool0 = pp.pose_from_tform(np.array(world_from_tool0.matrix))
+            tool0_from_bar = pp.multiply(pp.invert(world_from_tool0), world_from_bar)
+            poses.append(tool0_from_bar)
+        return poses
 
 
-def load_grasp_targets(file_path, state_name):
-    in_path = os.path.join(file_path, "RobotCellStates", state_name + "_GraspTargets.json")
-    with open(in_path, "r") as f:
-        # targets = json_load(f)
-        raw = json.load(f)
-
-    # raw is a list of objects, each with a 'data' key
-    targets = []
-    for item in raw:
-        data = item["data"] if "data" in item else item
-        targets.append(parse_grasp_target_dict(data))
-        # this doesn't work since GraspTarget is not registered
-        # targets.append(json_loads(json.dumps(data)))
-
-    return targets
-
-
-grasp_targets = None
-load = True
-file_path = os.path.join(DATA_DIR, "husky_assembly_design_study", "250707_RobotX_box_demo")
-state_name = "robotx_box_A0-G"
-if load:
-    grasp_targets = load_grasp_targets(file_path, state_name)
+if __name__ == "__main__":
+    file_path = os.path.join(DATA_DIR, "husky_assembly_design_study", "250707_RobotX_box_demo")
+    state_name = "robotx_box_A0-G"
+    target_parser = TargetParser(file_path, state_name)

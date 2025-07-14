@@ -117,6 +117,7 @@ class SceneParser:
         # Create PyBullet client and planner
         self.client = PyBulletClient(connection_type="gui" if self.use_gui else "direct", verbose=self.verbose)
         self.client.__enter__()  # Enter the context manager
+        
 
         pp.CLIENTS[self.client.client_id] = self.use_gui
         self.planner = PyBulletPlanner(self.client)
@@ -149,11 +150,6 @@ class SceneParser:
                 pass
             self.client = None
         self.planner = None
-
-    def __enter__(self):
-        """Context manager entry."""
-        self.reconstruct_scene()
-        return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit."""

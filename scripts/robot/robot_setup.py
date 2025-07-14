@@ -67,6 +67,8 @@ HUSKY_DUAL_TOOL0_RIGHT = "right_ur_arm_tool0"
 HUSKY_DUAL_ARM_JOINT_NAMES_LEFT = ["left_ur_arm_shoulder_pan_joint", "left_ur_arm_shoulder_lift_joint", "left_ur_arm_elbow_joint", "left_ur_arm_wrist_1_joint", "left_ur_arm_wrist_2_joint", "left_ur_arm_wrist_3_joint"]
 HUSKY_DUAL_ARM_JOINT_NAMES_RIGHT = ["right_ur_arm_shoulder_pan_joint", "right_ur_arm_shoulder_lift_joint", "right_ur_arm_elbow_joint", "right_ur_arm_wrist_1_joint", "right_ur_arm_wrist_2_joint", "right_ur_arm_wrist_3_joint"]
 HUSKY_DUAL_BASE_CONTROL_JOINT_NAMES = []
+HUSKY_DUAL_BASE_REDUCED_MODEL_JOINT_NAMES_LEFT = ["world_footprint", "base_footprint_joint", "dual_arm_bulkhead_joint", "left_arm_bulkhead_joint", "left_arm_mount_joint"]
+HUSKY_DUAL_BASE_REDUCED_MODEL_JOINT_NAMES_RIGHT = ["world_footprint", "base_footprint_joint", "dual_arm_bulkhead_joint", "right_arm_bulkhead_joint", "right_arm_mount_joint"]
 HUSKY_DUAL_CONTROL_JOINT_NAMES_LEFT = HUSKY_BASE_CONTROL_JOINT_NAMES + HUSKY_DUAL_ARM_JOINT_NAMES_LEFT
 HUSKY_DUAL_CONTROL_JOINT_NAMES_RIGHT = HUSKY_BASE_CONTROL_JOINT_NAMES + HUSKY_DUAL_ARM_JOINT_NAMES_RIGHT
 HUSKY_DUAL_ONBOARD_LINK_LEFT = "left_ur_arm_base_link"
@@ -193,9 +195,6 @@ class RobotSetup:
             self.robot_params["control_joint_names"] = HUSKY_DUAL_CONTROL_JOINT_NAMES
             self.robot_params["base_reduced_model_joint_names"] = HUSKY_BASE_REDUCED_MODEL_JOINT_NAMES
             self.robot_params["grasp_mask_links"] = HUSKY_DUAL_GRASP_MASK_LINKS_LEFT + HUSKY_DUAL_GRASP_MASK_LINKS_RIGHT
-
-            # Skip symbolic_forward computation for dual-arm variant for now
-            self.robot_params["base_from_connect"] = np.eye(4)
         else:
             raise ValueError(f"Unsupported robot type: {robot_type}")
 
@@ -241,6 +240,13 @@ class RobotSetup:
             self.control_joints = pp.joints_from_names(self.robot, self.robot_params["control_joint_names"])
         else:
             self.control_joints = []
+            
+        if self.robot_type == "husky_dual":
+            self.base_from_connect_left = pp.multiply(pp.invert(pp.get_pose(self.robot)), pp.get_link_pose(self.robot, pp.link_from_name(self.robot, self.robot_params["onboard_link_left"])))
+            self.base_from_connect_right = pp.multiply(pp.invert(pp.get_pose(self.robot)), pp.get_link_pose(self.robot, pp.link_from_name(self.robot, self.robot_params["onboard_link_right"])))
+            self.base_from_connect = self.base_from_connect_left
+        else:
+            self.base_from_connect = self.robot_params["base_from_connect"]
 
         # Initialize joint positions
         # self.set_joint_positions(self.arm_joints, self.arm_init_angles)
@@ -310,8 +316,10 @@ class RobotSetup:
             )
             ik_solver_relative = partial(pinocchio_solver.ik, tip_name=tool0_name)
         else:
-            pinocchio_solver_right = PinocchioSolver(robot_urdf, manipulator_joint_names=self.robot_params["joint_names"], control_joint_names=self.robot_params["right_joint_names"], base_link_name=self.robot_params["onboard_link_right"])
-            pinocchio_solver_left = PinocchioSolver(robot_urdf, manipulator_joint_names=self.robot_params["joint_names"], control_joint_names=self.robot_params["left_joint_names"], base_link_name=self.robot_params["onboard_link_left"])
+            pinocchio_solver_right = PinocchioSolver(robot_urdf, manipulator_joint_names=self.robot_params["right_joint_names"], control_joint_names=self.robot_params["right_joint_names"], base_link_name=self.robot_params["onboard_link_right"])
+            
+            pinocchio_solver_left = PinocchioSolver(robot_urdf, manipulator_joint_names=self.robot_params["left_joint_names"], control_joint_names=self.robot_params["left_joint_names"], base_link_name=self.robot_params["onboard_link_left"])
+            
             ik_solver_relative_left = partial(pinocchio_solver_left.ik, tip_name=self.robot_params["tool0_name_left"])
             ik_solver_relative_right = partial(pinocchio_solver_right.ik, tip_name=self.robot_params["tool0_name_right"])
 
@@ -575,8 +583,18 @@ class RobotSetup:
         Returns:
             Joint configuration solving the IK problem.
         """
+        if q_init is not None:
+            q_init = list(q_init)
+            
         # Use the pre-calculated base_from_connect (for all robot types)
-        world_from_connect = pp.multiply(pp.get_pose(self.robot), pp.pose_from_tform(self.robot_params["base_from_connect"]))
+        if self.robot_type == "husky_dual" and arm_side == "right":
+            base_from_connect = self.base_from_connect_right
+        elif self.robot_type == "husky_dual" and arm_side == "left":
+            base_from_connect = self.base_from_connect_left
+        else:
+            base_from_connect = self.base_from_connect
+            
+        world_from_connect = pp.multiply(pp.get_pose(self.robot), base_from_connect)
         connect_from_tool = pp.multiply(pp.invert(world_from_connect), world_from_tool)
         tform = pp.tform_from_pose(connect_from_tool)
 

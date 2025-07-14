@@ -175,30 +175,6 @@ class RelativeEndEffectorConstraint(ob.Constraint):
         return space
 
     def getProjection(self, space):
-        """Return a ProjectionEvaluator mapping state -> relative translation (3-D)."""
-
-        class RelProjection(ob.ProjectionEvaluator):
-            def __init__(self, space, constraint: RelativeEndEffectorConstraint):
-                super(RelProjection, self).__init__(space)
-                self.constraint = constraint
-                self.defaultCellSizes()
-
-            def getDimension(self):
-                return 6
-
-            def defaultCellSizes(self):
-                # Equal cell sizes for each coordinate
-                self.cellSizes_ = list2vec([0.05, 0.05, 0.05, 0.05, 0.05, 0.05])
-
-            def project(self, state, projection):
-                joint_angles = [state[i] for i in range(self.constraint.num_joints)]
-                position, angles = self.constraint._relative_position(joint_angles)
-                projection[0:3] = position
-                projection[3:6] = angles
-
-        return RelProjection(space, self)
-
-    def getProjection(self, space):
         class RelProjection(ob.ProjectionEvaluator):
             def __init__(self, space, constraint: RelativeEndEffectorConstraint):
                 super(RelProjection, self).__init__(space)
@@ -212,9 +188,9 @@ class RelativeEndEffectorConstraint(ob.Constraint):
                 self.cellSizes_ = list2vec([0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01])
 
             def project(self, state, projection):
+                print("state: ", state)
                 joint_angles = np.array([state[i] for i in range(self.constraint.num_joints)])
-                current_conf = pp.get_joint_positions(self.constraint.robot_setup.robot, self.constraint.control_joints)
-                current_conf = [state[0] for state in current_conf]
+                current_conf = list(pp.get_joint_positions(self.constraint.robot_setup.robot, self.constraint.control_joints))
 
                 try:
                     half = self.constraint.num_joints // 2

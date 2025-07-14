@@ -26,8 +26,11 @@ if __name__ == "__main__":
     pp.wait_for_user()
     
     left_tool0_pose = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_left)
+    right_tool0_pose = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
     left_arm_angles = pp.get_joint_positions(robot_setup.robot, robot_setup.arm_joints_left)
+    right_arm_angles = pp.get_joint_positions(robot_setup.robot, robot_setup.arm_joints_right)
     pp.draw_pose(left_tool0_pose)
+    pp.draw_pose(right_tool0_pose)
     
     pp.wait_for_user()
     
@@ -36,5 +39,12 @@ if __name__ == "__main__":
     new_left_arm_angles = robot_setup.get_left_arm_ik_solution(new_left_tool0_pose, left_arm_angles)
     robot_setup.set_joint_positions(robot_setup.arm_joints_left, new_left_arm_angles)
     pp.draw_pose(new_left_tool0_pose)
+    
+    pp.wait_for_user()
+    
+    new_right_tool0_pose = pp.multiply(right_tool0_pose, pose_delta)
+    new_right_arm_angles = robot_setup.get_right_arm_ik_solution(new_right_tool0_pose, right_arm_angles)
+    robot_setup.set_joint_positions(robot_setup.arm_joints_right, new_right_arm_angles)
+    pp.draw_pose(new_right_tool0_pose)
     
     pp.wait_for_user()

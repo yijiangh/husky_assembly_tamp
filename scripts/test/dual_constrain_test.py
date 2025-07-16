@@ -188,7 +188,7 @@ class RelativeEndEffectorConstraint(ob.Constraint):
                 self.cellSizes_ = list2vec([0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01])
 
             def project(self, state, projection):
-                print("state: ", state)
+                # print("state: ", state)
                 joint_angles = np.array([state[i] for i in range(self.constraint.num_joints)])
                 current_conf = list(pp.get_joint_positions(self.constraint.robot_setup.robot, self.constraint.control_joints))
 

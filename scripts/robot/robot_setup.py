@@ -26,66 +26,99 @@ from solver.ik_pinocchio_solver import PinocchioSolver
 from utils.params import URDF_PATH
 from utils.utils_casadi import eval
 
-# Husky specific constants
-HUSKY_TOOL0_FROM_EE_POSE = pp.Pose(point=[0, 0, 0.160])
-HUSKY_TOOL0_NAME = "ur_arm_tool0"
-HUSKY_INIT_ARM_JOINT_ANGLES = np.array([0, -np.pi / 2, 0, 0, 0, 0])
-HUSKY_ONBOARD_LINK = "ur_arm_base_link"
-HUSKY_ONBOARD_POSE = [0.0, -0.5, 0.5, -np.pi / 2, 0.0, np.pi / 2] if PICK_DIRECTION == "left" else [0.4, 0.0, 0.5, -np.pi / 2, 0.0, 0.0]
-HUSKY_GRASP_MASK_LINKS = ["ur_arm_wrist_3_link"]
+# =============================================================================
+# ROBOT CONFIGURATION CONSTANTS
+# =============================================================================
 
-# Husky joint names
-HUSKY_CONTROL_JOINT_NAMES = ["x", "y", "theta", "ur_arm_shoulder_pan_joint", "ur_arm_shoulder_lift_joint", "ur_arm_elbow_joint", "ur_arm_wrist_1_joint", "ur_arm_wrist_2_joint", "ur_arm_wrist_3_joint"]
-HUSKY_ARM_JOINT_NAMES = ["ur_arm_shoulder_pan_joint", "ur_arm_shoulder_lift_joint", "ur_arm_elbow_joint", "ur_arm_wrist_1_joint", "ur_arm_wrist_2_joint", "ur_arm_wrist_3_joint"]
-HUSKY_BASE_CONTROL_JOINT_NAMES = ["x", "y", "theta"]
-HUSKY_BASE_REDUCED_MODEL_JOINT_NAMES = ["base_footprint_joint", "top_plate_joint", "top_plate_front_joint", "arm_mount_joint"]
+# -----------------------------------------------------------------------------
+# HUSKY SINGLE ARM ROBOT CONSTANTS
+# -----------------------------------------------------------------------------
 
-# Husky file paths
+# File paths
 HUSKY_URDF_PATH = os.path.join(DATA_DIR, "husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf")
 HUSKY_SRDF_PATH = os.path.join(DATA_DIR, "husky_urdf/mt_husky_moveit_config/config/husky.srdf")
 HUSKY_GRIPPER_OBJ = os.path.join(DATA_DIR, "husky_urdf/robotiq_85/meshes/static/robotiq_85_close_20mm.obj")
 
-# Constants for ABB
-ABB_TOOL0_NAME = "eef_tcp_frame"
-ABB_INIT_ARM_JOINT_ANGLES = np.array([0, 0, 0, 0, 0, 0])
-ABB_ONBOARD_LINK = "world_link"
-ABB_ONBOARD_POSE = [0, 0, 0, 0, 0, 0]
-ABB_GRASP_MASK_LINKS = ["eef_tcp_frame", "eef_base_link"]
+# Tool coordinate system
+HUSKY_TOOL0_NAME = "ur_arm_tool0"
+HUSKY_TOOL0_FROM_EE_POSE = pp.Pose(point=[0, 0, 0.160])
 
-# ABB joint names
+# Joint configurations
+HUSKY_ARM_JOINT_NAMES = ["ur_arm_shoulder_pan_joint", "ur_arm_shoulder_lift_joint", "ur_arm_elbow_joint", "ur_arm_wrist_1_joint", "ur_arm_wrist_2_joint", "ur_arm_wrist_3_joint"]
+HUSKY_BASE_CONTROL_JOINT_NAMES = ["x", "y", "theta"]
+HUSKY_CONTROL_JOINT_NAMES = ["x", "y", "theta", "ur_arm_shoulder_pan_joint", "ur_arm_shoulder_lift_joint", "ur_arm_elbow_joint", "ur_arm_wrist_1_joint", "ur_arm_wrist_2_joint", "ur_arm_wrist_3_joint"]
+HUSKY_BASE_REDUCED_MODEL_JOINT_NAMES = ["base_footprint_joint", "top_plate_joint", "top_plate_front_joint", "arm_mount_joint"]
+HUSKY_INIT_ARM_JOINT_ANGLES = np.array([0, -np.pi / 2, 0, 0, 0, 0])
+
+# Link configurations
+HUSKY_ONBOARD_LINK = "ur_arm_base_link"
+HUSKY_GRASP_MASK_LINKS = ["ur_arm_wrist_3_link"]
+
+# Pose configurations
+HUSKY_ONBOARD_POSE = [0.0, -0.5, 0.5, -np.pi / 2, 0.0, np.pi / 2] if PICK_DIRECTION == "left" else [0.4, 0.0, 0.5, -np.pi / 2, 0.0, 0.0]
+
+# -----------------------------------------------------------------------------
+# ABB ROBOT CONSTANTS
+# -----------------------------------------------------------------------------
+
+# File paths
+ABB_URDF_PATH = os.path.join(DATA_DIR, "abb_irb4600_40_255/urdf/ECL_robot1_with_track.urdf")
+ABB_SRDF_PATH = os.path.join(DATA_DIR, "abb_irb4600_40_255/srdf/ECL_robot1_with_track.srdf")
+
+# Tool coordinate system
+ABB_TOOL0_NAME = "eef_tcp_frame"
+
+# Joint configurations
 ABB_JOINT_NAMES = ["joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6"]
 ABB_BASE_CONTROL_JOINT_NAMES = []
 ABB_CONTROL_JOINT_NAMES = ABB_JOINT_NAMES
 ABB_BASE_REDUCED_MODEL_JOINT_NAMES = []
+ABB_INIT_ARM_JOINT_ANGLES = np.array([0, 0, 0, 0, 0, 0])
 
-# ABB file paths
-ABB_URDF_PATH = os.path.join(DATA_DIR, "abb_irb4600_40_255/urdf/ECL_robot1_with_track.urdf")
-ABB_SRDF_PATH = os.path.join(DATA_DIR, "abb_irb4600_40_255/srdf/ECL_robot1_with_track.srdf")
+# Link configurations
+ABB_ONBOARD_LINK = "world_link"
+ABB_GRASP_MASK_LINKS = ["eef_tcp_frame", "eef_base_link"]
 
+# Pose configurations
+ABB_ONBOARD_POSE = [0, 0, 0, 0, 0, 0]
+
+# -----------------------------------------------------------------------------
+# HUSKY DUAL ARM ROBOT CONSTANTS
+# -----------------------------------------------------------------------------
+
+# File paths
+HUSKY_DUAL_URDF_PATH = os.path.join(DATA_DIR, "husky_urdf/mt_husky_dual_ur5_e_moveit_config/urdf/husky_dual_ur5_e.urdf")
+HUSKY_DUAL_SRDF_PATH = os.path.join(DATA_DIR, "husky_urdf/mt_husky_dual_ur5_e_moveit_config/config/husky.srdf")
+
+# Tool coordinate systems
 HUSKY_DUAL_TOOL0_LEFT = "left_ur_arm_tool0"
 HUSKY_DUAL_TOOL0_RIGHT = "right_ur_arm_tool0"
+
+# Joint configurations - Individual arms
 HUSKY_DUAL_ARM_JOINT_NAMES_LEFT = ["left_ur_arm_shoulder_pan_joint", "left_ur_arm_shoulder_lift_joint", "left_ur_arm_elbow_joint", "left_ur_arm_wrist_1_joint", "left_ur_arm_wrist_2_joint", "left_ur_arm_wrist_3_joint"]
 HUSKY_DUAL_ARM_JOINT_NAMES_RIGHT = ["right_ur_arm_shoulder_pan_joint", "right_ur_arm_shoulder_lift_joint", "right_ur_arm_elbow_joint", "right_ur_arm_wrist_1_joint", "right_ur_arm_wrist_2_joint", "right_ur_arm_wrist_3_joint"]
+
+# Joint configurations - Base control
 HUSKY_DUAL_BASE_CONTROL_JOINT_NAMES = []
 HUSKY_DUAL_BASE_REDUCED_MODEL_JOINT_NAMES_LEFT = ["world_footprint", "base_footprint_joint", "dual_arm_bulkhead_joint", "left_arm_bulkhead_joint", "left_arm_mount_joint"]
 HUSKY_DUAL_BASE_REDUCED_MODEL_JOINT_NAMES_RIGHT = ["world_footprint", "base_footprint_joint", "dual_arm_bulkhead_joint", "right_arm_bulkhead_joint", "right_arm_mount_joint"]
+
+# Joint configurations - Combined control
 HUSKY_DUAL_CONTROL_JOINT_NAMES_LEFT = HUSKY_BASE_CONTROL_JOINT_NAMES + HUSKY_DUAL_ARM_JOINT_NAMES_LEFT
 HUSKY_DUAL_CONTROL_JOINT_NAMES_RIGHT = HUSKY_BASE_CONTROL_JOINT_NAMES + HUSKY_DUAL_ARM_JOINT_NAMES_RIGHT
+
+# Joint configurations - Combined system
+HUSKY_DUAL_ARM_JOINT_NAMES = HUSKY_DUAL_ARM_JOINT_NAMES_LEFT + HUSKY_DUAL_ARM_JOINT_NAMES_RIGHT
+HUSKY_DUAL_CONTROL_JOINT_NAMES = HUSKY_DUAL_BASE_CONTROL_JOINT_NAMES + HUSKY_DUAL_ARM_JOINT_NAMES
+
+# Initial joint angles
+HUSKY_DUAL_INIT_ARM_JOINT_ANGLES = np.tile(HUSKY_INIT_ARM_JOINT_ANGLES, 2)
+
+# Link configurations
 HUSKY_DUAL_ONBOARD_LINK_LEFT = "left_ur_arm_base_link"
 HUSKY_DUAL_ONBOARD_LINK_RIGHT = "right_ur_arm_base_link"
 HUSKY_DUAL_GRASP_MASK_LINKS_LEFT = ["left_ur_arm_wrist_3_link"]
 HUSKY_DUAL_GRASP_MASK_LINKS_RIGHT = ["right_ur_arm_wrist_3_link"]
-HUSKY_DUAL_URDF_PATH = os.path.join(DATA_DIR, "husky_urdf/mt_husky_dual_ur5_e_moveit_config/urdf/husky_dual_ur5_e.urdf")
-HUSKY_DUAL_SRDF_PATH = os.path.join(DATA_DIR, "husky_urdf/mt_husky_dual_ur5_e_moveit_config/config/husky.srdf")
-
-# Combined joints for dual-arm system
-HUSKY_DUAL_ARM_JOINT_NAMES = HUSKY_DUAL_ARM_JOINT_NAMES_LEFT + HUSKY_DUAL_ARM_JOINT_NAMES_RIGHT
-
-# Combine base control joints with dual-arm joints
-HUSKY_DUAL_CONTROL_JOINT_NAMES = HUSKY_DUAL_BASE_CONTROL_JOINT_NAMES + HUSKY_DUAL_ARM_JOINT_NAMES
-
-# New constant for dual arms
-HUSKY_DUAL_INIT_ARM_JOINT_ANGLES = np.tile(HUSKY_INIT_ARM_JOINT_ANGLES, 2)
 
 
 class RobotSetup:
@@ -135,7 +168,7 @@ class RobotSetup:
         """Initialize robot-specific parameters based on robot type.
 
         Params:
-            robot_type: Type of robot ("husky" or "abb")
+            robot_type: Type of robot ("husky", "abb", or "husky_dual")
         """
         self.robot_params = {}
 
@@ -175,7 +208,7 @@ class RobotSetup:
             self.robot_params["control_joint_names"] = ABB_CONTROL_JOINT_NAMES
             self.robot_params["base_reduced_model_joint_names"] = ABB_BASE_REDUCED_MODEL_JOINT_NAMES
             self.robot_params["grasp_mask_links"] = ABB_GRASP_MASK_LINKS
-            # ABB doesn't need base_from_connect calculation
+            self.robot_params["base_from_connect"] = np.eye(4)
 
         elif robot_type == "husky_dual":
             self.robot_params["urdf_path"] = HUSKY_DUAL_URDF_PATH
@@ -200,6 +233,32 @@ class RobotSetup:
 
     def _setup_robot(self) -> None:
         """Load robot model and initialize components with Pinocchio IK solver."""
+        # Set up private variables from robot_params
+        self._urdf_path = self.robot_params["urdf_path"]
+        self._srdf_path = self.robot_params["srdf_path"]
+        self._gripper_obj = self.robot_params["gripper_obj"]
+        self._joint_names = self.robot_params["joint_names"]
+        self._init_angles = self.robot_params["init_angles"]
+        self._tool0_from_ee = self.robot_params["tool0_from_ee"]
+        self._onboard_pose = self.robot_params["onboard_pose"]
+        self._base_control_joint_names = self.robot_params["base_control_joint_names"]
+        self._control_joint_names = self.robot_params["control_joint_names"]
+        self._base_reduced_model_joint_names = self.robot_params["base_reduced_model_joint_names"]
+        self._grasp_mask_links = self.robot_params["grasp_mask_links"]
+        self._base_from_connect = self.robot_params["base_from_connect"]
+
+        # Robot type specific parameters
+        if self.robot_type == "husky_dual":
+            self._tool0_name_left = self.robot_params["tool0_name_left"]
+            self._tool0_name_right = self.robot_params["tool0_name_right"]
+            self._left_joint_names = self.robot_params["left_joint_names"]
+            self._right_joint_names = self.robot_params["right_joint_names"]
+            self._onboard_link_left = self.robot_params["onboard_link_left"]
+            self._onboard_link_right = self.robot_params["onboard_link_right"]
+        else:
+            self._tool0_name = self.robot_params["tool0_name"]
+            self._onboard_link = self.robot_params["onboard_link"]
+
         # Load the robot data
         robot_data = self._load_robot()
 
@@ -215,38 +274,39 @@ class RobotSetup:
         else:
             self.ik_solver_relative = robot_data["ik_solver_relative"]
         self.disabled_collisions = robot_data["disabled_collisions"]
+        self.obstacles = robot_data["obstacles"]
 
         # Set up robot links and joints
         if self.robot_type == "husky_dual":
-            self.tool_link_left = pp.link_from_name(self.robot, self.robot_params["tool0_name_left"])
-            self.tool_link_right = pp.link_from_name(self.robot, self.robot_params["tool0_name_right"])
+            self.tool_link_left = pp.link_from_name(self.robot, self._tool0_name_left)
+            self.tool_link_right = pp.link_from_name(self.robot, self._tool0_name_right)
             self.tool_link = self.tool_link_left  # Default to left for backward compatibility
-            self.arm_joints_left = pp.joints_from_names(self.robot, self.robot_params["left_joint_names"])
-            self.arm_joints_right = pp.joints_from_names(self.robot, self.robot_params["right_joint_names"])
+            self.arm_joints_left = pp.joints_from_names(self.robot, self._left_joint_names)
+            self.arm_joints_right = pp.joints_from_names(self.robot, self._right_joint_names)
             self.arm_joints = self.arm_joints_left + self.arm_joints_right
         else:
-            self.tool_link = pp.link_from_name(self.robot, self.robot_params["tool0_name"])
-            self.arm_joints = pp.joints_from_names(self.robot, self.robot_params["joint_names"])
-        self.arm_init_angles = self.robot_params["init_angles"]
+            self.tool_link = pp.link_from_name(self.robot, self._tool0_name)
+            self.arm_joints = pp.joints_from_names(self.robot, self._joint_names)
+        self.arm_init_angles = self._init_angles
 
         # Set up base joints if they exist
-        if self.robot_params["base_control_joint_names"]:
-            self.base_joints = pp.joints_from_names(self.robot, self.robot_params["base_control_joint_names"])
+        if self._base_control_joint_names:
+            self.base_joints = pp.joints_from_names(self.robot, self._base_control_joint_names)
         else:
             self.base_joints = []
 
         # Set up control joints if they exist
-        if self.robot_params["control_joint_names"]:
-            self.control_joints = pp.joints_from_names(self.robot, self.robot_params["control_joint_names"])
+        if self._control_joint_names:
+            self.control_joints = pp.joints_from_names(self.robot, self._control_joint_names)
         else:
             self.control_joints = []
             
         if self.robot_type == "husky_dual":
-            self.base_from_connect_left = pp.multiply(pp.invert(pp.get_pose(self.robot)), pp.get_link_pose(self.robot, pp.link_from_name(self.robot, self.robot_params["onboard_link_left"])))
-            self.base_from_connect_right = pp.multiply(pp.invert(pp.get_pose(self.robot)), pp.get_link_pose(self.robot, pp.link_from_name(self.robot, self.robot_params["onboard_link_right"])))
+            self.base_from_connect_left = pp.multiply(pp.invert(pp.get_pose(self.robot)), pp.get_link_pose(self.robot, pp.link_from_name(self.robot, self._onboard_link_left)))
+            self.base_from_connect_right = pp.multiply(pp.invert(pp.get_pose(self.robot)), pp.get_link_pose(self.robot, pp.link_from_name(self.robot, self._onboard_link_right)))
             self.base_from_connect = self.base_from_connect_left
         else:
-            self.base_from_connect = self.robot_params["base_from_connect"]
+            self.base_from_connect = self._base_from_connect
 
         # Initialize joint positions
         # self.set_joint_positions(self.arm_joints, self.arm_init_angles)
@@ -287,17 +347,18 @@ class RobotSetup:
 
         # Get the robot PyBullet ID from the client
         robot = client.robot_puid
+        obstacles = list(np.array(list(client.rigid_bodies_puids.values())).flatten())
 
         # Get robot parameters for setting up IK solvers and attachments
-        robot_urdf = self.robot_params["urdf_path"]
-        robot_srdf = self.robot_params["srdf_path"]
-        gripper_obj = self.robot_params["gripper_obj"]
+        robot_urdf = self._urdf_path
+        robot_srdf = self._srdf_path
+        gripper_obj = self._gripper_obj
 
         # Handle tool0_name for different robot types
         if self.robot_type == "husky_dual":
             tool0_name = None
         else:
-            tool0_name = self.robot_params["tool0_name"]
+            tool0_name = self._tool0_name
 
         # Load robot semantics for disabled collisions
         robot_model = RobotModel.from_urdf_file(robot_urdf)
@@ -310,18 +371,18 @@ class RobotSetup:
         if self.robot_type != "husky_dual":
             pinocchio_solver = PinocchioSolver(
                 robot_urdf,
-                manipulator_joint_names=self.robot_params["joint_names"],
-                control_joint_names=self.robot_params["control_joint_names"],
-                base_link_name=self.robot_params["onboard_link"],
+                manipulator_joint_names=self._joint_names,
+                control_joint_names=self._control_joint_names,
+                base_link_name=self._onboard_link,
             )
             ik_solver_relative = partial(pinocchio_solver.ik, tip_name=tool0_name)
         else:
-            pinocchio_solver_right = PinocchioSolver(robot_urdf, manipulator_joint_names=self.robot_params["right_joint_names"], control_joint_names=self.robot_params["right_joint_names"], base_link_name=self.robot_params["onboard_link_right"])
+            pinocchio_solver_right = PinocchioSolver(robot_urdf, manipulator_joint_names=self._right_joint_names, control_joint_names=self._right_joint_names, base_link_name=self._onboard_link_right)
             
-            pinocchio_solver_left = PinocchioSolver(robot_urdf, manipulator_joint_names=self.robot_params["left_joint_names"], control_joint_names=self.robot_params["left_joint_names"], base_link_name=self.robot_params["onboard_link_left"])
+            pinocchio_solver_left = PinocchioSolver(robot_urdf, manipulator_joint_names=self._left_joint_names, control_joint_names=self._left_joint_names, base_link_name=self._onboard_link_left)
             
-            ik_solver_relative_left = partial(pinocchio_solver_left.ik, tip_name=self.robot_params["tool0_name_left"])
-            ik_solver_relative_right = partial(pinocchio_solver_right.ik, tip_name=self.robot_params["tool0_name_right"])
+            ik_solver_relative_left = partial(pinocchio_solver_left.ik, tip_name=self._tool0_name_left)
+            ik_solver_relative_right = partial(pinocchio_solver_right.ik, tip_name=self._tool0_name_right)
 
         # Create ee attachment if gripper exists
         ee_attachment = None
@@ -331,16 +392,16 @@ class RobotSetup:
         if gripper_obj and os.path.exists(gripper_obj):
             if self.robot_type == "husky_dual":
                 # Create left ee attachment
-                left_tool0_pose = pp.get_link_pose(robot, pp.link_from_name(robot, self.robot_params["tool0_name_left"]))
+                left_tool0_pose = pp.get_link_pose(robot, pp.link_from_name(robot, self._tool0_name_left))
                 left_ee = pp.create_obj(gripper_obj, scale=1)
                 pp.set_pose(left_ee, pp.multiply(left_tool0_pose, pp.Pose(euler=pp.Euler(yaw=-np.pi / 2))))
-                left_ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, self.robot_params["tool0_name_left"]), left_ee)
+                left_ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, self._tool0_name_left), left_ee)
 
                 # Create right ee attachment
-                right_tool0_pose = pp.get_link_pose(robot, pp.link_from_name(robot, self.robot_params["tool0_name_right"]))
+                right_tool0_pose = pp.get_link_pose(robot, pp.link_from_name(robot, self._tool0_name_right))
                 right_ee = pp.create_obj(gripper_obj, scale=1)
                 pp.set_pose(right_ee, pp.multiply(right_tool0_pose, pp.Pose(euler=pp.Euler(yaw=-np.pi / 2))))
-                right_ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, self.robot_params["tool0_name_right"]), right_ee)
+                right_ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, self._tool0_name_right), right_ee)
 
                 # For backward compatibility, set ee_attachment to left
                 ee_attachment = left_ee_attachment
@@ -359,6 +420,7 @@ class RobotSetup:
                 "ik_solver_relative_left": ik_solver_relative_left,
                 "ik_solver_relative_right": ik_solver_relative_right,
                 "disabled_collisions": disabled_collisions,
+                "obstacles": obstacles,
             }
         else:
             return {
@@ -366,6 +428,7 @@ class RobotSetup:
                 "ee_attachment": ee_attachment,
                 "ik_solver_relative": ik_solver_relative,
                 "disabled_collisions": disabled_collisions,
+                "obstacles": obstacles,
             }
 
     def _load_robot_from_urdf(self) -> Dict:
@@ -375,16 +438,16 @@ class RobotSetup:
             Dict containing robot, ee_attachment(s), ik_solver_relative(s), and disabled_collisions.
         """
         # Get robot parameters
-        robot_urdf = self.robot_params["urdf_path"]
-        robot_srdf = self.robot_params["srdf_path"]
-        gripper_obj = self.robot_params["gripper_obj"]
+        robot_urdf = self._urdf_path
+        robot_srdf = self._srdf_path
+        gripper_obj = self._gripper_obj
 
         # Handle tool0_name for different robot types
         if self.robot_type == "husky_dual":
             # For dual-arm, we don't use a single tool0_name
             tool0_name = None
         else:
-            tool0_name = self.robot_params["tool0_name"]
+            tool0_name = self._tool0_name
 
         # Check if files exist
         if not os.path.exists(robot_urdf) or not os.path.exists(robot_srdf):
@@ -403,16 +466,16 @@ class RobotSetup:
         if self.robot_type != "husky_dual":
             pinocchio_solver = PinocchioSolver(
                 robot_urdf,
-                manipulator_joint_names=self.robot_params["joint_names"],
-                control_joint_names=self.robot_params["control_joint_names"],
-                base_link_name=self.robot_params["onboard_link"],
+                manipulator_joint_names=self._joint_names,
+                control_joint_names=self._control_joint_names,
+                base_link_name=self._onboard_link,
             )
             ik_solver_relative = partial(pinocchio_solver.ik, tip_name=tool0_name)
         else:
-            pinocchio_solver_right = PinocchioSolver(robot_urdf, manipulator_joint_names=self.robot_params["joint_names"], control_joint_names=self.robot_params["right_joint_names"], base_link_name=self.robot_params["onboard_link_right"])
-            pinocchio_solver_left = PinocchioSolver(robot_urdf, manipulator_joint_names=self.robot_params["joint_names"], control_joint_names=self.robot_params["left_joint_names"], base_link_name=self.robot_params["onboard_link_left"])
-            ik_solver_relative_left = partial(pinocchio_solver_left.ik, tip_name=self.robot_params["tool0_name_left"])
-            ik_solver_relative_right = partial(pinocchio_solver_right.ik, tip_name=self.robot_params["tool0_name_right"])
+            pinocchio_solver_right = PinocchioSolver(robot_urdf, manipulator_joint_names=self._joint_names, control_joint_names=self._right_joint_names, base_link_name=self._onboard_link_right)
+            pinocchio_solver_left = PinocchioSolver(robot_urdf, manipulator_joint_names=self._joint_names, control_joint_names=self._left_joint_names, base_link_name=self._onboard_link_left)
+            ik_solver_relative_left = partial(pinocchio_solver_left.ik, tip_name=self._tool0_name_left)
+            ik_solver_relative_right = partial(pinocchio_solver_right.ik, tip_name=self._tool0_name_right)
 
         # Create ee attachment if gripper exists
         ee_attachment = None
@@ -422,16 +485,16 @@ class RobotSetup:
         if gripper_obj and os.path.exists(gripper_obj):
             if self.robot_type == "husky_dual":
                 # Create left ee attachment
-                left_tool0_pose = pp.get_link_pose(robot, pp.link_from_name(robot, self.robot_params["tool0_name_left"]))
+                left_tool0_pose = pp.get_link_pose(robot, pp.link_from_name(robot, self._tool0_name_left))
                 left_ee = pp.create_obj(gripper_obj, scale=1)
                 pp.set_pose(left_ee, pp.multiply(left_tool0_pose, pp.Pose(euler=pp.Euler(yaw=-np.pi / 2))))
-                left_ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, self.robot_params["tool0_name_left"]), left_ee)
+                left_ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, self._tool0_name_left), left_ee)
 
                 # Create right ee attachment
-                right_tool0_pose = pp.get_link_pose(robot, pp.link_from_name(robot, self.robot_params["tool0_name_right"]))
+                right_tool0_pose = pp.get_link_pose(robot, pp.link_from_name(robot, self._tool0_name_right))
                 right_ee = pp.create_obj(gripper_obj, scale=1)
                 pp.set_pose(right_ee, pp.multiply(right_tool0_pose, pp.Pose(euler=pp.Euler(yaw=-np.pi / 2))))
-                right_ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, self.robot_params["tool0_name_right"]), right_ee)
+                right_ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, self._tool0_name_right), right_ee)
 
                 # For backward compatibility, set ee_attachment to left
                 ee_attachment = left_ee_attachment
@@ -537,11 +600,11 @@ class RobotSetup:
             # Select appropriate onboard link based on robot type and arm_side
             if self.robot_type == "husky_dual":
                 if arm_side == "right":
-                    link_name = self.robot_params["onboard_link_right"]
+                    link_name = self._onboard_link_right
                 else:  # Default to left if not specified or if specified as "left"
-                    link_name = self.robot_params["onboard_link_left"]
+                    link_name = self._onboard_link_left
             else:
-                link_name = self.robot_params["onboard_link"]
+                link_name = self._onboard_link
 
         link_pose = pp.get_link_pose(self.robot, pp.link_from_name(self.robot, link_name))
         return pp.multiply(pp.invert(link_pose), pose_world)
@@ -749,7 +812,7 @@ class RobotSetup:
         Returns:
             List of joint configurations forming the path, or None if planning fails.
         """
-        self.set_joint_positions(self.arm_joints, init_q)
+        # self.set_joint_positions(self.arm_joints, init_q)
 
         # Create a list of all attachments
         attachments_list = []
@@ -845,14 +908,14 @@ class RobotSetup:
         # Select appropriate onboard link based on robot type and arm_side
         if self.robot_type == "husky_dual":
             if arm_side == "right":
-                onboard_link_name = self.robot_params["onboard_link_right"]
+                onboard_link_name = self._onboard_link_right
             else:  # Default to left if not specified or if specified as "left"
-                onboard_link_name = self.robot_params["onboard_link_left"]
+                onboard_link_name = self._onboard_link_left
         else:
-            onboard_link_name = self.robot_params["onboard_link"]
+            onboard_link_name = self._onboard_link
 
         link_pose = pp.get_link_pose(self.robot, pp.link_from_name(self.robot, onboard_link_name))
-        delta_pose = Pose(point=self.robot_params["onboard_pose"][:3], euler=Euler(*self.robot_params["onboard_pose"][3:]))
+        delta_pose = Pose(point=self._onboard_pose[:3], euler=Euler(*self._onboard_pose[3:]))
         body_pose = multiply(link_pose, delta_pose)
         pp.set_pose(body, body_pose)
         return pp.create_attachment(self.robot, pp.link_from_name(self.robot, onboard_link_name), body)
@@ -967,7 +1030,7 @@ class RobotSetup:
 
         # Get tool link and wrist link based on robot type
         extra_disabled_collisions = []
-        for link_name in self.robot_params["grasp_mask_links"]:
+        for link_name in self._grasp_mask_links:
             link = pp.link_from_name(robot_body, link_name)
             for attachment in attachments:
                 extra_disabled_collisions.extend(
@@ -1003,6 +1066,53 @@ class RobotSetup:
             return grasped_collision or robot_collision
 
         return collision_fn
+    
+    def create_invalid_rfl_fn(self, desired_right_from_left: Tuple, obstacle_bodies: List[int] = []) -> Callable[[np.ndarray], bool]:
+        """Create a valid function for the robot.
+        
+        Params:
+            obstacle_bodies: List of obstacle bodies.
+        """
+        collision_fn = self.create_collision_fn(obstacle_bodies)
+        self._buffer = {}
+        
+        def invalid_rfl_fn(joint_conf, diagnosis=False):
+            """Check if a given joint configuration is valid.
+            
+            Params:
+                joint_conf: Joint configuration.
+                diagnosis: Whether to return diagnosis information.
+                
+            Returns:
+                bool: True if the configuration is valid, False otherwise.
+            """
+            conf_right = list(joint_conf)
+            # if tuple(conf_right) in self._buffer:
+            #     print(f"Using buffer for {tuple(conf_right)}")
+            #     conf_left = self._buffer[tuple(conf_right)]
+            #     conf = np.concatenate([conf_left, conf_right])
+            #     return not collision_fn(conf, diagnosis=diagnosis)
+            
+            self.set_right_arm_joint_positions(conf_right)
+            world_from_right = pp.get_link_pose(self.robot, self.tool_link_right)
+            world_from_left = pp.multiply(world_from_right, desired_right_from_left)
+
+            conf_left = self.get_left_arm_ik_solution(world_from_left, np.array(pp.get_joint_positions(self.robot, self.arm_joints_left)))
+            if conf_left is None:
+                return True
+            conf_left = list(conf_left)
+            conf = np.concatenate([conf_left, conf_right])
+            collision_result = collision_fn(conf, diagnosis=diagnosis)
+            if not collision_result:
+                # if conf_right not in self._buffer:
+                #     self._buffer[conf_right] = [conf_left]
+                # else:
+                #     self._buffer[conf_right].append(conf_left)
+                # print(f"Storing buffer for {tuple(conf_right)}")
+                self._buffer[tuple(conf_right)] = conf_left
+            return collision_result
+            
+        return invalid_rfl_fn
 
     @staticmethod
     def parse_urdf(urdf_path: str) -> Dict:

@@ -14,14 +14,13 @@ HUSKY_ASSEMBLY_PATH = os.path.join(PROJECT_DIR, "src")
 sys.path.extend([HUSKY_ASSEMBLY_PATH, PROJECT_DIR])
 
 import pybullet_planning as pp
+import tracikpy
 from compas_fab.robots import RobotSemantics
 from compas_robots import RobotModel
-
 # Import SceneParser for scene reconstruction
 from model.scene_parse import SceneParser
 from pybullet_planning import Attachment, Euler, Point, Pose, multiply
 from solver.ik_pinocchio_solver import PinocchioSolver
-
 # from utils.util import HUSKY_ARM_JOINT_NAMES
 from utils.params import URDF_PATH
 from utils.utils_casadi import eval
@@ -300,7 +299,7 @@ class RobotSetup:
             self.control_joints = pp.joints_from_names(self.robot, self._control_joint_names)
         else:
             self.control_joints = []
-            
+
         if self.robot_type == "husky_dual":
             self.base_from_connect_left = pp.multiply(pp.invert(pp.get_pose(self.robot)), pp.get_link_pose(self.robot, pp.link_from_name(self.robot, self._onboard_link_left)))
             self.base_from_connect_right = pp.multiply(pp.invert(pp.get_pose(self.robot)), pp.get_link_pose(self.robot, pp.link_from_name(self.robot, self._onboard_link_right)))
@@ -378,11 +377,14 @@ class RobotSetup:
             ik_solver_relative = partial(pinocchio_solver.ik, tip_name=tool0_name)
         else:
             pinocchio_solver_right = PinocchioSolver(robot_urdf, manipulator_joint_names=self._right_joint_names, control_joint_names=self._right_joint_names, base_link_name=self._onboard_link_right)
-            
+
             pinocchio_solver_left = PinocchioSolver(robot_urdf, manipulator_joint_names=self._left_joint_names, control_joint_names=self._left_joint_names, base_link_name=self._onboard_link_left)
-            
+
             ik_solver_relative_left = partial(pinocchio_solver_left.ik, tip_name=self._tool0_name_left)
             ik_solver_relative_right = partial(pinocchio_solver_right.ik, tip_name=self._tool0_name_right)
+            
+            ik_solver_relative_left = tracikpy.TracIKSolver(robot_urdf, self._onboard_link_left, self._tool0_name_left).ik
+            ik_solver_relative_right = tracikpy.TracIKSolver(robot_urdf, self._onboard_link_right, self._tool0_name_right).ik
 
         # Create ee attachment if gripper exists
         ee_attachment = None
@@ -648,7 +650,7 @@ class RobotSetup:
         """
         if q_init is not None:
             q_init = list(q_init)
-            
+
         # Use the pre-calculated base_from_connect (for all robot types)
         if self.robot_type == "husky_dual" and arm_side == "right":
             base_from_connect = self.base_from_connect_right
@@ -656,7 +658,7 @@ class RobotSetup:
             base_from_connect = self.base_from_connect_left
         else:
             base_from_connect = self.base_from_connect
-            
+
         world_from_connect = pp.multiply(pp.get_pose(self.robot), base_from_connect)
         connect_from_tool = pp.multiply(pp.invert(world_from_connect), world_from_tool)
         tform = pp.tform_from_pose(connect_from_tool)
@@ -1066,23 +1068,23 @@ class RobotSetup:
             return grasped_collision or robot_collision
 
         return collision_fn
-    
+
     def create_invalid_rfl_fn(self, desired_right_from_left: Tuple, obstacle_bodies: List[int] = []) -> Callable[[np.ndarray], bool]:
         """Create a valid function for the robot.
-        
+
         Params:
             obstacle_bodies: List of obstacle bodies.
         """
         collision_fn = self.create_collision_fn(obstacle_bodies)
         self._buffer = {}
-        
+
         def invalid_rfl_fn(joint_conf, diagnosis=False):
             """Check if a given joint configuration is valid.
-            
+
             Params:
                 joint_conf: Joint configuration.
                 diagnosis: Whether to return diagnosis information.
-                
+
             Returns:
                 bool: True if the configuration is valid, False otherwise.
             """
@@ -1092,7 +1094,7 @@ class RobotSetup:
             #     conf_left = self._buffer[tuple(conf_right)]
             #     conf = np.concatenate([conf_left, conf_right])
             #     return not collision_fn(conf, diagnosis=diagnosis)
-            
+
             self.set_right_arm_joint_positions(conf_right)
             world_from_right = pp.get_link_pose(self.robot, self.tool_link_right)
             world_from_left = pp.multiply(world_from_right, desired_right_from_left)
@@ -1111,8 +1113,41 @@ class RobotSetup:
                 # print(f"Storing buffer for {tuple(conf_right)}")
                 self._buffer[tuple(conf_right)] = conf_left
             return collision_result
-            
+
         return invalid_rfl_fn
+
+    def create_invalid_fn(self, desired_right_from_left: Tuple, obstacle_bodies: List[int] = [], resolution: float = 1e-2) -> Callable[[np.ndarray], bool]:
+        """Create a valid function for the robot.
+
+        Params:
+            desired_right_from_left: Desired relative pose of left EE in right EE's frame.
+            obstacle_bodies: List of obstacle bodies.
+        """
+        collision_fn = self.create_collision_fn(obstacle_bodies)
+
+        def invalid_fn(joint_conf, diagnosis=False):
+            """Check if a given joint configuration is valid.
+
+            Params:
+                joint_conf: Joint configuration.
+                diagnosis: Whether to return diagnosis information.
+            """
+            if collision_fn(joint_conf, diagnosis=diagnosis):
+                return True
+
+            self.set_joint_positions(self.arm_joints, joint_conf)
+            world_from_right = pp.get_link_pose(self.robot, self.tool_link_right)
+            world_from_left = pp.get_link_pose(self.robot, self.tool_link_left)
+            right_from_left = pp.multiply(pp.invert(world_from_right), world_from_left)
+
+            desired = np.concatenate([np.array(desired_right_from_left[0]), np.array(desired_right_from_left[1])])
+            actual = np.concatenate([np.array(right_from_left[0]), np.array(right_from_left[1])])
+            error = np.linalg.norm(desired - actual)
+            if error > resolution:
+                return True
+            return False
+
+        return invalid_fn
 
     @staticmethod
     def parse_urdf(urdf_path: str) -> Dict:

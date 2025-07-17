@@ -72,6 +72,7 @@ if __name__ == "__main__":
 
         def fn():
             sample = list(next(generator))
+            print(f"Sample: {sample}")
             return tuple(sample)
 
         return fn

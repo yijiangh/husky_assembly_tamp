@@ -1010,6 +1010,7 @@ class RobotSetup:
                     smooth=smooth,
                     diagnosis=diagnosis,
                     coarse_waypoints=coarse_waypoints,
+                    draw_fn=kwargs.get("draw_fn", None),
                 )
             print("End configuration in collision.")
             return None

@@ -2,10 +2,14 @@ import argparse
 import os
 import sys
 import time
+import math
 
 import numpy as np
 import pybullet
 import pybullet_planning as pp
+from pybullet_planning.interfaces.planner_interface.joint_motion_planning import get_difference_fn, get_refine_fn
+
+from typing import Callable, List, Tuple, Optional
 
 HERE = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(HERE)
@@ -14,6 +18,9 @@ from ConstrainedPlanningCommon import *
 from dual_arm_projection import DualArmProjection
 from robot.robot_setup import RobotSetup
 from utils.params import DATA_DIR
+
+# Define DEFAULT_RESOLUTION if not imported
+DEFAULT_RESOLUTION = math.radians(1.0)  # 0.05
 
 if __name__ == "__main__":
     # parser = argparse.ArgumentParser()
@@ -59,6 +66,8 @@ if __name__ == "__main__":
     # del robot_setup
 
     start_conf = np.array([1.44588847, -1.07000539, 2.06615573, 2.78551221, -0.66673551, 0.12182059, -4.49743795, -0.19841623, 1.19049788, -3.16904378, -2.07907343, -0.72975159])
+    # Normalize start_conf to be within [-pi, pi]
+    start_conf = (start_conf + np.pi) % (2 * np.pi) - np.pi
 
     # ------------------------------------------------------------------
     # Environment & Robot Setup
@@ -103,10 +112,62 @@ if __name__ == "__main__":
 
         return fn
 
+    def get_draw_fn():
+        def fn(conf, segment, valid = None, valid_right = None):
+            robot_setup.set_joint_positions(robot_setup.arm_joints, conf)
+            pose_1 = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
+            pp.draw_pose(pose_1, length=0.2)
+            
+            if len(segment) > 0:
+                robot_setup.set_joint_positions(robot_setup.arm_joints, segment[1])
+                pose_2 = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
+                pp.draw_pose(pose_2, length=0.2)
+                pp.add_line(pose_1[0], pose_2[0], width=0.05)
+
+        return fn
+    
+    def get_extend_fn(body, joints, resolutions=None, norm=2, projector: Optional[DualArmProjection] = None):
+        if resolutions is None:
+            resolutions = DEFAULT_RESOLUTION*np.ones(len(joints))
+        if len(joints) == 12 and projector is not None:
+            def fn(q1, q2):
+                q1_right = np.array(q1[6:])
+                q2_right = np.array(q2[6:])
+                
+                right_diff = q2_right - q1_right
+                right_steps = int(np.ceil(np.linalg.norm(right_diff / resolutions[6:], ord=norm)))
+                
+                q_left_init = np.array(q1[:6])
+                
+                for i in range(right_steps + 1):
+                    if right_steps == 0:
+                        t = 0.0
+                    else:
+                        t = i / right_steps
+                    
+                    q_right_interp = q1_right + t * right_diff
+                    
+                    projected_conf = projector.project(q_right_interp, q_left_init)
+                    
+                    if projected_conf is not None:
+                        q_left_init = np.array(projected_conf[:6])
+                        yield tuple(projected_conf)
+                    else:
+                        continue
+        else:
+            difference_fn = get_difference_fn(body, joints)
+            def fn(q1, q2):
+                steps = int(np.ceil(np.linalg.norm(np.divide(difference_fn(q2, q1), resolutions), ord=norm)))
+                refine_fn = get_refine_fn(body, joints, num_steps=steps)
+                return refine_fn(q1, q2)
+            return fn
+        
+        return fn       
+
     resolutions = np.array([1.0 if j in [] else 1.0 / 180.0 * np.pi for j in robot_setup.arm_joints])
 
     sample_fn = get_sample_fn()
-    extend_fn = pp.get_extend_fn(robot_setup.robot, robot_setup.arm_joints, resolutions=resolutions)
+    extend_fn = get_extend_fn(robot_setup.robot, robot_setup.arm_joints, resolutions=resolutions, projector=projector)
     invalid_fn = robot_setup.create_invalid_fn(desired_right_from_left, obstacle_bodies=robot_setup.obstacles, resolution=1e-2)
 
     # while True:
@@ -130,7 +191,7 @@ if __name__ == "__main__":
     # distance_fn = circular_distance_fn
 
     # path = robot_setup.plan_manipulator_path(start_conf, target_conf, attachments=[], obstacles=robot_setup.obstacles, sample_fn=sample_fn, collision_fn=collision_fn, extend_fn=extend_fn, distance_fn=distance_fn, max_time=600)
-    path = robot_setup.plan_manipulator_path(start_conf, target_conf, attachments=[], obstacles=robot_setup.obstacles, sample_fn=sample_fn, collision_fn=invalid_fn, extend_fn=extend_fn, max_time=600)
+    path = robot_setup.plan_manipulator_path(start_conf, target_conf, attachments=[], obstacles=robot_setup.obstacles, sample_fn=sample_fn, collision_fn=invalid_fn, extend_fn=extend_fn, max_time=600, draw_fn=get_draw_fn())
 
     print(f"Path: {path}")
 

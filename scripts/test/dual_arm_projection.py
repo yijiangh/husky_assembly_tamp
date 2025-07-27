@@ -43,6 +43,28 @@ class DualArmProjection:
 
         return np.concatenate([q_left_new, q_right])
 
+    def project_inv(self, left: np.ndarray, right_init_guess: np.ndarray) -> Union[np.ndarray, None]:
+        """
+        Inverse projection: project a state to satisfy the relative constraint by computing
+        the right arm configuration that maintains the desired relative pose with the left arm.
+
+        Args:
+            left: Left arm joint angles
+            right_init_guess: Initial guess for right arm joint angles
+        """
+        q_left = np.array(left)
+        q_right = np.array(right_init_guess)
+        self.robot_setup.set_joint_positions(self.robot_setup.arm_joints_left, q_left)
+
+        world_from_left = pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link_left)
+        world_from_right = pp.multiply(world_from_left, pp.invert(self.desired_right_from_left))
+        q_right_new = self.robot_setup.get_right_arm_ik_solution(world_from_right, q_right)
+
+        if q_right_new is None:
+            return None
+
+        return np.concatenate([q_left, q_right_new])
+
     def project_multiple(self, right: np.ndarray, max_attempts: int = 100, collision_fn: Callable[[np.ndarray], bool] = None) -> Union[np.ndarray, None]:
         """
         Project multiple states to satisfy the relative constraint.

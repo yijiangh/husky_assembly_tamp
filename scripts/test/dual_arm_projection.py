@@ -97,3 +97,48 @@ class DualArmProjection:
         if len(projected_confs) == 0:
             return None
         return np.stack(projected_confs)
+
+
+if __name__ == "__main__":
+    import argparse
+    import os
+    import sys
+    import time
+
+    import numpy as np
+    import pybullet
+    import pybullet_planning as pp
+
+    HERE = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+    sys.path.append(HERE)
+
+    from ConstrainedPlanningCommon import *
+    from dual_arm_projection import DualArmProjection
+    from dual_constrain_test import RelativeEndEffectorConstraint
+    from robot.robot_setup import RobotSetup
+    from utils.params import DATA_DIR
+    
+    design_study_path = os.path.join(DATA_DIR, "husky_assembly_design_study")
+    design_case = "250707_RobotX_box_demo"
+    robot_cell_state_path = os.path.join(design_study_path, design_case, "RobotCellStates", "robotx_box_A6-S4_end_RobotCellState.json")
+    
+    robot_setup = RobotSetup(robot_name="husky_with_scene", robot_type="husky_dual", robot_cell_state_path=robot_cell_state_path, use_scene_parser_gui=True, scene_parser_verbose=True)
+
+    world_from_left = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_left)
+    world_from_right = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
+    desired_right_from_left = pp.multiply(pp.invert(world_from_right), world_from_left)
+    projector = DualArmProjection(robot_setup, desired_right_from_left)
+    
+    target_conf = np.array([2.22637564e-03, -3.51527382e-01, 1.42532484e+00, -2.30987362e+00, 1.78120551e+00, -1.55214616e+00, 5.17115363e-01, -1.11289822e+00, -7.18635362e-01, 2.17292434e+00, -1.29150914e+00, 1.42157927e+00])
+    projected_confs = projector.project_multiple(target_conf[6:], collision_fn=robot_setup.create_invalid_fn(desired_right_from_left, obstacle_bodies=robot_setup.obstacles, resolution=1e-2))
+    
+    slider = pybullet.addUserDebugParameter("traj_idx", 0, projected_confs.shape[0] - 1, 0)
+    current_index = -1
+
+    while True:
+        idx = int(pybullet.readUserDebugParameter(slider))
+        if idx != current_index:
+            current_index = idx
+            conf = projected_confs[current_index]
+            robot_setup.set_joint_positions(robot_setup.arm_joints, conf)
+        time.sleep(0.01)

@@ -18,8 +18,8 @@ from utils.params import DATA_DIR
 
 if __name__ == "__main__":
     design_study_path = os.path.join(DATA_DIR, "husky_assembly_design_study")
-    design_case = "test"
-    robot_cell_state_path = os.path.join(design_study_path, design_case, "RobotCellStates", "robotx_box_A0-G_RobotCellState.json")
+    design_case = "250707_RobotX_box_demo"
+    robot_cell_state_path = os.path.join(design_study_path, design_case, "RobotCellStates", "robotx_box_A6-S4_end_RobotCellState.json")
 
     robot_setup = RobotSetup(robot_name="husky_with_scene", robot_type="husky_dual", robot_cell_state_path=robot_cell_state_path, use_scene_parser_gui=True, scene_parser_verbose=True)
 

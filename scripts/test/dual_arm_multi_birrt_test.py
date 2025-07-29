@@ -36,36 +36,28 @@ if __name__ == "__main__":
 
     # args = parser.parse_args()
     design_study_path = os.path.join(DATA_DIR, "husky_assembly_design_study")
-    design_case = "test"
-    target_cell_state_path = os.path.join(design_study_path, design_case, "RobotCellStates", "robotx_box_A0-G_RobotCellState.json")
-    start_cell_state_path = os.path.join(design_study_path, design_case, "RobotCellStates", "robotx_box_A8-S7_start_state_RobotCellState.json")
+    design_case = "250707_RobotX_box_demo"
+    start_cell_state_path = os.path.join(design_study_path, design_case, "RobotCellStates", "robotx_box_A6-S4_start_RobotCellState.json")
+    target_cell_state_path = os.path.join(design_study_path, design_case, "RobotCellStates", "robotx_box_A6-S4_end_RobotCellState.json")
 
     # ------------------------------------------------------------------
     # Start Configuration
     # ------------------------------------------------------------------
-    # print("Initializing start configuration...")
-    # robot_setup = RobotSetup("r0", robot_type="husky_dual", robot_cell_state_path=start_cell_state_path, use_scene_parser_gui=True, scene_parser_verbose=True)
-    # print("✓ Start configuration initialized.")
+    print("Initializing start configuration...")
+    robot_setup = RobotSetup("r0", robot_type="husky_dual", robot_cell_state_path=start_cell_state_path, use_scene_parser_gui=True, scene_parser_verbose=True)
+    print("✓ Start configuration initialized.")
 
-    # start_conf = np.array(robot_setup.arm_target_angles)
-    # start_conf = (start_conf + np.pi) % (2 * np.pi) - np.pi
-    # print(f"Start configuration: {list(start_conf)}")
-    # robot_setup.set_joint_positions(robot_setup.arm_joints, start_conf)
+    start_conf = np.array(robot_setup.arm_target_angles)
+    start_conf = (start_conf + np.pi) % (2 * np.pi) - np.pi
+    print(f"Start configuration: {list(start_conf)}")
+    robot_setup.set_joint_positions(robot_setup.arm_joints, start_conf)
 
-    # world_from_right = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
-    # world_from_left = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_left)
-    # collision_fn = robot_setup.create_collision_fn(obstacle_bodies=robot_setup.obstacles)
-    # projector = DualArmProjection(robot_setup, pp.multiply(pp.invert(world_from_right), world_from_left))
+    pp.disconnect()
+    del robot_setup
 
-    # for idx, conf in enumerate(projected_confs):
-    #     robot.set_joint_positions(robot.arm_joints, conf)
-    #     pp.wait_for_user(f"Projected configuration {idx}: {list(conf)}")
-    # pp.wait_for_user()
+    # start_conf = np.array([1.44588847, -1.07000539, 2.06615573, 2.78551221, -0.66673551, 0.12182059, -4.49743795, -0.19841623, 1.19049788, -3.16904378, -2.07907343, -0.72975159])
+    # start_conf = np.array([-0.04866986, -1.92762701, 1.99040722, -1.14682118, 1.47940549, -0.35373701, 2.31485796, -0.06613874, 0.13227749, -3.83605003, -0.92594337, 0.05148935]) # robotx_box_A6-S4_end_RobotCellState
 
-    # pp.disconnect()
-    # del robot_setup
-
-    start_conf = np.array([1.44588847, -1.07000539, 2.06615573, 2.78551221, -0.66673551, 0.12182059, -4.49743795, -0.19841623, 1.19049788, -3.16904378, -2.07907343, -0.72975159])
     # Normalize start_conf to be within [-pi, pi]
     start_conf = (start_conf + np.pi) % (2 * np.pi) - np.pi
 
@@ -85,16 +77,26 @@ if __name__ == "__main__":
     world_from_right = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
     desired_right_from_left = pp.multiply(pp.invert(world_from_right), world_from_left)
     projector = DualArmProjection(robot_setup, desired_right_from_left)
-
     collision_fn = robot_setup.create_collision_fn(obstacle_bodies=robot_setup.obstacles)
+
+    # -------------------- Projected configurations --------------------#
     start_projected_confs = projector.project_multiple(start_conf[6:], max_attempts=100, collision_fn=collision_fn)
     print(f"Projected configurations for start configuration: {start_projected_confs.shape}")
     target_projected_confs = projector.project_multiple(target_conf[6:], max_attempts=100, collision_fn=collision_fn)
     print(f"Projected configurations for target configuration: {target_projected_confs.shape}")
 
+    robot_setup.set_joint_positions(robot_setup.arm_joints, start_projected_confs[0])
+    pose = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
+    pp.draw_pose(pose, length=0.2)
+
+    robot_setup.set_joint_positions(robot_setup.arm_joints, target_projected_confs[0])
+    pose = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
+    pp.draw_pose(pose, length=0.2)
+
     def get_sample_fn():
         lower, upper = [-np.pi] * 12, [np.pi] * 12
         cache = list(start_projected_confs) + list(target_projected_confs)
+        # cache = []
 
         def fn():
             if len(cache) == 0:
@@ -104,6 +106,10 @@ if __name__ == "__main__":
                     projected_confs = projector.project_multiple(right_conf, max_attempts=10, collision_fn=collision_fn)
                     if projected_confs is not None:
                         cache.extend(list(projected_confs))
+                        for conf in projected_confs:
+                            robot_setup.set_joint_positions(robot_setup.arm_joints, conf)
+                            pose = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
+                            pp.draw_pose(pose, length=0.05)
                         print(f"Cache: {len(cache)}")
                 print("Cache generated!")
             sample = cache.pop()
@@ -113,89 +119,189 @@ if __name__ == "__main__":
         return fn
 
     def get_draw_fn():
-        def fn(conf, segment, valid = None, valid_right = None):
+        pose_cache = set()
+        segment_cache = set()
+
+        def pose_to_tuple(pose, decimals=3):
+            # Convert pose (position, orientation) to a tuple of rounded floats for hashing
+            pos, orn = pose
+            pos_tuple = tuple(np.round(pos, decimals=decimals))
+            orn_tuple = tuple(np.round(orn, decimals=decimals))
+            return pos_tuple + orn_tuple
+
+        def segment_to_tuple(pose1, pose2, decimals=3):
+            # Segment is unordered, so sort the two pose tuples
+            t1 = pose_to_tuple(pose1, decimals)
+            t2 = pose_to_tuple(pose2, decimals)
+            return tuple(sorted([t1, t2]))
+
+        def fn(conf, segment, valid=None, valid_right=None):
             robot_setup.set_joint_positions(robot_setup.arm_joints, conf)
             pose_1 = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
-            pp.draw_pose(pose_1, length=0.2)
-            
+            pose_1_tuple = pose_to_tuple(pose_1)
+
+            # Draw pose if not already drawn
+            if pose_1_tuple not in pose_cache:
+                # pp.draw_pose(pose_1, length=0.025)
+                pose_cache.add(pose_1_tuple)
+
             if len(segment) > 0:
                 robot_setup.set_joint_positions(robot_setup.arm_joints, segment[1])
                 pose_2 = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
-                pp.draw_pose(pose_2, length=0.2)
-                pp.add_line(pose_1[0], pose_2[0], width=0.05)
+                pose_2_tuple = pose_to_tuple(pose_2)
+
+                # Draw pose_2 if not already drawn
+                if pose_2_tuple not in pose_cache:
+                    # pp.draw_pose(pose_2, length=0.025)
+                    pose_cache.add(pose_2_tuple)
+
+                seg_tuple = segment_to_tuple(pose_1, pose_2)
+                if seg_tuple not in segment_cache:
+                    pp.add_line(pose_1[0], pose_2[0], width=0.1)
+                    segment_cache.add(seg_tuple)
+            else:
+                pass
 
         return fn
-    
+
+    def get_circular_diff(q1, q2):
+        """Compute the shortest angular difference between two angle arrays."""
+        q1 = np.array(q1)
+        q2 = np.array(q2)
+        # Normalize angles to [-pi, pi]
+        q1 = (q1 + np.pi) % (2 * np.pi) - np.pi
+        q2 = (q2 + np.pi) % (2 * np.pi) - np.pi
+        # Compute shortest angular distance for each joint
+        diff = q2 - q1
+        diff = (diff + np.pi) % (2 * np.pi) - np.pi
+        return diff
+
+    def create_invalid_configuration():
+        """Create a configuration that is guaranteed to fail collision checking."""
+        data = np.array([2.15557306, -1.05715414, 1.63506225, -0.25357488, 1.23252519, -1.42178216, 1.31437349, 1.25663757, 0.39683294, -3.90218878, -1.71960878, 0.05148935])
+        # Convert the data to the range [-pi, pi]
+        data = (data + np.pi) % (2 * np.pi) - np.pi
+        return data
+
     def get_extend_fn(body, joints, resolutions=None, norm=2, projector: Optional[DualArmProjection] = None):
         if resolutions is None:
-            resolutions = DEFAULT_RESOLUTION*np.ones(len(joints))
+            resolutions = DEFAULT_RESOLUTION * np.ones(len(joints))
         if len(joints) == 12 and projector is not None:
+
             def fn(q1, q2):
                 q1_right = np.array(q1[6:])
                 q2_right = np.array(q2[6:])
-                
-                right_diff = q2_right - q1_right
+
+                right_diff = get_circular_diff(q1_right, q2_right)
                 right_steps = int(np.ceil(np.linalg.norm(right_diff / resolutions[6:], ord=norm)))
-                
+
                 q_left_init = np.array(q1[:6])
-                
+
                 for i in range(right_steps + 1):
                     if right_steps == 0:
                         t = 0.0
                     else:
                         t = i / right_steps
-                    
+
                     q_right_interp = q1_right + t * right_diff
-                    
-                    projected_conf = projector.project(q_right_interp, q_left_init)
-                    
-                    if projected_conf is not None:
+                    q_right_interp = (q_right_interp + np.pi) % (2 * np.pi) - np.pi
+
+                    with pp.LockRenderer():
+                        projected_conf = projector.project(q_right_interp, q_left_init)
+
+                    if projected_conf is not None and np.linalg.norm(get_circular_diff(projected_conf[:6], q_left_init)) < 0.5:
                         q_left_init = np.array(projected_conf[:6])
                         yield tuple(projected_conf)
                     else:
-                        continue
+                        # Return an invalid configuration that will fail collision checking
+                        # This ensures the path is properly rejected by collision detection
+                        collision_conf = create_invalid_configuration()
+                        yield tuple(collision_conf)
+
         else:
             difference_fn = get_difference_fn(body, joints)
+
             def fn(q1, q2):
                 steps = int(np.ceil(np.linalg.norm(np.divide(difference_fn(q2, q1), resolutions), ord=norm)))
                 refine_fn = get_refine_fn(body, joints, num_steps=steps)
                 return refine_fn(q1, q2)
-            return fn
-        
-        return fn       
 
-    resolutions = np.array([1.0 if j in [] else 1.0 / 180.0 * np.pi for j in robot_setup.arm_joints])
+            return fn
+
+        return fn
+
+    def get_distance_fn(body, joints, weights=None):
+        if weights is None:
+            weights = 1 * np.ones(len(joints))
+        difference_fn = get_circular_diff
+
+        def fn(q1, q2):
+            diff = np.array(difference_fn(q2, q1))
+            return np.sqrt(np.dot(weights, diff * diff))
+
+        return fn
+
+    resolutions = np.array([1.0 if j in [] else 5.0 / 180.0 * np.pi for j in robot_setup.arm_joints])
 
     sample_fn = get_sample_fn()
     extend_fn = get_extend_fn(robot_setup.robot, robot_setup.arm_joints, resolutions=resolutions, projector=projector)
     invalid_fn = robot_setup.create_invalid_fn(desired_right_from_left, obstacle_bodies=robot_setup.obstacles, resolution=1e-2)
+    distance_fn = get_distance_fn(robot_setup.robot, robot_setup.arm_joints)
+    draw_fn = get_draw_fn()
 
-    # while True:
-    #     sample = sample_fn()
-    #     if sample is None:
-    #         continue
-    #     robot_setup.set_joint_positions(robot_setup.arm_joints, sample)
-    #     pp.wait_for_user(f"Sample: {sample}")
-
-    # def circular_distance_fn(q1, q2):
-    #     q1 = np.array(q1)
-    #     q2 = np.array(q2)
-    #     # Normalize angles to [-pi, pi]
-    #     q1 = np.mod(q1 + np.pi, 2 * np.pi) - np.pi
-    #     q2 = np.mod(q2 + np.pi, 2 * np.pi) - np.pi
-    #     # Compute shortest angular distance for each joint
-    #     diff = np.array(q1) - np.array(q2)
-    #     diff = (diff + np.pi) % (2 * np.pi) - np.pi
-    #     return np.linalg.norm(diff)
-
-    # distance_fn = circular_distance_fn
-
-    # path = robot_setup.plan_manipulator_path(start_conf, target_conf, attachments=[], obstacles=robot_setup.obstacles, sample_fn=sample_fn, collision_fn=collision_fn, extend_fn=extend_fn, distance_fn=distance_fn, max_time=600)
-    path = robot_setup.plan_manipulator_path(start_conf, target_conf, attachments=[], obstacles=robot_setup.obstacles, sample_fn=sample_fn, collision_fn=invalid_fn, extend_fn=extend_fn, max_time=600, draw_fn=get_draw_fn())
-
-    print(f"Path: {path}")
+    # Cross-iterate all pairs of start and target, check if there is a direct path
+    has_direct_path = False
+    for s in start_projected_confs:
+        for t in target_projected_confs:
+            path = pp.direct_path(s, t, extend_fn, invalid_fn)
+            if path is not None:
+                print(f"Direct path found between {s} and {t}: {path}")
+                has_direct_path = True
+            else:
+                print(f"No direct path between {s} and {t}")
+    if not has_direct_path:
+        print("No direct path found for any start-target pair.")
+        path = robot_setup.plan_manipulator_path(
+            start_conf, target_conf, attachments=[], obstacles=robot_setup.obstacles, sample_fn=sample_fn, collision_fn=invalid_fn, extend_fn=extend_fn, max_time=600, draw_fn=draw_fn, distance_fn=distance_fn
+        )
 
     if path is not None:
+        # Remove trailing frames where the right arm joint angles remain unchanged, keeping only the first occurrence
+        if len(path) > 1:
+            right_arm_indices = list(range(6, 12))
+            last_right = tuple(np.round(np.array(path[-1])[right_arm_indices], decimals=6))
+            # Find the first index from the end where right arm changes
+            cutoff_idx = len(path) - 1
+            for i in reversed(range(len(path) - 1)):
+                right_i = tuple(np.round(np.array(path[i])[right_arm_indices], decimals=6))
+                if right_i != last_right:
+                    cutoff_idx = i + 1
+                    break
+            # Keep up to the first occurrence of the repeated right arm, discard the rest
+            path = path[:cutoff_idx + 1]
+        print(f"Path: {path}")
+        prev_conf = path[0]
+        robot_setup.set_joint_positions(robot_setup.arm_joints, prev_conf)
+        prev_pose = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
+        for idx, conf in enumerate(path[1:]):
+            robot_setup.set_joint_positions(robot_setup.arm_joints, conf)
+            pose = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
+            pp.add_line(prev_pose[0], pose[0], color=[0, 1, 0, 0.5], width=2.0)
+            prev_pose = pose
+    else:
+        print("No path found.")
+
+    pp.wait_for_user()
+
+    if path is not None:
+        # print("Interpolating path...")
+        # interp_path = []
+        # start_conf = path[0]
+        # for temp_conf in path[1:]:
+        #     interp_path.extend(pp.direct_path(start_conf, temp_conf, extend_fn_refine, invalid_fn))
+        #     start_conf = temp_conf
+
+        # result_traj = np.array(interp_path)
         result_traj = np.array(path)
 
         slider = pybullet.addUserDebugParameter("traj_idx", 0, result_traj.shape[0] - 1, 0)

@@ -95,8 +95,8 @@ if __name__ == "__main__":
 
     def get_sample_fn():
         lower, upper = [-np.pi] * 12, [np.pi] * 12
-        cache = list(start_projected_confs) + list(target_projected_confs)
-        # cache = []
+        # cache = list(start_projected_confs) + list(target_projected_confs)
+        cache = []
 
         def fn():
             if len(cache) == 0:
@@ -104,13 +104,24 @@ if __name__ == "__main__":
                 while len(cache) < 100:
                     right_conf = np.random.uniform(lower[6:], upper[6:])
                     projected_confs = projector.project_multiple(right_conf, max_attempts=10, collision_fn=collision_fn)
+                    
+                    #-------------------- Multiple samples --------------------#
+                    # if projected_confs is not None:
+                    #     cache.extend(list(projected_confs))
+                    #     for conf in projected_confs:
+                    #         robot_setup.set_joint_positions(robot_setup.arm_joints, conf)
+                    #         pose = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
+                    #         # pp.draw_pose(pose, length=0.05)
+                    #     print(f"Cache: {len(cache)}")
+                    
+                    #-------------------- Single sample --------------------#
                     if projected_confs is not None:
-                        cache.extend(list(projected_confs))
-                        for conf in projected_confs:
-                            robot_setup.set_joint_positions(robot_setup.arm_joints, conf)
-                            pose = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
-                            pp.draw_pose(pose, length=0.05)
+                        cache.append(projected_confs[0])
+                        robot_setup.set_joint_positions(robot_setup.arm_joints, projected_confs[0])
+                        pose = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
+                        # pp.draw_pose(pose, length=0.05)
                         print(f"Cache: {len(cache)}")
+                        
                 print("Cache generated!")
             sample = cache.pop()
             print(f"Cache: {len(cache)}")
@@ -134,6 +145,16 @@ if __name__ == "__main__":
             t1 = pose_to_tuple(pose1, decimals)
             t2 = pose_to_tuple(pose2, decimals)
             return tuple(sorted([t1, t2]))
+        
+        start_tree_set = set()
+        robot_setup.set_joint_positions(robot_setup.arm_joints, start_conf)
+        start_pose_tuple = pose_to_tuple(pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right))
+        start_tree_set.add(start_pose_tuple)
+        
+        target_tree_set = set()
+        robot_setup.set_joint_positions(robot_setup.arm_joints, target_conf)
+        target_pose_tuple = pose_to_tuple(pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right))
+        target_tree_set.add(target_pose_tuple)
 
         def fn(conf, segment, valid=None, valid_right=None):
             robot_setup.set_joint_positions(robot_setup.arm_joints, conf)
@@ -154,11 +175,27 @@ if __name__ == "__main__":
                 if pose_2_tuple not in pose_cache:
                     # pp.draw_pose(pose_2, length=0.025)
                     pose_cache.add(pose_2_tuple)
+                    
+                    
+                color = pp.BROWN
+                if pose_1_tuple in start_tree_set:
+                    color = pp.BLUE
+                    start_tree_set.add(pose_2_tuple)
+                elif pose_2_tuple in start_tree_set:
+                    color = pp.BLUE
+                    start_tree_set.add(pose_1_tuple)
+                elif pose_1_tuple in target_tree_set:
+                    color = pp.RED
+                    target_tree_set.add(pose_2_tuple)
+                elif pose_2_tuple in target_tree_set:
+                    color = pp.RED
+                    target_tree_set.add(pose_1_tuple)
 
                 seg_tuple = segment_to_tuple(pose_1, pose_2)
                 if seg_tuple not in segment_cache:
-                    pp.add_line(pose_1[0], pose_2[0], width=0.1)
+                    pp.add_line(pose_1[0], pose_2[0], width=1.0, color=color)
                     segment_cache.add(seg_tuple)
+    
             else:
                 pass
 

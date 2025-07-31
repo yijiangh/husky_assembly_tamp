@@ -97,6 +97,41 @@ class DualArmProjection:
         if len(projected_confs) == 0:
             return None
         return np.stack(projected_confs)
+    
+    def project_multiple_inv(self, left: np.ndarray, max_attempts: int = 100, collision_fn: Callable[[np.ndarray], bool] = None) -> Union[np.ndarray, None]:
+        """
+        Project multiple states to satisfy the relative constraint by computing
+        the left arm configuration that maintains the desired relative pose with the right arm.
+
+        Args:
+            left: Left arm joint angles
+            max_attempts: Maximum number of attempts to project
+            collision_fn: Collision function to check if the configuration is valid
+        """
+        projected_confs = []
+        for _ in range(max_attempts):
+            right_init_guess = np.random.uniform(-np.pi, np.pi, 6)
+            projected_conf = self.project_inv(left, right_init_guess)
+            if projected_conf is not None:
+                projected_confs.append(projected_conf)
+        if not projected_confs:
+            return None
+        unique_confs = []
+        atol = 1e-2
+        for conf in projected_confs:
+            is_duplicate = False
+            for uconf in unique_confs:
+                if np.allclose(conf, uconf, atol=atol):
+                    is_duplicate = True
+                    break
+            if not is_duplicate:
+                unique_confs.append(conf)
+        projected_confs = unique_confs
+        if collision_fn is not None:
+            projected_confs = [conf for conf in projected_confs if not collision_fn(conf)]
+        if len(projected_confs) == 0:
+            return None
+        return np.stack(projected_confs)
 
 
 if __name__ == "__main__":

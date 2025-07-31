@@ -80,9 +80,14 @@ if __name__ == "__main__":
     collision_fn = robot_setup.create_collision_fn(obstacle_bodies=robot_setup.obstacles)
 
     # -------------------- Projected configurations --------------------#
-    start_projected_confs = projector.project_multiple(start_conf[6:], max_attempts=100, collision_fn=collision_fn)
+    # start_projected_confs = projector.project_multiple(start_conf[6:], max_attempts=100, collision_fn=collision_fn)
+    # print(f"Projected configurations for start configuration: {start_projected_confs.shape}")
+    # target_projected_confs = projector.project_multiple(target_conf[6:], max_attempts=100, collision_fn=collision_fn)
+    # print(f"Projected configurations for target configuration: {target_projected_confs.shape}")
+    
+    start_projected_confs = projector.project_multiple_inv(start_conf[:6], max_attempts=100, collision_fn=collision_fn)
     print(f"Projected configurations for start configuration: {start_projected_confs.shape}")
-    target_projected_confs = projector.project_multiple(target_conf[6:], max_attempts=100, collision_fn=collision_fn)
+    target_projected_confs = projector.project_multiple_inv(target_conf[:6], max_attempts=100, collision_fn=collision_fn)
     print(f"Projected configurations for target configuration: {target_projected_confs.shape}")
 
     robot_setup.set_joint_positions(robot_setup.arm_joints, start_projected_confs[0])
@@ -294,8 +299,11 @@ if __name__ == "__main__":
             if path is not None:
                 print(f"Direct path found between {s} and {t}: {path}")
                 has_direct_path = True
+                break
             else:
                 print(f"No direct path between {s} and {t}")
+        if has_direct_path:
+            break
     if not has_direct_path:
         print("No direct path found for any start-target pair.")
         path = robot_setup.plan_manipulator_path(

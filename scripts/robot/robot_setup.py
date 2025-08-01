@@ -875,6 +875,15 @@ class RobotSetup:
         """
         self.attachments = attachments
 
+    def remove_obstacle(self, obstacle_id: int) -> None:
+        """Remove an obstacle from the environment.
+
+        Params:
+            obstacle_id: PyBullet body ID of the obstacle to remove.
+        """
+        if obstacle_id in self.obstacles:
+            self.obstacles.remove(obstacle_id)
+
     def cleanup(self) -> None:
         """Clean up resources, including SceneParser if used."""
         if self.scene_parser is not None:

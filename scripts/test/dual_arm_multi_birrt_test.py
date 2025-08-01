@@ -1,20 +1,20 @@
 import argparse
+import math
 import os
 import sys
 import time
-import math
+from typing import Callable, List, Optional, Tuple
 
 import numpy as np
 import pybullet
 import pybullet_planning as pp
 from pybullet_planning.interfaces.planner_interface.joint_motion_planning import get_difference_fn, get_refine_fn
 
-from typing import Callable, List, Tuple, Optional
-
 HERE = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(HERE)
 
 from dual_arm_projection import DualArmProjection
+from model.target_parse import TargetParser
 from robot.robot_setup import RobotSetup
 from utils.params import DATA_DIR
 
@@ -54,9 +54,6 @@ if __name__ == "__main__":
     pp.disconnect()
     del robot_setup
 
-    # start_conf = np.array([1.44588847, -1.07000539, 2.06615573, 2.78551221, -0.66673551, 0.12182059, -4.49743795, -0.19841623, 1.19049788, -3.16904378, -2.07907343, -0.72975159])
-    # start_conf = np.array([-0.04866986, -1.92762701, 1.99040722, -1.14682118, 1.47940549, -0.35373701, 2.31485796, -0.06613874, 0.13227749, -3.83605003, -0.92594337, 0.05148935]) # robotx_box_A6-S4_end_RobotCellState
-
     # Normalize start_conf to be within [-pi, pi]
     start_conf = (start_conf + np.pi) % (2 * np.pi) - np.pi
 
@@ -76,6 +73,27 @@ if __name__ == "__main__":
     world_from_right = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
     desired_right_from_left = pp.multiply(pp.invert(world_from_right), world_from_left)
     projector = DualArmProjection(robot_setup, desired_right_from_left)
+
+    # -------------------- setup target parser --------------------#
+    target_parser = TargetParser(os.path.join(design_study_path, design_case), "robotx_box_A6-S4_end_GraspTargets.json")
+    world_from_bar = target_parser.world_from_bar
+    world_from_bar_pos = world_from_bar[0]
+    min_dist = np.inf
+    for id in robot_setup.obstacles:
+        pose = pp.get_pose(id)
+        position = pose[0]
+        dist = np.linalg.norm(np.array(position) - np.array(world_from_bar_pos))
+        if dist < min_dist:
+            min_dist = dist
+            min_dist_id = id
+    print(f"Min distance: {min_dist}, id: {min_dist_id}")
+    pp.set_color(min_dist_id, pp.YELLOW)
+    robot_setup.remove_obstacle(min_dist_id)
+    robot_setup.set_joint_positions(robot_setup.arm_joints, target_conf)
+    attachment = pp.create_attachment(robot_setup.robot, robot_setup.tool_link_right, min_dist_id)
+    robot_setup.update_attachments([attachment])
+
+    # -------------------- Set up collision checking --------------------#
     collision_fn = robot_setup.create_collision_fn(obstacle_bodies=robot_setup.obstacles)
 
     # -------------------- Projected configurations --------------------#

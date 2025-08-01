@@ -61,9 +61,11 @@ class TargetParser:
         self.targets = self.load_grasp_targets(file_path, state_name)
         self.parse_targets()
         self.poses = self.parse_targets()
+        world_from_bar = pp.pose_from_tform(np.array(self.targets[0].world_from_bar.matrix))
+        self.world_from_bar = (tuple(world_from_bar[0]), tuple(world_from_bar[1]))
 
     def load_grasp_targets(self, file_path, state_name):
-        in_path = os.path.join(file_path, "RobotCellStates", state_name + "_GraspTargets.json")
+        in_path = os.path.join(file_path, "RobotCellStates", state_name)
         with open(in_path, "r") as f:
             raw = json.load(f)
 
@@ -88,5 +90,5 @@ class TargetParser:
 
 if __name__ == "__main__":
     file_path = os.path.join(DATA_DIR, "husky_assembly_design_study", "250707_RobotX_box_demo")
-    state_name = "robotx_box_A0-G"
+    state_name = "robotx_box_A6-S4_end_GraspTargets.json"
     target_parser = TargetParser(file_path, state_name)

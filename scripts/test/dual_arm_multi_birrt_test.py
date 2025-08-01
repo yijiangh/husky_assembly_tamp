@@ -83,12 +83,12 @@ if __name__ == "__main__":
     print(f"Projected configurations for start configuration: {start_projected_confs_left.shape}")
     target_projected_confs_left = projector.project_multiple(target_conf[6:], max_attempts=100, collision_fn=collision_fn)
     print(f"Projected configurations for target configuration: {target_projected_confs_left.shape}")
-    
+
     start_projected_confs_right = projector.project_multiple_inv(start_conf[:6], max_attempts=100, collision_fn=collision_fn)
     print(f"Projected configurations for start configuration: {start_projected_confs_right.shape}")
     target_projected_confs_right = projector.project_multiple_inv(target_conf[:6], max_attempts=100, collision_fn=collision_fn)
     print(f"Projected configurations for target configuration: {target_projected_confs_right.shape}")
-    
+
     start_projected_confs = []
     target_projected_confs = []
     for left_conf in start_projected_confs_left:
@@ -121,8 +121,8 @@ if __name__ == "__main__":
                 while len(cache) < 100:
                     right_conf = np.random.uniform(lower[6:], upper[6:])
                     projected_confs = projector.project_multiple(right_conf, max_attempts=10, collision_fn=collision_fn)
-                    
-                    #-------------------- Multiple samples --------------------#
+
+                    # -------------------- Multiple samples --------------------#
                     # if projected_confs is not None:
                     #     cache.extend(list(projected_confs))
                     #     for conf in projected_confs:
@@ -130,15 +130,15 @@ if __name__ == "__main__":
                     #         pose = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
                     #         # pp.draw_pose(pose, length=0.05)
                     #     print(f"Cache: {len(cache)}")
-                    
-                    #-------------------- Single sample --------------------#
+
+                    # -------------------- Single sample --------------------#
                     if projected_confs is not None:
                         cache.append(projected_confs[0])
                         robot_setup.set_joint_positions(robot_setup.arm_joints, projected_confs[0])
                         pose = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
                         # pp.draw_pose(pose, length=0.05)
                         print(f"Cache: {len(cache)}")
-                        
+
                 print("Cache generated!")
             sample = cache.pop()
             print(f"Cache: {len(cache)}")
@@ -162,12 +162,12 @@ if __name__ == "__main__":
             t1 = pose_to_tuple(pose1, decimals)
             t2 = pose_to_tuple(pose2, decimals)
             return tuple(sorted([t1, t2]))
-        
+
         start_tree_set = set()
         robot_setup.set_joint_positions(robot_setup.arm_joints, start_conf)
         start_pose_tuple = pose_to_tuple(pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right))
         start_tree_set.add(start_pose_tuple)
-        
+
         target_tree_set = set()
         robot_setup.set_joint_positions(robot_setup.arm_joints, target_conf)
         target_pose_tuple = pose_to_tuple(pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right))
@@ -192,7 +192,7 @@ if __name__ == "__main__":
                 if pose_2_tuple not in pose_cache:
                     # pp.draw_pose(pose_2, length=0.025)
                     pose_cache.add(pose_2_tuple)
-                    
+
                 color = pp.BROWN
                 if pose_1_tuple in start_tree_set:
                     color = pp.BLUE
@@ -211,7 +211,7 @@ if __name__ == "__main__":
                 if seg_tuple not in segment_cache:
                     pp.add_line(pose_1[0], pose_2[0], width=1.0, color=color)
                     segment_cache.add(seg_tuple)
-    
+
             else:
                 pass
 
@@ -236,58 +236,75 @@ if __name__ == "__main__":
         data = (data + np.pi) % (2 * np.pi) - np.pi
         return data
 
-    def get_extend_fn(body, joints, resolutions=None, norm=2, projector: Optional[DualArmProjection] = None):
+    def get_extend_fn(body, joints, projector: DualArmProjection, resolutions=None, norm=2, check_continuous=True):
         if resolutions is None:
             resolutions = DEFAULT_RESOLUTION * np.ones(len(joints))
-        if len(joints) == 12 and projector is not None:
 
-            def fn(q1, q2):
-                q1_right = np.array(q1[6:])
-                q2_right = np.array(q2[6:])
+        def fn(q1, q2):
+            q1_right = np.array(q1[6:])
+            q2_right = np.array(q2[6:])
 
-                right_diff = get_circular_diff(q1_right, q2_right)
-                right_steps = int(np.ceil(np.linalg.norm(right_diff / resolutions[6:], ord=norm)))
+            right_diff = get_circular_diff(q1_right, q2_right)
+            right_steps = int(np.ceil(np.linalg.norm(right_diff / resolutions[6:], ord=norm)))
 
-                q_left_init = np.array(q1[:6])
-                q_left_target = np.array(q2[:6])
+            q_left_init = np.array(q1[:6])
+            q_left_target = np.array(q2[:6])
 
-                for i in range(right_steps + 1):
-                    if right_steps == 0:
-                        t = 0.0
-                    else:
-                        t = i / right_steps
+            for i in range(right_steps + 1):
+                if right_steps == 0:
+                    t = 0.0
+                else:
+                    t = i / right_steps
 
-                    q_right_interp = q1_right + t * right_diff
-                    q_right_interp = (q_right_interp + np.pi) % (2 * np.pi) - np.pi
+                q_right_interp = q1_right + t * right_diff
+                q_right_interp = (q_right_interp + np.pi) % (2 * np.pi) - np.pi
 
-                    with pp.LockRenderer():
-                        projected_conf = projector.project(q_right_interp, q_left_init)
+                with pp.LockRenderer():
+                    projected_conf = projector.project(q_right_interp, q_left_init)
 
-                    if projected_conf is not None and np.linalg.norm(get_circular_diff(projected_conf[:6], q_left_init)) < 0.5:
-                        q_left_init = np.array(projected_conf[:6])
-                        yield tuple(projected_conf)
-                    # if t < 1-0.01 and projected_conf is not None and np.linalg.norm(get_circular_diff(projected_conf[:6], q_left_init)) < 0.5:
-                    #     q_left_init = np.array(projected_conf[:6])
-                    #     yield tuple(projected_conf)
-                    # elif t >= 1-0.01 and projected_conf is not None and np.linalg.norm(get_circular_diff(projected_conf[:6], q_left_target)) < 0.1:
-                    #     q_left_init = np.array(projected_conf[:6])
-                    #     print("fuck")
-                    #     yield tuple(projected_conf)
-                    else:
-                        collision_conf = create_invalid_configuration()
-                        yield tuple(collision_conf)
+                if projected_conf is not None and np.linalg.norm(get_circular_diff(projected_conf[:6], q_left_init)) < 0.5:
+                    q_left_init = np.array(projected_conf[:6])
+                    yield tuple(projected_conf)
+                else:
+                    collision_conf = create_invalid_configuration()
+                    yield tuple(collision_conf)
 
+        def fn_continuous(q1, q2):
+            q1_right = np.array(q1[6:])
+            q2_right = np.array(q2[6:])
+
+            right_diff = get_circular_diff(q1_right, q2_right)
+            right_steps = int(np.ceil(np.linalg.norm(right_diff / resolutions[6:], ord=norm)))
+
+            q_left_init = np.array(q1[:6])
+            q_left_target = np.array(q2[:6])
+
+            for i in range(right_steps + 1):
+                if right_steps == 0:
+                    t = 0.0
+                else:
+                    t = i / right_steps
+
+                q_right_interp = q1_right + t * right_diff
+                q_right_interp = (q_right_interp + np.pi) % (2 * np.pi) - np.pi
+
+                with pp.LockRenderer():
+                    projected_conf = projector.project(q_right_interp, q_left_init)
+
+                if t < 1 - 0.01 and projected_conf is not None and np.linalg.norm(get_circular_diff(projected_conf[:6], q_left_init)) < 0.5:
+                    q_left_init = np.array(projected_conf[:6])
+                    yield tuple(projected_conf)
+                elif t >= 1 - 0.01 and projected_conf is not None and np.linalg.norm(get_circular_diff(projected_conf[:6], q_left_target)) < 0.1:
+                    q_left_init = np.array(projected_conf[:6])
+                    yield tuple(projected_conf)
+                else:
+                    collision_conf = create_invalid_configuration()
+                    yield tuple(collision_conf)
+
+        if check_continuous:
+            return fn_continuous
         else:
-            difference_fn = get_difference_fn(body, joints)
-
-            def fn(q1, q2):
-                steps = int(np.ceil(np.linalg.norm(np.divide(difference_fn(q2, q1), resolutions), ord=norm)))
-                refine_fn = get_refine_fn(body, joints, num_steps=steps)
-                return refine_fn(q1, q2)
-
             return fn
-
-        return fn
 
     def get_distance_fn(body, joints, weights=None):
         if weights is None:
@@ -303,7 +320,8 @@ if __name__ == "__main__":
     resolutions = np.array([1.0 if j in [] else 5.0 / 180.0 * np.pi for j in robot_setup.arm_joints])
 
     sample_fn = get_sample_fn()
-    extend_fn = get_extend_fn(robot_setup.robot, robot_setup.arm_joints, resolutions=resolutions, projector=projector)
+    extend_fn_continuous = get_extend_fn(robot_setup.robot, robot_setup.arm_joints, projector, resolutions=resolutions, check_continuous=True)
+    extend_fn_direct = get_extend_fn(robot_setup.robot, robot_setup.arm_joints, projector, resolutions=resolutions, check_continuous=False)
     invalid_fn = robot_setup.create_invalid_fn(desired_right_from_left, obstacle_bodies=robot_setup.obstacles, resolution=1e-2)
     distance_fn = get_distance_fn(robot_setup.robot, robot_setup.arm_joints)
     draw_fn = get_draw_fn()
@@ -312,7 +330,7 @@ if __name__ == "__main__":
     has_direct_path = False
     for s in start_projected_confs:
         for t in target_projected_confs:
-            path = pp.direct_path(s, t, extend_fn, invalid_fn)
+            path = pp.direct_path(s, t, extend_fn_direct, invalid_fn)
             if path is not None:
                 print(f"Direct path found!")
                 has_direct_path = True
@@ -324,7 +342,7 @@ if __name__ == "__main__":
     if not has_direct_path:
         print("No direct path found for any start-target pair.")
         path = robot_setup.plan_manipulator_path(
-            start_conf, target_conf, attachments=[], obstacles=robot_setup.obstacles, sample_fn=sample_fn, collision_fn=invalid_fn, extend_fn=extend_fn, max_time=600, draw_fn=draw_fn, distance_fn=distance_fn
+            start_conf, target_conf, attachments=[], obstacles=robot_setup.obstacles, sample_fn=sample_fn, collision_fn=invalid_fn, extend_fn=extend_fn_continuous, max_time=600, draw_fn=draw_fn, distance_fn=distance_fn
         )
 
     if path is not None:
@@ -340,7 +358,7 @@ if __name__ == "__main__":
                     cutoff_idx = i + 1
                     break
             # Keep up to the first occurrence of the repeated right arm, discard the rest
-            path = path[:cutoff_idx + 1]
+            path = path[: cutoff_idx + 1]
         print(f"Path: {path}")
         prev_conf = path[0]
         robot_setup.set_joint_positions(robot_setup.arm_joints, prev_conf)

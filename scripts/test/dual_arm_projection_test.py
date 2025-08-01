@@ -10,9 +10,7 @@ import pybullet_planning as pp
 HERE = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(HERE)
 
-from ConstrainedPlanningCommon import *
 from dual_arm_projection import DualArmProjection
-from dual_constrain_test import RelativeEndEffectorConstraint
 from robot.robot_setup import RobotSetup
 from utils.params import DATA_DIR
 

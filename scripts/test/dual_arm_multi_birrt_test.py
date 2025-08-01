@@ -14,7 +14,6 @@ from typing import Callable, List, Tuple, Optional
 HERE = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(HERE)
 
-from ConstrainedPlanningCommon import *
 from dual_arm_projection import DualArmProjection
 from robot.robot_setup import RobotSetup
 from utils.params import DATA_DIR
@@ -80,15 +79,28 @@ if __name__ == "__main__":
     collision_fn = robot_setup.create_collision_fn(obstacle_bodies=robot_setup.obstacles)
 
     # -------------------- Projected configurations --------------------#
-    # start_projected_confs = projector.project_multiple(start_conf[6:], max_attempts=100, collision_fn=collision_fn)
-    # print(f"Projected configurations for start configuration: {start_projected_confs.shape}")
-    # target_projected_confs = projector.project_multiple(target_conf[6:], max_attempts=100, collision_fn=collision_fn)
-    # print(f"Projected configurations for target configuration: {target_projected_confs.shape}")
+    start_projected_confs_left = projector.project_multiple(start_conf[6:], max_attempts=100, collision_fn=collision_fn)
+    print(f"Projected configurations for start configuration: {start_projected_confs_left.shape}")
+    target_projected_confs_left = projector.project_multiple(target_conf[6:], max_attempts=100, collision_fn=collision_fn)
+    print(f"Projected configurations for target configuration: {target_projected_confs_left.shape}")
     
-    start_projected_confs = projector.project_multiple_inv(start_conf[:6], max_attempts=100, collision_fn=collision_fn)
-    print(f"Projected configurations for start configuration: {start_projected_confs.shape}")
-    target_projected_confs = projector.project_multiple_inv(target_conf[:6], max_attempts=100, collision_fn=collision_fn)
-    print(f"Projected configurations for target configuration: {target_projected_confs.shape}")
+    start_projected_confs_right = projector.project_multiple_inv(start_conf[:6], max_attempts=100, collision_fn=collision_fn)
+    print(f"Projected configurations for start configuration: {start_projected_confs_right.shape}")
+    target_projected_confs_right = projector.project_multiple_inv(target_conf[:6], max_attempts=100, collision_fn=collision_fn)
+    print(f"Projected configurations for target configuration: {target_projected_confs_right.shape}")
+    
+    start_projected_confs = []
+    target_projected_confs = []
+    for left_conf in start_projected_confs_left:
+        for right_conf in start_projected_confs_right:
+            start_projected_confs.append(np.concatenate([left_conf[:6], right_conf[6:]]))
+    for left_conf in target_projected_confs_left:
+        for right_conf in target_projected_confs_right:
+            target_projected_confs.append(np.concatenate([left_conf[:6], right_conf[6:]]))
+    start_projected_confs = np.array(start_projected_confs)
+    target_projected_confs = np.array(target_projected_confs)
+    print(f"Start projected configurations: {start_projected_confs.shape}")
+    print(f"Target projected configurations: {target_projected_confs.shape}")
 
     robot_setup.set_joint_positions(robot_setup.arm_joints, start_projected_confs[0])
     pose = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
@@ -181,7 +193,6 @@ if __name__ == "__main__":
                     # pp.draw_pose(pose_2, length=0.025)
                     pose_cache.add(pose_2_tuple)
                     
-                    
                 color = pp.BROWN
                 if pose_1_tuple in start_tree_set:
                     color = pp.BLUE
@@ -238,6 +249,7 @@ if __name__ == "__main__":
                 right_steps = int(np.ceil(np.linalg.norm(right_diff / resolutions[6:], ord=norm)))
 
                 q_left_init = np.array(q1[:6])
+                q_left_target = np.array(q2[:6])
 
                 for i in range(right_steps + 1):
                     if right_steps == 0:
@@ -254,9 +266,14 @@ if __name__ == "__main__":
                     if projected_conf is not None and np.linalg.norm(get_circular_diff(projected_conf[:6], q_left_init)) < 0.5:
                         q_left_init = np.array(projected_conf[:6])
                         yield tuple(projected_conf)
+                    # if t < 1-0.01 and projected_conf is not None and np.linalg.norm(get_circular_diff(projected_conf[:6], q_left_init)) < 0.5:
+                    #     q_left_init = np.array(projected_conf[:6])
+                    #     yield tuple(projected_conf)
+                    # elif t >= 1-0.01 and projected_conf is not None and np.linalg.norm(get_circular_diff(projected_conf[:6], q_left_target)) < 0.1:
+                    #     q_left_init = np.array(projected_conf[:6])
+                    #     print("fuck")
+                    #     yield tuple(projected_conf)
                     else:
-                        # Return an invalid configuration that will fail collision checking
-                        # This ensures the path is properly rejected by collision detection
                         collision_conf = create_invalid_configuration()
                         yield tuple(collision_conf)
 
@@ -297,7 +314,7 @@ if __name__ == "__main__":
         for t in target_projected_confs:
             path = pp.direct_path(s, t, extend_fn, invalid_fn)
             if path is not None:
-                print(f"Direct path found between {s} and {t}: {path}")
+                print(f"Direct path found!")
                 has_direct_path = True
                 break
             else:

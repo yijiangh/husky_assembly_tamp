@@ -10,7 +10,7 @@ import pybullet_planning as pp
 HERE = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(HERE)
 
-from dual_arm_projection import DualArmProjection
+from robot.dual_arm_projection import DualArmProjection
 from robot.robot_setup import RobotSetup
 from utils.params import DATA_DIR
 

@@ -13,7 +13,7 @@ from pybullet_planning.interfaces.planner_interface.joint_motion_planning import
 HERE = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(HERE)
 
-from dual_arm_projection import DualArmProjection
+from robot.dual_arm_projection import DualArmProjection
 from model.target_parse import TargetParser
 from robot.robot_setup import RobotSetup
 from utils.params import DATA_DIR

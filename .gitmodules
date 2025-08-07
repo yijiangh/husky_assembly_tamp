@@ -1,27 +1,4 @@
-[submodule "data/husky_urdf"]
-	path = data/husky_urdf
-	url = git@gitlab.inf.ethz.ch:crl/husky_urdf.git
-	branch = main
-[submodule "ext/crl-husky"]
-	path = ext/crl-husky
-	url = git@gitlab.inf.ethz.ch:crl/robot-control/crl-husky.git
-	branch = main
-[submodule "ext/tracikpy"]
-	path = ext/tracikpy
-	url = https://github.com/mjd3/tracikpy.git
-	branch = main
-[submodule "ext/pddlstream"]
-	path = ext/pddlstream
-	url = https://github.com/yijiangh/pddlstream.git
-	branch = stable
-[submodule "ext/FrameX"]
-	path = ext/FrameX
-	url = https://github.com/yijiangh/FrameX.git
+[submodule "ext/husky-assembly-teleop"]
+	path = ext/husky-assembly-teleop
+	url = https://github.com/yijiangh/husky-assembly-teleop.git
 	branch = master
-[submodule "data/husky_assembly_design_study"]
-	path = data/husky_assembly_design_study
-	url = https://gitlab.inf.ethz.ch/crl/yijiangh/husky_assembly_design_study.git
-	branch = main
-[submodule "ext/compas_fab"]
-	path = ext/compas_fab
-	url = https://github.com/compas-dev/compas_fab.git

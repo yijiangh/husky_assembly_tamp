@@ -9,5 +9,3 @@ cd ext/husky-assembly-teleop
 git submodule init
 git submodule update --remote
 ```
-
-test

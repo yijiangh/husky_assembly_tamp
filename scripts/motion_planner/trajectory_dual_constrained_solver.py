@@ -102,7 +102,11 @@ class TrajectoryDualConstrainedSolver:
         extend_fn_continuous = self._get_extend_fn(check_continuous=True)
         extend_fn_direct = self._get_extend_fn(check_continuous=False)
         distance_fn = self._get_distance_fn()
-        draw_fn = self._get_draw_fn() if visualization else None
+        self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, start_conf)
+        start = pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link_right)
+        self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, target_conf)
+        target = pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link_right)
+        draw_fn = self._get_draw_fn(start, target) if visualization else None
 
         # Try direct path first
         path = self._try_direct_path(extend_fn_direct)
@@ -125,6 +129,7 @@ class TrajectoryDualConstrainedSolver:
 
     def _normalize_angles(self, conf: np.ndarray) -> np.ndarray:
         """Normalize joint angles to [-pi, pi] range."""
+        conf = np.array(conf)
         return (conf + np.pi) % (2 * np.pi) - np.pi
 
     def _setup_constraint_projection(self, target_conf: np.ndarray):
@@ -138,59 +143,62 @@ class TrajectoryDualConstrainedSolver:
 
     def _setup_collision_checking(self):
         """Setup collision checking functions."""
-        # Remove the target object from obstacles and attach it to the robot
-        world_from_bar = self.target_parser.world_from_bar
-        world_from_bar_pos = world_from_bar[0]
-        min_dist = np.inf
-        min_dist_id = None
-
-        for id in self.robot_setup.obstacles:
-            pose = pp.get_pose(id)
-            position = pose[0]
-            dist = np.linalg.norm(np.array(position) - np.array(world_from_bar_pos))
-            if dist < min_dist:
-                min_dist = dist
-                min_dist_id = id
-
-        if min_dist_id is not None:
-            print(f"Removing object with min distance: {min_dist}, id: {min_dist_id}")
-            pp.set_color(min_dist_id, pp.YELLOW)
-            self.robot_setup.remove_obstacle(min_dist_id)
-            attachment = pp.create_attachment(self.robot_setup.robot, self.robot_setup.tool_link_right, min_dist_id)
-            self.robot_setup.update_attachments([attachment])
-
         self.collision_fn = self.robot_setup.create_collision_fn(obstacle_bodies=self.robot_setup.obstacles)
         self.invalid_fn = self.robot_setup.create_invalid_fn(self.desired_right_from_left, obstacle_bodies=self.robot_setup.obstacles, resolution=1e-2)
 
     def _generate_projected_configurations(self, start_conf: np.ndarray, target_conf: np.ndarray, max_attempts: int):
         """Generate projected configurations for start and target."""
+
+        # Helper to normalize returns from projector to a consistent ndarray with shape (N, 12)
+        def to_array_or_empty(confs):
+            if confs is None:
+                return np.empty((0, 12))
+            arr = np.array(confs)
+            if arr.ndim == 1:
+                # Single configuration of length 12
+                if arr.size == 12:
+                    return arr.reshape(1, 12)
+                # Unexpected shape; treat as empty to be safe
+                return np.empty((0, 12))
+            return arr
+
         # Project configurations using left arm as primary
-        start_projected_confs_left = self.projector.project_multiple(start_conf[6:], max_attempts=max_attempts, collision_fn=self.collision_fn)
-        target_projected_confs_left = self.projector.project_multiple(target_conf[6:], max_attempts=max_attempts, collision_fn=self.collision_fn)
+        start_projected_confs_left = to_array_or_empty(self.projector.project_multiple(start_conf[6:], max_attempts=max_attempts, collision_fn=self.collision_fn))
+        target_projected_confs_left = to_array_or_empty(self.projector.project_multiple(target_conf[6:], max_attempts=max_attempts, collision_fn=self.collision_fn))
 
         # Project configurations using right arm as primary
-        start_projected_confs_right = self.projector.project_multiple_inv(start_conf[:6], max_attempts=max_attempts, collision_fn=self.collision_fn)
-        target_projected_confs_right = self.projector.project_multiple_inv(target_conf[:6], max_attempts=max_attempts, collision_fn=self.collision_fn)
+        start_projected_confs_right = to_array_or_empty(self.projector.project_multiple_inv(start_conf[:6], max_attempts=max_attempts, collision_fn=self.collision_fn))
+        target_projected_confs_right = to_array_or_empty(self.projector.project_multiple_inv(target_conf[:6], max_attempts=max_attempts, collision_fn=self.collision_fn))
 
         print(f"Start projected confs (left primary): {start_projected_confs_left.shape}")
         print(f"Target projected confs (left primary): {target_projected_confs_left.shape}")
         print(f"Start projected confs (right primary): {start_projected_confs_right.shape}")
         print(f"Target projected confs (right primary): {target_projected_confs_right.shape}")
 
-        # Generate all combinations
-        start_projected_confs = []
-        target_projected_confs = []
+        # Generate all combinations where available; otherwise fall back to the available side
+        start_projected_confs: List[np.ndarray] = []
+        target_projected_confs: List[np.ndarray] = []
 
-        for left_conf in start_projected_confs_left:
-            for right_conf in start_projected_confs_right:
-                start_projected_confs.append(np.concatenate([left_conf[:6], right_conf[6:]]))
+        if start_projected_confs_left.shape[0] > 0 and start_projected_confs_right.shape[0] > 0:
+            for left_conf in start_projected_confs_left:
+                for right_conf in start_projected_confs_right:
+                    start_projected_confs.append(np.concatenate([left_conf[:6], right_conf[6:]]))
+        elif start_projected_confs_left.shape[0] > 0:
+            start_projected_confs.extend(list(start_projected_confs_left))
+        elif start_projected_confs_right.shape[0] > 0:
+            start_projected_confs.extend(list(start_projected_confs_right))
 
-        for left_conf in target_projected_confs_left:
-            for right_conf in target_projected_confs_right:
-                target_projected_confs.append(np.concatenate([left_conf[:6], right_conf[6:]]))
+        if target_projected_confs_left.shape[0] > 0 and target_projected_confs_right.shape[0] > 0:
+            for left_conf in target_projected_confs_left:
+                for right_conf in target_projected_confs_right:
+                    target_projected_confs.append(np.concatenate([left_conf[:6], right_conf[6:]]))
+        elif target_projected_confs_left.shape[0] > 0:
+            target_projected_confs.extend(list(target_projected_confs_left))
+        elif target_projected_confs_right.shape[0] > 0:
+            target_projected_confs.extend(list(target_projected_confs_right))
 
-        self.start_projected_confs = np.array(start_projected_confs)
-        self.target_projected_confs = np.array(target_projected_confs)
+        self.start_projected_confs = np.array(start_projected_confs) if len(start_projected_confs) > 0 else np.empty((0, 12))
+        self.target_projected_confs = np.array(target_projected_confs) if len(target_projected_confs) > 0 else np.empty((0, 12))
 
         print(f"Total start projected configurations: {self.start_projected_confs.shape}")
         print(f"Total target projected configurations: {self.target_projected_confs.shape}")
@@ -219,7 +227,7 @@ class TrajectoryDualConstrainedSolver:
 
         return fn
 
-    def _get_draw_fn(self):
+    def _get_draw_fn(self, start, target):
         """Create drawing function for visualization."""
         pose_cache = set()
         segment_cache = set()
@@ -237,6 +245,9 @@ class TrajectoryDualConstrainedSolver:
 
         start_tree_set = set()
         target_tree_set = set()
+
+        start_tree_set.add(pose_to_tuple(start))
+        target_tree_set.add(pose_to_tuple(target))
 
         def fn(conf, segment, valid=None, valid_right=None):
             self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, conf)
@@ -421,6 +432,179 @@ class TrajectoryDualConstrainedSolver:
         finally:
             print("Trajectory playback ended.")
 
+    @staticmethod
+    def initialize_robot_setup_for_planning(robot_name: str, robot_type: str, target_cell_state_path: str, use_scene_parser_gui: bool = True, scene_parser_verbose: bool = True) -> Tuple[RobotSetup, np.ndarray, DualArmProjection]:
+        """
+        Initialize robot setup for dual-arm constrained motion planning.
+
+        This method encapsulates the complete initialization process for robot setup, including:
+        1. Creating and configuring the RobotSetup instance
+        2. Computing and normalizing the target joint configuration
+        3. Calculating the relative transformation between left and right tool poses
+        4. Creating the dual-arm constraint projector
+
+        Args:
+            robot_name (str): Unique identifier for the robot instance (e.g., "r0")
+            robot_type (str): Type of robot to initialize (e.g., "husky_dual")
+            target_cell_state_path (str): File path to the robot cell state JSON file containing
+                                        target configuration and scene information
+            use_scene_parser_gui (bool, optional): Whether to enable GUI for scene parsing.
+                                                 Defaults to True.
+            scene_parser_verbose (bool, optional): Whether to enable verbose output during
+                                                 scene parsing. Defaults to True.
+
+        Returns:
+            Tuple[RobotSetup, np.ndarray, DualArmProjection]: A tuple containing:
+                - robot_setup (RobotSetup): Fully configured robot setup instance with loaded
+                                          scene and target configuration
+                - target_conf (np.ndarray): Normalized target joint configuration (12 DOF)
+                                           with angles in [-π, π] range
+                - projector (DualArmProjection): Dual-arm constraint projector configured
+                                                with the relative transformation between
+                                                left and right tool poses
+
+        Raises:
+            FileNotFoundError: If the target_cell_state_path does not exist
+            ValueError: If the robot setup fails to initialize properly
+            RuntimeError: If unable to compute tool poses or create projector
+
+        Example:
+            ```python
+            # Initialize robot setup for planning
+            robot_setup, target_conf, projector = TrajectoryDualConstrainedSolver.initialize_robot_setup_for_planning(
+                robot_name="r0",
+                robot_type="husky_dual",
+                target_cell_state_path="/path/to/target_state.json"
+            )
+
+            # Create solver with initialized components
+            target_parser = TargetParser(design_path, targets_file)
+            solver = TrajectoryDualConstrainedSolver(robot_setup, target_parser)
+            ```
+
+        Note:
+            The target configuration is automatically normalized to the [-π, π] range to ensure
+            consistent angle representation for motion planning algorithms. The dual-arm projector
+            maintains the relative pose constraint between the left and right tool links as
+            computed from the target configuration.
+        """
+        print("Initializing robot setup for planning...")
+
+        # Create RobotSetup instance with specified parameters
+        robot_setup = RobotSetup(robot_name, robot_type=robot_type, robot_cell_state_path=target_cell_state_path, use_scene_parser_gui=use_scene_parser_gui, scene_parser_verbose=scene_parser_verbose)
+
+        # Extract and normalize target configuration
+        target_conf = np.array(robot_setup.arm_target_angles)
+        target_conf = (target_conf + np.pi) % (2 * np.pi) - np.pi
+        print(f"Target configuration: {list(target_conf)}")
+
+        # Compute relative transformation between left and right tool poses
+        world_from_left = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_left)
+        world_from_right = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
+        desired_right_from_left = pp.multiply(pp.invert(world_from_right), world_from_left)
+
+        # Create dual-arm constraint projector
+        projector = DualArmProjection(robot_setup, desired_right_from_left)
+
+        print("✓ Robot setup initialization completed")
+        return robot_setup, target_conf, projector
+
+    def generate_start_configuration(self, projector: DualArmProjection, delta_pose_point: List[float] = [0.4, 0.0, 0.75], delta_pose_euler: List[float] = [-1.5708, 1.5708, 0], tool_index: int = 1, max_attempts: int = 100) -> np.ndarray:
+        """
+        Generate a valid start configuration for dual-arm constrained motion planning.
+
+        This method computes a feasible starting joint configuration by:
+        1. Computing the target bar pose from robot base pose and relative delta pose
+        2. Using dual-arm constraint projection to find valid configurations
+        3. Normalizing joint angles to [-π, π] range
+        4. Setting the robot to the computed start configuration
+
+        Args:
+            projector (DualArmProjection): Dual-arm constraint projector for generating
+                                         valid configurations that maintain relative constraints
+            delta_pose_point (List[float], optional): Relative position offset from robot base
+                                                    in meters [x, y, z]. Defaults to [0.4, 0.0, 0.75].
+            delta_pose_euler (List[float], optional): Relative orientation in Euler angles
+                                                    [roll, pitch, yaw] in radians.
+                                                    Defaults to [-1.5708, 1.5708, 0].
+            tool_index (int, optional): Index of the tool transformation in target_parser.tools_from_bar.
+                                       Used to define the grasp relationship. Defaults to 1.
+            max_attempts (int, optional): Maximum number of attempts for configuration generation.
+                                        Higher values increase success probability but take longer.
+                                        Defaults to 100.
+
+        Returns:
+            np.ndarray: Normalized start joint configuration (12 DOF) with angles in [-π, π] range.
+                       The configuration satisfies dual-arm constraints and collision-free requirements.
+
+        Raises:
+            SystemExit: If no valid start configuration can be found after max_attempts.
+                       This indicates the problem may be infeasible or requires different parameters.
+            ValueError: If target_parser is not properly initialized or tool_index is invalid.
+            RuntimeError: If IK solution handles are not available or projector fails.
+
+        Example:
+            ```python
+            # Initialize solver components
+            robot_setup, target_conf, projector = TrajectoryDualConstrainedSolver.initialize_robot_setup_for_planning(...)
+            target_parser = TargetParser(design_path, targets_file)
+            solver = TrajectoryDualConstrainedSolver(robot_setup, target_parser)
+
+            # Generate start configuration with default parameters
+            start_conf = solver.generate_start_configuration(projector)
+
+            # Generate start configuration with custom pose
+            start_conf = solver.generate_start_configuration(
+                projector,
+                delta_pose_point=[0.5, 0.1, 0.8],
+                delta_pose_euler=[-1.57, 1.57, 0.1],
+                tool_index=0,
+                max_attempts=200
+            )
+            ```
+
+        Note:
+            - The delta pose defines the target position for the bar/object relative to the robot base
+            - The tool_index selects which tool transformation to use for grasp constraint
+            - The method automatically sets the robot to the computed configuration
+            - Joint angles are normalized to ensure consistent representation for planning algorithms
+            - Collision checking is automatically performed during configuration generation
+        """
+        print("Initializing start configuration...")
+
+        # Compute target bar pose from robot base and relative delta
+        delta_pose = pp.Pose(point=delta_pose_point, euler=delta_pose_euler)
+        base_pose = pp.get_pose(self.robot_setup.robot)
+        bar_pose = pp.multiply(base_pose, delta_pose)
+
+        # Get IK solution handles for both arms
+        left_start_ik_handle = self.robot_setup.get_left_arm_ik_solution
+        right_start_ik_handle = self.robot_setup.get_right_arm_ik_solution
+
+        # Generate valid configurations using dual-arm constraint projection
+        start_confs = projector.create_valid_confs(
+            right_start_ik_handle, bar_pose, pp.invert(self.target_parser.tools_from_bar[tool_index]), delta=0, max_attempts=max_attempts, collision_fn=self.robot_setup.create_collision_fn(obstacle_bodies=self.robot_setup.obstacles)
+        )
+
+        # Select first valid configuration or exit if none found
+        if start_confs is not None:
+            start_conf = start_confs[0]
+        else:
+            print(f"✗ Failed to generate start configuration after {max_attempts} attempts")
+            print("Consider adjusting delta_pose_point, delta_pose_euler, or increasing max_attempts")
+            exit()
+
+        # Normalize configuration to [-π, π] range
+        start_conf = np.array(start_conf)
+        start_conf = (start_conf + np.pi) % (2 * np.pi) - np.pi
+        print(f"Start configuration: {list(start_conf)}")
+
+        # Set robot to computed configuration
+        self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, start_conf)
+
+        print("✓ Start configuration generated successfully")
+        return start_conf
+
 
 def main():
     """
@@ -428,33 +612,15 @@ def main():
     """
     # Configuration paths
     design_study_path = os.path.join(DATA_DIR, "husky_assembly_design_study")
-    design_case = "250707_RobotX_box_demo"
-    start_cell_state_path = os.path.join(design_study_path, design_case, "RobotCellStates", "robotx_box_A6-S4_start_RobotCellState.json")
+    design_case = "250806_RobotX_box_redo"
     target_cell_state_path = os.path.join(design_study_path, design_case, "RobotCellStates", "robotx_box_A6-S4_end_RobotCellState.json")
-
-    # ------------------------------------------------------------------
-    # Get Start Configuration
-    # ------------------------------------------------------------------
-    print("Initializing start configuration...")
-    robot_setup_start = RobotSetup("r0", robot_type="husky_dual", robot_cell_state_path=start_cell_state_path, use_scene_parser_gui=True, scene_parser_verbose=True)
-
-    start_conf = np.array(robot_setup_start.arm_target_angles)
-    start_conf = (start_conf + np.pi) % (2 * np.pi) - np.pi
-    print(f"Start configuration: {list(start_conf)}")
-
-    # Clean up start setup
-    pp.disconnect()
-    del robot_setup_start
 
     # ------------------------------------------------------------------
     # Initialize Robot Setup for Planning
     # ------------------------------------------------------------------
-    print("Initializing robot setup for planning...")
-    robot_setup = RobotSetup("r0", robot_type="husky_dual", robot_cell_state_path=target_cell_state_path, use_scene_parser_gui=True, scene_parser_verbose=True)
-
-    target_conf = np.array(robot_setup.arm_target_angles)
-    target_conf = (target_conf + np.pi) % (2 * np.pi) - np.pi
-    print(f"Target configuration: {list(target_conf)}")
+    robot_setup, target_conf, projector = TrajectoryDualConstrainedSolver.initialize_robot_setup_for_planning(
+        robot_name="r0", robot_type="husky_dual", target_cell_state_path=target_cell_state_path, use_scene_parser_gui=True, scene_parser_verbose=True
+    )
 
     # ------------------------------------------------------------------
     # Initialize Target Parser
@@ -468,10 +634,21 @@ def main():
     solver = TrajectoryDualConstrainedSolver(robot_setup, target_parser)
 
     # ------------------------------------------------------------------
+    # Get Start Configuration
+    # ------------------------------------------------------------------
+    start_conf = solver.generate_start_configuration(projector)
+
+    # ------------------------------------------------------------------
     # Plan Trajectory
     # ------------------------------------------------------------------
     print("Planning trajectory...")
-    path = solver.plan(start_conf=start_conf, target_conf=target_conf, max_time=600, max_projection_attempts=100, visualization=True)  # Maximum planning time in seconds  # Maximum attempts for constraint projection  # Enable visualization
+    path = solver.plan(
+        start_conf=start_conf,
+        target_conf=target_conf,
+        max_time=36000,  # Maximum planning time in seconds, conservatively set to 10 hours
+        max_projection_attempts=100,  # Maximum attempts for constraint projection
+        visualization=True,  # Enable visualization
+    )
 
     if path is not None:
         print(f"✓ Trajectory found with {len(path)} waypoints")

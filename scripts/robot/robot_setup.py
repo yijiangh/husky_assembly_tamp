@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import xml.etree.ElementTree as ET
 from functools import partial
@@ -22,7 +23,7 @@ from model.scene_parse import SceneParser
 from pybullet_planning import Attachment, Euler, Point, Pose, multiply
 from solver.ik_pinocchio_solver import PinocchioSolver
 # from utils.util import HUSKY_ARM_JOINT_NAMES
-from utils.params import URDF_PATH
+# from utils.params import URDF_PATH
 from utils.utils_casadi import eval
 
 # =============================================================================
@@ -86,8 +87,8 @@ ABB_ONBOARD_POSE = [0, 0, 0, 0, 0, 0]
 # -----------------------------------------------------------------------------
 
 # File paths
-HUSKY_DUAL_URDF_PATH = os.path.join(DATA_DIR, "husky_urdf/mt_husky_dual_ur5_e_moveit_config/urdf/husky_dual_ur5_e.urdf")
-HUSKY_DUAL_SRDF_PATH = os.path.join(DATA_DIR, "husky_urdf/mt_husky_dual_ur5_e_moveit_config/config/husky.srdf")
+HUSKY_DUAL_URDF_PATH = os.path.join(DATA_DIR, "husky_urdf/mt_husky_dual_ur5_e_moveit_config/urdf/husky_dual_ur5_e_no_base_joint.urdf")
+HUSKY_DUAL_SRDF_PATH = os.path.join(DATA_DIR, "husky_urdf/mt_husky_dual_ur5_e_moveit_config/config/dual_arm_husky.srdf")
 
 # Tool coordinate systems
 HUSKY_DUAL_TOOL0_LEFT = "left_ur_arm_tool0"
@@ -347,6 +348,19 @@ class RobotSetup:
         # Get the robot PyBullet ID from the client
         robot = client.robot_puid
         obstacles = list(np.array(list(client.rigid_bodies_puids.values())).flatten())
+        
+        # Get other robots and grippers
+        other_robots = [client.tools_puids["Alice"], client.tools_puids["Belle"], client.tools_puids["SGAlice"], client.tools_puids["SGBelle"]]
+        obstacles += other_robots
+        
+        state_file = os.path.basename(self.robot_cell_state_path)
+        match = re.search(r'_A(\d+)-', state_file)
+        active_bar_name = f"b{match.group(1)}_0" if match else None
+        
+        target_bar = client.rigid_bodies_puids[active_bar_name][0]
+        obstacles.remove(target_bar)
+        attachment = pp.create_attachment(robot, pp.link_from_name(robot, self._tool0_name_right), target_bar)
+        self.attachments.append(attachment)
 
         # Get robot parameters for setting up IK solvers and attachments
         robot_urdf = self._urdf_path
@@ -391,23 +405,28 @@ class RobotSetup:
         left_ee_attachment = None
         right_ee_attachment = None
 
-        if gripper_obj and os.path.exists(gripper_obj):
-            if self.robot_type == "husky_dual":
-                # Create left ee attachment
-                left_tool0_pose = pp.get_link_pose(robot, pp.link_from_name(robot, self._tool0_name_left))
-                left_ee = pp.create_obj(gripper_obj, scale=1)
-                pp.set_pose(left_ee, pp.multiply(left_tool0_pose, pp.Pose(euler=pp.Euler(yaw=-np.pi / 2))))
-                left_ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, self._tool0_name_left), left_ee)
+        if self.robot_type == "husky_dual":
+            # # Create left ee attachment
+            # left_tool0_pose = pp.get_link_pose(robot, pp.link_from_name(robot, self._tool0_name_left))
+            # left_ee = pp.create_obj(gripper_obj, scale=1)
+            # pp.set_pose(left_ee, pp.multiply(left_tool0_pose, pp.Pose(euler=pp.Euler(yaw=-np.pi / 2))))
+            # left_ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, self._tool0_name_left), left_ee)
 
-                # Create right ee attachment
-                right_tool0_pose = pp.get_link_pose(robot, pp.link_from_name(robot, self._tool0_name_right))
-                right_ee = pp.create_obj(gripper_obj, scale=1)
-                pp.set_pose(right_ee, pp.multiply(right_tool0_pose, pp.Pose(euler=pp.Euler(yaw=-np.pi / 2))))
-                right_ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, self._tool0_name_right), right_ee)
+            # # Create right ee attachment
+            # right_tool0_pose = pp.get_link_pose(robot, pp.link_from_name(robot, self._tool0_name_right))
+            # right_ee = pp.create_obj(gripper_obj, scale=1)
+            # pp.set_pose(right_ee, pp.multiply(right_tool0_pose, pp.Pose(euler=pp.Euler(yaw=-np.pi / 2))))
+            # right_ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, self._tool0_name_right), right_ee)
+            
+            left_ee = client.tools_puids["AL"]
+            left_ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, self._tool0_name_left), left_ee)
+            right_ee = client.tools_puids["AR"]
+            right_ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, self._tool0_name_right), right_ee)
 
-                # For backward compatibility, set ee_attachment to left
-                ee_attachment = left_ee_attachment
-            else:
+            # For backward compatibility, set ee_attachment to left
+            ee_attachment = left_ee_attachment
+        else:
+            if gripper_obj and os.path.exists(gripper_obj):
                 tool0_pose = pp.get_link_pose(robot, pp.link_from_name(robot, tool0_name))
                 ee = pp.create_obj(gripper_obj, scale=1)
                 pp.set_pose(ee, pp.multiply(tool0_pose, pp.Pose(euler=pp.Euler(yaw=-np.pi / 2))))

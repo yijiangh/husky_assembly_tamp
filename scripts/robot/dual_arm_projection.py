@@ -164,7 +164,41 @@ class DualArmProjection:
         if len(projected_confs) == 0:
             return None
         return np.stack(projected_confs)
-
+    
+    def create_valid_confs(self, right_ik_handle: Callable[[np.ndarray], np.ndarray], bar_pose: Tuple, bar_from_right: Tuple, delta: float = np.pi/6, max_attempts: int = 20, collision_fn: Callable[[np.ndarray], bool] = None) -> Union[np.ndarray, None]:
+        """
+        Create valid configurations by projecting multiple states to satisfy the relative constraint.
+        """
+        projected_confs = []
+        for _ in range(max_attempts):
+            print(f"Creating valid configurations... {_}/{max_attempts}")
+            right_ik_init_guess = np.random.uniform(-np.pi, np.pi, 6)
+            delta_angle = np.random.uniform(-delta, delta)
+            delta_pose = pp.Pose(point = [0.0, 0.0, 0.0], euler = [0, 0, delta_angle])
+            new_bar_pose = pp.multiply(bar_pose, delta_pose)
+            right_tool0_pose = pp.multiply(new_bar_pose, bar_from_right)
+            right_conf = right_ik_handle(right_tool0_pose, right_ik_init_guess)
+            if right_conf is not None:
+                right_conf = np.array(right_conf)
+                right_conf = (right_conf + np.pi) % (2 * np.pi) - np.pi
+                projected_confs_temp = self.project_multiple(right_conf, max_attempts=max_attempts, collision_fn=collision_fn)
+                if projected_confs_temp is not None:
+                    for projected_conf in projected_confs_temp:
+                        projected_confs.append(projected_conf)
+        unique_confs = []
+        atol = 1e-2
+        for conf in projected_confs:
+            is_duplicate = False
+            for uconf in unique_confs:
+                if np.allclose(conf, uconf, atol=atol):
+                    is_duplicate = True
+                    break
+            if not is_duplicate:
+                unique_confs.append(conf)
+        projected_confs = unique_confs
+        if len(projected_confs) == 0:
+            return None
+        return np.array(projected_confs)
 
 if __name__ == "__main__":
     import time

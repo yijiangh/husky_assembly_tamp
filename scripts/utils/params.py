@@ -62,9 +62,9 @@ MNIPULATOR_PLAN_SHOW = True
 
 HERE = os.path.dirname(os.path.dirname(__file__))  # scripts
 PROJECT_DIR = os.path.dirname(HERE)  # husky_assembly
-DATA_DIR = os.path.join(PROJECT_DIR, "data")  # data
-PACKAGE_DIR = os.path.join(DATA_DIR, "husky_urdf")  # husky_urdf
 EXT_DIR = os.path.join(PROJECT_DIR, "ext")  # ext
+DATA_DIR = os.path.join(EXT_DIR, "husky-assembly-teleop", "data")  # data
 LOG_DIR = os.path.join(HERE, "logs")
 
-URDF_PATH = os.path.join(PACKAGE_DIR, "mt_husky_moveit_config", "urdf", "husky_ur5_e.urdf")
+# PACKAGE_DIR = os.path.join(DATA_DIR, "husky_urdf")  # husky_urdf
+# URDF_PATH = os.path.join(PACKAGE_DIR, "mt_husky_moveit_config", "urdf", "husky_ur5_e.urdf")

@@ -60,7 +60,7 @@ class TargetParser:
     def __init__(self, file_path, state_name):
         self.targets = self.load_grasp_targets(file_path, state_name)
         self.parse_targets()
-        self.poses = self.parse_targets()
+        self.tools_from_bar = self.parse_targets()
         world_from_bar = pp.pose_from_tform(np.array(self.targets[0].world_from_bar.matrix))
         self.world_from_bar = (tuple(world_from_bar[0]), tuple(world_from_bar[1]))
 

@@ -1,0 +1,4 @@
+[submodule "ext/husky-assembly-teleop"]
+	path = ext/husky-assembly-teleop
+	url = https://github.com/yijiangh/husky-assembly-teleop.git
+	branch = master

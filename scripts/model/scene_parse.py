@@ -115,7 +115,7 @@ class SceneParser:
             print("Starting scene reconstruction...")
 
         # Create PyBullet client and planner
-        self.client = PyBulletClient(connection_type="gui" if self.use_gui else "direct", verbose=self.verbose)
+        self.client = PyBulletClient(connection_type="gui" if self.use_gui else "direct", verbose=self.verbose, enable_debug_gui=True)
         self.client.__enter__()  # Enter the context manager
         
 

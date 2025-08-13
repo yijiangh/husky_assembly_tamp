@@ -16,7 +16,7 @@ sys.path.append(HERE)
 from model.target_parse import TargetParser
 from robot.dual_arm_projection import DualArmProjection
 from robot.robot_setup import RobotSetup
-from utils.params import DATA_DIR
+from utils.params import DATA_DIR, PROJECT_DIR
 
 DEFAULT_RESOLUTION = math.radians(1.0)
 
@@ -613,7 +613,8 @@ def main():
     # Configuration paths
     design_study_path = os.path.join(DATA_DIR, "husky_assembly_design_study")
     design_case = "250806_RobotX_box_redo"
-    target_cell_state_path = os.path.join(design_study_path, design_case, "RobotCellStates", "robotx_box_A6-S4_end_RobotCellState.json")
+    target_name = "robotx_box_A6-S4_end"
+    target_cell_state_path = os.path.join(design_study_path, design_case, "RobotCellStates", f"{target_name}_RobotCellState.json")
 
     # ------------------------------------------------------------------
     # Initialize Robot Setup for Planning
@@ -650,20 +651,41 @@ def main():
         visualization=True,  # Enable visualization
     )
 
+    # if path is not None:
+    #     print(f"✓ Trajectory found with {len(path)} waypoints")
+
+    #     # Wait for user to examine the path
+    #     pp.wait_for_user()
+
+    #     # Optional: Interactive trajectory playback
+    #     print("Starting interactive trajectory playback...")
+    #     print("Use the slider to control trajectory position. Press Ctrl+C to exit.")
+    #     solver.interactive_trajectory_playback(path)
+
+    # else:
+    #     print("✗ No trajectory found")
+    #     pp.wait_for_user()
+
+    # ------------------------------------------------------------------
+    # Save Trajectory
+    # ------------------------------------------------------------------
+    from compas.data import json_dump, json_load
+    from compas_fab.robots import JointTrajectory, JointTrajectoryPoint
+    from compas_fab.robots import Duration
+
     if path is not None:
-        print(f"✓ Trajectory found with {len(path)} waypoints")
+        points = []
+        for i, conf in enumerate(path):
+            conf: np.ndarray
+            point = JointTrajectoryPoint(joint_values=conf.tolist(), joint_types=robot_setup.joint_types, time_from_start=Duration(secs=i * 0.5, nsecs=0))
+            points.append(point)
 
-        # Wait for user to examine the path
-        pp.wait_for_user()
-
-        # Optional: Interactive trajectory playback
-        print("Starting interactive trajectory playback...")
-        print("Use the slider to control trajectory position. Press Ctrl+C to exit.")
-        solver.interactive_trajectory_playback(path)
-
-    else:
-        print("✗ No trajectory found")
-        pp.wait_for_user()
+        trajectory = JointTrajectory(joint_names=robot_setup.joint_names, trajectory_points=points)
+        print(f"Created trajectory with {len(points)} points")
+        
+        json_file = os.path.join(PROJECT_DIR, "data", f"{target_name}_robot_trajectory.json")
+        json_dump(trajectory, json_file)
+        print(f"Trajectory saved to {json_file}")
 
     # ------------------------------------------------------------------
     # Cleanup

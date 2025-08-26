@@ -1,149 +1,153 @@
 import json
-import logging
 import os
+import random
 import sys
-import time
 from collections import defaultdict
 from contextlib import contextmanager
-from functools import partial
 from typing import Dict, List, Set, Tuple, Union
-import random
 
 HERE = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(HERE)
 
-import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 import pybullet_planning as pp
-from pybullet_planning import Attachment
-from pybullet_planning.utils import CIRCULAR_LIMITS, DEFAULT_RESOLUTION, MAX_DISTANCE
-from termcolor import colored, cprint
-from .params import PROJECT_DIR
-
-HUSKYU_JOINT_NAMES = [
-    "ur_arm_shoulder_pan_joint",
-    "ur_arm_shoulder_lift_joint",
-    "ur_arm_elbow_joint",
-    "ur_arm_wrist_1_joint",
-    "ur_arm_wrist_2_joint",
-    "ur_arm_wrist_3_joint",
-]
+from termcolor import cprint
 
 
-###########################################
-
-
-def get_custom_limits(robot, custom_limits=None):
-    """[summary]
-
-    Returns
-    -------
-    [type]
-        {joint index : (lower limit, upper limit)}
+def normalize_angles(angles, low: float = -np.pi, high: float = np.pi):
     """
-    custom_limits = custom_limits or {}
-    limits = {pp.joint_from_name(robot, joint): limits for joint, limits in custom_limits.items()}
-    return limits
+    Normalize an iterable of angles to the range (low, high].
+
+    Supports tuple, list, and np.ndarray. The return type matches the input type.
+    """
+    span = high - low
+    if not np.isfinite(span) or span <= 0:
+        raise ValueError("Invalid angle range: 'high' must be greater than 'low'.")
+
+    array_like = np.asarray(angles, dtype=float)
+    shifted = np.fmod(array_like - low, span)
+    normalized = np.where(shifted <= 0, shifted + high, shifted + low)
+
+    if isinstance(angles, np.ndarray):
+        return normalized
+    if isinstance(angles, tuple):
+        return tuple(normalized.tolist())
+    if isinstance(angles, list):
+        return normalized.tolist()
+    # Fallback: return numpy array if an unexpected type is provided
+    return normalized
 
 
-###########################################
+def normalize_angle(angle, low: float = -np.pi, high: float = np.pi):
+    """Normalize a single angle to the range (low, high]."""
+    span = high - low
+    if not np.isfinite(span) or span <= 0:
+        raise ValueError("Invalid angle range: 'high' must be greater than 'low'.")
 
-
-def normalize_angles(angles):
-    for i in range(len(angles)):
-        angles[i] = normalize_angle(angles[i])
-    return angles
-
-
-def normalize_angle(angle):
-    angle = np.fmod(angle + np.pi, 2 * np.pi)
-    if angle <= 0:
-        return angle + np.pi
-    else:
-        return angle - np.pi
+    shifted = np.fmod(angle - low, span)
+    if shifted <= 0:
+        return shifted + high
+    return shifted + low
 
 
 def angles_distance(angles1, angles2):
-    diff = angles1 - angles2
+    """
+    Compute the Euclidean norm of directed circular differences between two angle vectors.
+
+    The per-joint difference is the signed minimal angle delta δ such that
+    normalize_angle(angle2 + δ) == normalize_angle(angle1).
+    """
+    a1 = np.asarray(angles1, dtype=float)
+    a2 = np.asarray(angles2, dtype=float)
+    diff = a1 - a2
     diff = normalize_angles(diff)
     return np.linalg.norm(diff)
 
 
 def angle_distance(angle1, angle2):
+    """Compute the signed minimal circular difference δ with normalize_angle(angle2 + δ) == normalize_angle(angle1)."""
     diff = angle1 - angle2
-    diff = normalize_angle(diff)
-    return diff
-
-
-###########################################
+    return normalize_angle(diff)
 
 
 def interpolate(trajectory: np.ndarray, target_length: int) -> np.ndarray:
     """
-    重新插值轨迹到指定长度，确保原始轨迹中的所有点都被保留
+    Resample a trajectory to the target length while preserving all original waypoints.
 
     Args:
-        trajectory: 原始轨迹数据，形状为 [N, D]，其中 N 是时间步数，D 是每步的维度
-        target_length: 目标轨迹长度
+        trajectory: Input trajectory of shape [N, D], where N is timesteps and D is dimensionality per step.
+        target_length: Desired trajectory length.
 
     Returns:
-        np.ndarray: 重新插值后的轨迹，形状为 [target_length, D]
+        np.ndarray: Interpolated trajectory of shape [target_length, D].
     """
-    # 原始轨迹长度和维度
+    # Original trajectory length and dimensionality
     orig_length, dims = trajectory.shape
 
-    # 如果目标长度小于或等于原始长度，需要进行降采样
+    # Downsample if the target length is less than or equal to the original length
     if target_length <= orig_length:
-        # 选择等间隔的点
+        # Select evenly spaced indices
         indices = np.round(np.linspace(0, orig_length - 1, target_length)).astype(int)
         return trajectory[indices]
 
-    # 创建新轨迹数组，初始化为零
+    # Allocate new trajectory initialized to zeros
     new_trajectory = np.zeros((target_length, dims))
 
-    # 首先确保原始轨迹中的所有点都被保留
-    # 计算原始点在新轨迹中的索引
+    # Ensure all original waypoints are preserved first
+    # Compute indices of original points in the new trajectory
     orig_indices_in_new = np.round(np.linspace(0, target_length - 1, orig_length)).astype(int)
 
-    # 将原始点放入新轨迹
+    # Place original points into the new trajectory
     for i, idx in enumerate(orig_indices_in_new):
         new_trajectory[idx] = trajectory[i]
 
-    # 创建掩码标记哪些位置已分配值
+    # Create a mask for positions that already have values
     mask = np.zeros(target_length, dtype=bool)
     mask[orig_indices_in_new] = True
 
-    # 为没有分配值的位置创建插值
+    # Interpolate positions without assigned values
     for i in range(target_length):
         if not mask[i]:
-            # 查找两侧最近的已知点
+            # Find nearest known points on both sides
             left_idx = np.max(orig_indices_in_new[orig_indices_in_new < i]) if any(orig_indices_in_new < i) else 0
-            right_idx = (
-                np.min(orig_indices_in_new[orig_indices_in_new > i])
-                if any(orig_indices_in_new > i)
-                else target_length - 1
-            )
+            right_idx = np.min(orig_indices_in_new[orig_indices_in_new > i]) if any(orig_indices_in_new > i) else target_length - 1
 
-            # 如果左右索引相同，无法进行插值，使用最近点
+            # If both indices are the same, use the nearest point
             if left_idx == right_idx:
                 new_trajectory[i] = new_trajectory[left_idx]
                 continue
 
-            # 计算插值权重
+            # Compute interpolation weight
             left_orig_idx = np.where(orig_indices_in_new == left_idx)[0][0]
             right_orig_idx = np.where(orig_indices_in_new == right_idx)[0][0]
 
             weight = (i - left_idx) / (right_idx - left_idx)
 
-            # 线性插值
+            # Linear interpolation
             new_trajectory[i] = (1 - weight) * trajectory[left_orig_idx] + weight * trajectory[right_orig_idx]
 
     return new_trajectory
 
 
+###########################################
+
+
 class CounterValue:
+    """
+    A simple numeric counter associated with a CounterModule.
+
+    Tracks an accumulated numeric value and the most recent increment applied.
+    """
+
     def __init__(self, name, parent):
+        """
+        Initialize a CounterValue and register it with its parent module.
+
+        Args:
+            name: Unique name of this counter within the parent module.
+            parent: The CounterModule that owns this counter.
+        """
         self.name = name
         self.parent = parent
         self.value = 0
@@ -151,15 +155,35 @@ class CounterValue:
         parent.values[name] = self
 
     def increment(self, value=1):
+        """Increase the counter by the specified value and record the increment size."""
         self.last_update = value
         self.value += value
 
     def update(self, value):
+        """Set the counter to an absolute value without changing structure relationships."""
         self.value = value
 
 
 class CounterModule:
+    """
+    A hierarchical counter manager.
+
+    Each module can hold multiple named CounterValue instances and can create
+    nested child modules ("handles"). All modules created within the same tree
+    share a single registry (modules dict) anchored at the root, which allows
+    aggregation, traversal, and persistence of counters.
+    """
+
     def __init__(self, root=None, name=None, parent=None):
+        """
+        Create a counter module.
+
+        Args:
+            root: If None, create a new root registry. If provided, this module
+                will share the registry from the given root (used internally).
+            name: Name of this module; the root typically uses "root".
+            parent: Optional parent module to form a hierarchy.
+        """
         if root is None:
             self.modules = {}
             self.name = "root"
@@ -178,9 +202,16 @@ class CounterModule:
                 parent.children.append(self)
 
     def create_handle(self, name):
+        """Create a child module (handle) under this module and return it."""
         return CounterModule(root=self, name=name, parent=self)
 
     def add_counter_value(self, name):
+        """
+        Get or create a CounterValue with the given name within this module.
+
+        Returns:
+            CounterValue: Existing or newly created counter value.
+        """
         if name in self.values:
             return self.values[name]
         else:
@@ -188,6 +219,13 @@ class CounterModule:
             return counter_value
 
     def plot(self):
+        """
+        Render a side-by-side bar chart of all counter values grouped by module.
+
+        Aggregates values across the hierarchy by handle (module) name and draws
+        a grouped bar chart using matplotlib.
+        """
+
         def collect_data(module, collected=None):
             if collected is None:
                 collected = defaultdict(lambda: defaultdict(int))
@@ -203,7 +241,6 @@ class CounterModule:
         handles = list(data.keys())
         value_labels = list(set(vname for handle_values in data.values() for vname in handle_values.keys()))
 
-        # 获取颜色映射
         color_map = dict(zip(value_labels, plt.cm.viridis(np.linspace(0, 1, len(value_labels)))))
 
         bar_width = 0.8 / len(value_labels)
@@ -228,14 +265,22 @@ class CounterModule:
         plt.show()
 
     def reset(self):
+        """Reset all counters' values in the entire registry to zero."""
         for module in self.modules.values():
             for value in module.values:
                 value.value = 0
 
     def save(self, path, filename):
-        data_to_save = {
-            name: {value.name: value.value for value in module.values.values()} for name, module in self.modules.items()
-        }
+        """
+        Persist all counters in the registry to a JSON file.
+
+        The JSON structure is {module_name: {counter_name: value, ...}, ...}.
+
+        Args:
+            path: Directory to save the file into. Created if it does not exist.
+            filename: Target JSON filename.
+        """
+        data_to_save = {name: {value.name: value.value for value in module.values.values()} for name, module in self.modules.items()}
         os.makedirs(path, exist_ok=True)
         file_path = os.path.join(path, filename)
         with open(file_path, "w") as file:
@@ -262,145 +307,138 @@ class TermPrint(object):
 
 
 class PrintManager:
-    """打印控制模块，用于统一管理终端输出并控制缩进级别"""
-    
-    # 预定义的颜色映射，便于使用不同颜色打印不同类型的消息
-    COLORS = {
-        "info": "white",
-        "success": "green",
-        "warning": "yellow",
-        "error": "red",
-        "debug": "cyan",
-        "highlight": "magenta"
-    }
-    
-    # 单例模式，确保只有一个打印管理器实例
+    """Print control utility for consistent terminal output with indentation levels."""
+
+    # Predefined color mapping for different message types
+    COLORS = {"info": "white", "success": "green", "warning": "yellow", "error": "red", "debug": "cyan", "highlight": "magenta"}
+
+    # Singleton to ensure a single manager instance
     _instance = None
-    
+
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             cls._instance = super(PrintManager, cls).__new__(cls)
         return cls._instance
-    
-    def __init__(self, indent_size: int = 4, tab_char: str = ' ', use_color: bool = True, default_color: str = "white"):
+
+    def __init__(self, indent_size: int = 4, tab_char: str = " ", use_color: bool = True, default_color: str = "white"):
         """
-        初始化打印管理器
-        
+        Initialize the print manager.
+
         Args:
-            indent_size: 每级缩进的空格数
-            tab_char: 缩进使用的字符
-            use_color: 是否使用彩色输出
-            default_color: 默认输出颜色
+            indent_size: Number of spaces per indentation level.
+            tab_char: Character used for indentation.
+            use_color: Whether to use colored output.
+            default_color: Default color name.
         """
-        # 避免重复初始化
-        if hasattr(self, 'indent_level'):
+        # Avoid re-initialization for the singleton instance
+        if hasattr(self, "indent_level"):
             return
-            
+
         self.indent_size = indent_size
         self.tab_char = tab_char
         self.indent_level = 0
         self.use_color = use_color
         self.default_color = default_color
-    
+
     def _get_indent(self, level: int = None) -> str:
         """
-        获取当前缩进级别下的缩进字符串
-        
+        Return the indentation string for the specified level.
+
         Args:
-            level: 指定的缩进级别，若不指定则使用当前级别
-            
+            level: Indentation level to use; defaults to the current level.
+
         Returns:
-            缩进字符串
+            Indentation string.
         """
         if level is None:
             level = self.indent_level
         return self.tab_char * self.indent_size * level
-    
+
     def print(self, message: str, indent_level: int = None, color: str = None, end: str = "\n", flush: bool = True):
         """
-        按照指定的缩进级别打印消息
-        
+        Print a message with a given indentation level and color.
+
         Args:
-            message: 要打印的消息
-            indent_level: 指定的缩进级别，若不指定则使用当前级别
-            color: 指定的颜色，若不指定则使用默认颜色
-            end: 行结束符
-            flush: 是否立即刷新输出
+            message: The message to print.
+            indent_level: Indentation level; defaults to the current level.
+            color: Color name; defaults to the manager's default color.
+            end: Line terminator.
+            flush: Whether to flush the output stream immediately.
         """
         if indent_level is None:
             indent_level = self.indent_level
-            
+
         if color is None:
             color = self.default_color
-            
+
         indent_str = self._get_indent(indent_level)
         formatted_message = f"{indent_str}{message}"
-        
+
         if self.use_color:
             cprint(formatted_message, color, end=end, flush=flush)
         else:
             print(formatted_message, end=end, flush=flush)
-    
+
     def info(self, message: str, indent_level: int = None):
-        """打印普通信息"""
+        """Print an informational message."""
         self.print(message, indent_level, self.COLORS["info"])
-    
+
     def success(self, message: str, indent_level: int = None):
-        """打印成功信息"""
+        """Print a success message."""
         self.print(message, indent_level, self.COLORS["success"])
-    
+
     def warning(self, message: str, indent_level: int = None):
-        """打印警告信息"""
+        """Print a warning message."""
         self.print(message, indent_level, self.COLORS["warning"])
-    
+
     def error(self, message: str, indent_level: int = None):
-        """打印错误信息"""
+        """Print an error message."""
         self.print(message, indent_level, self.COLORS["error"])
-    
+
     def debug(self, message: str, indent_level: int = None):
-        """打印调试信息"""
+        """Print a debug message."""
         self.print(message, indent_level, self.COLORS["debug"])
-    
+
     def highlight(self, message: str, indent_level: int = None):
-        """打印高亮信息"""
+        """Print a highlighted message."""
         self.print(message, indent_level, self.COLORS["highlight"])
-    
+
     def indent(self, levels: int = 1):
-        """增加缩进级别"""
+        """Increase the indentation level by the given number of levels."""
         self.indent_level += levels
         return self
-    
+
     def dedent(self, levels: int = 1):
-        """减少缩进级别"""
+        """Decrease the indentation level by the given number of levels."""
         self.indent_level = max(0, self.indent_level - levels)
         return self
-    
+
     def reset_indent(self):
-        """重置缩进级别为0"""
+        """Reset the indentation level to zero."""
         self.indent_level = 0
         return self
-    
+
     def set_indent(self, level: int):
-        """直接设置缩进级别"""
+        """Set the indentation level directly to the specified value."""
         self.indent_level = max(0, level)
         return self
-    
+
     @contextmanager
     def indented(self, levels: int = 1):
         """
-        临时增加缩进级别的上下文管理器
-        
+        Context manager that temporarily increases the indentation level.
+
         Args:
-            levels: 增加的缩进级别数量
-            
-        示例:
+            levels: Number of levels to increase the indentation by.
+
+        Example:
             printer = PrintManager()
-            printer.info("主层级消息")
+            printer.info("root level message")
             with printer.indented():
-                printer.info("缩进一级的消息")
+                printer.info("indented by 1 level")
                 with printer.indented(2):
-                    printer.info("缩进三级的消息")
-            printer.info("回到主层级")
+                    printer.info("indented by 3 levels")
+            printer.info("back to root level")
         """
         self.indent(levels)
         try:
@@ -410,104 +448,53 @@ class PrintManager:
 
 
 def flatten(nested_list):
-    result = []
-    for element in nested_list:
-        if isinstance(element, list):
-            result.extend(flatten(element))
-        else:
-            result.append(element)
-    return result
-
-
-def timeit_decorator_counter(counter_name: str = "", verbose: bool = False, output_time: bool = False):
-
-    def timeit_decorator(func):
-        def wrapper(self, *args, **kwargs):
-            start_time = time.time()
-            result = func(self, *args, **kwargs)
-            end_time = time.time()
-
-            if verbose:
-                cprint(
-                    f"\n============================================================\nFunction '{func.__name__}' executed in {end_time - start_time:.6f} seconds!\n============================================================\n",
-                    "cyan",
-                )
-
-            if counter_name != "":
-                others_handle: CounterModule = getattr(self, counter_name)
-                time_handle: CounterValue = others_handle.add_counter_value("total time")
-                time_handle.increment(end_time - start_time)
-
-            if output_time:
-                return result, end_time - start_time
-            else:
-                return result
-
-        return wrapper
-
-    return timeit_decorator
-
-
-def closest_points_between_segments(
-    seg1: List[Union[List[float], np.ndarray]], seg2: List[Union[List[float], np.ndarray]]
-) -> Tuple[List[float], List[float]]:
     """
-    Calculate the endpoints of the common perpendicular line between two line segments.
+    Flatten a nested structure of arbitrary depth containing list, tuple, and np.ndarray.
 
-    Params:
-        seg1 ([[x1, y1, z1], [x2, y2, z2]]): segment 1
-        seg2 ([[x1, y1, z1], [x2, y2, z2]]): segment 2
+    Mixed nesting is supported (e.g., a list containing many np.ndarray).
+    The return container type matches the outermost input type:
+      - list -> list
+      - tuple -> tuple
+      - np.ndarray -> np.ndarray
+
+    Args:
+        nested_list: The nested container to flatten.
 
     Returns:
-        [x1, y1, z1]: point on segment 1
-        [x2, y2, z2]: point on segment 1
-
+        A fully flattened 1-D container of the same outer type as the input
+        containing the elements in traversal order.
     """
-    p1, q1 = np.array(seg1[0]), np.array(seg1[1])
-    p2, q2 = np.array(seg2[0]), np.array(seg2[1])
 
-    d1 = q1 - p1
-    d2 = q2 - p2
+    def _append_flat(destination_list, item):
+        # Recursively flatten lists and tuples
+        if isinstance(item, (list, tuple)):
+            for sub_item in item:
+                _append_flat(destination_list, sub_item)
+            return
 
-    r = p1 - p2
+        # For numpy arrays: handle both numeric arrays and object arrays
+        if isinstance(item, np.ndarray):
+            if item.dtype == object:
+                # Iterate over elements (which may themselves be containers)
+                for sub_item in item.flat:
+                    _append_flat(destination_list, sub_item)
+            else:
+                # Fast path for numeric arrays
+                destination_list.extend(item.ravel().tolist())
+            return
 
-    a = np.dot(d1, d1)
-    b = np.dot(d1, d2)
-    c = np.dot(d2, d2)
-    d = np.dot(d1, r)
-    e = np.dot(d2, r)
+        # Base case: non-container element
+        destination_list.append(item)
 
-    denom = a * c - b * b
-    if denom == 0:
-        raise ValueError("Segments are parallel!")
+    flat_list = []
+    _append_flat(flat_list, nested_list)
 
-    s = (b * e - c * d) / denom
-    t = (a * e - b * d) / denom
-
-    s = np.clip(s, 0, 1)
-    t = np.clip(t, 0, 1)
-
-    closest_point_on_seg1: np.ndarray = p1 + s * d1
-    closest_point_on_seg2: np.ndarray = p2 + t * d2
-
-    return closest_point_on_seg1.tolist(), closest_point_on_seg2.tolist()
-
-
-@contextmanager
-def HideOutput():
-    """
-    A context manager to suppress all standard output (stdout) and standard error (stderr).
-    """
-    with open(os.devnull, "w") as fnull:
-        original_stdout = sys.stdout
-        original_stderr = sys.stderr
-        try:
-            sys.stdout = fnull  # 重定向标准输出
-            sys.stderr = fnull  # 重定向标准错误
-            yield
-        finally:
-            sys.stdout = original_stdout  # 恢复标准输出
-            sys.stderr = original_stderr  # 恢复标准错误
+    # Match the outermost container type
+    if isinstance(nested_list, tuple):
+        return tuple(flat_list)
+    if isinstance(nested_list, np.ndarray):
+        return np.asarray(flat_list)
+    return flat_list
 
 
 def SetSeeds(seed=24):

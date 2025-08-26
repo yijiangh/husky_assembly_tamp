@@ -28,7 +28,7 @@ from motion_planner.trajectory_ompl_solver import PbOMPLRobotWrapper
 from multi_tangent.collision import create_collision_bodies
 from robot.robot_setup import RobotSetup
 from utils.collision import init_pb
-from utils.params import URDF_PATH
+from utils.params import HUSKY_URDF_PATH
 from utils.util import PrintManager, interpolate
 
 # 初始化PrintManager实例

@@ -16,9 +16,7 @@ HERE = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(HERE)
 
 from model.scene_parse import SceneParser
-from multi_tangent.collision import create_collision_bodies
 from robot.robot_setup import RobotSetup
-from utils.collision import init_pb
 
 
 class PointCloudDataset(Dataset):

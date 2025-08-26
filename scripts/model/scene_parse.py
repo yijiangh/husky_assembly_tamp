@@ -1,27 +1,23 @@
+import argparse
+import glob
 import os
+import random
 import sys
+import time
 from types import SimpleNamespace
 from typing import Dict, List, Tuple, Union
 
 import numpy as np
+import pybullet as p
 import pybullet_planning as pp
 import yaml
-from scipy.spatial.transform import Rotation
 from scipy.spatial import ConvexHull
-import glob
-import time
-import pybullet as p
-import argparse
-import random
+from scipy.spatial.transform import Rotation
 
 HERE = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(HERE)
 
-import utils.load_multi_tangent as load_multi_tangent
-from multi_tangent.collision import create_collision_bodies
-from utils.collision import init_pb
 from utils.params import *
-from robot.robot import RobotSetup
 
 
 class SceneParser:

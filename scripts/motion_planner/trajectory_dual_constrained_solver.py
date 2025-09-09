@@ -18,7 +18,8 @@ from robot.dual_arm_projection import DualArmProjection
 from robot.robot_setup import RobotSetup
 from utils.params import DATA_DIR, PROJECT_DIR
 
-DEFAULT_RESOLUTION = math.radians(1.0)
+# DEFAULT_RESOLUTION = math.radians(1.0)
+DEFAULT_RESOLUTION = math.radians(0.01)
 
 
 class TrajectoryDualConstrainedSolver:
@@ -620,8 +621,8 @@ def main():
     # Initialize Robot Setup for Planning
     # ------------------------------------------------------------------
     robot_setup, target_conf, projector = TrajectoryDualConstrainedSolver.initialize_robot_setup_for_planning(
-        robot_name="r0", robot_type="husky_dual", target_cell_state_path=target_cell_state_path, use_scene_parser_gui=True, scene_parser_verbose=True
-    )
+            robot_name="r0", robot_type="husky_dual", target_cell_state_path=target_cell_state_path, use_scene_parser_gui=True, scene_parser_verbose=True
+        )
 
     # ------------------------------------------------------------------
     # Initialize Target Parser
@@ -643,16 +644,21 @@ def main():
     # Plan Trajectory
     # ------------------------------------------------------------------
     print("Planning trajectory...")
-    path = solver.plan(
-        start_conf=start_conf,
-        target_conf=target_conf,
-        max_time=36000,  # Maximum planning time in seconds, conservatively set to 10 hours
-        max_projection_attempts=100,  # Maximum attempts for constraint projection
-        visualization=True,  # Enable visualization
-    )
+    import time
+    start_time = time.time()
+    with pp.LockRenderer():
+        path = solver.plan(
+            start_conf=start_conf,
+            target_conf=target_conf,
+            max_time=36000,  # Maximum planning time in seconds, conservatively set to 10 hours
+            max_projection_attempts=100,  # Maximum attempts for constraint projection
+            visualization=False,  # Enable visualization
+        )
+    end_time = time.time()
+    print(f"Trajectory planning took {end_time - start_time:.2f} seconds.")
 
-    # if path is not None:
-    #     print(f"✓ Trajectory found with {len(path)} waypoints")
+    if path is not None:
+        print(f"✓ Trajectory found with {len(path)} waypoints")
 
     #     # Wait for user to examine the path
     #     pp.wait_for_user()
@@ -662,9 +668,9 @@ def main():
     #     print("Use the slider to control trajectory position. Press Ctrl+C to exit.")
     #     solver.interactive_trajectory_playback(path)
 
-    # else:
-    #     print("✗ No trajectory found")
-    #     pp.wait_for_user()
+    else:
+        print("✗ No trajectory found")
+        pp.wait_for_user()
 
     # ------------------------------------------------------------------
     # Save Trajectory
@@ -677,13 +683,13 @@ def main():
         points = []
         for i, conf in enumerate(path):
             conf: np.ndarray
-            point = JointTrajectoryPoint(joint_values=conf.tolist(), joint_types=robot_setup.joint_types, time_from_start=Duration(secs=i * 0.5, nsecs=0))
+            point = JointTrajectoryPoint(joint_names=robot_setup.joint_names, joint_values=conf.tolist(), joint_types=robot_setup.joint_types, time_from_start=Duration(secs=i * 0.5, nsecs=0))
             points.append(point)
 
         trajectory = JointTrajectory(joint_names=robot_setup.joint_names, trajectory_points=points)
         print(f"Created trajectory with {len(points)} points")
         
-        json_file = os.path.join(PROJECT_DIR, "data", f"{target_name}_robot_trajectory.json")
+        json_file = os.path.join(PROJECT_DIR, "data", f"{target_name}_robot_trajectory_joint_res_{DEFAULT_RESOLUTION:.4f}.json")
         json_dump(trajectory, json_file)
         print(f"Trajectory saved to {json_file}")
 

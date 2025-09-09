@@ -21,7 +21,9 @@ from compas_robots import RobotModel
 # Import SceneParser for scene reconstruction
 from model.scene_parse import SceneParser
 from pybullet_planning import Attachment, Euler, Point, Pose, multiply
+
 from solver.ik_pinocchio_solver import PinocchioSolver
+
 # from utils.util import HUSKY_ARM_JOINT_NAMES
 # from utils.params import URDF_PATH
 from utils.utils_casadi import eval
@@ -87,7 +89,7 @@ ABB_ONBOARD_POSE = [0, 0, 0, 0, 0, 0]
 # -----------------------------------------------------------------------------
 
 # File paths
-HUSKY_DUAL_URDF_PATH = os.path.join(DATA_DIR, "husky_urdf/mt_husky_dual_ur5_e_moveit_config/urdf/husky_dual_ur5_e_no_base_joint.urdf")
+HUSKY_DUAL_URDF_PATH = os.path.join(DATA_DIR, "husky_urdf/mt_husky_dual_ur5_e_moveit_config/urdf/husky_dual_ur5_e_no_base_joint_All_Calibrated.urdf")
 HUSKY_DUAL_SRDF_PATH = os.path.join(DATA_DIR, "husky_urdf/mt_husky_dual_ur5_e_moveit_config/config/dual_arm_husky.srdf")
 
 # Tool coordinate systems

@@ -3,7 +3,7 @@ from typing import Tuple, Union, List
 
 import numpy as np
 import pinocchio
-from pinocchio.robot_wrapper import RobotWrapper
+# from pinocchio.robot_wrapper import RobotWrapper
 import casadi as ca
 
 Joint = namedtuple("Joint", ["id", "type", "idx_qs", "idx_qn"])

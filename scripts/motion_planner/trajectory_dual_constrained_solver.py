@@ -19,7 +19,7 @@ from robot.robot_setup import RobotSetup
 from utils.params import DATA_DIR, PROJECT_DIR
 
 # DEFAULT_RESOLUTION = math.radians(1.0)
-DEFAULT_RESOLUTION = math.radians(0.01)
+DEFAULT_RESOLUTION = 0.01
 
 
 class TrajectoryDualConstrainedSolver:
@@ -613,8 +613,8 @@ def main():
     """
     # Configuration paths
     design_study_path = os.path.join(DATA_DIR, "husky_assembly_design_study")
-    design_case = "250806_RobotX_box_redo"
-    target_name = "robotx_box_A6-S4_end"
+    design_case = "250904_transfer_path_test"
+    target_name = "IK_test__20250909_235058"
     target_cell_state_path = os.path.join(design_study_path, design_case, "RobotCellStates", f"{target_name}_RobotCellState.json")
 
     # ------------------------------------------------------------------
@@ -627,13 +627,15 @@ def main():
     # ------------------------------------------------------------------
     # Initialize Target Parser
     # ------------------------------------------------------------------
-    target_parser = TargetParser(os.path.join(design_study_path, design_case), "robotx_box_A6-S4_end_GraspTargets.json")
+    target_parser = TargetParser(os.path.join(design_study_path, design_case), "IK_test__GraspTargets.json")
 
     # ------------------------------------------------------------------
     # Initialize Trajectory Solver
     # ------------------------------------------------------------------
     print("Initializing TrajectoryDualConstrainedSolver...")
     solver = TrajectoryDualConstrainedSolver(robot_setup, target_parser)
+
+    pp.wait_for_user()
 
     # ------------------------------------------------------------------
     # Get Start Configuration

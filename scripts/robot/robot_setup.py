@@ -353,15 +353,27 @@ class RobotSetup:
         robot = client.robot_puid
         obstacles = list(np.array(list(client.rigid_bodies_puids.values())).flatten())
         
+        other_robots = []
         # Get other robots and grippers
-        other_robots = [client.tools_puids["Alice"], client.tools_puids["Belle"], client.tools_puids["SGAlice"], client.tools_puids["SGBelle"]]
+        if "Alice" in client.tools_puids:
+            other_robots.append(client.tools_puids["Alice"])
+        if "Belle" in client.tools_puids:
+            other_robots.append(client.tools_puids["Belle"])
+        if "SGAlice" in client.tools_puids:
+            other_robots.append(client.tools_puids["SGAlice"])
+        if "SGBelle" in client.tools_puids:
+            other_robots.append(client.tools_puids["SGBelle"])
         obstacles += other_robots
         
         state_file = os.path.basename(self.robot_cell_state_path)
         match = re.search(r'_A(\d+)-', state_file)
         active_bar_name = f"b{match.group(1)}_0" if match else None
         
-        target_bar = client.rigid_bodies_puids[active_bar_name][0]
+        if active_bar_name in client.rigid_bodies_puids:
+            target_bar = client.rigid_bodies_puids[active_bar_name][0]
+        else:
+            target_bar = client.rigid_bodies_puids["b0_0"][0]
+
         obstacles.remove(target_bar)
         attachment = pp.create_attachment(robot, pp.link_from_name(robot, self._tool0_name_right), target_bar)
         self.attachments.append(attachment)
@@ -422,10 +434,13 @@ class RobotSetup:
             # pp.set_pose(right_ee, pp.multiply(right_tool0_pose, pp.Pose(euler=pp.Euler(yaw=-np.pi / 2))))
             # right_ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, self._tool0_name_right), right_ee)
             
-            left_ee = client.tools_puids["AL"]
-            left_ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, self._tool0_name_left), left_ee)
-            right_ee = client.tools_puids["AR"]
-            right_ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, self._tool0_name_right), right_ee)
+            if "AL" in client.tools_puids:
+                left_ee = client.tools_puids["AL"]
+                left_ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, self._tool0_name_left), left_ee)
+
+            if "AR" in client.tools_puids:
+                right_ee = client.tools_puids["AR"]
+                right_ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, self._tool0_name_right), right_ee)
 
             # For backward compatibility, set ee_attachment to left
             ee_attachment = left_ee_attachment

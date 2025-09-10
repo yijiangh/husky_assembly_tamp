@@ -361,6 +361,7 @@ class TrajectoryDualConstrainedSolver:
     def _try_direct_path(self, extend_fn_direct):
         """Try to find a direct path between start and target configurations."""
         print("Checking for direct paths...")
+        i = 0
         for s in self.start_projected_confs:
             for t in self.target_projected_confs:
                 path = pp.direct_path(s, t, extend_fn_direct, self.invalid_fn)
@@ -368,7 +369,8 @@ class TrajectoryDualConstrainedSolver:
                     print("Direct path found!")
                     return path
                 else:
-                    print(f"No direct path between configurations")
+                    print(f"No direct path between configurations {i}th")
+                i += 1
 
         print("No direct path found for any start-target pair.")
         return None

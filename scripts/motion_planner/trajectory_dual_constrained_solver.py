@@ -3,7 +3,7 @@ import math
 import os
 import sys
 import time
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple, Union
 
 import numpy as np
 import pybullet
@@ -359,7 +359,7 @@ class TrajectoryDualConstrainedSolver:
 
         return fn
 
-    def _try_direct_path(self, extend_fn_direct):
+    def _try_direct_path(self, extend_fn_direct) -> Union[np.ndarray, None]:
         """Try to find a direct path between start and target configurations."""
         print("Checking for direct paths...")
         i = 0
@@ -368,7 +368,7 @@ class TrajectoryDualConstrainedSolver:
                 path = pp.direct_path(s, t, extend_fn_direct, self.invalid_fn)
                 if path is not None:
                     print("Direct path found!")
-                    return path
+                    return np.array(path)
                 else:
                     print(f"No direct path between configurations {i}th")
                 i += 1
@@ -586,7 +586,7 @@ class TrajectoryDualConstrainedSolver:
 
         # Generate valid configurations using dual-arm constraint projection
         start_confs = projector.create_valid_confs(
-            right_start_ik_handle, bar_pose, pp.invert(self.target_parser.tools_from_bar[tool_index]), delta=0, max_attempts=max_attempts, collision_fn=self.robot_setup.create_collision_fn(obstacle_bodies=self.robot_setup.obstacles)
+            right_start_ik_handle, bar_pose, pp.invert(self.target_parser.tools_from_bar[tool_index]), delta=np.pi, max_attempts=max_attempts, collision_fn=self.robot_setup.create_collision_fn(obstacle_bodies=self.robot_setup.obstacles)
         )
 
         # Select first valid configuration or exit if none found

@@ -5,6 +5,7 @@ import re
 from typing import List, Optional, Tuple
 
 import matplotlib.pyplot as plt
+from matplotlib.widgets import Slider
 import numpy as np
 import pybullet_planning as pp
 
@@ -192,11 +193,179 @@ def _plot_and_save(pos_d: np.ndarray, eul_d: np.ndarray, out_path: str, title: s
     plt.close(fig)
 
 
+def _playback_with_normalized_slider(trajectory: np.ndarray, robot_setup, window_title: str = "Trajectory Playback") -> None:
+    """Open a small UI with a slider in [0, 1] to scrub along the trajectory.
+
+    The slider value s in [0, 1] maps to index round(s * (N-1)), and updates the robot
+    joint configuration in PyBullet using robot_setup.set_joint_positions.
+    """
+    if trajectory.size == 0:
+        return
+
+    num_frames = trajectory.shape[0]
+
+    # Ensure an initial configuration
+    try:
+        robot_setup.set_joint_positions(robot_setup.arm_joints, trajectory[0])
+    except Exception:
+        pass
+
+    # Minimal figure hosting only the slider
+    fig = plt.figure(figsize=(7, 2))
+    fig.canvas.manager.set_window_title(window_title) if hasattr(fig.canvas.manager, "set_window_title") else None
+
+    # Create the slider axis
+    ax_slider = fig.add_axes([0.1, 0.45, 0.8, 0.15])
+    slider = Slider(ax=ax_slider, label="s (0-1)", valmin=0.0, valmax=1.0, valinit=0.0)
+
+    # Optional: display current frame index
+    ax_text = fig.add_axes([0.1, 0.15, 0.8, 0.2])
+    ax_text.axis('off')
+    text_artist = ax_text.text(0.0, 0.5, "frame: 0", fontsize=11, va='center', ha='left')
+
+    def on_change(val: float) -> None:
+        try:
+            s = float(val)
+        except Exception:
+            s = 0.0
+        s = max(0.0, min(1.0, s))
+        idx = int(round(s * (num_frames - 1)))
+        text_artist.set_text(f"frame: {idx}")
+        try:
+            robot_setup.set_joint_positions(robot_setup.arm_joints, trajectory[idx])
+        except Exception:
+            # Keep UI responsive even if PyBullet/robot update is unavailable
+            pass
+        fig.canvas.draw_idle()
+
+    slider.on_changed(on_change)
+
+    # Also respond to arrow keys for convenience
+    def on_key(event):
+        if event.key in ("left", "right"):
+            s = float(slider.val)
+            step = 1.0 / max(1, num_frames - 1)
+            if event.key == "left":
+                s = max(0.0, s - step)
+            else:
+                s = min(1.0, s + step)
+            slider.set_val(s)
+
+    fig.canvas.mpl_connect("key_press_event", on_key)
+
+    plt.show()
+
+
+def _interactive_plot_with_normalized_slider(
+    pos_d: np.ndarray,
+    eul_d: np.ndarray,
+    trajectory: np.ndarray,
+    robot_setup,
+    title: str,
+) -> None:
+    """Interactive plot: show charts and a vertical dashed line for current frame.
+
+    Includes a slider s in [0, 1] mapping to frame round(s*(N-1)). Updates robot pose via
+    robot_setup.set_joint_positions for visual playback in PyBullet. The saved static plot
+    remains unaffected (no vertical line in saved image).
+    """
+    if trajectory.size == 0:
+        return
+
+    num_frames = pos_d.shape[0]
+
+    # Create figure and plots (reserve space at bottom for slider)
+    fig, axes = plt.subplots(2, 1, figsize=(10, 8))
+    plt.subplots_adjust(bottom=0.18)
+
+    t = np.arange(num_frames)
+    # Position deltas
+    axes[0].plot(t, pos_d[:, 0], label="dx")
+    axes[0].plot(t, pos_d[:, 1], label="dy")
+    axes[0].plot(t, pos_d[:, 2], label="dz")
+    axes[0].set_xlabel("Frame")
+    axes[0].set_ylabel("Translation (m)")
+    axes[0].set_title("Left tool0 in Right tool0 frame (pos delta)")
+    axes[0].grid(True, linestyle=":", alpha=0.5)
+    axes[0].legend()
+
+    # Euler deltas (degrees for consistency with saved plot)
+    eul_deg = np.rad2deg(eul_d)
+    axes[1].plot(t, eul_deg[:, 0], label="droll")
+    axes[1].plot(t, eul_deg[:, 1], label="dpitch")
+    axes[1].plot(t, eul_deg[:, 2], label="dyaw")
+    axes[1].set_xlabel("Frame")
+    axes[1].set_ylabel("Rotation (rad)")
+    axes[1].set_title("Left tool0 in Right tool0 frame (ori delta)")
+    axes[1].grid(True, linestyle=":", alpha=0.5)
+    axes[1].legend()
+
+    fig.suptitle(title)
+
+    # Vertical dashed lines indicating current frame
+    vline_pos = axes[0].axvline(0, color="k", linestyle="--", alpha=0.6)
+    vline_ori = axes[1].axvline(0, color="k", linestyle="--", alpha=0.6)
+
+    # Slider for normalized [0,1] scrubbing
+    slider_ax = fig.add_axes([0.12, 0.06, 0.76, 0.04])
+    slider = Slider(ax=slider_ax, label="s (0-1)", valmin=0.0, valmax=1.0, valinit=0.0)
+
+    # Optional text readout for frame index
+    text_ax = fig.add_axes([0.12, 0.01, 0.76, 0.04])
+    text_ax.axis("off")
+    frame_text = text_ax.text(0.0, 0.5, "frame: 0", fontsize=11, va="center", ha="left")
+
+    # Initialize robot pose at frame 0
+    try:
+        robot_setup.set_joint_positions(robot_setup.arm_joints, trajectory[0])
+    except Exception:
+        pass
+
+    def on_slider_change(val: float) -> None:
+        try:
+            s = float(val)
+        except Exception:
+            s = 0.0
+        s = max(0.0, min(1.0, s))
+        idx = int(round(s * (num_frames - 1)))
+
+        # Update vlines and text
+        vline_pos.set_xdata([idx, idx])
+        vline_ori.set_xdata([idx, idx])
+        frame_text.set_text(f"frame: {idx}")
+
+        # Update robot joints
+        try:
+            robot_setup.set_joint_positions(robot_setup.arm_joints, trajectory[idx])
+        except Exception:
+            pass
+
+        fig.canvas.draw_idle()
+
+    slider.on_changed(on_slider_change)
+
+    # Arrow keys step by one frame
+    def on_key(event):
+        if event.key in ("left", "right"):
+            s = float(slider.val)
+            step = 1.0 / max(1, num_frames - 1)
+            if event.key == "left":
+                s = max(0.0, s - step)
+            else:
+                s = min(1.0, s + step)
+            slider.set_val(s)
+
+    fig.canvas.mpl_connect("key_press_event", on_key)
+
+    plt.show()
+
+
 def main():
     parser = argparse.ArgumentParser(description="Plot left-vs-right tool0 relative pose deltas for a trajectory.")
     parser.add_argument("--design_case", type=str, required=True, help="Design case directory name under DATA_DIR/husky_assembly_design_study")
     parser.add_argument("--target_name", type=str, required=True, help="Target state base name without suffix, e.g., robotx_box_A6-S4_end")
     parser.add_argument("--gui", action="store_true", help="Enable PyBullet GUI when reconstructing scene")
+    parser.add_argument("--slider", action="store_true", help="Open a 0-1 slider to scrub trajectory and update robot")
     parser.add_argument("--traj", type=str, default=None, help="Explicit trajectory file path (.json or .npy)")
     parser.add_argument("--out", type=str, default=None, help="Output plot path (.png). Default: alongside trajectory")
     args = parser.parse_args()
@@ -252,6 +421,10 @@ def main():
     title = f"Scene: {args.design_case} | Target: {args.target_name}"
     _plot_and_save(pos_d, eul_d, out_path, title)
     print(f"Plot saved to: {out_path}")
+
+    # Optional: open an interactive plot with slider and vline cursor
+    if args.slider:
+        _interactive_plot_with_normalized_slider(pos_d, eul_d, trajectory, robot_setup, title)
 
     # Cleanup
     robot_setup.cleanup()

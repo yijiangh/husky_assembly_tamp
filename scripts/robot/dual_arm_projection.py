@@ -49,7 +49,7 @@ class DualArmProjection:
 
         world_from_right = pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link_right)
         world_from_left = pp.multiply(world_from_right, self.desired_right_from_left)
-        q_left_new = self.robot_setup.get_left_arm_ik_solution(world_from_left, q_left)
+        q_left_new = self.robot_setup.ik_solver_left(world_from_left, q_left) # fuck
 
         if q_left_new is None:
             return None

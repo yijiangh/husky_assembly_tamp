@@ -14,19 +14,16 @@ from utils.params import DATA_DIR, PICK_DIRECTION, PROJECT_DIR
 HUSKY_ASSEMBLY_PATH = os.path.join(PROJECT_DIR, "src")
 sys.path.extend([HUSKY_ASSEMBLY_PATH, PROJECT_DIR])
 
+import pybullet
 import pybullet_planning as pp
 import tracikpy
 from compas_fab.robots import RobotSemantics
 from compas_robots import RobotModel
-# Import SceneParser for scene reconstruction
 from model.scene_parse import SceneParser
 from pybullet_planning import Attachment, Euler, Point, Pose, multiply
-
-from solver.ik_pinocchio_solver import PinocchioSolver
-
-# from utils.util import HUSKY_ARM_JOINT_NAMES
-# from utils.params import URDF_PATH
 from utils.utils_casadi import eval
+from utils.util import calculate_pose_error, normalize_angles
+
 
 # =============================================================================
 # ROBOT CONFIGURATION CONSTANTS
@@ -266,17 +263,16 @@ class RobotSetup:
 
         # Set up the robot and its components
         self.robot = robot_data["robot"]
+        self.obstacles = robot_data["obstacles"]
         self.ee_attachment = robot_data["ee_attachment"]
+        self.disabled_collisions = robot_data["disabled_collisions"]
+
         if self.robot_type == "husky_dual":
             self.left_ee_attachment = robot_data["left_ee_attachment"]
             self.right_ee_attachment = robot_data["right_ee_attachment"]
-            self.ik_solver_relative_left = robot_data["ik_solver_relative_left"]
-            self.ik_solver_relative_right = robot_data["ik_solver_relative_right"]
-            self.ik_solver_relative = self.ik_solver_relative_left  # Default to left for backward compatibility
-        else:
-            self.ik_solver_relative = robot_data["ik_solver_relative"]
-        self.disabled_collisions = robot_data["disabled_collisions"]
-        self.obstacles = robot_data["obstacles"]
+            # self.ik_solver_relative_left = robot_data["ik_solver_relative_left"]
+            # self.ik_solver_relative_right = robot_data["ik_solver_relative_right"]
+            # self.ik_solver_relative = self.ik_solver_relative_left  # Default to left for backward compatibility
 
         # Set up robot links and joints
         if self.robot_type == "husky_dual":
@@ -310,8 +306,40 @@ class RobotSetup:
         else:
             self.base_from_connect = self._base_from_connect
 
-        # Initialize joint positions
-        # self.set_joint_positions(self.arm_joints, self.arm_init_angles)
+        # Set up ik solver
+
+        if self.robot_type != "husky_dual":
+            pass
+        else:
+            # ik_solver_relative_left_raw = tracikpy.TracIKSolver(robot_urdf, self._onboard_link_left, self._tool0_name_left).ik
+            # ik_solver_relative_right_raw = tracikpy.TracIKSolver(robot_urdf, self._onboard_link_right, self._tool0_name_right).ik
+            # ik_solver_relative_left = partial(ik_solver_relative_left_raw, bx = 1e-6, by = 1e-6, bz = 1e-6, brx = 1e-6, bry = 1e-6, brz = 1e-6)
+            # ik_solver_relative_right = partial(ik_solver_relative_right_raw, bx = 1e-6, by = 1e-6, bz = 1e-6, brx = 1e-6, bry = 1e-6, brz = 1e-6)
+
+            def pyb_ik_solver_left(ee_pose, q_init=None) -> np.ndarray:
+                if q_init is not None:
+                    self.set_left_arm_joint_positions(q_init)
+                res = np.array(pybullet.calculateInverseKinematics(self.robot, pp.link_from_name(self.robot, self._tool0_name_left), ee_pose[0], ee_pose[1], maxNumIterations=100, residualThreshold=1e-6))[:6]
+                self.set_left_arm_joint_positions(res)
+                pose_res = pp.get_link_pose(self.robot, pp.link_from_name(self.robot, self._tool0_name_left))
+                pose_err = calculate_pose_error(ee_pose, pose_res)
+                if np.linalg.norm(pose_err) > 1e-4:
+                    return None
+                return normalize_angles(res)
+
+            def pyb_ik_solver_right(ee_pose, q_init=None) -> np.ndarray:
+                if q_init is not None:
+                    self.set_right_arm_joint_positions(q_init)
+                res = np.array(pybullet.calculateInverseKinematics(self.robot, pp.link_from_name(self.robot, self._tool0_name_right), ee_pose[0], ee_pose[1], maxNumIterations=100, residualThreshold=1e-6))[6:]
+                self.set_right_arm_joint_positions(res)
+                pose_res = pp.get_link_pose(self.robot, pp.link_from_name(self.robot, self._tool0_name_right))
+                pose_err = calculate_pose_error(ee_pose, pose_res)
+                if np.linalg.norm(pose_err) > 1e-4:
+                    return None
+                return normalize_angles(res)
+
+            self.ik_solver_left = pyb_ik_solver_left
+            self.ik_solver_right = pyb_ik_solver_right
 
     def _load_robot(self) -> Dict:
         """Load robot URDF and configure Pinocchio IK solver for relative kinematics.
@@ -324,11 +352,7 @@ class RobotSetup:
         Raises:
             FileNotFoundError: If required files are missing.
         """
-        # Check if we should use SceneParser
-        if self.robot_cell_state_path is not None:
-            return self._load_robot_with_scene_parser()
-        else:
-            return self._load_robot_from_urdf()
+        return self._load_robot_with_scene_parser()
 
     def _load_robot_with_scene_parser(self) -> Dict:
         """Load robot using SceneParser for complete scene reconstruction.
@@ -352,7 +376,7 @@ class RobotSetup:
         # Get the robot PyBullet ID from the client
         robot = client.robot_puid
         obstacles = list(np.array(list(client.rigid_bodies_puids.values())).flatten())
-        
+
         other_robots = []
         # Get other robots and grippers
         if "Alice" in client.tools_puids:
@@ -364,11 +388,11 @@ class RobotSetup:
         if "SGBelle" in client.tools_puids:
             other_robots.append(client.tools_puids["SGBelle"])
         obstacles += other_robots
-        
+
         state_file = os.path.basename(self.robot_cell_state_path)
-        match = re.search(r'_A(\d+)-', state_file)
+        match = re.search(r"_A(\d+)-", state_file)
         active_bar_name = f"b{match.group(1)}_0" if match else None
-        
+
         if active_bar_name in client.rigid_bodies_puids:
             target_bar = client.rigid_bodies_puids[active_bar_name][0]
         else:
@@ -394,46 +418,12 @@ class RobotSetup:
         semantics = RobotSemantics.from_srdf_file(robot_srdf, robot_model)
         disabled_collisions = self.get_disabled_collisions_from_link_names(robot, semantics.disabled_collisions)
 
-        # Set up Pinocchio IK solvers
-        ik_solver_relative = lambda *args, **kwargs: None  # default no-op solver
-
-        if self.robot_type != "husky_dual":
-            pinocchio_solver = PinocchioSolver(
-                robot_urdf,
-                manipulator_joint_names=self._joint_names,
-                control_joint_names=self._control_joint_names,
-                base_link_name=self._onboard_link,
-            )
-            ik_solver_relative = partial(pinocchio_solver.ik, tip_name=tool0_name)
-        else:
-            pinocchio_solver_right = PinocchioSolver(robot_urdf, manipulator_joint_names=self._right_joint_names, control_joint_names=self._right_joint_names, base_link_name=self._onboard_link_right)
-
-            pinocchio_solver_left = PinocchioSolver(robot_urdf, manipulator_joint_names=self._left_joint_names, control_joint_names=self._left_joint_names, base_link_name=self._onboard_link_left)
-
-            ik_solver_relative_left = partial(pinocchio_solver_left.ik, tip_name=self._tool0_name_left)
-            ik_solver_relative_right = partial(pinocchio_solver_right.ik, tip_name=self._tool0_name_right)
-            
-            ik_solver_relative_left = tracikpy.TracIKSolver(robot_urdf, self._onboard_link_left, self._tool0_name_left).ik
-            ik_solver_relative_right = tracikpy.TracIKSolver(robot_urdf, self._onboard_link_right, self._tool0_name_right).ik
-
         # Create ee attachment if gripper exists
         ee_attachment = None
         left_ee_attachment = None
         right_ee_attachment = None
 
         if self.robot_type == "husky_dual":
-            # # Create left ee attachment
-            # left_tool0_pose = pp.get_link_pose(robot, pp.link_from_name(robot, self._tool0_name_left))
-            # left_ee = pp.create_obj(gripper_obj, scale=1)
-            # pp.set_pose(left_ee, pp.multiply(left_tool0_pose, pp.Pose(euler=pp.Euler(yaw=-np.pi / 2))))
-            # left_ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, self._tool0_name_left), left_ee)
-
-            # # Create right ee attachment
-            # right_tool0_pose = pp.get_link_pose(robot, pp.link_from_name(robot, self._tool0_name_right))
-            # right_ee = pp.create_obj(gripper_obj, scale=1)
-            # pp.set_pose(right_ee, pp.multiply(right_tool0_pose, pp.Pose(euler=pp.Euler(yaw=-np.pi / 2))))
-            # right_ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, self._tool0_name_right), right_ee)
-            
             if "AL" in client.tools_puids:
                 left_ee = client.tools_puids["AL"]
                 left_ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, self._tool0_name_left), left_ee)
@@ -457,110 +447,11 @@ class RobotSetup:
                 "ee_attachment": ee_attachment,
                 "left_ee_attachment": left_ee_attachment,
                 "right_ee_attachment": right_ee_attachment,
-                "ik_solver_relative_left": ik_solver_relative_left,
-                "ik_solver_relative_right": ik_solver_relative_right,
                 "disabled_collisions": disabled_collisions,
                 "obstacles": obstacles,
             }
         else:
-            return {
-                "robot": robot,
-                "ee_attachment": ee_attachment,
-                "ik_solver_relative": ik_solver_relative,
-                "disabled_collisions": disabled_collisions,
-                "obstacles": obstacles,
-            }
-
-    def _load_robot_from_urdf(self) -> Dict:
-        """Load robot from URDF files (original method).
-
-        Returns:
-            Dict containing robot, ee_attachment(s), ik_solver_relative(s), and disabled_collisions.
-        """
-        # Get robot parameters
-        robot_urdf = self._urdf_path
-        robot_srdf = self._srdf_path
-        gripper_obj = self._gripper_obj
-
-        # Handle tool0_name for different robot types
-        if self.robot_type == "husky_dual":
-            # For dual-arm, we don't use a single tool0_name
-            tool0_name = None
-        else:
-            tool0_name = self._tool0_name
-
-        # Check if files exist
-        if not os.path.exists(robot_urdf) or not os.path.exists(robot_srdf):
-            raise FileNotFoundError("Required robot files not found.")
-
-        # Load robot in PyBullet
-        robot = pp.load_pybullet(robot_urdf, fixed_base=False, cylinder=False)
-
-        # By default, populate empty placeholders
-        disabled_collisions = set()
-        ik_solver_relative = lambda *args, **kwargs: None  # default no-op solver
-
-        robot_model = RobotModel.from_urdf_file(robot_urdf)
-        semantics = RobotSemantics.from_srdf_file(robot_srdf, robot_model)
-        disabled_collisions = self.get_disabled_collisions_from_link_names(robot, semantics.disabled_collisions)
-        if self.robot_type != "husky_dual":
-            pinocchio_solver = PinocchioSolver(
-                robot_urdf,
-                manipulator_joint_names=self._joint_names,
-                control_joint_names=self._control_joint_names,
-                base_link_name=self._onboard_link,
-            )
-            ik_solver_relative = partial(pinocchio_solver.ik, tip_name=tool0_name)
-        else:
-            pinocchio_solver_right = PinocchioSolver(robot_urdf, manipulator_joint_names=self._joint_names, control_joint_names=self._right_joint_names, base_link_name=self._onboard_link_right)
-            pinocchio_solver_left = PinocchioSolver(robot_urdf, manipulator_joint_names=self._joint_names, control_joint_names=self._left_joint_names, base_link_name=self._onboard_link_left)
-            ik_solver_relative_left = partial(pinocchio_solver_left.ik, tip_name=self._tool0_name_left)
-            ik_solver_relative_right = partial(pinocchio_solver_right.ik, tip_name=self._tool0_name_right)
-
-        # Create ee attachment if gripper exists
-        ee_attachment = None
-        left_ee_attachment = None
-        right_ee_attachment = None
-
-        if gripper_obj and os.path.exists(gripper_obj):
-            if self.robot_type == "husky_dual":
-                # Create left ee attachment
-                left_tool0_pose = pp.get_link_pose(robot, pp.link_from_name(robot, self._tool0_name_left))
-                left_ee = pp.create_obj(gripper_obj, scale=1)
-                pp.set_pose(left_ee, pp.multiply(left_tool0_pose, pp.Pose(euler=pp.Euler(yaw=-np.pi / 2))))
-                left_ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, self._tool0_name_left), left_ee)
-
-                # Create right ee attachment
-                right_tool0_pose = pp.get_link_pose(robot, pp.link_from_name(robot, self._tool0_name_right))
-                right_ee = pp.create_obj(gripper_obj, scale=1)
-                pp.set_pose(right_ee, pp.multiply(right_tool0_pose, pp.Pose(euler=pp.Euler(yaw=-np.pi / 2))))
-                right_ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, self._tool0_name_right), right_ee)
-
-                # For backward compatibility, set ee_attachment to left
-                ee_attachment = left_ee_attachment
-            else:
-                tool0_pose = pp.get_link_pose(robot, pp.link_from_name(robot, tool0_name))
-                ee = pp.create_obj(gripper_obj, scale=1)
-                pp.set_pose(ee, pp.multiply(tool0_pose, pp.Pose(euler=pp.Euler(yaw=-np.pi / 2))))
-                ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, tool0_name), ee)
-
-        if self.robot_type == "husky_dual":
-            return {
-                "robot": robot,
-                "ee_attachment": ee_attachment,
-                "left_ee_attachment": left_ee_attachment,
-                "right_ee_attachment": right_ee_attachment,
-                "ik_solver_relative_left": ik_solver_relative_left,
-                "ik_solver_relative_right": ik_solver_relative_right,
-                "disabled_collisions": disabled_collisions,
-            }
-        else:
-            return {
-                "robot": robot,
-                "ee_attachment": ee_attachment,
-                "ik_solver_relative": ik_solver_relative,
-                "disabled_collisions": disabled_collisions,
-            }
+            return {"robot": robot, "obstacles": obstacles, "ee_attachment": ee_attachment, "disabled_collisions": disabled_collisions}
 
     def set_joint_positions(self, control_joints: List[int], conf: np.ndarray) -> None:
         """Set joint positions and update attachments.
@@ -674,86 +565,6 @@ class RobotSetup:
         if self.robot_type != "husky_dual":
             raise ValueError("Right relative pose is only available for dual-arm robots")
         return self.get_relative_pose(pose_world, arm_side="right")
-
-    def get_relative_ik_solution(self, world_from_tool: Tuple, q_init: List[float] = None, arm_side: str = None) -> np.ndarray:
-        """Calculate inverse kinematics solution relative to base using Pinocchio.
-
-        Params:
-            world_from_tool: Tool pose in world frame.
-            q_init: Initial joint configuration guess (default: None).
-            arm_side: For dual-arm robots, specify "left" or "right" (default: None uses left or single arm).
-
-        Returns:
-            Joint configuration solving the IK problem.
-        """
-        if q_init is not None:
-            q_init = list(q_init)
-
-        # Use the pre-calculated base_from_connect (for all robot types)
-        if self.robot_type == "husky_dual" and arm_side == "right":
-            base_from_connect = self.base_from_connect_right
-        elif self.robot_type == "husky_dual" and arm_side == "left":
-            base_from_connect = self.base_from_connect_left
-        else:
-            base_from_connect = self.base_from_connect
-
-        world_from_connect = pp.multiply(pp.get_pose(self.robot), base_from_connect)
-        connect_from_tool = pp.multiply(pp.invert(world_from_connect), world_from_tool)
-        tform = pp.tform_from_pose(connect_from_tool)
-
-        # Select appropriate solver based on arm_side for dual-arm robots
-        if self.robot_type == "husky_dual":
-            if arm_side == "right":
-                solver = self.ik_solver_relative_right
-            else:  # Default to left if not specified or if specified as "left"
-                solver = self.ik_solver_relative_left
-        else:
-            solver = self.ik_solver_relative
-
-        conf = solver(tform, qinit=q_init)
-
-        # Update ee attachments
-        if self.robot_type == "husky_dual":
-            if arm_side == "right" and self.right_ee_attachment:
-                self.right_ee_attachment.assign()
-            elif self.left_ee_attachment:  # Default to left or explicitly left
-                self.left_ee_attachment.assign()
-        else:
-            if self.ee_attachment:
-                self.ee_attachment.assign()
-
-        if conf is not None:
-            # 将关节角度规范化到 [-pi, pi] 范围内
-            conf = np.array([(angle + np.pi) % (2 * np.pi) - np.pi for angle in conf])
-        return conf
-
-    def get_grasp_ik_solution(self, world_from_object: Tuple, tool_from_obj: Tuple, q_init: List[float] = None, arm_side: str = None) -> np.ndarray:
-        """Calculate inverse kinematics solution relative to base using Pinocchio.
-
-        Params:
-            world_from_object: Object pose in world frame.
-            tool_from_obj: Tool pose relative to object.
-            q_init: Initial joint configuration guess (default: None).
-            arm_side: For dual-arm robots, specify "left" or "right" (default: None uses left or single arm).
-        """
-        world_from_tool = pp.multiply(world_from_object, pp.invert(tool_from_obj))
-        return self.get_relative_ik_solution(world_from_tool, q_init, arm_side)
-
-    def get_left_arm_ik_solution(self, world_from_tool: Tuple, q_init: List[float] = None) -> np.ndarray:
-        """Calculate IK solution for left arm (dual-arm robots only).
-
-        Params:
-            world_from_tool: Tool pose in world frame.
-            q_init: Initial joint configuration guess (default: None).
-
-        Returns:
-            Joint configuration solving the IK problem for left arm.
-        """
-        if self.robot_type != "husky_dual":
-            raise ValueError("Left arm IK is only available for dual-arm robots")
-        return self.get_relative_ik_solution(world_from_tool, q_init, arm_side="left")
-
-    def get_right_arm_ik_solution(self, world_from_tool: Tuple, q_init: List[float] = None) -> np.ndarray:
         """Calculate IK solution for right arm (dual-arm robots only).
 
         Params:
@@ -935,10 +746,6 @@ class RobotSetup:
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit."""
         self.cleanup()
-
-    def is_using_scene_parser(self) -> bool:
-        """Check if this RobotSetup instance is using SceneParser."""
-        return self.robot_cell_state_path is not None
 
     def get_scene_parser(self):
         """Get the SceneParser instance if available."""

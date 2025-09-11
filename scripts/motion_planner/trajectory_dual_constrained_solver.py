@@ -1,6 +1,9 @@
 import argparse
+import cProfile
+import io
 import math
 import os
+import pstats
 import sys
 import time
 from typing import Callable, List, Optional, Tuple, Union
@@ -615,21 +618,30 @@ def main():
     """
     # Configuration paths
     design_study_path = os.path.join(DATA_DIR, "husky_assembly_design_study")
+    
+    # ------------------------------
     design_case = "250904_transfer_path_test"
-    target_name = "IK_test__20250909_235058"
+    # target_name = "IK_test__20250909_235058"
+    target_name = "IK_test__20250905_101010"
+    state_name = "IK_test__GraspTargets"
+    # ------------------------------
+    design_case = "250707_RobotX_box_demo"
+    target_name = "robotx_box_A13-S_end"
+    state_name = "robotx_box_A13-S_end_GraspTargets"
+    
     target_cell_state_path = os.path.join(design_study_path, design_case, "RobotCellStates", f"{target_name}_RobotCellState.json")
 
     # ------------------------------------------------------------------
     # Initialize Robot Setup for Planning
     # ------------------------------------------------------------------
     robot_setup, target_conf, projector = TrajectoryDualConstrainedSolver.initialize_robot_setup_for_planning(
-            robot_name="r0", robot_type="husky_dual", target_cell_state_path=target_cell_state_path, use_scene_parser_gui=True, scene_parser_verbose=True
-        )
+        robot_name="r0", robot_type="husky_dual", target_cell_state_path=target_cell_state_path, use_scene_parser_gui=True, scene_parser_verbose=True
+    )
 
     # ------------------------------------------------------------------
     # Initialize Target Parser
     # ------------------------------------------------------------------
-    target_parser = TargetParser(os.path.join(design_study_path, design_case), "IK_test__GraspTargets.json")
+    target_parser = TargetParser(os.path.join(design_study_path, design_case), f"{state_name}.json")
 
     # ------------------------------------------------------------------
     # Initialize Trajectory Solver
@@ -649,7 +661,10 @@ def main():
     # ------------------------------------------------------------------
     print("Planning trajectory...")
     import time
+
     start_time = time.time()
+    pr = cProfile.Profile()
+    pr.enable()
     with pp.LockRenderer():
         path = solver.plan(
             start_conf=start_conf,
@@ -660,6 +675,12 @@ def main():
         )
     end_time = time.time()
     print(f"Trajectory planning took {end_time - start_time:.2f} seconds.")
+    pr.disable()
+    s = io.StringIO()
+    sortby = pstats.SortKey.CUMULATIVE
+    ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
+    ps.print_stats()
+    print(s.getvalue())
 
     if path is not None:
         print(f"✓ Trajectory found with {len(path)} waypoints")
@@ -680,8 +701,7 @@ def main():
     # Save Trajectory
     # ------------------------------------------------------------------
     from compas.data import json_dump, json_load
-    from compas_fab.robots import JointTrajectory, JointTrajectoryPoint
-    from compas_fab.robots import Duration
+    from compas_fab.robots import Duration, JointTrajectory, JointTrajectoryPoint
 
     if path is not None:
         points = []
@@ -692,7 +712,7 @@ def main():
 
         trajectory = JointTrajectory(joint_names=robot_setup.joint_names, trajectory_points=points)
         print(f"Created trajectory with {len(points)} points")
-        
+
         json_file = os.path.join(PROJECT_DIR, "data", f"{target_name}_robot_trajectory_joint_res_{DEFAULT_RESOLUTION:.4f}.json")
         json_dump(trajectory, json_file)
         print(f"Trajectory saved to {json_file}")

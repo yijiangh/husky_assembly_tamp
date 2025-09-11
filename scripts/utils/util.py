@@ -41,30 +41,86 @@ def get_custom_limits(robot, custom_limits=None):
 ###########################################
 
 
-def normalize_angles(angles):
-    for i in range(len(angles)):
-        angles[i] = normalize_angle(angles[i])
-    return angles
+def normalize_angles(angles, low: float = -np.pi, high: float = np.pi):
+    """
+    Normalize an iterable of angles to the range (low, high].
+
+    Supports tuple, list, and np.ndarray. The return type matches the input type.
+    """
+    span = high - low
+    if not np.isfinite(span) or span <= 0:
+        raise ValueError("Invalid angle range: 'high' must be greater than 'low'.")
+
+    array_like = np.asarray(angles, dtype=float)
+    shifted = np.fmod(array_like - low, span)
+    normalized = np.where(shifted <= 0, shifted + high, shifted + low)
+
+    if isinstance(angles, np.ndarray):
+        return normalized
+    if isinstance(angles, tuple):
+        return tuple(normalized.tolist())
+    if isinstance(angles, list):
+        return normalized.tolist()
+    # Fallback: return numpy array if an unexpected type is provided
+    return normalized
 
 
-def normalize_angle(angle):
-    angle = np.fmod(angle + np.pi, 2 * np.pi)
-    if angle <= 0:
-        return angle + np.pi
-    else:
-        return angle - np.pi
+def normalize_angle(angle, low: float = -np.pi, high: float = np.pi):
+    """Normalize a single angle to the range (low, high]."""
+    span = high - low
+    if not np.isfinite(span) or span <= 0:
+        raise ValueError("Invalid angle range: 'high' must be greater than 'low'.")
+
+    shifted = np.fmod(angle - low, span)
+    if shifted <= 0:
+        return shifted + high
+    return shifted + low
 
 
 def angles_distance(angles1, angles2):
-    diff = angles1 - angles2
+    """
+    Compute the Euclidean norm of directed circular differences between two angle vectors.
+
+    The per-joint difference is the signed minimal angle delta δ such that
+    normalize_angle(angle2 + δ) == normalize_angle(angle1).
+    """
+    a1 = np.asarray(angles1, dtype=float)
+    a2 = np.asarray(angles2, dtype=float)
+    diff = a1 - a2
     diff = normalize_angles(diff)
     return np.linalg.norm(diff)
 
 
 def angle_distance(angle1, angle2):
+    """Compute the signed minimal circular difference δ with normalize_angle(angle2 + δ) == normalize_angle(angle1)."""
     diff = angle1 - angle2
-    diff = normalize_angle(diff)
-    return diff
+    return normalize_angle(diff)
+
+
+def angle_between_unit_vectors(u: np.ndarray, v: np.ndarray) -> float:
+    u = np.asarray(u, dtype=float)
+    v = np.asarray(v, dtype=float)
+    u_norm = np.linalg.norm(u)
+    v_norm = np.linalg.norm(v)
+    if u_norm > 0.0:
+        u = u / u_norm
+    if v_norm > 0.0:
+        v = v / v_norm
+    dot = float(np.dot(u, v))
+    dot = max(-1.0, min(1.0, dot))
+    return float(np.arccos(dot))
+
+
+def calculate_pose_error(pose1, pose2) -> np.ndarray:
+    R1 = pp.tform_from_pose(pose1)[:3, :3]
+    R2 = pp.tform_from_pose(pose2)[:3, :3]
+    p1 = np.array(pose1[0], dtype=float)
+    p2 = np.array(pose2[0], dtype=float)
+    position_err = p1 - p2
+    x_err = angle_between_unit_vectors(R1[:, 0], R2[:, 0])
+    y_err = angle_between_unit_vectors(R1[:, 1], R2[:, 1])
+    z_err = angle_between_unit_vectors(R1[:, 2], R2[:, 2])
+    return np.concatenate([position_err, np.array([x_err, y_err, z_err])])
 
 
 ###########################################
@@ -110,11 +166,7 @@ def interpolate(trajectory: np.ndarray, target_length: int) -> np.ndarray:
         if not mask[i]:
             # 查找两侧最近的已知点
             left_idx = np.max(orig_indices_in_new[orig_indices_in_new < i]) if any(orig_indices_in_new < i) else 0
-            right_idx = (
-                np.min(orig_indices_in_new[orig_indices_in_new > i])
-                if any(orig_indices_in_new > i)
-                else target_length - 1
-            )
+            right_idx = np.min(orig_indices_in_new[orig_indices_in_new > i]) if any(orig_indices_in_new > i) else target_length - 1
 
             # 如果左右索引相同，无法进行插值，使用最近点
             if left_idx == right_idx:
@@ -224,9 +276,7 @@ class CounterModule:
                 value.value = 0
 
     def save(self, path, filename):
-        data_to_save = {
-            name: {value.name: value.value for value in module.values.values()} for name, module in self.modules.items()
-        }
+        data_to_save = {name: {value.name: value.value for value in module.values.values()} for name, module in self.modules.items()}
         os.makedirs(path, exist_ok=True)
         file_path = os.path.join(path, filename)
         with open(file_path, "w") as file:
@@ -254,29 +304,22 @@ class TermPrint(object):
 
 class PrintManager:
     """打印控制模块，用于统一管理终端输出并控制缩进级别"""
-    
+
     # 预定义的颜色映射，便于使用不同颜色打印不同类型的消息
-    COLORS = {
-        "info": "white",
-        "success": "green",
-        "warning": "yellow",
-        "error": "red",
-        "debug": "cyan",
-        "highlight": "magenta"
-    }
-    
+    COLORS = {"info": "white", "success": "green", "warning": "yellow", "error": "red", "debug": "cyan", "highlight": "magenta"}
+
     # 单例模式，确保只有一个打印管理器实例
     _instance = None
-    
+
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             cls._instance = super(PrintManager, cls).__new__(cls)
         return cls._instance
-    
-    def __init__(self, indent_size: int = 4, tab_char: str = ' ', use_color: bool = True, default_color: str = "white"):
+
+    def __init__(self, indent_size: int = 4, tab_char: str = " ", use_color: bool = True, default_color: str = "white"):
         """
         初始化打印管理器
-        
+
         Args:
             indent_size: 每级缩进的空格数
             tab_char: 缩进使用的字符
@@ -284,33 +327,33 @@ class PrintManager:
             default_color: 默认输出颜色
         """
         # 避免重复初始化
-        if hasattr(self, 'indent_level'):
+        if hasattr(self, "indent_level"):
             return
-            
+
         self.indent_size = indent_size
         self.tab_char = tab_char
         self.indent_level = 0
         self.use_color = use_color
         self.default_color = default_color
-    
+
     def _get_indent(self, level: int = None) -> str:
         """
         获取当前缩进级别下的缩进字符串
-        
+
         Args:
             level: 指定的缩进级别，若不指定则使用当前级别
-            
+
         Returns:
             缩进字符串
         """
         if level is None:
             level = self.indent_level
         return self.tab_char * self.indent_size * level
-    
+
     def print(self, message: str, indent_level: int = None, color: str = None, end: str = "\n", flush: bool = True):
         """
         按照指定的缩进级别打印消息
-        
+
         Args:
             message: 要打印的消息
             indent_level: 指定的缩进级别，若不指定则使用当前级别
@@ -320,70 +363,70 @@ class PrintManager:
         """
         if indent_level is None:
             indent_level = self.indent_level
-            
+
         if color is None:
             color = self.default_color
-            
+
         indent_str = self._get_indent(indent_level)
         formatted_message = f"{indent_str}{message}"
-        
+
         if self.use_color:
             cprint(formatted_message, color, end=end, flush=flush)
         else:
             print(formatted_message, end=end, flush=flush)
-    
+
     def info(self, message: str, indent_level: int = None):
         """打印普通信息"""
         self.print(message, indent_level, self.COLORS["info"])
-    
+
     def success(self, message: str, indent_level: int = None):
         """打印成功信息"""
         self.print(message, indent_level, self.COLORS["success"])
-    
+
     def warning(self, message: str, indent_level: int = None):
         """打印警告信息"""
         self.print(message, indent_level, self.COLORS["warning"])
-    
+
     def error(self, message: str, indent_level: int = None):
         """打印错误信息"""
         self.print(message, indent_level, self.COLORS["error"])
-    
+
     def debug(self, message: str, indent_level: int = None):
         """打印调试信息"""
         self.print(message, indent_level, self.COLORS["debug"])
-    
+
     def highlight(self, message: str, indent_level: int = None):
         """打印高亮信息"""
         self.print(message, indent_level, self.COLORS["highlight"])
-    
+
     def indent(self, levels: int = 1):
         """增加缩进级别"""
         self.indent_level += levels
         return self
-    
+
     def dedent(self, levels: int = 1):
         """减少缩进级别"""
         self.indent_level = max(0, self.indent_level - levels)
         return self
-    
+
     def reset_indent(self):
         """重置缩进级别为0"""
         self.indent_level = 0
         return self
-    
+
     def set_indent(self, level: int):
         """直接设置缩进级别"""
         self.indent_level = max(0, level)
         return self
-    
+
     @contextmanager
     def indented(self, levels: int = 1):
         """
         临时增加缩进级别的上下文管理器
-        
+
         Args:
             levels: 增加的缩进级别数量
-            
+
         示例:
             printer = PrintManager()
             printer.info("主层级消息")
@@ -439,9 +482,7 @@ def timeit_decorator_counter(counter_name: str = "", verbose: bool = False, outp
     return timeit_decorator
 
 
-def closest_points_between_segments(
-    seg1: List[Union[List[float], np.ndarray]], seg2: List[Union[List[float], np.ndarray]]
-) -> Tuple[List[float], List[float]]:
+def closest_points_between_segments(seg1: List[Union[List[float], np.ndarray]], seg2: List[Union[List[float], np.ndarray]]) -> Tuple[List[float], List[float]]:
     """
     Calculate the endpoints of the common perpendicular line between two line segments.
 

@@ -5,16 +5,18 @@ import re
 from typing import List, Optional, Tuple
 
 import matplotlib.pyplot as plt
-from matplotlib.widgets import Slider
 import numpy as np
 import pybullet_planning as pp
+from matplotlib.widgets import Slider
 
 # Local imports
 HERE = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 import sys
+
 sys.path.append(HERE)
 
 from motion_planner.trajectory_dual_constrained_solver import TrajectoryDualConstrainedSolver
+from robot.robot_setup import RobotSetup
 from utils.params import DATA_DIR, PROJECT_DIR
 
 
@@ -113,7 +115,24 @@ def _load_trajectory(traj_path: str) -> Tuple[np.ndarray, Optional[List[str]]]:
     raise ValueError(f"Unrecognized trajectory format: {traj_path}")
 
 
-def _compute_rel_pose_deltas(robot_setup, trajectory: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def _angle_between_unit_vectors(u: np.ndarray, v: np.ndarray) -> float:
+    """Compute the angle between two vectors in radians.
+
+    The inputs are normalized internally for numerical robustness.
+    """
+    u = np.asarray(u, dtype=float)
+    v = np.asarray(v, dtype=float)
+    u_norm = np.linalg.norm(u)
+    v_norm = np.linalg.norm(v)
+    if u_norm > 0.0:
+        u = u / u_norm
+    if v_norm > 0.0:
+        v = v / v_norm
+    dot = float(np.dot(u, v))
+    dot = max(-1.0, min(1.0, dot))
+    return float(np.arccos(dot))
+
+def _compute_rel_pose_deltas(robot_setup: RobotSetup, trajectory: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """Compute deltas of left-in-right tool0 pose relative to the first frame.
 
     Args:
@@ -121,7 +140,9 @@ def _compute_rel_pose_deltas(robot_setup, trajectory: np.ndarray) -> Tuple[np.nd
         trajectory: [N, D] joint angles; D must be 12 for dual arms
 
     Returns:
-        (pos_deltas [N,3], euler_deltas [N,3]) where euler is (roll, pitch, yaw) in radians
+        (pos_deltas [N,3], rot_axis_errors [N,3]) where the rotational component
+        is the per-axis angle error between the axes of the current rotation
+        matrix and the axes of the initial rotation matrix, in radians.
     """
     if trajectory.ndim != 2:
         raise ValueError("Trajectory must be 2D [N, D]")
@@ -130,13 +151,15 @@ def _compute_rel_pose_deltas(robot_setup, trajectory: np.ndarray) -> Tuple[np.nd
 
     N = trajectory.shape[0]
     pos_d = np.zeros((N, 3), dtype=float)
-    eul_d = np.zeros((N, 3), dtype=float)
+    rot_err_d = np.zeros((N, 3), dtype=float)
 
     # Set first frame and compute baseline relative pose
     robot_setup.set_joint_positions(robot_setup.arm_joints, trajectory[0])
     world_from_left0 = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_left)
     world_from_right0 = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
     right_from_left0 = pp.multiply(pp.invert(world_from_right0), world_from_left0)
+    R0 = pp.tform_from_pose(right_from_left0)[:3, :3]
+    p0 = np.asarray(right_from_left0[0], dtype=float)
 
     for i in range(N):
         conf = trajectory[i]
@@ -146,18 +169,22 @@ def _compute_rel_pose_deltas(robot_setup, trajectory: np.ndarray) -> Tuple[np.nd
         world_from_right = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
         right_from_left = pp.multiply(pp.invert(world_from_right), world_from_left)
 
-        # delta = inv(first) * current
-        delta = pp.multiply(pp.invert(right_from_left0), right_from_left)
-        pos, quat = delta
-        eul = pp.euler_from_quat(quat)
+        # Positional error as current minus initial in the right frame
+        pos = np.asarray(right_from_left[0], dtype=float) - p0
+
+        # Rotational error from current vs initial rotation matrices (no delta multiply)
+        R_cur = pp.tform_from_pose(right_from_left)[:3, :3]
+        x_err = _angle_between_unit_vectors(R_cur[:, 0], R0[:, 0])
+        y_err = _angle_between_unit_vectors(R_cur[:, 1], R0[:, 1])
+        z_err = _angle_between_unit_vectors(R_cur[:, 2], R0[:, 2])
 
         pos_d[i] = np.array(pos, dtype=float)
-        eul_d[i] = np.array(eul, dtype=float)
+        rot_err_d[i] = np.array([x_err, y_err, z_err], dtype=float)
 
-    return pos_d, eul_d
+    return pos_d, rot_err_d
 
 
-def _plot_and_save(pos_d: np.ndarray, eul_d: np.ndarray, out_path: str, title: str) -> None:
+def _plot_and_save(pos_d: np.ndarray, rot_err_d: np.ndarray, out_path: str, title: str) -> None:
     """Plot position and Euler angle deltas and save to file.
 
     Euler deltas are shown in degrees.
@@ -177,11 +204,11 @@ def _plot_and_save(pos_d: np.ndarray, eul_d: np.ndarray, out_path: str, title: s
     axes[0].grid(True, linestyle=":", alpha=0.5)
     axes[0].legend()
 
-    # Euler deltas
-    eul_deg = np.rad2deg(eul_d)
-    axes[1].plot(t, eul_deg[:, 0], label="droll")
-    axes[1].plot(t, eul_deg[:, 1], label="dpitch")
-    axes[1].plot(t, eul_deg[:, 2], label="dyaw")
+    # Rotational axis angle errors
+    # rot_deg = np.rad2deg(rot_err_d)
+    axes[1].plot(t, rot_err_d[:, 0], label="x-axis err")
+    axes[1].plot(t, rot_err_d[:, 1], label="y-axis err")
+    axes[1].plot(t, rot_err_d[:, 2], label="z-axis err")
     axes[1].set_xlabel("Frame")
     axes[1].set_ylabel("Rotation (rad)")
     axes[1].set_title(f"Left tool0 in Right tool0 frame (ori delta)")
@@ -220,8 +247,8 @@ def _playback_with_normalized_slider(trajectory: np.ndarray, robot_setup, window
 
     # Optional: display current frame index
     ax_text = fig.add_axes([0.1, 0.15, 0.8, 0.2])
-    ax_text.axis('off')
-    text_artist = ax_text.text(0.0, 0.5, "frame: 0", fontsize=11, va='center', ha='left')
+    ax_text.axis("off")
+    text_artist = ax_text.text(0.0, 0.5, "frame: 0", fontsize=11, va="center", ha="left")
 
     def on_change(val: float) -> None:
         try:
@@ -258,7 +285,7 @@ def _playback_with_normalized_slider(trajectory: np.ndarray, robot_setup, window
 
 def _interactive_plot_with_normalized_slider(
     pos_d: np.ndarray,
-    eul_d: np.ndarray,
+    rot_err_d: np.ndarray,
     trajectory: np.ndarray,
     robot_setup,
     title: str,
@@ -289,11 +316,11 @@ def _interactive_plot_with_normalized_slider(
     axes[0].grid(True, linestyle=":", alpha=0.5)
     axes[0].legend()
 
-    # Euler deltas (degrees for consistency with saved plot)
-    eul_deg = np.rad2deg(eul_d)
-    axes[1].plot(t, eul_deg[:, 0], label="droll")
-    axes[1].plot(t, eul_deg[:, 1], label="dpitch")
-    axes[1].plot(t, eul_deg[:, 2], label="dyaw")
+    # Rotational axis angle errors (degrees for consistency with saved plot)
+    # rot_deg = np.rad2deg(rot_err_d)
+    axes[1].plot(t, rot_err_d[:, 0], label="x-axis err")
+    axes[1].plot(t, rot_err_d[:, 1], label="y-axis err")
+    axes[1].plot(t, rot_err_d[:, 2], label="z-axis err")
     axes[1].set_xlabel("Frame")
     axes[1].set_ylabel("Rotation (rad)")
     axes[1].set_title("Left tool0 in Right tool0 frame (ori delta)")
@@ -372,9 +399,7 @@ def main():
 
     # Build RobotCellState path and initialize robot+scene like constrained solver
     design_study_path = os.path.join(DATA_DIR, "husky_assembly_design_study")
-    target_cell_state_path = os.path.join(
-        design_study_path, args.design_case, "RobotCellStates", f"{args.target_name}_RobotCellState.json"
-    )
+    target_cell_state_path = os.path.join(design_study_path, args.design_case, "RobotCellStates", f"{args.target_name}_RobotCellState.json")
     if not os.path.isfile(target_cell_state_path):
         raise FileNotFoundError(f"RobotCellState not found: {target_cell_state_path}")
 
@@ -391,9 +416,7 @@ def main():
         search_dirs = [os.path.join(PROJECT_DIR, "data")]
         candidates = _find_candidate_trajectories(args.target_name, search_dirs)
         if not candidates:
-            raise FileNotFoundError(
-                f"No matching trajectory found under PROJECT_DIR/data for '{args.target_name}'"
-            )
+            raise FileNotFoundError(f"No matching trajectory found under PROJECT_DIR/data for '{args.target_name}'")
         traj_path = candidates[0]
         print(f"Using trajectory: {traj_path}")
     else:
@@ -403,12 +426,10 @@ def main():
     trajectory, _ = _load_trajectory(traj_path)
     if trajectory.shape[1] != len(robot_setup.arm_joints):
         # Best-effort: if 6-DOF single-arm provided, fail with clear message
-        raise ValueError(
-            f"Trajectory DOF ({trajectory.shape[1]}) does not match dual-arm DOF ({len(robot_setup.arm_joints)})."
-        )
+        raise ValueError(f"Trajectory DOF ({trajectory.shape[1]}) does not match dual-arm DOF ({len(robot_setup.arm_joints)}).")
 
     with pp.WorldSaver():
-        pos_d, eul_d = _compute_rel_pose_deltas(robot_setup, trajectory)
+        pos_d, rot_err_d = _compute_rel_pose_deltas(robot_setup, trajectory)
 
     # Prepare output
     if args.out is None:
@@ -419,12 +440,12 @@ def main():
         out_path = args.out
 
     title = f"Scene: {args.design_case} | Target: {args.target_name}"
-    _plot_and_save(pos_d, eul_d, out_path, title)
+    _plot_and_save(pos_d, rot_err_d, out_path, title)
     print(f"Plot saved to: {out_path}")
 
     # Optional: open an interactive plot with slider and vline cursor
     if args.slider:
-        _interactive_plot_with_normalized_slider(pos_d, eul_d, trajectory, robot_setup, title)
+        _interactive_plot_with_normalized_slider(pos_d, rot_err_d, trajectory, robot_setup, title)
 
     # Cleanup
     robot_setup.cleanup()
@@ -432,5 +453,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

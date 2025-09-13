@@ -195,11 +195,11 @@ def _plot_and_save(pos_d: np.ndarray, rot_err_d: np.ndarray, out_path: str, titl
 
     t = np.arange(pos_d.shape[0])
     # Position deltas
-    axes[0].plot(t, pos_d[:, 0], label="dx")
-    axes[0].plot(t, pos_d[:, 1], label="dy")
-    axes[0].plot(t, pos_d[:, 2], label="dz")
+    axes[0].plot(t, pos_d[:, 0] * 1000, label="dx")
+    axes[0].plot(t, pos_d[:, 1] * 1000, label="dy")
+    axes[0].plot(t, pos_d[:, 2] * 1000, label="dz")
     axes[0].set_xlabel("Frame")
-    axes[0].set_ylabel("Translation (m)")
+    axes[0].set_ylabel("Translation (mm)")
     axes[0].set_title(f"Left tool0 in Right tool0 frame (pos delta)")
     axes[0].grid(True, linestyle=":", alpha=0.5)
     axes[0].legend()
@@ -307,11 +307,11 @@ def _interactive_plot_with_normalized_slider(
 
     t = np.arange(num_frames)
     # Position deltas
-    axes[0].plot(t, pos_d[:, 0], label="dx")
-    axes[0].plot(t, pos_d[:, 1], label="dy")
-    axes[0].plot(t, pos_d[:, 2], label="dz")
+    axes[0].plot(t, pos_d[:, 0] * 1000, label="dx")
+    axes[0].plot(t, pos_d[:, 1] * 1000, label="dy")
+    axes[0].plot(t, pos_d[:, 2] * 1000, label="dz")
     axes[0].set_xlabel("Frame")
-    axes[0].set_ylabel("Translation (m)")
+    axes[0].set_ylabel("Translation (mm)")
     axes[0].set_title("Left tool0 in Right tool0 frame (pos delta)")
     axes[0].grid(True, linestyle=":", alpha=0.5)
     axes[0].legend()

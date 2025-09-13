@@ -77,7 +77,7 @@ class DualArmProjection:
 
         world_from_left = pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link_left)
         world_from_right = pp.multiply(world_from_left, pp.invert(self.desired_right_from_left))
-        q_right_new = self.robot_setup.get_right_arm_ik_solution(world_from_right, q_right)
+        q_right_new = self.robot_setup.ik_solver_right(world_from_right, q_right)
 
         if q_right_new is None:
             return None
@@ -170,10 +170,10 @@ class DualArmProjection:
         Create valid configurations by projecting multiple states to satisfy the relative constraint.
         """
         projected_confs = []
-        for _ in range(max_attempts):
-            print(f"Creating valid configurations... {_}/{max_attempts}")
+        delta_angles = np.linspace(-delta, delta, max_attempts)
+        for attempt_idx, delta_angle in enumerate(delta_angles):
+            print(f"Creating valid configurations... {attempt_idx+1}/{max_attempts}")
             right_ik_init_guess = np.random.uniform(-np.pi, np.pi, 6)
-            delta_angle = np.random.uniform(-delta, delta)
             delta_pose = pp.Pose(point = [0.0, 0.0, 0.0], euler = [0, 0, delta_angle])
             new_bar_pose = pp.multiply(bar_pose, delta_pose)
             right_tool0_pose = pp.multiply(new_bar_pose, bar_from_right)

@@ -132,8 +132,9 @@ def main():
         if projected is None or projected.size == 0:
             continue
         projected_confs.append(projected[0])
-        if len(projected_confs) % 50 == 0:
-            print(f"Collected {len(projected_confs)} / {args.count}")
+        # if len(projected_confs) % 50 == 0:
+        #     print(f"Collected {len(projected_confs)} / {args.count}")
+        print(f"Collected {len(projected_confs)} / {args.count}")
 
     # Build trajectory: start frame is the target configuration
     start_conf = np.array(target_conf, dtype=float)
@@ -147,7 +148,7 @@ def main():
     if args.out is None:
         out_dir = os.path.join(PROJECT_DIR, "data", "plots")
         os.makedirs(out_dir, exist_ok=True)
-        out_path = os.path.join(out_dir, f"{args.target_name}_left_in_right_tool0_deltas.png")
+        out_path = os.path.join(out_dir, f"{args.target_name}_ik_random_test.png")
     else:
         out_path = args.out
 

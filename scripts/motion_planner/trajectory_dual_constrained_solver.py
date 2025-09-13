@@ -20,6 +20,7 @@ from model.target_parse import TargetParser
 from robot.dual_arm_projection import DualArmProjection
 from robot.robot_setup import RobotSetup
 from utils.params import DATA_DIR, PROJECT_DIR
+from utils.util import normalize_angles, angles_distance
 
 # DEFAULT_RESOLUTION = math.radians(1.0)
 DEFAULT_RESOLUTION = 0.01
@@ -71,12 +72,12 @@ class TrajectoryDualConstrainedSolver:
         self.start_projected_confs = None
         self.target_projected_confs = None
 
-    def plan(self, start_conf: np.ndarray, target_conf: np.ndarray, max_time: int = 600, max_projection_attempts: int = 100, visualization: bool = True) -> Optional[List[np.ndarray]]:
+    def plan(self, start_confs: np.ndarray, target_conf: np.ndarray, max_time: int = 600, max_projection_attempts: int = 100, visualization: bool = True) -> Optional[List[np.ndarray]]:
         """
-        Main planning method that finds a trajectory from start to target configuration.
+        Main planning method that finds a trajectory from any of the given start configurations to the target configuration.
 
         Args:
-            start_conf: Starting joint configuration (12 DOF)
+            start_confs: Candidate starting joint configurations, shape (N, 12) or (12,)
             target_conf: Target joint configuration (12 DOF)
             max_time: Maximum planning time in seconds
             max_projection_attempts: Maximum attempts for constraint projection
@@ -86,40 +87,62 @@ class TrajectoryDualConstrainedSolver:
             List of joint configurations representing the path, or None if no path found
         """
         # Normalize configurations to [-pi, pi]
-        start_conf = self._normalize_angles(start_conf)
+        start_confs = np.array(start_confs)
+        if start_confs.ndim == 1:
+            start_confs = start_confs.reshape(1, -1)
+        start_confs = np.array([self._normalize_angles(sc) for sc in start_confs])
         target_conf = self._normalize_angles(target_conf)
 
-        print(f"Start configuration: {list(start_conf)}")
-        print(f"Target configuration: {list(target_conf)}")
-
-        # Setup constraint projection
+        # Setup constraint projection and collision checking (independent of specific start)
         self._setup_constraint_projection(target_conf)
-
-        # Setup collision checking
         self._setup_collision_checking()
 
-        # Generate projected configurations
-        self._generate_projected_configurations(start_conf, target_conf, max_projection_attempts)
-
-        # Setup planning functions
+        # Setup planning helper functions
         sample_fn = self._get_sample_fn()
         extend_fn_continuous = self._get_extend_fn(check_continuous=True)
         extend_fn_direct = self._get_extend_fn(check_continuous=False)
         distance_fn = self._get_distance_fn()
-        self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, start_conf)
-        start = pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link_right)
+
+        # 1) For each start_conf, generate projections and try direct path
+        for idx, start_conf in enumerate(start_confs):
+            print(f"Attempting direct path check for start_conf #{idx}")
+            self._generate_projected_configurations(start_conf, target_conf, max_projection_attempts)
+            path = self._try_direct_path(extend_fn_direct)
+            if path is not None:
+                # Post-process and optional visualize then return immediately
+                path = self._post_process_path(path)
+                if visualization:
+                    self._visualize_path(path)
+                print(f"Path found with {len(path)} waypoints (direct)")
+                return path
+
+        # 2) If no direct path exists for any start, pick the closest start to target by joint-space distance
+        print("No direct path for any start_conf. Selecting closest start_conf by angles_distance...")
+        distances = [angles_distance(sc, target_conf) for sc in start_confs]
+        best_idx = int(np.argmin(distances)) if len(distances) > 0 else 0
+        chosen_start_conf = start_confs[best_idx]
+        print(f"Chosen start_conf index: {best_idx}, distance: {distances[best_idx] if len(distances) > 0 else 'N/A'}")
+
+        # Draw function based on chosen start and target
+        self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, chosen_start_conf)
+        start_pose = pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link_right)
         self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, target_conf)
-        target = pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link_right)
-        draw_fn = self._get_draw_fn(start, target) if visualization else None
+        target_pose = pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link_right)
+        draw_fn = self._get_draw_fn(start_pose, target_pose) if visualization else None
 
-        # Try direct path first
-        path = self._try_direct_path(extend_fn_direct)
-
-        if path is None:
-            print("No direct path found. Using RRT-based planning...")
-            path = self.robot_setup.plan_manipulator_path(
-                start_conf, target_conf, attachments=[], obstacles=self.robot_setup.obstacles, sample_fn=sample_fn, collision_fn=self.invalid_fn, extend_fn=extend_fn_continuous, max_time=max_time, draw_fn=draw_fn, distance_fn=distance_fn
-            )
+        print("Using RRT-based planning from chosen start_conf...")
+        path = self.robot_setup.plan_manipulator_path(
+            chosen_start_conf,
+            target_conf,
+            attachments=[],
+            obstacles=self.robot_setup.obstacles,
+            sample_fn=sample_fn,
+            collision_fn=self.invalid_fn,
+            extend_fn=extend_fn_continuous,
+            max_time=max_time,
+            draw_fn=draw_fn,
+            distance_fn=distance_fn,
+        )
 
         if path is not None:
             path = self._post_process_path(path)
@@ -584,8 +607,8 @@ class TrajectoryDualConstrainedSolver:
         bar_pose = pp.multiply(base_pose, delta_pose)
 
         # Get IK solution handles for both arms
-        left_start_ik_handle = self.robot_setup.get_left_arm_ik_solution
-        right_start_ik_handle = self.robot_setup.get_right_arm_ik_solution
+        left_start_ik_handle = self.robot_setup.ik_solver_left
+        right_start_ik_handle = self.robot_setup.ik_solver_right
 
         # Generate valid configurations using dual-arm constraint projection
         start_confs = projector.create_valid_confs(
@@ -593,23 +616,19 @@ class TrajectoryDualConstrainedSolver:
         )
 
         # Select first valid configuration or exit if none found
-        if start_confs is not None:
-            start_conf = start_confs[0]
-        else:
+        if start_confs is None:
             print(f"✗ Failed to generate start configuration after {max_attempts} attempts")
             print("Consider adjusting delta_pose_point, delta_pose_euler, or increasing max_attempts")
             exit()
 
         # Normalize configuration to [-π, π] range
-        start_conf = np.array(start_conf)
-        start_conf = (start_conf + np.pi) % (2 * np.pi) - np.pi
-        print(f"Start configuration: {list(start_conf)}")
+        start_confs = normalize_angles(start_confs)
 
         # Set robot to computed configuration
-        self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, start_conf)
+        # self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, start_confs[0])
 
         print("✓ Start configuration generated successfully")
-        return start_conf
+        return start_confs
 
 
 def main():
@@ -620,14 +639,18 @@ def main():
     design_study_path = os.path.join(DATA_DIR, "husky_assembly_design_study")
     
     # ------------------------------
-    design_case = "250904_transfer_path_test"
+    # design_case = "250904_transfer_path_test"
     # target_name = "IK_test__20250909_235058"
-    target_name = "IK_test__20250905_101010"
-    state_name = "IK_test__GraspTargets"
+    # # target_name = "IK_test__20250905_101010"
+    # state_name = "IK_test__GraspTargets"
+    # ------------------------------ failed
+    # design_case = "250707_RobotX_box_demo"
+    # target_name = "robotx_box_A13-S_end"
+    # state_name = "robotx_box_A13-S_end_GraspTargets"
     # ------------------------------
     design_case = "250707_RobotX_box_demo"
-    target_name = "robotx_box_A13-S_end"
-    state_name = "robotx_box_A13-S_end_GraspTargets"
+    target_name = "robotx_box_A6-S4_end"
+    state_name = "robotx_box_A6-S4_end_GraspTargets"
     
     target_cell_state_path = os.path.join(design_study_path, design_case, "RobotCellStates", f"{target_name}_RobotCellState.json")
 
@@ -654,7 +677,8 @@ def main():
     # ------------------------------------------------------------------
     # Get Start Configuration
     # ------------------------------------------------------------------
-    start_conf = solver.generate_start_configuration(projector)
+    start_confs = solver.generate_start_configuration(projector, max_attempts=20)
+    print(f"Start configurations length: {len(start_confs)}")
 
     # ------------------------------------------------------------------
     # Plan Trajectory
@@ -667,10 +691,10 @@ def main():
     pr.enable()
     with pp.LockRenderer():
         path = solver.plan(
-            start_conf=start_conf,
+            start_confs=start_confs,
             target_conf=target_conf,
             max_time=36000,  # Maximum planning time in seconds, conservatively set to 10 hours
-            max_projection_attempts=100,  # Maximum attempts for constraint projection
+            max_projection_attempts=20,  # Maximum attempts for constraint projection
             visualization=False,  # Enable visualization
         )
     end_time = time.time()

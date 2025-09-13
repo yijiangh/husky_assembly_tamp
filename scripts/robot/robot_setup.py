@@ -311,15 +311,10 @@ class RobotSetup:
         if self.robot_type != "husky_dual":
             pass
         else:
-            # ik_solver_relative_left_raw = tracikpy.TracIKSolver(robot_urdf, self._onboard_link_left, self._tool0_name_left).ik
-            # ik_solver_relative_right_raw = tracikpy.TracIKSolver(robot_urdf, self._onboard_link_right, self._tool0_name_right).ik
-            # ik_solver_relative_left = partial(ik_solver_relative_left_raw, bx = 1e-6, by = 1e-6, bz = 1e-6, brx = 1e-6, bry = 1e-6, brz = 1e-6)
-            # ik_solver_relative_right = partial(ik_solver_relative_right_raw, bx = 1e-6, by = 1e-6, bz = 1e-6, brx = 1e-6, bry = 1e-6, brz = 1e-6)
-
             def pyb_ik_solver_left(ee_pose, q_init=None) -> np.ndarray:
                 if q_init is not None:
                     self.set_left_arm_joint_positions(q_init)
-                res = np.array(pybullet.calculateInverseKinematics(self.robot, pp.link_from_name(self.robot, self._tool0_name_left), ee_pose[0], ee_pose[1], maxNumIterations=100, residualThreshold=1e-6))[:6]
+                res = np.array(pybullet.calculateInverseKinematics(self.robot, pp.link_from_name(self.robot, self._tool0_name_left), ee_pose[0], ee_pose[1], maxNumIterations=1000, residualThreshold=1e-6))[:6]
                 self.set_left_arm_joint_positions(res)
                 pose_res = pp.get_link_pose(self.robot, pp.link_from_name(self.robot, self._tool0_name_left))
                 pose_err = calculate_pose_error(ee_pose, pose_res)
@@ -330,7 +325,7 @@ class RobotSetup:
             def pyb_ik_solver_right(ee_pose, q_init=None) -> np.ndarray:
                 if q_init is not None:
                     self.set_right_arm_joint_positions(q_init)
-                res = np.array(pybullet.calculateInverseKinematics(self.robot, pp.link_from_name(self.robot, self._tool0_name_right), ee_pose[0], ee_pose[1], maxNumIterations=100, residualThreshold=1e-6))[6:]
+                res = np.array(pybullet.calculateInverseKinematics(self.robot, pp.link_from_name(self.robot, self._tool0_name_right), ee_pose[0], ee_pose[1], maxNumIterations=1000, residualThreshold=1e-6))[6:]
                 self.set_right_arm_joint_positions(res)
                 pose_res = pp.get_link_pose(self.robot, pp.link_from_name(self.robot, self._tool0_name_right))
                 pose_err = calculate_pose_error(ee_pose, pose_res)

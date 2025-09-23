@@ -170,11 +170,12 @@ class DualArmProjection:
         Create valid configurations by projecting multiple states to satisfy the relative constraint.
         """
         projected_confs = []
-        delta_angles = np.linspace(-delta, delta, max_attempts)
+        delta_angles = np.linspace(0, delta, max_attempts)
         for attempt_idx, delta_angle in enumerate(delta_angles):
-            print(f"Creating valid configurations... {attempt_idx+1}/{max_attempts}")
+            # print(f"Creating valid configurations... {attempt_idx+1}/{max_attempts}")
             right_ik_init_guess = np.random.uniform(-np.pi, np.pi, 6)
             delta_pose = pp.Pose(point = [0.0, 0.0, 0.0], euler = [0, 0, delta_angle])
+            # print(f"Delta pose: {delta_pose}")
             new_bar_pose = pp.multiply(bar_pose, delta_pose)
             right_tool0_pose = pp.multiply(new_bar_pose, bar_from_right)
             right_conf = right_ik_handle(right_tool0_pose, right_ik_init_guess)

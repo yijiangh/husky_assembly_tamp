@@ -266,6 +266,7 @@ class RobotSetup:
         self.obstacles = robot_data["obstacles"]
         self.ee_attachment = robot_data["ee_attachment"]
         self.disabled_collisions = robot_data["disabled_collisions"]
+        self.target_bar = robot_data["target_bar"]
 
         if self.robot_type == "husky_dual":
             self.left_ee_attachment = robot_data["left_ee_attachment"]
@@ -307,10 +308,10 @@ class RobotSetup:
             self.base_from_connect = self._base_from_connect
 
         # Set up ik solver
-
         if self.robot_type != "husky_dual":
             pass
         else:
+
             def pyb_ik_solver_left(ee_pose, q_init=None) -> np.ndarray:
                 if q_init is not None:
                     self.set_left_arm_joint_positions(q_init)
@@ -444,9 +445,10 @@ class RobotSetup:
                 "right_ee_attachment": right_ee_attachment,
                 "disabled_collisions": disabled_collisions,
                 "obstacles": obstacles,
+                "target_bar": target_bar,
             }
         else:
-            return {"robot": robot, "obstacles": obstacles, "ee_attachment": ee_attachment, "disabled_collisions": disabled_collisions}
+            return {"robot": robot, "obstacles": obstacles, "ee_attachment": ee_attachment, "disabled_collisions": disabled_collisions, "target_bar": target_bar}
 
     def set_joint_positions(self, control_joints: List[int], conf: np.ndarray) -> None:
         """Set joint positions and update attachments.

@@ -84,7 +84,7 @@ class TargetParser:
             world_from_bar = pp.pose_from_tform(np.array(world_from_bar.matrix))
             world_from_tool0 = pp.pose_from_tform(np.array(world_from_tool0.matrix))
             tool0_from_bar = pp.multiply(pp.invert(world_from_tool0), world_from_bar)
-            poses.append(tool0_from_bar)
+            poses.append(tool0_from_bar) # left, right
         return poses
 
 

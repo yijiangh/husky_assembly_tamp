@@ -331,7 +331,7 @@ def rrt_connect_capsule(start, goal, distance_fn, sample_fn, extend_fn, collisio
             draw_fn(target, [])
 
         last1, _ = extend_towards_capsule(tree1, target, distance_fn, extend_fn, collision_fn, robot_setup, projector, swap, **kwargs)
-        last2, success = extend_towards_capsule(tree2, last1.config, distance_fn, extend_fn, collision_fn, robot_setup, projector, not swap, **kwargs)
+        last2, success = extend_towards_capsule(tree2, last1, distance_fn, extend_fn, collision_fn, robot_setup, projector, not swap, **kwargs)
 
         if success:
             path1, path2 = last1.retrace(), last2.retrace()
@@ -339,6 +339,8 @@ def rrt_connect_capsule(start, goal, distance_fn, sample_fn, extend_fn, collisio
                 path1, path2 = path2, path1
             if verbose:
                 print(f"RRT connect capsule: {iteration} iterations, {len(nodes1) + len(nodes2)} nodes")
+            capsule_path = configs_capsule(path1[:-1] + path2[::-1])
+            plot_capsule_path(capsule_path)
             return configs_capsule(path1[:-1] + path2[::-1])
     return None
 
@@ -768,7 +770,7 @@ def main():
         for way_point in way_points:
             pp.draw_pose(way_point, length=0.25)
 
-    pp.wait_for_user()
+    # pp.wait_for_user()
 
     extend_fn = solver._get_extend_fn()
     collision_fn = solver._get_collision_fn()

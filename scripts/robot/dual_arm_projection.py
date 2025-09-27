@@ -49,7 +49,7 @@ class DualArmProjection:
 
         world_from_right = pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link_right)
         world_from_left = pp.multiply(world_from_right, self.desired_right_from_left)
-        q_left_new = self.robot_setup.ik_solver_left(world_from_left, q_left) # fuck
+        q_left_new = self.robot_setup.ik_solver_left(world_from_left, q_left)
 
         if q_left_new is None:
             return None
@@ -165,7 +165,7 @@ class DualArmProjection:
             return None
         return np.stack(projected_confs)
     
-    def create_valid_confs(self, right_ik_handle: Callable[[np.ndarray], np.ndarray], bar_pose: Tuple, bar_from_right: Tuple, delta: float = np.pi/6, max_attempts: int = 20, collision_fn: Callable[[np.ndarray], bool] = None) -> Union[np.ndarray, None]:
+    def create_valid_confs(self, right_ik_handle: Callable[[np.ndarray], np.ndarray], bar_pose: Tuple, bar_from_right: Tuple, delta: float = np.pi/6, max_attempts: int = 20, collision_fn: Callable[[np.ndarray], bool] = None, immediate: bool = False) -> Union[np.ndarray, None]:
         """
         Create valid configurations by projecting multiple states to satisfy the relative constraint.
         """
@@ -186,6 +186,8 @@ class DualArmProjection:
                 if projected_confs_temp is not None:
                     for projected_conf in projected_confs_temp:
                         projected_confs.append(projected_conf)
+                        if immediate:
+                            return projected_conf
         unique_confs = []
         atol = 1e-2
         for conf in projected_confs:

@@ -127,10 +127,10 @@ Methods:
     - check_connection() -> bool: whether any valid parent connection exists.
     - retrace() -> List[Capsule]: returns the chain from root to this capsule.
 
-- configs_capsule(nodes: List[Capsule]) -> Optional[List[np.ndarray]]
+- configs_capsule(nodes: List[Capsule]) -> Optional[Tuple[List[np.ndarray], List[int]]]
   - Given an ordered list of capsules (rungs), selects a feasible sequence of joint configs across rungs by backtracking the stored connections. Returns `None` if no sequence exists.
 
-- plot_capsule_path(capsule_path: List[Capsule]) -> Optional[str]
+- plot_capsule_path(capsule_path: List[Capsule], highlight_feasible: bool = False) -> Optional[str]
   - Draws the ladder graph (nodes per rung and edges across adjacent rungs) and saves an SVG to `PROJECT_DIR/plots/ladder_graph_<timestamp>.svg`. Returns the saved file path or `None`.
 
 - rrt_connect_capsule(start: Capsule, goal: Capsule, distance_fn, sample_fn, extend_fn, collision_fn, robot_setup, projector, ...) -> Optional[List[np.ndarray]]

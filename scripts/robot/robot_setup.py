@@ -921,6 +921,40 @@ class RobotSetup:
 
         return collision_fn
 
+    def create_floating_body_collision_fn(self, obstacle_bodies: List[int] = []) -> Callable[[np.ndarray], bool]:
+        """Create PyBullet-based collision function for a floating body."""
+
+        attachments = []
+        if self.robot_type == "husky_dual":
+            if self.left_ee_attachment:
+                attachments.append(self.left_ee_attachment)
+            if self.right_ee_attachment:
+                attachments.append(self.right_ee_attachment)
+        else:
+            if self.ee_attachment:
+                attachments.append(self.ee_attachment)
+        attachments.extend(self.attachments)
+        disabled_collisions = self.disabled_collisions
+
+        extra_disabled_collisions = []
+        for link_name in self._grasp_mask_links:
+            link = pp.link_from_name(self.robot, link_name)
+            for attachment in attachments:
+                attachment: Attachment
+                extra_disabled_collisions.extend([((self.robot, link), (attachment.child, pp.BASE_LINK))])
+
+        grasped_collision_fn_list = []
+        for attachment in self.attachments:
+            grasped_collision_fn_list.append(pp.get_floating_body_collision_fn(attachment.child, obstacles=obstacle_bodies + [self.robot], disabled_collisions=extra_disabled_collisions))
+
+        def collision_fn(pose, diagnosis=False):
+            collision = False
+            for idx, grasped_collision_fn in enumerate(grasped_collision_fn_list):
+                collision = collision or grasped_collision_fn(pose, diagnosis=diagnosis)
+            return collision
+
+        return collision_fn
+
     def create_invalid_rfl_fn(self, desired_right_from_left: Tuple, obstacle_bodies: List[int] = []) -> Callable[[np.ndarray], bool]:
         """Create a valid function for the robot.
 

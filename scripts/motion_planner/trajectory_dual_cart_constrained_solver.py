@@ -75,7 +75,7 @@ def cspace_linear_extend(q1: np.ndarray, q2: np.ndarray, robot_setup: RobotSetup
 
 class Capsule(object):
 
-    def __init__(self, pose, config = None, parent=None, robot_setup=None, projector=None):
+    def __init__(self, pose, config=None, parent=None, robot_setup=None, projector=None):
         self.pose = pose
         if config is not None:
             self.config = config
@@ -115,17 +115,17 @@ def extend_towards_capsule(tree: List[Capsule], target: Capsule, distance_fn, ex
     for i, c in enumerate(safe):
         c: Capsule
         if (i % tree_frequency == 0) or (i == len(safe) - 1):
-            # if i != 0:
             c.parent = last
             tree.append(c)
             last = c
     success = len(extend) == len(safe)
     return last, success
 
+
 # TODO: implement this
 def configs_capsule(nodes: List[Capsule]):
     pass
-    
+
     # if nodes is None or len(nodes) == 0:
     #     return None
 
@@ -186,18 +186,19 @@ def configs_capsule(nodes: List[Capsule]):
     # path = [nodes[i].config[chosen_indices[i]] for i in range(num_nodes)]
     # return path, chosen_indices
 
+
 # TODO: re-implement this
 def plot_ladder_graph(capsule_path: List[Capsule], highlight_feasible: bool = False) -> Optional[str]:
     """
     Draw ladder graph nodes (per-rung IK solutions) and inter-rung connections, then save as SVG.
-    
+
     When highlight_feasible is True, computes a feasible joint sequence via configs_capsule
     and highlights its nodes and connecting edges.
     """
     if capsule_path is None or len(capsule_path) == 0:
         return None
 
-    rung_sizes = [len(node.config) if (node is not None and hasattr(node, 'config') and node.config is not None) else 0 for node in capsule_path]
+    rung_sizes = [len(node.config) if (node is not None and hasattr(node, "config") and node.config is not None) else 0 for node in capsule_path]
     if sum(rung_sizes) == 0:
         return None
 
@@ -233,8 +234,8 @@ def plot_ladder_graph(capsule_path: List[Capsule], highlight_feasible: bool = Fa
         right_size = len(right.config) if right.config is not None else 0
         if left_size == 0 or right_size == 0:
             continue
-        
-        if getattr(right, 'parent', None) is left:
+
+        if getattr(right, "parent", None) is left:
             # right.connection[curr_idx] -> list of prev indices in left
             for curr_idx in range(right_size):
                 conns = right.connection[curr_idx] if curr_idx < len(right.connection) else []
@@ -242,8 +243,8 @@ def plot_ladder_graph(capsule_path: List[Capsule], highlight_feasible: bool = Fa
                     if 0 <= prev_idx < left_size:
                         x0, y0 = rung_positions[r][prev_idx]
                         x1, y1 = rung_positions[r + 1][curr_idx]
-                        ax.plot([x0, x1], [y0, y1], color='0.6', linewidth=1.2, alpha=0.8)
-        elif getattr(left, 'parent', None) is right:
+                        ax.plot([x0, x1], [y0, y1], color="0.6", linewidth=1.2, alpha=0.8)
+        elif getattr(left, "parent", None) is right:
             # left.connection[prev_idx] -> list of curr indices in right
             for prev_idx in range(left_size):
                 conns = left.connection[prev_idx] if prev_idx < len(left.connection) else []
@@ -251,7 +252,7 @@ def plot_ladder_graph(capsule_path: List[Capsule], highlight_feasible: bool = Fa
                     if 0 <= curr_idx < right_size:
                         x0, y0 = rung_positions[r][prev_idx]
                         x1, y1 = rung_positions[r + 1][curr_idx]
-                        ax.plot([x0, x1], [y0, y1], color='0.6', linewidth=1.2, alpha=0.8)
+                        ax.plot([x0, x1], [y0, y1], color="0.6", linewidth=1.2, alpha=0.8)
         else:
             continue
 
@@ -262,14 +263,14 @@ def plot_ladder_graph(capsule_path: List[Capsule], highlight_feasible: bool = Fa
         xs = [p[0] for p in positions]
         ys = [p[1] for p in positions]
         if r == 0:
-            facecolor = '#2ca02c'  # green
+            facecolor = "#2ca02c"  # green
         elif r == num_rungs - 1:
-            facecolor = '#d62728'  # red
+            facecolor = "#d62728"  # red
         else:
-            facecolor = '#1f77b4'  # blue
-        ax.scatter(xs, ys, s=(node_radius * 650) ** 2 / (fig.dpi ** 2), c=facecolor, edgecolors='k', linewidths=0.6, zorder=3)
+            facecolor = "#1f77b4"  # blue
+        ax.scatter(xs, ys, s=(node_radius * 650) ** 2 / (fig.dpi**2), c=facecolor, edgecolors="k", linewidths=0.6, zorder=3)
         for i, (x, y) in enumerate(positions):
-            ax.text(x, y + 0.08, f"{i}", ha='center', va='bottom', fontsize=8, color='k')
+            ax.text(x, y + 0.08, f"{i}", ha="center", va="bottom", fontsize=8, color="k")
 
     # Optionally highlight one feasible path across rungs
     if highlight_feasible:
@@ -289,7 +290,7 @@ def plot_ladder_graph(capsule_path: List[Capsule], highlight_feasible: bool = Fa
                     continue
                 x0, y0 = rung_positions[r][i0]
                 x1, y1 = rung_positions[r + 1][i1]
-                ax.plot([x0, x1], [y0, y1], color='#ffbf00', linewidth=3.0, alpha=0.95, zorder=2)
+                ax.plot([x0, x1], [y0, y1], color="#ffbf00", linewidth=3.0, alpha=0.95, zorder=2)
 
             # Overlay highlighted nodes
             for r, idx in enumerate(chosen_indices):
@@ -298,30 +299,32 @@ def plot_ladder_graph(capsule_path: List[Capsule], highlight_feasible: bool = Fa
                 if idx >= len(rung_positions[r]):
                     continue
                 xh, yh = rung_positions[r][idx]
-                ax.scatter([xh], [yh], s=(node_radius * 900) ** 2 / (fig.dpi ** 2), c='#ffbf00', edgecolors='k', linewidths=0.8, zorder=4)
+                ax.scatter([xh], [yh], s=(node_radius * 900) ** 2 / (fig.dpi**2), c="#ffbf00", edgecolors="k", linewidths=0.8, zorder=4)
 
-    ax.set_aspect('equal', adjustable='datalim')
-    ax.set_xlabel('Rung Index')
-    ax.set_ylabel('Node Index (layout)')
-    ax.set_title('Ladder Graph (Capsule Path)')
+    ax.set_aspect("equal", adjustable="datalim")
+    ax.set_xlabel("Rung Index")
+    ax.set_ylabel("Node Index (layout)")
+    ax.set_title("Ladder Graph (Capsule Path)")
     ax.set_xticks([i * x_spacing for i in range(num_rungs)])
     ax.set_xticklabels([str(i) for i in range(num_rungs)])
     ax.margins(x=0.15, y=0.15)
-    for spine in ['top', 'right']:
+    for spine in ["top", "right"]:
         ax.spines[spine].set_visible(False)
 
-    out_dir = os.path.join(PROJECT_DIR, 'plots')
+    out_dir = os.path.join(PROJECT_DIR, "plots")
     os.makedirs(out_dir, exist_ok=True)
-    timestamp = time.strftime('%Y%m%d_%H%M%S')
-    out_path = os.path.join(out_dir, f'ladder_graph_{timestamp}.svg')
-    fig.savefig(out_path, format='svg', bbox_inches='tight')
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    out_path = os.path.join(out_dir, f"ladder_graph_{timestamp}.svg")
+    fig.savefig(out_path, format="svg", bbox_inches="tight")
     plt.close(fig)
     print(f"Ladder graph saved to: {out_path}")
     return out_path
 
+
 def plot_capsule_path(capsule_path: List[Capsule]):
     for capsule in capsule_path:
         pp.draw_pose(capsule.pose)
+
 
 # TODO: re-implement this
 def rrt_connect_capsule(start: Capsule, goal: Capsule, distance_fn, sample_fn, extend_fn, collision_fn, robot_setup, projector, max_iterations=10000, max_time=pp.INF, verbose=False, draw_fn=None, enforce_alternate=False, **kwargs):
@@ -362,7 +365,7 @@ def rrt_connect_capsule(start: Capsule, goal: Capsule, distance_fn, sample_fn, e
             capsule_nodes = path1[:-1] + path2[::-1]
             plot_capsule_path(capsule_nodes)
             return capsule_nodes
-            
+
             # plot_ladder_graph(capsule_nodes, highlight_feasible=True)
             # result = configs_capsule(capsule_nodes)
             # return None if result is None else result[0]
@@ -597,11 +600,11 @@ class TrajectoryDualCartConstrainedSolver(object):
                 world_from_bar = pp.Pose(point=[x, y, z], euler=pp.Euler(roll, pitch, yaw))
                 if enable_ik:
                     confs = self.projector.create_valid_confs(
-                            self.robot_setup.ik_solver_right, world_from_bar, bar_from_right, delta=0.0, max_attempts=20, collision_fn=self.robot_setup.create_collision_fn(obstacle_bodies=self.robot_setup.obstacles)
-                        )
+                        self.robot_setup.ik_solver_right, world_from_bar, bar_from_right, delta=0.0, max_attempts=20, collision_fn=self.robot_setup.create_collision_fn(obstacle_bodies=self.robot_setup.obstacles)
+                    )
                 else:
                     confs = None
-                    
+
                 if enable_ik and confs is not None:
                     return Capsule(world_from_bar, confs, parent=None, robot_setup=self.robot_setup, projector=self.projector)
                 elif not enable_ik:
@@ -614,16 +617,16 @@ class TrajectoryDualCartConstrainedSolver(object):
         def fn(c1: Capsule, c2: Capsule):
             way_points = self.cart_linear_interp(c1, c2, position_res=0.05, rotation_res=0.1)
             global bar_from_right
-            
+
             last_capsule = copy.deepcopy(c1)
             last_capsule.parent = None
-            yield last_capsule
+            # yield last_capsule
 
             for world_from_bar in way_points[1:]:
                 world_from_right = pp.multiply(world_from_bar, bar_from_right)
 
                 conf = None
-                if enable_ik and hasattr(last_capsule, 'config') and last_capsule.config is not None and len(last_capsule.config) > 0:
+                if enable_ik and hasattr(last_capsule, "config") and last_capsule.config is not None and len(last_capsule.config) > 0:
                     seed_right = last_capsule.config[0][6:]
                     seed_left = last_capsule.config[0][:6]
 
@@ -679,14 +682,17 @@ class TrajectoryDualCartConstrainedSolver(object):
 
         return fn
 
-    # TODO: re-implement this
+    # TODO: current step 2
     def _get_collision_fn(self):
-        def fn(q: Capsule):
-            # if len(q.config) == 0:
-            #     return True
-            # if q.parent is not None and not q.valid_flag:
-            #     return True
-            return False
+        floating_collision_fn = self.robot_setup.create_floating_body_collision_fn(obstacle_bodies=self.robot_setup.obstacles)
+        collision_fn = self.robot_setup.create_collision_fn(obstacle_bodies=self.robot_setup.obstacles)
+
+        def fn(c: Capsule):
+            # self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, np.array([0] * 12))
+            # return floating_collision_fn(c.pose)
+            if len(c.config) == 0:
+                return True
+            return collision_fn(c.config[0])
 
         return fn
 
@@ -737,9 +743,9 @@ def main():
     """
     Example usage of TrajectoryDualConstrainedSolver.
     """
-    
+
     # np.random.seed(0)
-    
+
     # Configuration paths
     design_study_path = os.path.join(DATA_DIR, "husky_assembly_design_study")
 
@@ -796,8 +802,8 @@ def main():
 
     # pp.wait_for_user()
 
-    start_capsule = Capsule(world_from_bar_start, config = start_confs, parent=None, robot_setup=robot_setup, projector=projector)
-    target_capsule = Capsule(world_from_bar_target, config = target_confs, parent=None, robot_setup=robot_setup, projector=projector)
+    start_capsule = Capsule(world_from_bar_start, config=start_confs, parent=None, robot_setup=robot_setup, projector=projector)
+    target_capsule = Capsule(world_from_bar_target, config=target_confs, parent=None, robot_setup=robot_setup, projector=projector)
 
     way_points = solver.cart_linear_interp(start_capsule, target_capsule, position_res=0.1, rotation_res=0.05)
 
@@ -807,7 +813,7 @@ def main():
 
     # pp.wait_for_user()
 
-    extend_fn = solver._get_extend_fn(enable_ik=False)
+    extend_fn = solver._get_extend_fn(enable_ik=True)
     collision_fn = solver._get_collision_fn()
     distance_fn = solver._get_distance_fn()
     sample_fn = solver._get_sample_fn(enable_ik=False)
@@ -819,11 +825,12 @@ def main():
     #     result = configs_capsule(capsule_path)
     #     path = None if result is None else result[0]
 
-    if path is None:    
+    if path is None:
         path = rrt_connect_capsule(start_capsule, target_capsule, distance_fn, sample_fn, extend_fn, collision_fn, robot_setup, projector)
         print(path)
-        
+
     pp.wait_for_user()
+
 
 if __name__ == "__main__":
     main()

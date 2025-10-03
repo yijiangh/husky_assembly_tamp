@@ -3,6 +3,7 @@ import cProfile
 import io
 import math
 import os
+import pathlib
 import pstats
 import sys
 import time
@@ -82,6 +83,7 @@ class Capsule(object):
         else:
             self.config = []
         self.parent = parent
+        self.connection = []
 
     def retrace(self):
         sequence = []
@@ -92,7 +94,19 @@ class Capsule(object):
         return sequence[::-1]
 
     def draw(self, draw_fn):
-        pass
+        segment = [] if self.parent is None else [self, self.parent]
+        draw_fn(self, segment)
+
+    def set_parent(self, parent: "Capsule"):
+        self.parent = parent
+        for _ in range(len(self.config)):
+            self.connection.append([])
+        for i in range(len(self.config)):
+            for j in range(len(parent.config)):
+                dist = np.linalg.norm(angles_distance(self.config[i], parent.config[j]))
+                # print(f"i: {i}, j: {j}, dist: {dist}")
+                if dist < 0.75:
+                    self.connection[i].append(j)
 
     def __str__(self):
         return "Capsule(" + str(self.pose) + ", " + str(len(self.config)) + ")"
@@ -119,75 +133,108 @@ def extend_towards_capsule(tree: List[Capsule], target: Capsule, distance_fn, ex
             tree.append(c)
             last = c
     success = len(extend) == len(safe)
-    return last, success
+    return last, success, tree
 
 
-# TODO: implement this
-def configs_capsule(nodes: List[Capsule]):
-    pass
+def configs_capsule(nodes: List[Capsule], distance_fn: Optional[Callable[[np.ndarray, np.ndarray], float]] = None):
+    """Enumerate all feasible configuration paths across capsule rungs.
 
-    # if nodes is None or len(nodes) == 0:
-    #     return None
+    Args:
+        nodes: Ladder of `Capsule` rungs with `config` lists and inter-rung `connection` info.
+        distance_fn: Function mapping (q_prev, q_curr) -> scalar step distance. If None,
+                     uses L2 norm of angular difference via `angles_distance`.
 
-    # if len(nodes) == 1:
-    #     first_node = nodes[0]
-    #     if len(first_node.config) == 0:
-    #         return None
-    #     return [first_node.config[0]], [0]
+    Returns:
+        List of tuples (path, chosen_indices, total_distance), sorted by total_distance ascending.
+        - path: List[np.ndarray] of configurations, one per rung.
+        - chosen_indices: List[int] indices into each rung's `config`.
+        - total_distance: float cumulative distance along adjacent rung transitions.
+        Empty list if no feasible path exists.
+    """
+    if nodes is None or len(nodes) == 0:
+        return []
 
-    # num_nodes = len(nodes)
-    # parent_choice = [dict() for _ in range(num_nodes)]
+    # Default distance function in C-space
+    def _default_dist(q1: np.ndarray, q2: np.ndarray) -> float:
+        return float(np.linalg.norm(angles_distance(np.asarray(q1, dtype=float), np.asarray(q2, dtype=float)), ord=2))
 
-    # reachable_prev = set(range(len(nodes[0].config)))
+    dist_fn = distance_fn if distance_fn is not None else _default_dist
 
-    # for level in range(1, num_nodes):
-    #     prev_node = nodes[level - 1]
-    #     curr_node = nodes[level]
+    if len(nodes) == 1:
+        first_node = nodes[0]
+        if first_node is None or first_node.config is None or len(first_node.config) == 0:
+            return []
+        # All single-node choices have zero path length; return each as a feasible path
+        results = []
+        for idx, q in enumerate(first_node.config):
+            results.append(([q], [idx], 0.0))
+        return results
 
-    #     edges = {i: set() for i in range(len(prev_node.config))}
+    # If any rung has zero configs, no path exists
+    for n in nodes:
+        if n is None or n.config is None or len(n.config) == 0:
+            return []
 
-    #     if curr_node.parent is prev_node:
-    #         for curr_idx in range(len(curr_node.config)):
-    #             for prev_idx in curr_node.connection[curr_idx]:
-    #                 if 0 <= prev_idx < len(prev_node.config):
-    #                     edges[prev_idx].add(curr_idx)
-    #     elif prev_node.parent is curr_node:
-    #         for prev_idx in range(len(prev_node.config)):
-    #             for curr_idx in prev_node.connection[prev_idx]:
-    #                 if 0 <= curr_idx < len(curr_node.config):
-    #                     edges[prev_idx].add(curr_idx)
-    #     else:
-    #         return None
+    num_nodes = len(nodes)
 
-    #     reachable_curr = set()
-    #     for prev_idx in reachable_prev:
-    #         for curr_idx in edges.get(prev_idx, []):
-    #             if curr_idx not in parent_choice[level]:
-    #                 parent_choice[level][curr_idx] = prev_idx
-    #             reachable_curr.add(curr_idx)
+    # Build adjacency maps for each consecutive rung pair: prev_idx -> List[curr_idx]
+    edges_per_level: List[dict] = []
+    for level in range(num_nodes - 1):
+        prev_node = nodes[level]
+        curr_node = nodes[level + 1]
+        prev_size = len(prev_node.config)
+        curr_size = len(curr_node.config)
+        edges = {i: [] for i in range(prev_size)}
 
-    #     if len(reachable_curr) == 0:
-    #         return None
+        if getattr(curr_node, "parent", None) is prev_node:
+            # Use curr_node.connection[curr_idx] -> list of prev indices
+            for curr_idx in range(curr_size):
+                conns = curr_node.connection[curr_idx] if curr_idx < len(curr_node.connection) else []
+                for prev_idx in conns:
+                    if 0 <= prev_idx < prev_size:
+                        edges[prev_idx].append(curr_idx)
+        elif getattr(prev_node, "parent", None) is curr_node:
+            # Use prev_node.connection[prev_idx] -> list of curr indices
+            for prev_idx in range(prev_size):
+                conns = prev_node.connection[prev_idx] if prev_idx < len(prev_node.connection) else []
+                for curr_idx in conns:
+                    if 0 <= curr_idx < curr_size:
+                        edges[prev_idx].append(curr_idx)
+        else:
+            # Unknown relation between rungs; treat as no edges
+            return []
 
-    #     reachable_prev = reachable_curr
+        edges_per_level.append(edges)
 
-    # last_choices = list(reachable_prev)
-    # if len(last_choices) == 0:
-    #     return None
-    # last_idx = last_choices[0]
+    # DFS to enumerate all feasible index sequences and their paths/costs
+    results: List[Tuple[List[np.ndarray], List[int], float]] = []
 
-    # chosen_indices = [None] * num_nodes
-    # chosen_indices[-1] = last_idx
-    # for level in range(num_nodes - 1, 0, -1):
-    #     curr_idx = chosen_indices[level]
-    #     prev_idx = parent_choice[level][curr_idx]
-    #     chosen_indices[level - 1] = prev_idx
+    def dfs(rung_idx: int, curr_idx: int, chosen_indices: List[int], path: List[np.ndarray], total_cost: float):
+        # At rung_idx refers to current rung index (0-based). If we reached last rung, record
+        if rung_idx == num_nodes - 1:
+            results.append((path, chosen_indices, float(total_cost)))
+            return
+        # Explore all successors on next rung
+        successors = edges_per_level[rung_idx].get(curr_idx, [])
+        for nxt_idx in successors:
+            q_prev = nodes[rung_idx].config[curr_idx]
+            q_curr = nodes[rung_idx + 1].config[nxt_idx]
+            step_cost = dist_fn(q_prev, q_curr)
+            dfs(rung_idx + 1, nxt_idx, chosen_indices + [nxt_idx], path + [q_curr], total_cost + step_cost)
 
-    # path = [nodes[i].config[chosen_indices[i]] for i in range(num_nodes)]
-    # return path, chosen_indices
+    # Start from every feasible index on the first rung that has at least one outgoing edge
+    first_edges = edges_per_level[0]
+    for start_idx in range(len(nodes[0].config)):
+        if len(first_edges.get(start_idx, [])) == 0:
+            continue
+        q0 = nodes[0].config[start_idx]
+        dfs(0, start_idx, [start_idx], [q0], 0.0)
+
+    # Sort by total cost ascending
+    results.sort(key=lambda item: item[2])
+    return results
 
 
-# TODO: re-implement this
 def plot_ladder_graph(capsule_path: List[Capsule], highlight_feasible: bool = False) -> Optional[str]:
     """
     Draw ladder graph nodes (per-rung IK solutions) and inter-rung connections, then save as SVG.
@@ -272,34 +319,45 @@ def plot_ladder_graph(capsule_path: List[Capsule], highlight_feasible: bool = Fa
         for i, (x, y) in enumerate(positions):
             ax.text(x, y + 0.08, f"{i}", ha="center", va="bottom", fontsize=8, color="k")
 
-    # Optionally highlight one feasible path across rungs
+    # Optionally highlight all feasible paths across rungs, colored by total distance (shortest=green, longest=red)
     if highlight_feasible:
-        result = configs_capsule(capsule_path)
-        if result is not None:
-            feasible_path, chosen_indices = result
+        def _js_dist(q1: np.ndarray, q2: np.ndarray) -> float:
+            return float(np.linalg.norm(angles_distance(np.asarray(q1, dtype=float), np.asarray(q2, dtype=float)), ord=2))
 
-            # Draw highlighted edges between successive chosen nodes
-            for r in range(num_rungs - 1):
-                i0 = chosen_indices[r]
-                i1 = chosen_indices[r + 1]
-                if i0 is None or i1 is None:
-                    continue
-                if i0 < 0 or i1 < 0:
-                    continue
-                if i0 >= len(rung_positions[r]) or i1 >= len(rung_positions[r + 1]):
-                    continue
-                x0, y0 = rung_positions[r][i0]
-                x1, y1 = rung_positions[r + 1][i1]
-                ax.plot([x0, x1], [y0, y1], color="#ffbf00", linewidth=3.0, alpha=0.95, zorder=2)
+        results = configs_capsule(capsule_path, distance_fn=_js_dist)
+        if results is not None and len(results) > 0:
+            distances = [d for (_, _, d) in results]
+            dmin = min(distances)
+            dmax = max(distances)
+            denom = (dmax - dmin) if (dmax - dmin) > 1e-12 else 1.0
+            cmap = plt.get_cmap("RdYlGn_r")  # 0 -> green, 1 -> red
 
-            # Overlay highlighted nodes
-            for r, idx in enumerate(chosen_indices):
-                if idx is None or idx < 0:
-                    continue
-                if idx >= len(rung_positions[r]):
-                    continue
-                xh, yh = rung_positions[r][idx]
-                ax.scatter([xh], [yh], s=(node_radius * 900) ** 2 / (fig.dpi**2), c="#ffbf00", edgecolors="k", linewidths=0.8, zorder=4)
+            for feasible_path, chosen_indices, total_d in results:
+                t = float((total_d - dmin) / denom)
+                color = cmap(t)
+
+                # Draw highlighted edges between successive chosen nodes
+                for r in range(num_rungs - 1):
+                    i0 = chosen_indices[r]
+                    i1 = chosen_indices[r + 1]
+                    if i0 is None or i1 is None:
+                        continue
+                    if i0 < 0 or i1 < 0:
+                        continue
+                    if i0 >= len(rung_positions[r]) or i1 >= len(rung_positions[r + 1]):
+                        continue
+                    x0, y0 = rung_positions[r][i0]
+                    x1, y1 = rung_positions[r + 1][i1]
+                    ax.plot([x0, x1], [y0, y1], color=color, linewidth=2.8, alpha=0.95, zorder=2)
+
+                # Overlay highlighted nodes for this path
+                for r, idx in enumerate(chosen_indices):
+                    if idx is None or idx < 0:
+                        continue
+                    if idx >= len(rung_positions[r]):
+                        continue
+                    xh, yh = rung_positions[r][idx]
+                    ax.scatter([xh], [yh], s=(node_radius * 780) ** 2 / (fig.dpi**2), c=[color], edgecolors="k", linewidths=0.7, zorder=4)
 
     ax.set_aspect("equal", adjustable="datalim")
     ax.set_xlabel("Rung Index")
@@ -323,11 +381,77 @@ def plot_ladder_graph(capsule_path: List[Capsule], highlight_feasible: bool = Fa
 
 def plot_capsule_path(capsule_path: List[Capsule]):
     for capsule in capsule_path:
-        pp.draw_pose(capsule.pose)
+        pp.draw_pose(capsule.pose, length=0.025)
 
 
-# TODO: re-implement this
-def rrt_connect_capsule(start: Capsule, goal: Capsule, distance_fn, sample_fn, extend_fn, collision_fn, robot_setup, projector, max_iterations=10000, max_time=pp.INF, verbose=False, draw_fn=None, enforce_alternate=False, **kwargs):
+def check_capsule_path(capsule_path: List[Capsule]):
+    """Remove capsules with duplicate poses, keeping only the first occurrence.
+
+    Deduplication uses rounded pose values to be robust to small floating errors.
+    Parents of the kept capsules are rewired to maintain a valid chain.
+
+    Args:
+        capsule_path: Sequence of `Capsule` nodes to deduplicate.
+
+    Returns:
+        A new list containing capsules with unique poses (by rounded values), in order.
+    """
+    if capsule_path is None or len(capsule_path) == 0:
+        return capsule_path
+
+    def pose_to_tuple(pose, decimals: int = 3):
+        # Handle (pos, quat) tuples/lists directly; otherwise convert from transform
+        if isinstance(pose, (list, tuple)) and len(pose) == 2:
+            pos, orn = pose
+            pos = np.asarray(pos, dtype=float).reshape(3)
+            orn = np.asarray(orn, dtype=float).reshape(4)
+        else:
+            T = pp.tform_from_pose(pose)
+            pos = np.asarray(T[:3, 3], dtype=float)
+            Rm = np.asarray(T[:3, :3], dtype=float)
+            orn = R.from_matrix(Rm).as_quat()
+        return tuple(np.round(pos, decimals=decimals)) + tuple(np.round(orn, decimals=decimals))
+
+    seen = set()
+    deduped: List[Capsule] = []
+    last_kept: Optional[Capsule] = None
+
+    for cap in capsule_path:
+        try:
+            key = pose_to_tuple(cap.pose)
+        except Exception:
+            # If pose cannot be parsed, treat it as unique by id fallback
+            key = (id(cap.pose),)
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+        # Rewire parent to maintain a continuous chain among kept nodes
+        cap.parent = last_kept
+        deduped.append(cap)
+        last_kept = cap
+
+    return deduped
+
+
+def rrt_connect_capsule(
+    solver: "TrajectoryDualCartConstrainedSolver",
+    start: Capsule,
+    goal: Capsule,
+    distance_fn,
+    sample_fn,
+    extend_fn,
+    collision_fn,
+    robot_setup,
+    projector,
+    max_iterations=10000,
+    max_time=pp.INF,
+    verbose=False,
+    draw_fn=None,
+    enforce_alternate=False,
+    **kwargs,
+):
     start_time = time.time()
     if collision_fn(start):
         print(f"Start configuration in collision.")
@@ -353,8 +477,13 @@ def rrt_connect_capsule(start: Capsule, goal: Capsule, distance_fn, sample_fn, e
         if draw_fn:
             draw_fn(target, [])
 
-        last1, _ = extend_towards_capsule(tree1, target, distance_fn, extend_fn, collision_fn, robot_setup, projector, swap, **kwargs)
-        last2, success = extend_towards_capsule(tree2, last1, distance_fn, extend_fn, collision_fn, robot_setup, projector, not swap, **kwargs)
+        last1, _, tree1 = extend_towards_capsule(tree1, target, distance_fn, extend_fn, collision_fn, robot_setup, projector, swap, **kwargs)
+        last2, success, tree2 = extend_towards_capsule(tree2, last1, distance_fn, extend_fn, collision_fn, robot_setup, projector, not swap, **kwargs)
+
+        if draw_fn:
+            for sp1, sp2 in zip(tree1, tree2):
+                sp1.draw(draw_fn)
+                sp2.draw(draw_fn)
 
         if success:
             path1, path2 = last1.retrace(), last2.retrace()
@@ -362,13 +491,22 @@ def rrt_connect_capsule(start: Capsule, goal: Capsule, distance_fn, sample_fn, e
                 path1, path2 = path2, path1
             if verbose:
                 print(f"RRT connect capsule: {iteration} iterations, {len(nodes1) + len(nodes2)} nodes")
-            capsule_nodes = path1[:-1] + path2[::-1]
-            plot_capsule_path(capsule_nodes)
-            return capsule_nodes
-
-            # plot_ladder_graph(capsule_nodes, highlight_feasible=True)
-            # result = configs_capsule(capsule_nodes)
-            # return None if result is None else result[0]
+            capsule_nodes = path1 + path2[::-1]
+            capsule_path = check_capsule_path(capsule_nodes)
+            
+            def _js_dist(q1: np.ndarray, q2: np.ndarray) -> float:
+                return float(np.linalg.norm(angles_distance(np.asarray(q1, dtype=float), np.asarray(q2, dtype=float)), ord=2))
+            
+            expended_path = solver.expand_path(capsule_path)
+            results = configs_capsule(expended_path, distance_fn=_js_dist)
+            if results is None or len(results) == 0:
+                continue
+            
+            plot_capsule_path(capsule_path)
+            plot_ladder_graph(expended_path, highlight_feasible=True)
+            
+            best_path, _, _ = results[0]
+            return best_path
     return None
 
 
@@ -682,7 +820,6 @@ class TrajectoryDualCartConstrainedSolver(object):
 
         return fn
 
-    # TODO: current step 2
     def _get_collision_fn(self):
         floating_collision_fn = self.robot_setup.create_floating_body_collision_fn(obstacle_bodies=self.robot_setup.obstacles)
         collision_fn = self.robot_setup.create_collision_fn(obstacle_bodies=self.robot_setup.obstacles)
@@ -693,6 +830,54 @@ class TrajectoryDualCartConstrainedSolver(object):
             if len(c.config) == 0:
                 return True
             return collision_fn(c.config[0])
+
+        return fn
+
+    def _get_draw_fn(self, start: Capsule, target: Capsule):
+
+        def pose_to_tuple(pose: Tuple[np.ndarray, np.ndarray], decimals: int = 3):
+            pos, orn = pose
+            pos_tuple = tuple(np.round(pos, decimals=decimals))
+            orn_tuple = tuple(np.round(orn, decimals=decimals))
+            return pos_tuple + orn_tuple
+
+        def segment_to_tuple(pose1: Tuple[np.ndarray, np.ndarray], pose2: Tuple[np.ndarray, np.ndarray], decimals: int = 3):
+            t1 = pose_to_tuple(pose1, decimals)
+            t2 = pose_to_tuple(pose2, decimals)
+            return tuple(sorted([t1, t2]))
+
+        start_tree_set = set()
+        target_tree_set = set()
+
+        pose_cache = set()
+        segment_cache = set()
+
+        start_tree_set.add(pose_to_tuple(start.pose))
+        target_tree_set.add(pose_to_tuple(target.pose))
+
+        def fn(conf: Capsule, segment: List[Capsule], valid=None, valid_right=None):
+            if len(segment) > 0:
+                color = pp.BROWN
+                pose_1_tup = pose_to_tuple(segment[0].pose)
+                pose_2_tup = pose_to_tuple(segment[1].pose)
+
+                if pose_1_tup in start_tree_set:
+                    color = pp.BLUE
+                    start_tree_set.add(pose_2_tup)
+                elif pose_2_tup in start_tree_set:
+                    color = pp.BLUE
+                    start_tree_set.add(pose_1_tup)
+                elif pose_1_tup in target_tree_set:
+                    color = pp.RED
+                    target_tree_set.add(pose_2_tup)
+                elif pose_2_tup in target_tree_set:
+                    color = pp.RED
+                    target_tree_set.add(pose_1_tup)
+
+                seg_tuple = segment_to_tuple(segment[0].pose, segment[1].pose)
+                if seg_tuple not in segment_cache:
+                    pp.add_line(segment[0].pose[0], segment[1].pose[0], width=2.0, color=color)
+                    segment_cache.add(seg_tuple)
 
         return fn
 
@@ -738,13 +923,36 @@ class TrajectoryDualCartConstrainedSolver(object):
             capsule_path = pp.direct_path(start_capsule, target_capsule, extend_fn, collision_fn)
         return capsule_path
 
+    def expand(self, capsule: Capsule) -> Capsule:
+        global bar_from_right
+        bar_pose = capsule.pose
+        right_ik_handle = self.robot_setup.ik_solver_right
+        confs = self.projector.create_valid_confs(right_ik_handle, bar_pose, bar_from_right, delta=0.0, max_attempts=20, collision_fn=self.robot_setup.create_collision_fn(obstacle_bodies=self.robot_setup.obstacles))
+        return Capsule(bar_pose, config=confs, parent=None, robot_setup=self.robot_setup, projector=self.projector)
+
+    def expand_path(self, path: List[Capsule]):
+        expended_path = []
+        for capsule in path:
+            if len(capsule.config) > 1 or capsule.parent is None:
+                capsule.parent = None
+                expended_path.append(capsule)
+            else:
+                expended_path.append(self.expand(capsule))
+
+        for i, capsule in enumerate(expended_path):
+            if i == 0:
+                continue
+            expended_path[i].set_parent(expended_path[i - 1])
+
+        return expended_path
+
 
 def main():
     """
     Example usage of TrajectoryDualConstrainedSolver.
     """
 
-    # np.random.seed(0)
+    # np.random.seed(1281712)
 
     # Configuration paths
     design_study_path = os.path.join(DATA_DIR, "husky_assembly_design_study")
@@ -817,6 +1025,7 @@ def main():
     collision_fn = solver._get_collision_fn()
     distance_fn = solver._get_distance_fn()
     sample_fn = solver._get_sample_fn(enable_ik=False)
+    draw_fn = solver._get_draw_fn(start_capsule, target_capsule)
 
     path = None
     # capsule_path = solver.try_direct_path(extend_fn, start_capsule, target_capsule)
@@ -825,11 +1034,25 @@ def main():
     #     result = configs_capsule(capsule_path)
     #     path = None if result is None else result[0]
 
-    if path is None:
-        path = rrt_connect_capsule(start_capsule, target_capsule, distance_fn, sample_fn, extend_fn, collision_fn, robot_setup, projector)
-        print(path)
+    time_start = time.time()
 
-    pp.wait_for_user()
+    if path is None:
+        path = rrt_connect_capsule(solver, start_capsule, target_capsule, distance_fn, sample_fn, extend_fn, collision_fn, robot_setup, projector, draw_fn=draw_fn, verbose=True)
+
+    print(f"RRT connect capsule took {time.time() - time_start:.2f} seconds")
+
+    if path is not None:
+        slider = pybullet.addUserDebugParameter("path_idx", 0, len(path) - 1, 0)
+        current_index = -1
+        while True:
+            idx = int(pybullet.readUserDebugParameter(slider))
+            if idx != current_index:
+                current_index = idx
+                conf = path[current_index]
+                robot_setup.set_joint_positions(robot_setup.arm_joints, conf)
+            time.sleep(0.01)
+    else:
+        pp.wait_for_user("No path found")
 
 
 if __name__ == "__main__":

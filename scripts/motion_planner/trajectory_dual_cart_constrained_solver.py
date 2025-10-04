@@ -126,6 +126,7 @@ def extend_towards_capsule(tree: List[Capsule], target: Capsule, distance_fn, ex
     last = pp.utils.argmin(lambda n: float(np.linalg.norm(np.asarray(distance_fn(n, target), dtype=float), ord=2)), tree)
     extend = list(asymmetric_extend(last, target, extend_fn, backward=swap))
     safe = list(takewhile(pp.utils.negate(collision_fn), extend))
+    print(safe)
     for i, c in enumerate(safe):
         c: Capsule
         if (i % tree_frequency == 0) or (i == len(safe) - 1):
@@ -321,6 +322,7 @@ def plot_ladder_graph(capsule_path: List[Capsule], highlight_feasible: bool = Fa
 
     # Optionally highlight all feasible paths across rungs, colored by total distance (shortest=green, longest=red)
     if highlight_feasible:
+
         def _js_dist(q1: np.ndarray, q2: np.ndarray) -> float:
             return float(np.linalg.norm(angles_distance(np.asarray(q1, dtype=float), np.asarray(q2, dtype=float)), ord=2))
 
@@ -478,7 +480,9 @@ def rrt_connect_capsule(
             draw_fn(target, [])
 
         last1, _, tree1 = extend_towards_capsule(tree1, target, distance_fn, extend_fn, collision_fn, robot_setup, projector, swap, **kwargs)
-        last2, success, tree2 = extend_towards_capsule(tree2, last1, distance_fn, extend_fn, collision_fn, robot_setup, projector, not swap, **kwargs)
+        last_1_independent = copy.deepcopy(last1)
+        last_1_independent.parent = None
+        last2, success, tree2 = extend_towards_capsule(tree2, last_1_independent, distance_fn, extend_fn, collision_fn, robot_setup, projector, not swap, **kwargs)
 
         if draw_fn:
             for sp1, sp2 in zip(tree1, tree2):
@@ -493,20 +497,66 @@ def rrt_connect_capsule(
                 print(f"RRT connect capsule: {iteration} iterations, {len(nodes1) + len(nodes2)} nodes")
             capsule_nodes = path1 + path2[::-1]
             capsule_path = check_capsule_path(capsule_nodes)
-            
+
             def _js_dist(q1: np.ndarray, q2: np.ndarray) -> float:
                 return float(np.linalg.norm(angles_distance(np.asarray(q1, dtype=float), np.asarray(q2, dtype=float)), ord=2))
-            
-            expended_path = solver.expand_path(capsule_path)
+
+            with pp.LockRenderer():
+                expended_path = solver.expand_path(capsule_path)
             results = configs_capsule(expended_path, distance_fn=_js_dist)
             if results is None or len(results) == 0:
-                continue
-            
-            plot_capsule_path(capsule_path)
+                continue # way 1: restart in the loop
+                # break  # way 2: break out of the loop and restart out of the loop
+
+            with pp.LockRenderer():
+                plot_capsule_path(capsule_path)
             plot_ladder_graph(expended_path, highlight_feasible=True)
-            
+
             best_path, _, _ = results[0]
             return best_path
+    return None
+
+
+def random_restarts_capsule(
+    solver: "TrajectoryDualCartConstrainedSolver",
+    start: Capsule,
+    goal: Capsule,
+    distance_fn,
+    sample_fn,
+    extend_fn,
+    collision_fn,
+    robot_setup: RobotSetup,
+    projector: DualArmProjection,
+    restarts=pp.RRT_RESTARTS,
+    smooth=pp.RRT_SMOOTHING,
+    max_solutions=1,
+    max_time=pp.INF,
+    draw_fn=None,
+    verbose=False,
+    **kwargs,
+):
+    start_time = time.time()
+    solutions = []
+    # path = check_direct(start, goal, extend_fn, collision_fn, **kwargs) # TODO: check direct path
+    path = None
+
+    for attempt in range(restarts + 1):
+        if (len(solutions) >= max_solutions) or (pp.elapsed_time(start_time) >= max_time):
+            break
+        pp.remove_all_debug()
+        attempt_time = min(max_time - pp.elapsed_time(start_time), max_time / restarts)
+        path = rrt_connect_capsule(solver, start, goal, distance_fn, sample_fn, extend_fn, collision_fn, robot_setup, projector, max_time=attempt_time, draw_fn=draw_fn, verbose=verbose, **kwargs)
+        if path is None:
+            continue
+        # path = pp.smooth_path(path, extend_fn, collision_fn, max_smooth_iterations=smooth, max_time=max_time-pp.elapsed_time(start_time), **kwargs) # TODO: smooth path
+        solutions.append(path)
+        # if pp.compute_path_cost(path, distance_fn) < success_cost:
+        #     break
+    solutions = sorted(solutions, key=lambda path: pp.compute_path_cost(path, distance_fn))
+    if verbose:
+        print("Solutions ({}): {} | Time: {:.3f}".format(len(solutions), [(len(path), round(pp.compute_path_cost(path, distance_fn), 3)) for path in solutions], pp.elapsed_time(start_time)))
+    if len(solutions) > 0:
+        return solutions[0]
     return None
 
 
@@ -1038,6 +1088,7 @@ def main():
 
     if path is None:
         path = rrt_connect_capsule(solver, start_capsule, target_capsule, distance_fn, sample_fn, extend_fn, collision_fn, robot_setup, projector, draw_fn=draw_fn, verbose=True)
+        # path = random_restarts_capsule(solver, start_capsule, target_capsule, distance_fn, sample_fn, extend_fn, collision_fn, robot_setup, projector, draw_fn=draw_fn, verbose=False, restarts=10, max_time=120)
 
     print(f"RRT connect capsule took {time.time() - time_start:.2f} seconds")
 

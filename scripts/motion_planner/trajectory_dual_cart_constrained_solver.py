@@ -124,15 +124,19 @@ def extend_towards_capsule(tree: List[Capsule], target: Capsule, distance_fn, ex
     target = copy.deepcopy(target)
     target.parent = None
     last = pp.utils.argmin(lambda n: float(np.linalg.norm(np.asarray(distance_fn(n, target), dtype=float), ord=2)), tree)
-    extend = list(asymmetric_extend(last, target, extend_fn, backward=swap))
+    # extend = list(asymmetric_extend(last, target, extend_fn, backward=swap))
+    extend = list(extend_fn(last, target))
     safe = list(takewhile(pp.utils.negate(collision_fn), extend))
-    print(safe)
-    for i, c in enumerate(safe):
+    for i, c in enumerate(safe[1:]):
         c: Capsule
-        if (i % tree_frequency == 0) or (i == len(safe) - 1):
-            c.parent = last
-            tree.append(c)
-            last = c
+        c.parent = last
+        tree.append(c)
+        last = c
+        
+        # if (i % tree_frequency == 0) or (i == len(safe) - 1):
+        #     c.parent = last
+        #     tree.append(c)
+        #     last = c
     success = len(extend) == len(safe)
     return last, success, tree
 
@@ -416,7 +420,7 @@ def check_capsule_path(capsule_path: List[Capsule]):
 
     seen = set()
     deduped: List[Capsule] = []
-    last_kept: Optional[Capsule] = None
+    last_kept_copy: Optional[Capsule] = None
 
     for cap in capsule_path:
         try:
@@ -429,10 +433,18 @@ def check_capsule_path(capsule_path: List[Capsule]):
             continue
 
         seen.add(key)
-        # Rewire parent to maintain a continuous chain among kept nodes
-        cap.parent = last_kept
-        deduped.append(cap)
-        last_kept = cap
+
+        # IMPORTANT: Do not mutate original tree nodes here.
+        # Create an independent copy to build a clean chain for downstream processing.
+        cap_copy = copy.deepcopy(cap)
+        # Track the origin node in its source tree so we can cache expansions back later
+        try:
+            setattr(cap_copy, "_origin", cap)
+        except Exception:
+            pass
+        cap_copy.parent = last_kept_copy
+        deduped.append(cap_copy)
+        last_kept_copy = cap_copy
 
     return deduped
 
@@ -471,23 +483,24 @@ def rrt_connect_capsule(
             swap = iteration % 2
         else:
             swap = len(nodes1) > len(nodes2)
+        # swap = False
         tree1, tree2 = nodes1, nodes2
         if swap:
             tree1, tree2 = nodes2, nodes1
 
         target = sample_fn()
         if draw_fn:
-            draw_fn(target, [])
+            bodies = pp.draw_pose(target.pose, length=0.1)
+            # draw_fn(target, [])
 
         last1, _, tree1 = extend_towards_capsule(tree1, target, distance_fn, extend_fn, collision_fn, robot_setup, projector, swap, **kwargs)
-        last_1_independent = copy.deepcopy(last1)
-        last_1_independent.parent = None
-        last2, success, tree2 = extend_towards_capsule(tree2, last_1_independent, distance_fn, extend_fn, collision_fn, robot_setup, projector, not swap, **kwargs)
+        last1_independent = copy.deepcopy(last1)
+        last1_independent.parent = None
+        last2, success, tree2 = extend_towards_capsule(tree2, last1_independent, distance_fn, extend_fn, collision_fn, robot_setup, projector, not swap, **kwargs)
 
         if draw_fn:
-            for sp1, sp2 in zip(tree1, tree2):
-                sp1.draw(draw_fn)
-                sp2.draw(draw_fn)
+            for sp in tree1 + tree2:
+                sp.draw(draw_fn)
 
         if success:
             path1, path2 = last1.retrace(), last2.retrace()
@@ -498,13 +511,30 @@ def rrt_connect_capsule(
             capsule_nodes = path1 + path2[::-1]
             capsule_path = check_capsule_path(capsule_nodes)
 
+            # Fast skip: if every rung in this path is already expanded (config length > 1),
+            # we assume this path has been checked before and skip heavy processing.
+            all_expanded = True
+            for n in capsule_path:
+                cfg = getattr(n, "config", None)
+                if (cfg is None) or (len(cfg) <= 1):
+                    all_expanded = False
+                    break
+            if all_expanded:
+                if draw_fn:
+                    for debug_body in bodies:
+                        pp.remove_debug(debug_body)
+                continue
+
             def _js_dist(q1: np.ndarray, q2: np.ndarray) -> float:
                 return float(np.linalg.norm(angles_distance(np.asarray(q1, dtype=float), np.asarray(q2, dtype=float)), ord=2))
 
-            with pp.LockRenderer():
-                expended_path = solver.expand_path(capsule_path)
+            # with pp.LockRenderer():
+            #     expended_path, updates = solver.expand_path(capsule_path)
+            expended_path, updates = solver.expand_path(capsule_path)
             results = configs_capsule(expended_path, distance_fn=_js_dist)
             if results is None or len(results) == 0:
+                for debug_body in bodies:
+                    pp.remove_debug(debug_body)
                 continue # way 1: restart in the loop
                 # break  # way 2: break out of the loop and restart out of the loop
 
@@ -514,6 +544,9 @@ def rrt_connect_capsule(
 
             best_path, _, _ = results[0]
             return best_path
+        
+        for debug_body in bodies:
+            pp.remove_debug(debug_body)
     return None
 
 
@@ -981,20 +1014,46 @@ class TrajectoryDualCartConstrainedSolver(object):
         return Capsule(bar_pose, config=confs, parent=None, robot_setup=self.robot_setup, projector=self.projector)
 
     def expand_path(self, path: List[Capsule]):
-        expended_path = []
+        # Returns: (expended_path, updates) where updates is a list of (origin_node, new_config)
+        expended_path: List[Capsule] = []
+        updates: List[Tuple[Capsule, Optional[List[np.ndarray]]]] = []
+
         for capsule in path:
+            origin = getattr(capsule, "_origin", None)
+
             if len(capsule.config) > 1 or capsule.parent is None:
                 capsule.parent = None
                 expended_path.append(capsule)
+                if origin is not None:
+                    try:
+                        new_conf = copy.deepcopy(capsule.config)
+                    except Exception:
+                        new_conf = capsule.config
+                    try:
+                        origin.config = new_conf
+                    except Exception:
+                        pass
+                    updates.append((origin, new_conf))
             else:
-                expended_path.append(self.expand(capsule))
+                expanded = self.expand(capsule)
+                expended_path.append(expanded)
+                if origin is not None:
+                    try:
+                        new_conf = copy.deepcopy(expanded.config)
+                    except Exception:
+                        new_conf = expanded.config
+                    try:
+                        origin.config = new_conf
+                    except Exception:
+                        pass
+                    updates.append((origin, new_conf))
 
         for i, capsule in enumerate(expended_path):
             if i == 0:
                 continue
             expended_path[i].set_parent(expended_path[i - 1])
 
-        return expended_path
+        return expended_path, updates
 
 
 def main():
@@ -1087,7 +1146,7 @@ def main():
     time_start = time.time()
 
     if path is None:
-        path = rrt_connect_capsule(solver, start_capsule, target_capsule, distance_fn, sample_fn, extend_fn, collision_fn, robot_setup, projector, draw_fn=draw_fn, verbose=True)
+        path = rrt_connect_capsule(solver, start_capsule, target_capsule, distance_fn, sample_fn, extend_fn, collision_fn, robot_setup, projector, draw_fn=draw_fn, verbose=True, enforce_alternate=False)
         # path = random_restarts_capsule(solver, start_capsule, target_capsule, distance_fn, sample_fn, extend_fn, collision_fn, robot_setup, projector, draw_fn=draw_fn, verbose=False, restarts=10, max_time=120)
 
     print(f"RRT connect capsule took {time.time() - time_start:.2f} seconds")

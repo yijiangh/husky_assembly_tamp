@@ -105,7 +105,8 @@ class Capsule(object):
             for j in range(len(parent.config)):
                 dist = np.linalg.norm(angles_distance(self.config[i], parent.config[j]))
                 # print(f"i: {i}, j: {j}, dist: {dist}")
-                if dist < 0.75:
+                if dist < 2.0:
+                # if dist < 100.0:
                     self.connection[i].append(j)
 
     def __str__(self):
@@ -141,16 +142,21 @@ def extend_towards_capsule(tree: List[Capsule], target: Capsule, distance_fn, ex
     return last, success, tree
 
 
-def configs_capsule(nodes: List[Capsule], distance_fn: Optional[Callable[[np.ndarray, np.ndarray], float]] = None):
+def configs_capsule(nodes: List[Capsule], distance_fn: Optional[Callable[[np.ndarray, np.ndarray], float]] = None, instant: bool = False):
     """Enumerate all feasible configuration paths across capsule rungs.
 
     Args:
         nodes: Ladder of `Capsule` rungs with `config` lists and inter-rung `connection` info.
         distance_fn: Function mapping (q_prev, q_curr) -> scalar step distance. If None,
                      uses L2 norm of angular difference via `angles_distance`.
+        instant: If True, return immediately with the first feasible path found during DFS
+                 enumeration (in exploration order) and stop searching further.
 
     Returns:
-        List of tuples (path, chosen_indices, total_distance), sorted by total_distance ascending.
+        When `instant` is False: List of tuples (path, chosen_indices, total_distance), sorted by
+        total_distance ascending.
+        When `instant` is True: Either a single-element list with the first feasible result found,
+        or an empty list if no feasible path exists.
         - path: List[np.ndarray] of configurations, one per rung.
         - chosen_indices: List[int] indices into each rung's `config`.
         - total_distance: float cumulative distance along adjacent rung transitions.
@@ -169,7 +175,10 @@ def configs_capsule(nodes: List[Capsule], distance_fn: Optional[Callable[[np.nda
         first_node = nodes[0]
         if first_node is None or first_node.config is None or len(first_node.config) == 0:
             return []
-        # All single-node choices have zero path length; return each as a feasible path
+        # All single-node choices have zero path length
+        if instant:
+            # Return only the first option when instant is requested
+            return [([first_node.config[0]], [0], 0.0)]
         results = []
         for idx, q in enumerate(first_node.config):
             results.append(([q], [idx], 0.0))
@@ -213,11 +222,18 @@ def configs_capsule(nodes: List[Capsule], distance_fn: Optional[Callable[[np.nda
 
     # DFS to enumerate all feasible index sequences and their paths/costs
     results: List[Tuple[List[np.ndarray], List[int], float]] = []
+    early_result: Optional[Tuple[List[np.ndarray], List[int], float]] = None
 
     def dfs(rung_idx: int, curr_idx: int, chosen_indices: List[int], path: List[np.ndarray], total_cost: float):
+        nonlocal early_result
+        if instant and early_result is not None:
+            return
         # At rung_idx refers to current rung index (0-based). If we reached last rung, record
         if rung_idx == num_nodes - 1:
-            results.append((path, chosen_indices, float(total_cost)))
+            if instant:
+                early_result = (path, chosen_indices, float(total_cost))
+            else:
+                results.append((path, chosen_indices, float(total_cost)))
             return
         # Explore all successors on next rung
         successors = edges_per_level[rung_idx].get(curr_idx, [])
@@ -226,6 +242,8 @@ def configs_capsule(nodes: List[Capsule], distance_fn: Optional[Callable[[np.nda
             q_curr = nodes[rung_idx + 1].config[nxt_idx]
             step_cost = dist_fn(q_prev, q_curr)
             dfs(rung_idx + 1, nxt_idx, chosen_indices + [nxt_idx], path + [q_curr], total_cost + step_cost)
+            if instant and early_result is not None:
+                return
 
     # Start from every feasible index on the first rung that has at least one outgoing edge
     first_edges = edges_per_level[0]
@@ -234,6 +252,11 @@ def configs_capsule(nodes: List[Capsule], distance_fn: Optional[Callable[[np.nda
             continue
         q0 = nodes[0].config[start_idx]
         dfs(0, start_idx, [start_idx], [q0], 0.0)
+        if instant and early_result is not None:
+            return [early_result]
+
+    if instant:
+        return [early_result] if early_result is not None else []
 
     # Sort by total cost ascending
     results.sort(key=lambda item: item[2])
@@ -538,7 +561,7 @@ def rrt_connect_capsule(
             # with pp.LockRenderer():
             #     expended_path, updates = solver.expand_path(capsule_path)
             expended_path, updates = solver.expand_path(capsule_path)
-            results = configs_capsule(expended_path, distance_fn=_js_dist)
+            results = configs_capsule(expended_path, distance_fn=_js_dist, instant=False)
             if results is None or len(results) == 0:
                 for debug_body in bodies:
                     pp.remove_debug(debug_body)
@@ -547,7 +570,7 @@ def rrt_connect_capsule(
 
             with pp.LockRenderer():
                 plot_capsule_path(capsule_path)
-            plot_ladder_graph(expended_path, highlight_feasible=True)
+            # plot_ladder_graph(expended_path, highlight_feasible=True)
 
             best_path, _, _ = results[0]
             return best_path
@@ -925,13 +948,13 @@ class TrajectoryDualCartConstrainedSolver(object):
 
     def _get_draw_fn(self, start: Capsule, target: Capsule):
 
-        def pose_to_tuple(pose: Tuple[np.ndarray, np.ndarray], decimals: int = 3):
+        def pose_to_tuple(pose: Tuple[np.ndarray, np.ndarray], decimals: int = 6):
             pos, orn = pose
             pos_tuple = tuple(np.round(pos, decimals=decimals))
             orn_tuple = tuple(np.round(orn, decimals=decimals))
             return pos_tuple + orn_tuple
 
-        def segment_to_tuple(pose1: Tuple[np.ndarray, np.ndarray], pose2: Tuple[np.ndarray, np.ndarray], decimals: int = 3):
+        def segment_to_tuple(pose1: Tuple[np.ndarray, np.ndarray], pose2: Tuple[np.ndarray, np.ndarray], decimals: int = 6):
             t1 = pose_to_tuple(pose1, decimals)
             t2 = pose_to_tuple(pose2, decimals)
             return tuple(sorted([t1, t2]))
@@ -954,9 +977,11 @@ class TrajectoryDualCartConstrainedSolver(object):
                 if "color" in kwargs:
                     color = kwargs["color"]
                     if color == "red":
-                        color = pp.RED
+                        color = (1, 0, 0, 0.5)
+                        width = 4.0
                     if color == "blue":
-                        color = pp.BLUE
+                        color = (0, 0, 1, 1)
+                        width = 2.0
                 else:
                     if pose_1_tup in start_tree_set:
                         color = pp.BLUE
@@ -973,7 +998,7 @@ class TrajectoryDualCartConstrainedSolver(object):
 
                 seg_tuple = segment_to_tuple(segment[0].pose, segment[1].pose)
                 if seg_tuple not in segment_cache:
-                    pp.add_line(segment[0].pose[0], segment[1].pose[0], width=2.0, color=color)
+                    pp.add_line(segment[0].pose[0], segment[1].pose[0], width=width, color=color)
                     segment_cache.add(seg_tuple)
 
         return fn

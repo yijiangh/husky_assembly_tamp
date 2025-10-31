@@ -93,9 +93,9 @@ class Capsule(object):
             node = node.parent
         return sequence[::-1]
 
-    def draw(self, draw_fn):
+    def draw(self, draw_fn, **kwargs):
         segment = [] if self.parent is None else [self, self.parent]
-        draw_fn(self, segment)
+        draw_fn(self, segment, **kwargs)
 
     def set_parent(self, parent: "Capsule"):
         self.parent = parent
@@ -132,7 +132,7 @@ def extend_towards_capsule(tree: List[Capsule], target: Capsule, distance_fn, ex
         c.parent = last
         tree.append(c)
         last = c
-        
+
         # if (i % tree_frequency == 0) or (i == len(safe) - 1):
         #     c.parent = last
         #     tree.append(c)
@@ -498,9 +498,16 @@ def rrt_connect_capsule(
         last1_independent.parent = None
         last2, success, tree2 = extend_towards_capsule(tree2, last1_independent, distance_fn, extend_fn, collision_fn, robot_setup, projector, not swap, **kwargs)
 
+        # if draw_fn:
+        #     for sp in tree1 + tree2:
+        #         sp.draw(draw_fn)
+
         if draw_fn:
-            for sp in tree1 + tree2:
-                sp.draw(draw_fn)
+            for sp in nodes1:
+                sp.draw(draw_fn, color="red")
+
+            for sp in nodes2:
+                sp.draw(draw_fn, color="blue")
 
         if success:
             path1, path2 = last1.retrace(), last2.retrace()
@@ -535,7 +542,7 @@ def rrt_connect_capsule(
             if results is None or len(results) == 0:
                 for debug_body in bodies:
                     pp.remove_debug(debug_body)
-                continue # way 1: restart in the loop
+                continue  # way 1: restart in the loop
                 # break  # way 2: break out of the loop and restart out of the loop
 
             with pp.LockRenderer():
@@ -544,7 +551,7 @@ def rrt_connect_capsule(
 
             best_path, _, _ = results[0]
             return best_path
-        
+
         for debug_body in bodies:
             pp.remove_debug(debug_body)
     return None
@@ -938,24 +945,31 @@ class TrajectoryDualCartConstrainedSolver(object):
         start_tree_set.add(pose_to_tuple(start.pose))
         target_tree_set.add(pose_to_tuple(target.pose))
 
-        def fn(conf: Capsule, segment: List[Capsule], valid=None, valid_right=None):
+        def fn(conf: Capsule, segment: List[Capsule], valid=None, valid_right=None, **kwargs):
             if len(segment) > 0:
                 color = pp.BROWN
                 pose_1_tup = pose_to_tuple(segment[0].pose)
                 pose_2_tup = pose_to_tuple(segment[1].pose)
 
-                if pose_1_tup in start_tree_set:
-                    color = pp.BLUE
-                    start_tree_set.add(pose_2_tup)
-                elif pose_2_tup in start_tree_set:
-                    color = pp.BLUE
-                    start_tree_set.add(pose_1_tup)
-                elif pose_1_tup in target_tree_set:
-                    color = pp.RED
-                    target_tree_set.add(pose_2_tup)
-                elif pose_2_tup in target_tree_set:
-                    color = pp.RED
-                    target_tree_set.add(pose_1_tup)
+                if "color" in kwargs:
+                    color = kwargs["color"]
+                    if color == "red":
+                        color = pp.RED
+                    if color == "blue":
+                        color = pp.BLUE
+                else:
+                    if pose_1_tup in start_tree_set:
+                        color = pp.BLUE
+                        start_tree_set.add(pose_2_tup)
+                    elif pose_2_tup in start_tree_set:
+                        color = pp.BLUE
+                        start_tree_set.add(pose_1_tup)
+                    elif pose_1_tup in target_tree_set:
+                        color = pp.RED
+                        target_tree_set.add(pose_2_tup)
+                    elif pose_2_tup in target_tree_set:
+                        color = pp.RED
+                        target_tree_set.add(pose_1_tup)
 
                 seg_tuple = segment_to_tuple(segment[0].pose, segment[1].pose)
                 if seg_tuple not in segment_cache:

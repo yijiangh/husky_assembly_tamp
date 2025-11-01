@@ -1,4 +1,5 @@
 import argparse
+from ast import Pass
 import cProfile
 import io
 import math
@@ -580,6 +581,38 @@ def rrt_connect_capsule(
     return None
 
 
+def smooth(path, extend_fn, max_iterations: int = 50, robot_setup: RobotSetup = None):
+    if path is None or len(path) < 3:
+        return path
+
+    rng = np.random.default_rng()
+    current_path = list(path)
+
+    for _ in range(max_iterations):
+        n = len(current_path)
+        if n < 3:
+            break
+
+        i, j = sorted(rng.integers(low=0, high=n, size=2))
+        if j - i <= 1:
+            continue
+        
+        # i, j = 9, 15
+
+        start = current_path[i]
+        end = current_path[j]
+
+        segment = list(extend_fn(start, end))
+        if not segment:
+            continue
+        if any(s is None for s in segment):
+            continue
+
+        current_path = current_path[:i] + segment + current_path[j:]
+
+    return current_path
+
+
 def random_restarts_capsule(
     solver: "TrajectoryDualCartConstrainedSolver",
     start: Capsule,
@@ -898,6 +931,51 @@ class TrajectoryDualCartConstrainedSolver(object):
                         last_capsule = capsule
 
         return fn
+    
+    def _get_cspace_extend_fn(self, enable_ik: bool = True):
+        def fn(q1, q2):
+            """Extend in configuration space by interpolating the RIGHT arm joints.
+
+            For each right-arm interpolation step, attempt to recover a full dual-arm
+            configuration using the projector. Yield a `Capsule` at every step with the
+            corresponding bar pose and (when available) the full 12-DOF configuration.
+
+            If projection fails at a step and `enable_ik` is True, yield the pose-only
+            capsule and stop extending (mirrors the behavior of `_get_extend_fn`).
+            """
+            global bar_from_right
+
+            # Guard: require configs to interpolate
+            q1_full = np.asarray(q1, dtype=float)
+            q2_full = np.asarray(q2, dtype=float)
+
+            q1_right = np.asarray(q1_full[6:], dtype=float)
+            q2_right = np.asarray(q2_full[6:], dtype=float)
+
+            # Seed for the left arm comes from the last successful configuration
+            last_q = copy.deepcopy(q1)
+
+            seed_left = np.asarray(q1_full[:6], dtype=float)
+
+            # Determine number of interpolation steps based on right-arm delta
+            right_diff = angles_distance(q1_right, q2_right)
+            resolutions = np.array([DEFAULT_RESOLUTION] * 6, dtype=float)
+            steps = int(np.ceil(np.linalg.norm(right_diff / resolutions, ord=DEFAULT_NORM)))
+            steps = max(1, steps)
+
+            for i in range(steps + 1):
+                t = float(i) / float(steps)
+                q_right_interp = q1_right + t * right_diff
+                q_right_interp = normalize_angles(q_right_interp)
+
+                seed_left = last_q[:6]
+                conf = self.projector.project(q_right_interp, seed_left)
+                if conf is not None:
+                    yield conf
+                    last_q = conf
+                else:
+                    yield None
+        return fn
 
     def _get_distance_fn(self):
         def _pose_to_Rp(pose):
@@ -1174,6 +1252,8 @@ def main():
     distance_fn = solver._get_distance_fn()
     sample_fn = solver._get_sample_fn(enable_ik=False)
     draw_fn = solver._get_draw_fn(start_capsule, target_capsule)
+    cspace_extend_fn = solver._get_cspace_extend_fn(enable_ik=True)
+    cspace_collision_fn = robot_setup.create_collision_fn(obstacle_bodies=robot_setup.obstacles)
 
     path = None
     # capsule_path = solver.try_direct_path(extend_fn, start_capsule, target_capsule)
@@ -1187,19 +1267,28 @@ def main():
     if path is None:
         path = rrt_connect_capsule(solver, start_capsule, target_capsule, distance_fn, sample_fn, extend_fn, collision_fn, robot_setup, projector, draw_fn=draw_fn, verbose=True, enforce_alternate=False)
         # path = random_restarts_capsule(solver, start_capsule, target_capsule, distance_fn, sample_fn, extend_fn, collision_fn, robot_setup, projector, draw_fn=draw_fn, verbose=False, restarts=10, max_time=120)
+    
+    # path = np.load("/home/jeong/summer_research/path.npy")
 
     print(f"RRT connect capsule took {time.time() - time_start:.2f} seconds")
-
+    
     if path is not None:
-        slider = pybullet.addUserDebugParameter("path_idx", 0, len(path) - 1, 0)
-        current_index = -1
-        while True:
-            idx = int(pybullet.readUserDebugParameter(slider))
-            if idx != current_index:
-                current_index = idx
-                conf = path[current_index]
-                robot_setup.set_joint_positions(robot_setup.arm_joints, conf)
-            time.sleep(0.01)
+        path_res = smooth(path, cspace_extend_fn, robot_setup=robot_setup)
+        
+        for q in path_res:
+            robot_setup.set_joint_positions(robot_setup.arm_joints, q)
+            pp.draw_pose(pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right), length=0.01)
+
+        if path_res is not None:
+            slider = pybullet.addUserDebugParameter("path_idx", 0, len(path_res) - 1, 0)
+            current_index = -1
+            while True:
+                idx = int(pybullet.readUserDebugParameter(slider))
+                if idx != current_index:
+                    current_index = idx
+                    conf = path_res[current_index]
+                    robot_setup.set_joint_positions(robot_setup.arm_joints, conf)
+                time.sleep(0.01)
     else:
         pp.wait_for_user("No path found")
 

@@ -86,7 +86,7 @@ def angles_distance(angles1, angles2):
     """
     a1 = np.asarray(angles1, dtype=float)
     a2 = np.asarray(angles2, dtype=float)
-    diff = a1 - a2
+    diff = a2 - a1
     diff = normalize_angles(diff)
     return diff
 

@@ -613,6 +613,42 @@ def smooth(path, extend_fn, max_iterations: int = 50, robot_setup: RobotSetup = 
     return current_path
 
 
+def interpolate(path, extend_fn, robot_setup: RobotSetup = None):
+    if path is None or len(path) <= 1:
+        return path
+
+    def _same_conf(q1, q2, tol: float = 1e-6) -> bool:
+        try:
+            a = np.asarray(q1, dtype=float)
+            b = np.asarray(q2, dtype=float)
+            diff = angles_distance(a, b)
+            return float(np.linalg.norm(diff, ord=2)) <= tol
+        except Exception:
+            return False
+
+    result = [path[0]]
+    for i in range(len(path) - 1):
+        q1 = path[i]
+        q2 = path[i + 1]
+
+        seg = list(extend_fn(q1, q2))
+        if not seg or any(s is None for s in seg):
+            # Fallback: keep the original neighbor
+            if not _same_conf(result[-1], q2):
+                result.append(q2)
+            continue
+
+        # Splice segment with de-duplication
+        for s in seg:
+            if not _same_conf(result[-1], s):
+                result.append(s)
+        # Ensure the end neighbor is present
+        if not _same_conf(result[-1], q2):
+            result.append(q2)
+
+    return result
+
+
 def random_restarts_capsule(
     solver: "TrajectoryDualCartConstrainedSolver",
     start: Capsule,
@@ -1173,6 +1209,133 @@ class TrajectoryDualCartConstrainedSolver(object):
         return expended_path, updates
 
 
+    def plan(
+        self,
+        start_conf: np.ndarray,
+        target_conf: np.ndarray,
+        max_time: float = pp.INF,
+        max_iterations: int = 200,
+        max_attempts: int = 40,
+        smooth_iterations: int = 10,
+        use_draw: bool = False,
+        verbose: bool = False,
+    ) -> Optional[List[np.ndarray]]:
+        """Plan a dual-arm path from start_conf to target_conf.
+
+        Builds capsules from the bar poses implied by the configurations,
+        runs RRT-Connect in the capsule space, and post-processes with
+        shortcut smoothing and interpolation in joint space.
+
+        Args:
+            start_conf: 12-DOF joint configuration (left+right).
+            target_conf: 12-DOF joint configuration (left+right).
+            max_time: Maximum planning time.
+            max_iterations: Maximum RRT-Connect iterations.
+            smooth_iterations: Shortcut iterations (not used directly here; kept for API symmetry).
+            use_draw: If True, enable debug drawing during planning.
+            verbose: If True, print planner progress.
+
+        Returns:
+            List of joint configurations (path) or None if planning fails.
+        """
+        global bar_from_right, bar_from_left
+
+        # Ensure globals for bar_from_right/left are initialized from target pose
+        with pp.WorldSaver():
+            # Use target config to define consistent bar_from_right transform
+            self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, target_conf)
+            world_from_right = pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link_right)
+            world_from_left = pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link_left)
+            world_from_bar = pp.get_pose(self.robot_setup.target_bar)
+
+            bar_from_right = pp.multiply(pp.invert(world_from_bar), world_from_right)
+            bar_from_left = pp.multiply(pp.invert(world_from_bar), world_from_left)
+
+        # Compute bar poses for start and target configurations
+        def _bar_pose_from_conf(conf: np.ndarray):
+            self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, conf)
+            right_pose = pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link_right)
+            return pp.multiply(right_pose, pp.invert(bar_from_right))
+
+        world_from_bar_start = _bar_pose_from_conf(start_conf)
+        world_from_bar_target = _bar_pose_from_conf(target_conf)
+
+        # Prepare confs (plural) for capsules using projector; fallback to provided confs
+        robot_collision_fn = self.robot_setup.create_collision_fn(obstacle_bodies=self.robot_setup.obstacles)
+
+        start_confs_candidates = self.projector.create_valid_confs(
+            self.robot_setup.ik_solver_right,
+            world_from_bar_start,
+            bar_from_right,
+            delta=0.0,
+            max_attempts=40,
+            collision_fn=robot_collision_fn,
+        )
+        target_confs_candidates = self.projector.create_valid_confs(
+            self.robot_setup.ik_solver_right,
+            world_from_bar_target,
+            bar_from_right,
+            delta=0.0,
+            max_attempts=40,
+            collision_fn=robot_collision_fn,
+        )
+
+        def _prepare_confs(default_conf, confs_list):
+            if confs_list is None or len(confs_list) == 0:
+                return [normalize_angles(np.asarray(default_conf, dtype=float))]
+            return [normalize_angles(np.asarray(q, dtype=float)) for q in confs_list]
+
+        start_confs_prepared = _prepare_confs(start_conf, start_confs_candidates)
+        target_confs_prepared = _prepare_confs(target_conf, target_confs_candidates)
+
+        start_capsule = Capsule(world_from_bar_start, config=start_confs_prepared, parent=None, robot_setup=self.robot_setup, projector=self.projector)
+        target_capsule = Capsule(world_from_bar_target, config=target_confs_prepared, parent=None, robot_setup=self.robot_setup, projector=self.projector)
+
+        extend_fn = self._get_extend_fn(enable_ik=True)
+        collision_fn = self._get_collision_fn()
+        distance_fn = self._get_distance_fn()
+        sample_fn = self._get_sample_fn(enable_ik=False)
+        draw_fn = self._get_draw_fn(start_capsule, target_capsule) if use_draw else None
+
+        cspace_extend_fn = self._get_cspace_extend_fn(enable_ik=True)
+        cspace_collision_fn = self.robot_setup.create_collision_fn(obstacle_bodies=self.robot_setup.obstacles)
+
+        for _ in range(max_attempts):
+            
+            pp.remove_all_debug()
+
+            path = rrt_connect_capsule(
+                self,
+                start_capsule,
+                target_capsule,
+                distance_fn,
+                sample_fn,
+                extend_fn,
+                collision_fn,
+                self.robot_setup,
+                self.projector,
+                max_iterations=max_iterations,
+                max_time=max_time,
+                verbose=verbose,
+                draw_fn=draw_fn,
+                enforce_alternate=False,
+            )
+
+            if path is None:
+                continue
+
+            # Post-process in joint space using provided helpers
+            path_smooth = smooth(path, cspace_extend_fn, robot_setup=self.robot_setup)
+            path_res = interpolate(path_smooth, cspace_extend_fn, robot_setup=self.robot_setup)
+            
+            for q in path_res:
+                self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, q)
+                pp.draw_pose(pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link_right), length=0.01)
+        
+            return path_res
+        
+        return None
+
 def main():
     """
     Example usage of TrajectoryDualConstrainedSolver.
@@ -1227,68 +1390,23 @@ def main():
     print("Initializing TrajectoryDualCartConstrainedSolver...")
     solver = TrajectoryDualCartConstrainedSolver(robot_setup, target_parser, projector)
 
-    start_confs, world_from_bar_start = solver.generate_start_configuration(projector, max_attempts=20, delta_angle=np.pi * 2)
+    start_confs, _ = solver.generate_start_configuration(projector, max_attempts=20, delta_angle=np.pi * 2)
     robot_setup.set_joint_positions(robot_setup.arm_joints, start_confs[0])
 
-    robot_setup.set_joint_positions(robot_setup.arm_joints, target_conf)
-    world_from_bar = pp.get_pose(robot_setup.target_bar)
-    target_confs = projector.create_valid_confs(solver.robot_setup.ik_solver_right, world_from_bar, bar_from_right, delta=0.0, max_attempts=20, collision_fn=robot_setup.create_collision_fn(obstacle_bodies=robot_setup.obstacles))
-
-    # pp.wait_for_user()
-
-    start_capsule = Capsule(world_from_bar_start, config=start_confs, parent=None, robot_setup=robot_setup, projector=projector)
-    target_capsule = Capsule(world_from_bar_target, config=target_confs, parent=None, robot_setup=robot_setup, projector=projector)
-
-    way_points = solver.cart_linear_interp(start_capsule, target_capsule, position_res=0.1, rotation_res=0.05)
-
-    # with pp.LockRenderer():
-    #     for way_point in way_points:
-    #         pp.draw_pose(way_point, length=0.25)
-
-    # pp.wait_for_user()
-
-    extend_fn = solver._get_extend_fn(enable_ik=True)
-    collision_fn = solver._get_collision_fn()
-    distance_fn = solver._get_distance_fn()
-    sample_fn = solver._get_sample_fn(enable_ik=False)
-    draw_fn = solver._get_draw_fn(start_capsule, target_capsule)
-    cspace_extend_fn = solver._get_cspace_extend_fn(enable_ik=True)
-    cspace_collision_fn = robot_setup.create_collision_fn(obstacle_bodies=robot_setup.obstacles)
-
-    path = None
-    # capsule_path = solver.try_direct_path(extend_fn, start_capsule, target_capsule)
-    # plot_capsule_path(capsule_path, highlight_feasible=True)
-    # if capsule_path is not None:
-    #     result = configs_capsule(capsule_path)
-    #     path = None if result is None else result[0]
-
     time_start = time.time()
+    path = solver.plan(start_conf=start_confs[0], target_conf=target_conf, max_time=120, max_iterations=10000, use_draw=True, verbose=True)
+    print(f"Planning took {time.time() - time_start:.2f} seconds")
 
-    if path is None:
-        path = rrt_connect_capsule(solver, start_capsule, target_capsule, distance_fn, sample_fn, extend_fn, collision_fn, robot_setup, projector, draw_fn=draw_fn, verbose=True, enforce_alternate=False)
-        # path = random_restarts_capsule(solver, start_capsule, target_capsule, distance_fn, sample_fn, extend_fn, collision_fn, robot_setup, projector, draw_fn=draw_fn, verbose=False, restarts=10, max_time=120)
-    
-    # path = np.load("/home/jeong/summer_research/path.npy")
-
-    print(f"RRT connect capsule took {time.time() - time_start:.2f} seconds")
-    
     if path is not None:
-        path_res = smooth(path, cspace_extend_fn, robot_setup=robot_setup)
-        
-        for q in path_res:
-            robot_setup.set_joint_positions(robot_setup.arm_joints, q)
-            pp.draw_pose(pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right), length=0.01)
-
-        if path_res is not None:
-            slider = pybullet.addUserDebugParameter("path_idx", 0, len(path_res) - 1, 0)
-            current_index = -1
-            while True:
-                idx = int(pybullet.readUserDebugParameter(slider))
-                if idx != current_index:
-                    current_index = idx
-                    conf = path_res[current_index]
-                    robot_setup.set_joint_positions(robot_setup.arm_joints, conf)
-                time.sleep(0.01)
+        slider = pybullet.addUserDebugParameter("path_idx", 0, len(path) - 1, 0)
+        current_index = -1
+        while True:
+            idx = int(pybullet.readUserDebugParameter(slider))
+            if idx != current_index:
+                current_index = idx
+                conf = path[current_index]
+                robot_setup.set_joint_positions(robot_setup.arm_joints, conf)
+            time.sleep(0.01)
     else:
         pp.wait_for_user("No path found")
 

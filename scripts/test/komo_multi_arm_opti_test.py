@@ -1,10 +1,8 @@
 import numpy as np
 import pybullet_planning as pp
 import robotic as ry
-import matplotlib.pyplot as plt
 import json
 import os
-from tqdm import tqdm
 
 print("The path where model files are pre-installed:\n", ry.raiPath(""))
 
@@ -112,9 +110,12 @@ if __name__ == "__main__":
     base1 = C.getFrame("r1_panda_link0")
     base2 = C.getFrame("r2_panda_link0")
     base3 = C.getFrame("r3_panda_link0")
-    base1.setJoint(ry.JT.transXY, [-0.25, -0.25, 0.25, 0.25])
-    base2.setJoint(ry.JT.transXY, [-0.25, -0.25, 0.25, 0.25])
-    base3.setJoint(ry.JT.transXY, [-0.25, -0.25, 0.25, 0.25])
+    # base1.setJoint(ry.JT.transXY, [-0.25, -0.25, 0.25, 0.25])
+    # base2.setJoint(ry.JT.transXY, [-0.25, -0.25, 0.25, 0.25])
+    # base3.setJoint(ry.JT.transXY, [-0.25, -0.25, 0.25, 0.25])
+    base1.setJoint(ry.JT.transXYPhi, [-0.25, -0.25, -np.pi, 0.25, 0.25, np.pi])
+    base2.setJoint(ry.JT.transXYPhi, [-0.25, -0.25, -np.pi, 0.25, 0.25, np.pi])
+    base3.setJoint(ry.JT.transXYPhi, [-0.25, -0.25, -np.pi, 0.25, 0.25, np.pi])
     base_frame_names = ["r1_panda_link0", "r2_panda_link0", "r3_panda_link0"]
     initial_base_positions = [base1.getPosition(), base2.getPosition(), base3.getPosition()]
     initial_base_quaternions = [base1.getQuaternion(), base2.getQuaternion(), base3.getQuaternion()]
@@ -126,6 +127,8 @@ if __name__ == "__main__":
             base_joint_indices.append(i)
 
     C.view()
+    
+    pp.wait_for_user()
 
     def draw_pose(config, frame_name, pose_name_prefix, length=0.1):
         """Draw pose using marker frames"""
@@ -228,7 +231,7 @@ if __name__ == "__main__":
 
         return retval, None
 
-    def solve_with_weights(joint_weight, gripper_weight, base_distribution_weight, base_gripper_distance_weight, initial_state, max_attempts=10, view=False, damping=None, wolfe=None):
+    def solve_with_weights(joint_weight, gripper_weight, initial_state, max_attempts=10, view=False, damping=None, wolfe=None):
         komo = ry.KOMO(C, 1, 1, 0, True)
 
         komo.addObjective([], ry.FS.jointState, [], ry.OT.sos, [joint_weight], initial_state)
@@ -249,14 +252,6 @@ if __name__ == "__main__":
         komo.addObjective([], ry.FS.positionRel, ["r3_gripper", "element_6"], ry.OT.ineq, [-gripper_weight], [0, 0, -0.4])
 
         komo.addObjective([], ry.FS.accumulatedCollisions, [], ry.OT.eq)
-
-        komo.addObjective([], ry.FS.positionDiff, [base_frame_names[0], "r1_gripper"], ry.OT.sos, [base_gripper_distance_weight])
-        komo.addObjective([], ry.FS.positionDiff, [base_frame_names[1], "r2_gripper"], ry.OT.sos, [base_gripper_distance_weight])
-        komo.addObjective([], ry.FS.positionDiff, [base_frame_names[2], "r3_gripper"], ry.OT.sos, [base_gripper_distance_weight])
-
-        komo.addObjective([], ry.FS.positionDiff, [base_frame_names[0], base_frame_names[1]], ry.OT.sos, [base_distribution_weight])
-        komo.addObjective([], ry.FS.positionDiff, [base_frame_names[1], base_frame_names[2]], ry.OT.sos, [base_distribution_weight])
-        komo.addObjective([], ry.FS.positionDiff, [base_frame_names[2], base_frame_names[0]], ry.OT.sos, [base_distribution_weight])
 
         ret_dict, keyframes = solve_komo_problem(komo, max_attempts, C, view=view, damping=damping, wolfe=wolfe, initial_state=initial_state)
 
@@ -283,28 +278,13 @@ if __name__ == "__main__":
     gripper_weight_end = 1e3
     gripper_weight_num = 25
     gripper_weights = np.logspace(np.log10(gripper_weight_start), np.log10(gripper_weight_end), gripper_weight_num)
+    # gripper_weight = 5.11
     gripper_weight = 5.11
-    gripper_weight = 5.11
-
-    base_distribution_weight_start = 1e-2
-    base_distribution_weight_end = 1e1
-    base_distribution_weight_num = 10
-    base_distribution_weights = np.logspace(np.log10(base_distribution_weight_start), np.log10(base_distribution_weight_end), base_distribution_weight_num)
-    base_distribution_weights = [0]
-    base_distribution_weight = 7e-2
-
-    base_gripper_distance_weight_start = 1e-2
-    base_gripper_distance_weight_end = 1e1
-    base_gripper_distance_weight_num = 10
-    base_gripper_distance_weights = np.logspace(np.log10(base_gripper_distance_weight_start), np.log10(base_gripper_distance_weight_end), base_gripper_distance_weight_num)
-    base_gripper_distance_weights = [0]
-    base_gripper_distance_weight = 7e-2
 
     num_initial_states = 100
     print(f"Generating {num_initial_states} random initial states")
-    print(f"For each initial state, searching {len(joint_weights)} x {len(gripper_weights)} = {len(joint_weights) * len(gripper_weights)} weight combinations")
-    print(f"Joint weights range: {joint_weight_start} to {joint_weight_end}")
-    print(f"Gripper weights range: {gripper_weight_start} to {gripper_weight_end}")
+    print(f"Joint weight: {joint_weight}")
+    print(f"Gripper weight: {gripper_weight}")
 
     np.random.seed(42)
 
@@ -316,13 +296,6 @@ if __name__ == "__main__":
 
     pp.wait_for_user()
 
-    # unique_joint_weights = sorted(set(joint_weights))
-    # unique_gripper_weights = sorted(set(gripper_weights))
-    # count_matrix_before = np.zeros((len(unique_gripper_weights), len(unique_joint_weights)))
-    # count_matrix_after = np.zeros((len(unique_gripper_weights), len(unique_joint_weights)))
-    unique_base_distribution_weights = sorted(set(base_distribution_weights))
-    unique_base_gripper_distance_weights = sorted(set(base_gripper_distance_weights))
-    count_matrix = np.zeros((len(unique_base_gripper_distance_weights), len(unique_base_distribution_weights)))
     all_results = []
 
     for state_idx, initial_state in enumerate(initial_states):
@@ -338,40 +311,23 @@ if __name__ == "__main__":
 
         feasible_configs_for_state = []
 
-        # total_combinations = len(joint_weights) * len(gripper_weights)
-        total_combinations = len(base_distribution_weights) * len(base_gripper_distance_weights)
-        with tqdm(total=total_combinations, desc=f"  State {state_idx + 1}: Weight combinations", leave=False, unit="combo") as pbar:
-            for base_distribution_weight in base_distribution_weights:
-                for base_gripper_distance_weight in base_gripper_distance_weights:
-                    ret, komo = solve_with_weights(joint_weight, gripper_weight, base_distribution_weight, base_gripper_distance_weight, initial_state, max_attempts=1)
+        ret, komo = solve_with_weights(joint_weight, gripper_weight, initial_state, max_attempts=1)
 
-                    # joint_idx = unique_joint_weights.index(joint_weight)
-                    # gripper_idx = unique_gripper_weights.index(gripper_weight)
-
-                    base_distribution_weight_idx = unique_base_distribution_weights.index(base_distribution_weight)
-                    base_gripper_distance_weight_idx = unique_base_gripper_distance_weights.index(base_gripper_distance_weight)
-
-                    if ret.feasible:
-                        count_matrix[base_gripper_distance_weight_idx, base_distribution_weight_idx] += 1
-                        
-                        q = ret.keyframes
-                        _, eq_vals, ineq_vals = check_gripper_constraints(C, q[0], eps=1e-3)
-                        feasible_configs_for_state.append(
-                            {
-                                "joint_weight": joint_weight,
-                                "gripper_weight": gripper_weight,
-                                "base_distribution_weight": base_distribution_weight,
-                                "base_gripper_distance_weight": base_gripper_distance_weight,
-                                "q": q[0].tolist(),
-                                "ret_eq": float(ret.eq),
-                                "ret_ineq": float(ret.ineq),
-                                "ret_sos": float(ret.sos),
-                                "eq_constraints": {name: float(val) for name, val, _ in eq_vals},
-                                "ineq_constraints": {name: float(val) for name, val, _, _ in ineq_vals},
-                            }
-                        )
-
-                    pbar.update(1)
+        if ret.feasible:
+            q = ret.keyframes
+            _, eq_vals, ineq_vals = check_gripper_constraints(C, q[0], eps=1e-3)
+            feasible_configs_for_state.append(
+                {
+                    "joint_weight": joint_weight,
+                    "gripper_weight": gripper_weight,
+                    "q": q[0].tolist(),
+                    "ret_eq": float(ret.eq),
+                    "ret_ineq": float(ret.ineq),
+                    "ret_sos": float(ret.sos),
+                    "eq_constraints": {name: float(val) for name, val, _ in eq_vals},
+                    "ineq_constraints": {name: float(val) for name, val, _, _ in ineq_vals},
+                }
+            )
 
         if len(feasible_configs_for_state) > 0:
             feasible_config = (feasible_configs_for_state[0]["joint_weight"], feasible_configs_for_state[0]["gripper_weight"])
@@ -412,8 +368,6 @@ if __name__ == "__main__":
                     "state_idx": r["state_idx"],
                     "joint_weight": cfg["joint_weight"],
                     "gripper_weight": cfg["gripper_weight"],
-                    "base_distribution_weight": cfg["base_distribution_weight"],
-                    "base_gripper_distance_weight": cfg["base_gripper_distance_weight"],
                     "q": cfg["q"],
                     "eq": cfg["ret_eq"],
                     "ineq": cfg["ret_ineq"],
@@ -434,35 +388,6 @@ if __name__ == "__main__":
             json.dump(all_feasible_configs, f, indent=2)
         print(f"Saved to {results_file}")
 
-    print("\nPlotting weight heatmap...")
-
-    fig, ax = plt.subplots(1, 1, figsize=(12, 10))
-
-    im = ax.imshow(count_matrix, aspect="auto", cmap="YlOrRd", origin="lower", interpolation="nearest", vmin=0, vmax=num_initial_states)
-
-    ax.set_xticks(range(len(unique_base_distribution_weights)))
-    ax.set_xticklabels([f"{w:.2e}" for w in unique_base_distribution_weights], rotation=45, ha="right")
-    ax.set_yticks(range(len(unique_base_gripper_distance_weights)))
-    ax.set_yticklabels([f"{w:.2e}" for w in unique_base_gripper_distance_weights])
-
-    ax.set_xlabel("Base Distribution Weight", fontsize=12)
-    ax.set_ylabel("Base Gripper Distance Weight", fontsize=12)
-    ax.set_title(f"Feasible Configurations (Total: {len(all_feasible_configs)} configs)", fontsize=14)
-
-    cbar = plt.colorbar(im, ax=ax)
-    cbar.set_label("Number of Feasible Configurations", fontsize=11)
-
-    for i in range(len(unique_base_gripper_distance_weights)):
-        for j in range(len(unique_base_distribution_weights)):
-            if count_matrix[i, j] > 0:
-                text = ax.text(j, i, int(count_matrix[i, j]), ha="center", va="center", color="black", fontsize=8)
-
-    plt.tight_layout()
-    plot_file = os.path.join(output_dir, "feasible_weights_heatmap.png")
-    plt.savefig(plot_file, dpi=300, bbox_inches="tight")
-    print(f"Saved plot to {plot_file}")
-    plt.close()
-
     if len(all_feasible_configs) > 0:
         print("\nFeasible configurations summary:")
         for r in all_results:
@@ -478,8 +403,6 @@ if __name__ == "__main__":
             print(f"  State ID: {cfg['state_idx'] + 1}")
             print(f"  Joint Weight: {cfg['joint_weight']:.3e}")
             print(f"  Gripper Weight: {cfg['gripper_weight']:.3e}")
-            print(f"  Base Distribution Weight: {cfg['base_distribution_weight']:.3e}")
-            print(f"  Base Gripper Distance Weight: {cfg['base_gripper_distance_weight']:.3e}")
             print(f"  Optimization Errors:")
             print(f"    EQ: {cfg['eq']:.3e}")
             print(f"    INEQ: {cfg['ineq']:.3e}")

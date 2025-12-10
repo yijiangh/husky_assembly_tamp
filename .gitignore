@@ -122,3 +122,5 @@ ENV/
 ###############################
 scripts/*test*.py
 scripts/logs/**/*.npy
+
+z.log.global

@@ -428,200 +428,9 @@ def create_vertical_element(
     return element
 
 
-@dataclass
-class Constraint:
+class SingleKeyFrameSolver:
     """
-    Represents a constraint to be checked after optimization and automatically added to KOMO.
-
-    Attributes:
-        name: Unique identifier for the constraint
-        constraint_type: Type of constraint ('eq' for equality, 'ineq' for inequality, 'sos' for soft objective)
-        feature_type: The ry.FS feature type (e.g., ry.FS.scalarProductXY)
-        frames: List of frame names for the feature evaluation
-        phase_idx: Phase index (None if applies to all phases). KOMO phases are 1-indexed, so phase_idx 0 -> [1], 1 -> [2], etc.
-        objective_type: The ry.OT objective type (ry.OT.eq, ry.OT.ineq, ry.OT.sos)
-        weight: Weight of the constraint (constraints with weight=0 are skipped)
-        target: Target value(s) for the constraint. For eq: scalar or list, for ineq: list with bounds, for sos: target value(s)
-        order: Order for velocity constraints (default 0)
-    """
-
-    name: str
-    constraint_type: str  # 'eq' or 'ineq' or 'sos'
-    feature_type: Any  # ry.FS type
-    frames: List[str]
-    objective_type: Any  # ry.OT type
-    weight: float = 1.0
-    phase_idx: Optional[int] = None  # None means applies to all phases
-    target: Optional[Union[float, List[float]]] = None
-    order: int = 0
-
-    def should_check(self) -> bool:
-        """Return True if this constraint should be checked (weight != 0)."""
-        if isinstance(self.weight, list):
-            # For list weights, check if any element is non-zero
-            return any(abs(w) > 1e-10 for w in self.weight)
-        else:
-            return abs(self.weight) > 1e-10
-
-    def get_phase_time(self) -> List[int]:
-        """Get phase time list for KOMO (1-indexed). Empty list means all phases."""
-        if self.phase_idx is None:
-            return []
-        return [self.phase_idx + 1]  # KOMO phases are 1-indexed
-
-    def get_target_value(self) -> float:
-        """Get target value for equality constraint checking."""
-        if isinstance(self.target, list):
-            return self.target[0] if len(self.target) > 0 else 0.0
-        return self.target if self.target is not None else 0.0
-
-    # Additional attribute for constraint checking (not used in KOMO addition)
-    bounds: Optional[Tuple[float, float]] = None  # (upper, lower) for inequality constraints
-
-    def get_bounds(self) -> Optional[Tuple[float, float]]:
-        """Get bounds for inequality constraint checking."""
-        return self.bounds
-
-
-class ConstraintManager:
-    """Manages constraints registered during KOMO problem setup."""
-
-    def __init__(self, config: ry.Config, constraint_eps: float = 1e-3):
-        """
-        Initialize the constraint manager.
-
-        Args:
-            config: The ry.Config object for constraint evaluation
-            constraint_eps: Tolerance for constraint satisfaction checking
-        """
-        self.config = config
-        self.constraint_eps = constraint_eps
-        self.constraints: List[Constraint] = []
-
-    def register(self, constraint: Constraint, komo: Optional[ry.KOMO] = None) -> None:
-        """
-        Register a constraint and optionally add it to KOMO immediately.
-
-        Args:
-            constraint: The constraint to register
-            komo: Optional KOMO object. If provided, the constraint will be automatically added.
-        """
-        self.constraints.append(constraint)
-        if komo is not None:
-            self._add_constraint_to_komo(constraint, komo)
-
-    def add_all_to_komo(self, komo: ry.KOMO) -> None:
-        """
-        Add all registered constraints to the KOMO problem.
-
-        Args:
-            komo: The KOMO object to add constraints to
-        """
-        for constraint in self.constraints:
-            if constraint.should_check():
-                self._add_constraint_to_komo(constraint, komo)
-
-    def _add_constraint_to_komo(self, constraint: Constraint, komo: ry.KOMO) -> None:
-        """
-        Add a single constraint to KOMO.
-
-        Args:
-            constraint: The constraint to add
-            komo: The KOMO object
-        """
-        phase_time = constraint.get_phase_time()
-        weight_list = [constraint.weight] if not isinstance(constraint.weight, list) else constraint.weight
-
-        # Prepare target value
-        if constraint.target is None:
-            target = [0]
-        elif isinstance(constraint.target, list):
-            target = constraint.target
-        else:
-            target = [constraint.target]
-
-        # Add objective to KOMO
-        if constraint.order > 0:
-            komo.addObjective(phase_time, constraint.feature_type, constraint.frames, constraint.objective_type, weight_list, target, order=constraint.order)
-        else:
-            komo.addObjective(phase_time, constraint.feature_type, constraint.frames, constraint.objective_type, weight_list, target)
-
-    def check_all(self, keyframes: np.ndarray) -> Tuple[bool, List, List]:
-        """
-        Check all registered constraints using eval for all phases.
-
-        Args:
-            keyframes: Keyframes array with shape (num_phases, num_joints)
-
-        Returns:
-            Tuple of (all_satisfied, eq_constraints, ineq_constraints)
-            where eq_constraints is list of (name, actual_value, target_value)
-            and ineq_constraints is list of (name, actual_value, upper_bound, lower_bound)
-        """
-        eq_constraints = []
-        ineq_constraints = []
-
-        num_phases = keyframes.shape[0] if keyframes.ndim == 2 else 1
-
-        # Check constraints for each phase
-        for phase_idx in range(num_phases):
-            q_state = keyframes[phase_idx] if keyframes.ndim == 2 else keyframes
-            self.config.setJointState(q_state)
-            self.config.computeCollisions()
-
-            # Check constraints that apply to this phase
-            for constraint in self.constraints:
-                if not constraint.should_check():
-                    continue
-
-                # Check if constraint applies to this phase
-                if constraint.phase_idx is not None and constraint.phase_idx != phase_idx:
-                    continue
-
-                # Skip checking constraints that cannot be evaluated (e.g., qItself with base frames)
-                # These are velocity/equality constraints that are better validated through optimization results
-                if constraint.feature_type == ry.FS.qItself and constraint.order > 0:
-                    continue  # Skip velocity constraints as they're validated by KOMO optimization
-
-                # Evaluate the feature
-                try:
-                    result = self.config.eval(constraint.feature_type, constraint.frames)
-
-                    # Extract feature value from tuple (phi, J)
-                    phi = result[0] if isinstance(result, tuple) else result
-
-                    # Handle different result shapes
-                    if constraint.feature_type == ry.FS.positionRel:
-                        actual_value = float(phi[2])  # z-component for position constraints
-                    else:
-                        actual_value = float(phi[0] if hasattr(phi, "__getitem__") else phi)
-                except Exception as e:
-                    # If evaluation fails, skip this constraint
-                    # Some constraints (like qItself with base frames) cannot be evaluated directly
-                    if "is not a joint or pathDof" in str(e) or "dim_phi" in str(e):
-                        continue  # Silently skip constraints that cannot be evaluated
-                    print(f"Warning: Failed to evaluate constraint {constraint.name}: {e}")
-                    continue
-
-                if constraint.constraint_type == "eq":
-                    target = constraint.get_target_value()
-                    eq_constraints.append((constraint.name, actual_value, target))
-                elif constraint.constraint_type == "ineq":
-                    bounds = constraint.get_bounds()
-                    if bounds is not None:
-                        upper, lower = bounds
-                        ineq_constraints.append((constraint.name, actual_value, upper, lower))
-                # Note: 'sos' constraints are soft objectives and are typically checked less strictly
-
-        all_eq_satisfied = all(abs(val - target) < self.constraint_eps for _, val, target in eq_constraints)
-        all_ineq_satisfied = all(val <= upper and val >= lower for _, val, upper, lower in ineq_constraints)
-
-        return all_eq_satisfied and all_ineq_satisfied, eq_constraints, ineq_constraints
-
-
-class MultiPhaseKomoSolver:
-    """
-    Multi-phase KOMO solver for multi-robot grasp tasks (single keyframe per phase).
+    A solver for multi-phase keyframe optimization using KOMO.
 
     This class encapsulates the logic for solving inverse kinematics problems
     with gripper constraints for multiple robots across multiple phases.
@@ -649,18 +458,23 @@ class MultiPhaseKomoSolver:
         gripper_weight: float = 5.11,
         position_rel_z_bounds: Tuple[float, float] = (0.4, -0.4),
         constraint_eps: float = 1e-3,
+        max_attempts: int = 10,
         damping: Optional[float] = None,
         wolfe: Optional[float] = None,
+        random_init_mult: float = 3.0,
+        random_init_offset: float = -1.5,
         freeze_arm_joints: bool = False,
         x_home: Optional[np.ndarray] = None,
         arm_joint_indices: Optional[List[List[int]]] = None,
+        group_distance_constraints: Optional[List[Optional[np.ndarray]]] = None,
+        distance_frame_names: Optional[List[Union[str, List[str]]]] = None,
+        distance_weight: float = 1.0,
         collision_weight: float = 1.0,
         pose_rel_constraints: Optional[List[Tuple[str, str, List[float]]]] = None,
         pose_rel_weight: float = 1.0,
-        enable_constraint_verification: bool = True,
     ):
         """
-        Initialize the solver.
+        Initialize the SingleKeyFrameSolver.
 
         Args:
             config: The ry.Config object containing the robot and environment setup
@@ -674,16 +488,29 @@ class MultiPhaseKomoSolver:
             gripper_weight: Weight for gripper constraint objectives
             position_rel_z_bounds: Tuple of (upper, lower) bounds for relative position Z constraint
             constraint_eps: Tolerance for constraint satisfaction checking
+            max_attempts: Maximum number of optimization attempts
             damping: Damping parameter for NLP solver (optional)
             wolfe: Wolfe parameter for NLP solver (optional)
+            random_init_mult: Multiplier for random initialization
+            random_init_offset: Offset for random initialization
             freeze_arm_joints: Whether to freeze arm joint angles to home position
             x_home: Home joint state for freezing arm joints (required if freeze_arm_joints=True)
             arm_joint_indices: List of lists, each containing joint indices for each robot's arm (required if freeze_arm_joints=True)
+            group_distance_constraints: List of upper triangular matrices defining distance constraints
+                                        within each group. For a group with n robots, provide an n×n matrix
+                                        where element [i,j] (i<j) specifies the target distance between
+                                        robot i and robot j. Use -1 to indicate no constraint between two robots.
+                                        None matrix means no constraints for that group.
+                                        Example for 2 robots: np.array([[-1, 1.0], [-1, -1]])
+                                        means distance between robot 0 and 1 should be 1.0
+            distance_frame_names: List of frame names (grouped like robot_names) used for distance constraints.
+                                  e.g., [["r1_panda_link0", "r2_panda_link0"], "r3_panda_link0"] for base link distances.
+                                  If None, uses robot_names from first phase for distance calculation.
+            distance_weight: Weight for distance constraint objectives
             collision_weight: Weight for collision avoidance constraint
             pose_rel_constraints: List of directed constraints (frame_i, frame_j, target_pose7).
                                   Position uses target_pose7[:3] via positionRel; rotation uses scalarProductXX to align x-axes.
             pose_rel_weight: Weight for poseRel constraints
-            enable_constraint_verification: Whether to perform secondary constraint checking after optimization
         """
         self.config = config
         self.robot_names_phases = robot_names_phases
@@ -693,15 +520,20 @@ class MultiPhaseKomoSolver:
         self.gripper_weight = gripper_weight
         self.position_rel_z_bounds = position_rel_z_bounds
         self.constraint_eps = constraint_eps
+        self.max_attempts = max_attempts
         self.damping = damping
         self.wolfe = wolfe
+        self.random_init_mult = random_init_mult
+        self.random_init_offset = random_init_offset
         self.freeze_arm_joints = freeze_arm_joints
         self.x_home = x_home
         self.arm_joint_indices = arm_joint_indices
+        self.group_distance_constraints = group_distance_constraints
+        self.distance_frame_names = distance_frame_names if distance_frame_names is not None else robot_names_phases[0]
+        self.distance_weight = distance_weight
         self.collision_weight = collision_weight
         self.pose_rel_constraints = pose_rel_constraints
         self.pose_rel_weight = pose_rel_weight
-        self.enable_constraint_verification = enable_constraint_verification
 
         # Validate number of phases match
         if len(robot_names_phases) != len(target_names_phases):
@@ -722,6 +554,9 @@ class MultiPhaseKomoSolver:
 
         # Build flattened robot-target pairs for each phase
         self._robot_target_pairs_by_phase = self._build_robot_target_pairs_by_phase()
+
+        # Build group distance constraint pairs
+        self._group_distance_pairs = self._build_group_distance_pairs()
 
         if freeze_arm_joints:
             if x_home is None:
@@ -754,127 +589,201 @@ class MultiPhaseKomoSolver:
             pairs_by_phase.append(pairs)
         return pairs_by_phase
 
-    def check_constraints(self, constraint_manager: ConstraintManager, keyframes: np.ndarray) -> Tuple[bool, List, List]:
+    def _build_group_distance_pairs(self) -> List[Tuple[str, str, float]]:
         """
-        Check all constraints using the constraint manager.
+        Build a list of (frame_i, frame_j, target_distance) tuples from group distance constraints.
+
+        Uses upper triangular matrix format where element [i,j] (i<j) specifies the target
+        distance between frame i and frame j within the same group.
+        Use -1 to indicate no constraint between two frames.
+
+        Returns:
+            List of (frame_i_name, frame_j_name, target_distance) tuples
+        """
+        pairs = []
+        if self.group_distance_constraints is None:
+            return pairs
+
+        for group_idx, frames in enumerate(self.distance_frame_names):
+            if not isinstance(frames, list):
+                # Single frame in group, no distance constraints possible
+                continue
+
+            if group_idx >= len(self.group_distance_constraints):
+                continue
+
+            distance_matrix = self.group_distance_constraints[group_idx]
+            if distance_matrix is None:
+                continue
+
+            n_frames = len(frames)
+            # Extract upper triangular pairs (i < j)
+            for i in range(n_frames):
+                for j in range(i + 1, n_frames):
+                    if i < distance_matrix.shape[0] and j < distance_matrix.shape[1]:
+                        dist = distance_matrix[i, j]
+                        # Skip if distance is -1 (no constraint) or negative
+                        if dist >= 0:
+                            pairs.append((frames[i], frames[j], float(dist)))
+
+        return pairs
+
+    def check_gripper_constraints(self, keyframes: np.ndarray) -> Tuple[bool, List, List]:
+        """
+        Manually check gripper constraints using eval for all phases.
+        Constraints with weight=0 are skipped.
 
         Args:
-            constraint_manager: The ConstraintManager containing all registered constraints
             keyframes: Keyframes array with shape (num_phases, num_joints)
 
         Returns:
             Tuple of (all_satisfied, eq_constraints, ineq_constraints)
         """
-        return constraint_manager.check_all(keyframes)
+        eq_constraints = []
+        ineq_constraints = []
 
-    def solve_komo_problem(self, komo: ry.KOMO, constraint_manager: Optional[ConstraintManager] = None, initial_state: Optional[np.ndarray] = None, view: bool = False) -> Tuple[Dict[str, Any], Optional[np.ndarray]]:
+        # Check constraints for each phase
+        for phase_idx in range(self.num_phases):
+            q_state = keyframes[phase_idx]
+            self.config.setJointState(q_state)
+            self.config.computeCollisions()
+
+            # Check constraints for each robot-target pair in this phase (skip if gripper_weight == 0)
+            if self.gripper_weight != 0:
+                for robot_name, target_name in self._robot_target_pairs_by_phase[phase_idx]:
+                    scalar_product_xy = self.config.eval(ry.FS.scalarProductXY, [target_name, robot_name])
+                    scalar_product_yy = self.config.eval(ry.FS.scalarProductYY, [target_name, robot_name])
+                    val_xy = float(scalar_product_xy[0][0])
+                    val_yy = float(scalar_product_yy[0][0])
+                    eq_constraints.append((f"phase{phase_idx+1}_scalarProductXY_{robot_name}_{target_name}", val_xy, 0))
+                    eq_constraints.append((f"phase{phase_idx+1}_scalarProductYY_{robot_name}_{target_name}", val_yy, 0))
+
+                    position_rel = self.config.eval(ry.FS.positionRel, [robot_name, target_name])
+                    pos_rel = position_rel[0]
+                    val_pos_z = float(pos_rel[2])
+                    upper, lower = self.position_rel_z_bounds
+                    ineq_constraints.append((f"phase{phase_idx+1}_positionRel_{robot_name}_{target_name}_z", val_pos_z, upper, lower))
+
+            # Check group distance constraints (skip if distance_weight == 0)
+            # if self.distance_weight != 0:
+            #     for robot_i, robot_j, target_dist in self._group_distance_pairs:
+            #         dist_val = self.config.eval(ry.FS.distance, [robot_i, robot_j])
+            #         actual_dist = float(dist_val[0][0])
+            #         eq_constraints.append((f"phase{phase_idx+1}_distance_{robot_i}_{robot_j}", actual_dist, -target_dist))
+
+            accumulated_collisions = self.config.eval(ry.FS.accumulatedCollisions, [])
+            val_collisions = float(accumulated_collisions[0][0])
+            eq_constraints.append((f"phase{phase_idx+1}_accumulatedCollisions", val_collisions, 0))
+
+        all_eq_satisfied = all(abs(val - target) < self.constraint_eps for _, val, target in eq_constraints)
+        all_ineq_satisfied = all(val <= upper and val >= lower for _, val, upper, lower in ineq_constraints)
+
+        return all_eq_satisfied and all_ineq_satisfied, eq_constraints, ineq_constraints
+
+    def solve_komo_problem(self, komo: ry.KOMO, initial_state: Optional[np.ndarray] = None, view: bool = False) -> Tuple[Dict[str, Any], Optional[np.ndarray]]:
         """
-        Solve a KOMO problem (single attempt).
+        Solve a KOMO problem with multiple attempts.
 
         Args:
             komo: The KOMO problem to solve
-            constraint_manager: Optional ConstraintManager for constraint verification
             initial_state: Initial joint state (optional)
             view: Whether to visualize the solution
 
         Returns:
             Tuple of (retval_dict, keyframes)
         """
+        for num_attempt in range(self.max_attempts):
 
-        def _init_with_path_or_const(state: np.ndarray):
-            """Initialize KOMO with a per-phase path if 2D, else constant."""
-            state_arr = np.asarray(state)
-            if state_arr.ndim == 2:
-                komo.initWithPath(state_arr)
+            def _init_with_path_or_const(state: np.ndarray):
+                """Initialize KOMO with a per-phase path if 2D, else constant."""
+                state_arr = np.asarray(state)
+                if state_arr.ndim == 2:
+                    komo.initWithPath(state_arr)
+                else:
+                    komo.initWithConstant(state_arr)
+
+            if num_attempt == 0 and initial_state is not None:
+                _init_with_path_or_const(initial_state)
             else:
-                komo.initWithConstant(state_arr)
+                x_init = generate_random_initial_state(self.config)
+                # Tile the random state across phases so each phase has a seed
+                x_path = np.tile(x_init, (self.num_phases, 1)) if self.num_phases > 1 else x_init
+                _init_with_path_or_const(x_path)
 
-        if initial_state is not None:
-            _init_with_path_or_const(initial_state)
-        else:
-            x_init = generate_random_initial_state(self.config)
-            x_path = np.tile(x_init, (self.num_phases, 1)) if self.num_phases > 1 else x_init
-            _init_with_path_or_const(x_path)
+            solver = ry.NLP_Solver(komo.nlp(), verbose=0)
 
-        solver = ry.NLP_Solver(komo.nlp(), verbose=0)
+            # if self.damping is not None:
+            #     solver.setOptions(damping=self.damping)
+            # if self.wolfe is not None:
+            #     solver.setOptions(wolfe=self.wolfe)
 
-        # if self.damping is not None:
-        #     solver.setOptions(damping=self.damping)
-        # if self.wolfe is not None:
-        #     solver.setOptions(wolfe=self.wolfe)
+            # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+            # This is generated by AI, not sure if it is correct.
+            # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+            # NLP_Solver.setOptions() parameters:
+            #
+            # Stopping criteria:
+            #   verbose (int, default=1): Verbosity level for solver output (0=silent, higher=more info)
+            #   stopTolerance (float, default=0.01): Convergence tolerance on step size Delta
+            #       Optimization stops when |x - x'| < stopTolerance
+            #   stopFTolerance (float, default=-1): Tolerance on objective function change
+            #       If >= 0, stops when |f - f'| < stopFTolerance (-1 means disabled)
+            #   stopGTolerance (float, default=-1): Tolerance on gradient norm
+            #       If >= 0, stops when ||grad|| < stopGTolerance (-1 means disabled)
+            #   stopEvals (int, default=1000): Maximum number of function evaluations allowed
+            #   stopInners (int, default=1000): Maximum inner loop iterations (within one penalty level)
+            #   stopOuters (int, default=1000): Maximum outer loop iterations (penalty parameter updates)
+            #
+            # Step size control:
+            #   stepMax (float, default=0.2): Maximum step size per iteration
+            #       Larger values allow bigger jumps but may cause instability
+            #   stepInc (float, default=1.5): Factor to increase step size after successful step
+            #   stepDec (float, default=0.5): Factor to decrease step size after failed step
+            #
+            # Regularization:
+            #   damping (float, default=1.0): Damping/regularization parameter (Levenberg-Marquardt style)
+            #       Higher = more stable but slower convergence; Lower = more aggressive optimization
+            #
+            # Line search:
+            #   wolfe (float, default=0.01): Wolfe condition parameter for line search
+            #       Smaller values make line search conditions more lenient
+            #
+            # Augmented Lagrangian parameters (for constrained optimization):
+            #   muInit (float, default=1.0): Initial penalty coefficient for constraints
+            #       Smaller = start with looser constraint enforcement
+            #   muInc (float, default=5.0): Factor to increase mu after each outer iteration
+            #       Smaller = slower constraint tightening, more stable
+            #   muMax (float, default=10000.0): Maximum penalty coefficient
+            #   muLBInit (float, default=0.1): Initial penalty for lower bound constraints
+            #   muLBDec (float, default=0.2): Factor to decrease muLB
+            #   lambdaMax (float, default=-1): Maximum Lagrange multiplier magnitude (-1 = no limit)
 
-        # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        # This is generated by AI, not sure if it is correct. Do not remove
-        # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        # NLP_Solver.setOptions() parameters:
-        #
-        # Stopping criteria:
-        #   verbose (int, default=1): Verbosity level for solver output (0=silent, higher=more info)
-        #   stopTolerance (float, default=0.01): Convergence tolerance on step size Delta
-        #       Optimization stops when |x - x'| < stopTolerance
-        #   stopFTolerance (float, default=-1): Tolerance on objective function change
-        #       If >= 0, stops when |f - f'| < stopFTolerance (-1 means disabled)
-        #   stopGTolerance (float, default=-1): Tolerance on gradient norm
-        #       If >= 0, stops when ||grad|| < stopGTolerance (-1 means disabled)
-        #   stopEvals (int, default=1000): Maximum number of function evaluations allowed
-        #   stopInners (int, default=1000): Maximum inner loop iterations (within one penalty level)
-        #   stopOuters (int, default=1000): Maximum outer loop iterations (penalty parameter updates)
-        #
-        # Step size control:
-        #   stepMax (float, default=0.2): Maximum step size per iteration
-        #       Larger values allow bigger jumps but may cause instability
-        #   stepInc (float, default=1.5): Factor to increase step size after successful step
-        #   stepDec (float, default=0.5): Factor to decrease step size after failed step
-        #
-        # Regularization:
-        #   damping (float, default=1.0): Damping/regularization parameter (Levenberg-Marquardt style)
-        #       Higher = more stable but slower convergence; Lower = more aggressive optimization
-        #
-        # Line search:
-        #   wolfe (float, default=0.01): Wolfe condition parameter for line search
-        #       Smaller values make line search conditions more lenient
-        #
-        # Augmented Lagrangian parameters (for constrained optimization):
-        #   muInit (float, default=1.0): Initial penalty coefficient for constraints
-        #       Smaller = start with looser constraint enforcement
-        #   muInc (float, default=5.0): Factor to increase mu after each outer iteration
-        #       Smaller = slower constraint tightening, more stable
-        #   muMax (float, default=10000.0): Maximum penalty coefficient
-        #   muLBInit (float, default=0.1): Initial penalty for lower bound constraints
-        #   muLBDec (float, default=0.2): Factor to decrease muLB
-        #   lambdaMax (float, default=-1): Maximum Lagrange multiplier magnitude (-1 = no limit)
+            solver.setOptions(
+                stopEvals=5000,
+                stopTolerance=1e-6,
+                stepMax=0.5,
+                damping=0.1,
+                stepInc=2.0,
+                stepDec=0.3,
+                wolfe=0.001,
+                muInit=0.1,
+                muInc=2.0,
+                muMax=100000.0,
+            )
 
-        solver.setOptions(
-            stopEvals=5000,
-            stopTolerance=1e-6,
-            stepMax=0.5,
-            damping=0.1,
-            stepInc=2.0,
-            stepDec=0.3,
-            wolfe=0.001,
-            muInit=0.1,
-            muInc=2.0,
-            muMax=100000.0,
-        )
+            retval = solver.solve(verbose=0)
+            retval = retval.dict()
 
-        retval = solver.solve(verbose=0)
-        retval = retval.dict()
+            if view:
+                print(retval)
+                komo.view(True, "IK solution")
 
-        if view:
-            print(retval)
-            komo.view(True, "IK solution")
-
-        if retval["feasible"]:
-            keyframes = komo.getPath()
-            if keyframes is not None and len(keyframes) >= self.num_phases:
-                # Only check constraints if verification is enabled and constraint_manager is provided
-                if self.enable_constraint_verification and constraint_manager is not None:
-                    is_feasible, eq_vals, ineq_vals = self.check_constraints(constraint_manager, keyframes)
+            if retval["feasible"]:
+                keyframes = komo.getPath()
+                if keyframes is not None and len(keyframes) >= self.num_phases:  # TODO: Check if this is correct.
+                    is_feasible, eq_vals, ineq_vals = self.check_gripper_constraints(keyframes)
                     if is_feasible:
                         return retval, keyframes
-                else:
-                    # If verification is disabled, accept the solution directly
-                    return retval, keyframes
 
         return retval, None
 
@@ -908,158 +817,40 @@ class MultiPhaseKomoSolver:
         # Create multi-phase KOMO: phases=num_phases, slicesPerPhase=1, kOrder=1 to allow cross-phase equality
         komo = ry.KOMO(self.config, phases=self.num_phases, slicesPerPhase=1, kOrder=1, enableCollisions=True)
 
-        # Create constraint manager for constraint verification
-        constraint_manager = ConstraintManager(self.config, self.constraint_eps)
-
         # Add joint state regularization objective (applies to all phases)
         # komo.addObjective([], ry.FS.jointState, [], ry.OT.sos, [self.joint_weight], initial_state)
 
-        # Register and add gripper constraints for each phase
+        # Add gripper constraints for each phase
         for phase_idx in range(self.num_phases):
+            phase_time = [phase_idx + 1]  # KOMO phases are 1-indexed: [1], [2], etc.
+
             # Add gripper constraints for each robot-target pair in this phase
             for robot_name, target_name in self._robot_target_pairs_by_phase[phase_idx]:
-                # Alignment constraints (scalar products) - equality
-                constraint_manager.register(
-                    Constraint(
-                        name=f"phase{phase_idx+1}_scalarProductXY_{robot_name}_{target_name}",
-                        constraint_type="eq",
-                        feature_type=ry.FS.scalarProductXY,
-                        frames=[target_name, robot_name],
-                        objective_type=ry.OT.eq,
-                        phase_idx=phase_idx,
-                        target=0.0,
-                        weight=[self.gripper_weight],  # Weight should be a list
-                    ),
-                    komo,
-                )
+                # Alignment constraints (scalar products)
+                komo.addObjective(phase_time, ry.FS.scalarProductXY, [target_name, robot_name], ry.OT.eq, [self.gripper_weight], [0])
+                komo.addObjective(phase_time, ry.FS.scalarProductYY, [target_name, robot_name], ry.OT.eq, [self.gripper_weight], [0])
 
-                constraint_manager.register(
-                    Constraint(
-                        name=f"phase{phase_idx+1}_scalarProductYY_{robot_name}_{target_name}",
-                        constraint_type="eq",
-                        feature_type=ry.FS.scalarProductYY,
-                        frames=[target_name, robot_name],
-                        objective_type=ry.OT.eq,
-                        phase_idx=phase_idx,
-                        target=0.0,
-                        weight=[self.gripper_weight],  # Weight should be a list
-                    ),
-                    komo,
-                )
-
-                # Position constraints (inequality) - need two constraints for upper and lower bounds
+                # Position constraints (inequality)
                 upper, lower = self.position_rel_z_bounds
-                # Upper bound constraint
-                constraint_manager.register(
-                    Constraint(
-                        name=f"phase{phase_idx+1}_positionRel_{robot_name}_{target_name}_upper",
-                        constraint_type="ineq",
-                        feature_type=ry.FS.positionRel,
-                        frames=[robot_name, target_name],
-                        objective_type=ry.OT.ineq,
-                        phase_idx=phase_idx,
-                        target=[0, 0, upper],
-                        weight=[self.gripper_weight],  # Weight should be a list to match original code
-                        bounds=(upper, lower),  # Store bounds for checking
-                    ),
-                    komo,
-                )
-                # Lower bound constraint (negative weight for flipped inequality)
-                constraint_manager.register(
-                    Constraint(
-                        name=f"phase{phase_idx+1}_positionRel_{robot_name}_{target_name}_lower",
-                        constraint_type="ineq",
-                        feature_type=ry.FS.positionRel,
-                        frames=[robot_name, target_name],
-                        objective_type=ry.OT.ineq,
-                        phase_idx=phase_idx,
-                        target=[0, 0, lower],
-                        weight=[-self.gripper_weight],  # Negative weight for lower bound
-                        bounds=(upper, lower),  # Store bounds for checking
-                    ),
-                    komo,
-                )
+                komo.addObjective(phase_time, ry.FS.positionRel, [robot_name, target_name], ry.OT.ineq, [self.gripper_weight], [0, 0, upper])
+                komo.addObjective(phase_time, ry.FS.positionRel, [robot_name, target_name], ry.OT.ineq, [-self.gripper_weight], [0, 0, lower])
 
-                # Register a single constraint for checking (checks z-component within bounds)
-                constraint_manager.register(
-                    Constraint(
-                        name=f"phase{phase_idx+1}_positionRel_{robot_name}_{target_name}_z",
-                        constraint_type="ineq",
-                        feature_type=ry.FS.positionRel,
-                        frames=[robot_name, target_name],
-                        objective_type=ry.OT.ineq,  # Not actually used for this check-only constraint
-                        phase_idx=phase_idx,
-                        target=None,
-                        weight=0.0,  # Don't add to KOMO, only for checking
-                        bounds=(upper, lower),
-                    )
-                )
+        # # Add group distance constraints (applies to all phases)
+        # for robot_i, robot_j, target_dist in self._group_distance_pairs:
+        #     # komo.addObjective([], ry.FS.distance, [robot_i, robot_j], ry.OT.eq, [self.distance_weight], [-target_dist])
+        #     komo.addObjective([], ry.FS.distance, [robot_i, robot_j], ry.OT.sos, [self.distance_weight], [-target_dist])  # TODO: 换成ry.FS.poseRel
 
         # Directed pose/heading constraints (applies to all phases)
         # Position via positionRel; rotation via scalarProductXX (x-axes alignment)
-        # Note: These are sos (soft) objectives, but we can still register them for verification
         if self.pose_rel_constraints:
             for frame_i, frame_j, target_pose in self.pose_rel_constraints:
                 pos_target = target_pose[:3]
                 pos_weight = [self.pose_rel_weight] * 3
-                constraint_manager.register(
-                    Constraint(
-                        name=f"poseRel_position_{frame_i}_{frame_j}",
-                        constraint_type="sos",
-                        feature_type=ry.FS.positionRel,
-                        frames=[frame_i, frame_j],
-                        objective_type=ry.OT.sos,
-                        phase_idx=None,  # Applies to all phases
-                        target=pos_target,
-                        weight=pos_weight,
-                    ),
-                    komo,
-                )
-
-                constraint_manager.register(
-                    Constraint(
-                        name=f"poseRel_scalarProductXX_{frame_i}_{frame_j}",
-                        constraint_type="sos",
-                        feature_type=ry.FS.scalarProductXX,
-                        frames=[frame_i, frame_j],
-                        objective_type=ry.OT.sos,
-                        phase_idx=None,  # Applies to all phases
-                        target=1.0,
-                        weight=[self.pose_rel_weight],  # Weight should be a list
-                    ),
-                    komo,
-                )
+                komo.addObjective([], ry.FS.positionRel, [frame_i, frame_j], ry.OT.sos, pos_weight, pos_target)
+                komo.addObjective([], ry.FS.scalarProductXX, [frame_i, frame_j], ry.OT.sos, [self.pose_rel_weight], [1.0])
 
         # Collision avoidance (applies to all phases)
-        # Register once for all phases, but check for each phase
-        constraint_manager.register(
-            Constraint(
-                name="accumulatedCollisions_all",
-                constraint_type="eq",
-                feature_type=ry.FS.accumulatedCollisions,
-                frames=[],
-                objective_type=ry.OT.eq,
-                phase_idx=None,  # Applies to all phases
-                target=0.0,
-                weight=[self.collision_weight],  # Weight should be a list
-            ),
-            komo,
-        )
-
-        # Also register per-phase constraints for checking
-        for phase_idx in range(self.num_phases):
-            constraint_manager.register(
-                Constraint(
-                    name=f"phase{phase_idx+1}_accumulatedCollisions",
-                    constraint_type="eq",
-                    feature_type=ry.FS.accumulatedCollisions,
-                    frames=[],
-                    objective_type=ry.OT.eq,  # Not actually used, only for checking
-                    phase_idx=phase_idx,
-                    target=0.0,
-                    weight=0.0,  # Don't add to KOMO, only for checking
-                )
-            )
+        komo.addObjective([], ry.FS.accumulatedCollisions, [], ry.OT.eq, [self.collision_weight])
 
         # Enforce r3 joint states equal between Phase 1 and Phase 2 (soft equality on velocity for r3 joints)
         all_joint_names = self.config.getJointNames()
@@ -1068,12 +859,9 @@ class MultiPhaseKomoSolver:
             weight = np.zeros(len(all_joint_names))
             weight[r3_joint_indices] = self.joint_weight * 10  # stronger weight for equality
             # order=1 enforces zero velocity at the phase transition (q2 - q1 = 0) for selected joints
-            constraint_manager.register(
-                Constraint(name="r3_joint_equality_phase2", constraint_type="eq", feature_type=ry.FS.qItself, frames=[], objective_type=ry.OT.eq, phase_idx=1, target=0.0, weight=weight.tolist(), order=1),  # Phase 2 (index 1, KOMO phase 2)
-                komo,
-            )
+            komo.addObjective([2], ry.FS.qItself, [], ry.OT.eq, weight.tolist(), order=1)
 
-        ret_dict, keyframes = self.solve_komo_problem(komo, constraint_manager=constraint_manager, initial_state=initial_state, view=view)
+        ret_dict, keyframes = self.solve_komo_problem(komo, initial_state=initial_state, view=view)
 
         class RetWrapper:
             def __init__(self, ret_dict, keyframes, num_phases):
@@ -1208,14 +996,17 @@ if __name__ == "__main__":
         return path
 
     # Solver configuration parameters (shared)
-    joint_weight = 0.1  # bak
-    gripper_weight = 5.11  # bak
+    joint_weight = 0.1 # bak
+    # joint_weight = 0
+    gripper_weight = 5.11 # bak
+    # gripper_weight = 1
     position_rel_z_bounds = (0.45, -0.45)
     constraint_eps = 1e-3
+    max_attempts = 1
     freeze_arm_joints = True
+    distance_weight = 0
     collision_weight = 10
     pose_rel_weight = 10
-    enable_constraint_verification = True
 
     # Arm joint indices for freezing (assuming 10 DOF per robot: 3 base + 7 arm)
     arm_joint_indices = [
@@ -1228,6 +1019,16 @@ if __name__ == "__main__":
     robot_1_joint_indices = list(range(0 * 10, 0 * 10 + 10))
     robot_2_joint_indices = list(range(1 * 10, 1 * 10 + 10))
     robot_3_joint_indices = list(range(2 * 10, 2 * 10 + 10))
+    robot_group_joint_indices = robot_1_joint_indices + robot_2_joint_indices  # r1 + r2
+
+    # Distance frame names (grouped like robot_names, using base link frames)
+    distance_frame_names = [["r1_panda_link0", "r2_panda_link0"], "r3_panda_link0"]
+
+    # Group distance constraints (upper triangular matrix, -1 means no constraint)
+    group_distance_constraints = [
+        np.array([[-1, 0.5], [-1, -1]]),  # r1-r2 base distance = 0.3 (kept for compatibility, weight=0)
+        None,  # Group 1 (r3): single robot, no distance constraint
+    ]
 
     # Directed poseRel constraints (frame_i in frame_j coordinates)
     pose_rel_constraints = [
@@ -1249,7 +1050,7 @@ if __name__ == "__main__":
     robot_names_phases = [robot_names_phase1, robot_names_phase2]
     target_names_phases = [target_names_phase1, target_names_phase2]
 
-    solver = MultiPhaseKomoSolver(
+    solver = SingleKeyFrameSolver(
         config=C,
         robot_names_phases=robot_names_phases,
         target_names_phases=target_names_phases,
@@ -1257,13 +1058,16 @@ if __name__ == "__main__":
         gripper_weight=gripper_weight,
         position_rel_z_bounds=position_rel_z_bounds,
         constraint_eps=constraint_eps,
+        max_attempts=max_attempts,
         freeze_arm_joints=freeze_arm_joints,
         x_home=x_home,
         arm_joint_indices=arm_joint_indices,
+        group_distance_constraints=group_distance_constraints,
+        distance_frame_names=distance_frame_names,
+        distance_weight=distance_weight,
         collision_weight=collision_weight,
         pose_rel_constraints=pose_rel_constraints,
         pose_rel_weight=pose_rel_weight,
-        enable_constraint_verification=enable_constraint_verification,
     )
 
     num_initial_states = 100
@@ -1382,6 +1186,11 @@ if __name__ == "__main__":
             C.setJointState(q_phase1)
             C.view()
 
+            # print(f"  Distance constraints:")
+            # for robot_i, robot_j, target_dist in solver._group_distance_pairs:
+            #     actual_dist = C.eval(ry.FS.distance, [robot_i, robot_j])[0][0]
+            #     print(f"    {robot_i} - {robot_j}: target={target_dist:.3f}, actual={actual_dist:.3f}")
+
             print(f"  PoseRel constraints (positionRel + scalarProductXX):")
             for frame_i, frame_j, target_pose in solver.pose_rel_constraints:
                 actual_pos = C.eval(ry.FS.positionRel, [frame_i, frame_j])[0]
@@ -1395,6 +1204,11 @@ if __name__ == "__main__":
             q_phase2 = np.array(result["q_phase2"])
             C.setJointState(q_phase2)
             C.view()
+
+            # print(f"  Distance constraints:")
+            # for robot_i, robot_j, target_dist in solver._group_distance_pairs:
+            #     actual_dist = C.eval(ry.FS.distance, [robot_i, robot_j])[0][0]
+            #     print(f"    {robot_i} - {robot_j}: target={target_dist:.3f}, actual={actual_dist:.3f}")
 
             print(f"  PoseRel constraints (positionRel + scalarProductXX):")
             for frame_i, frame_j, target_pose in solver.pose_rel_constraints:

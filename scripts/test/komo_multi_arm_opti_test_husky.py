@@ -179,8 +179,10 @@ if __name__ == "__main__":
     position_rel_z_bounds = (0.45, -0.45)
     constraint_eps = 1e-3
     freeze_arm_joints = True
-    collision_weight = 10
+    collision_weight = 1
     pose_rel_weight = 0
+    baselink_distance_weight = 1.0
+    baselink_distance_target = 1.5
     enable_constraint_verification = False
 
     # Arm joint indices for freezing (assuming 10 DOF per robot: 3 base + 7 arm)
@@ -213,13 +215,16 @@ if __name__ == "__main__":
     # target_names_phase1 = [["element_4", "element_4"], "element_5"]
     robot_names_phase1 = ["r1_right_ur_arm_tool0", "r1_left_ur_arm_tool0", "r2_ur_arm_tool0"]
     target_names_phase1 = ["element_4", "element_4", "element_5"]
+    baselink_names_phase1 = ["r1_base_footprint", "r1_base_footprint", "r2_base_footprint"]
 
     robot_names_phase2 = ["r1_right_ur_arm_tool0", "r1_left_ur_arm_tool0", "r2_ur_arm_tool0"]
     target_names_phase2 = ["element_6", "element_6", "element_5"]
+    baselink_names_phase2 = ["r1_base_footprint", "r1_base_footprint", "r2_base_footprint"]
 
     # Combine into multi-phase format
     robot_names_phases = [robot_names_phase1, robot_names_phase2]
     target_names_phases = [target_names_phase1, target_names_phase2]
+    baselink_names_phases = [baselink_names_phase1, baselink_names_phase2]
 
     solver = MultiPhaseKomoSolver(
         config=C,
@@ -236,9 +241,12 @@ if __name__ == "__main__":
         # pose_rel_constraints=pose_rel_constraints,
         pose_rel_weight=pose_rel_weight,
         enable_constraint_verification=enable_constraint_verification,
+        baselink_distance_weight=baselink_distance_weight,
+        baselink_distance_target=baselink_distance_target,
+        baselink_names_phases=baselink_names_phases,
     )
 
-    num_initial_states = 100
+    num_initial_states = 10
     print(f"Generating {num_initial_states} random initial states")
     print(f"Joint weight: {joint_weight}")
     print(f"Gripper weight: {gripper_weight}")

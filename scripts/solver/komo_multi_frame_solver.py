@@ -745,6 +745,9 @@ class MultiPhaseKomoSolver:
         pose_rel_constraints: Optional[List[Tuple[str, str, List[float]]]] = None,
         pose_rel_weight: float = 1.0,
         enable_constraint_verification: bool = True,
+        baselink_names_phases: Optional[List[List[Union[str, List[str]]]]] = None,
+        baselink_distance_weight: float = 1.0,
+        baselink_distance_target: float = 10.0,
     ):
         """
         Initialize the solver.
@@ -771,6 +774,12 @@ class MultiPhaseKomoSolver:
                                   Position uses target_pose7[:3] via positionRel; rotation uses scalarProductXX to align x-axes.
             pose_rel_weight: Weight for poseRel constraints
             enable_constraint_verification: Whether to perform secondary constraint checking after optimization
+            baselink_names_phases: Optional list of baselink frame names per phase.
+                                  Structure must match robot_names_phases.
+                                  e.g., [[["r1_base_footprint", "r1_base_footprint"], "r2_base_footprint"], [...]]
+                                  If None, baselink distance constraints are skipped.
+            baselink_distance_weight: Weight for soft constraint maximizing distance between baselink and element
+            baselink_distance_target: Target distance value for baselink-element distance constraint (large value to maximize distance)
         """
         self.config = config
         self.robot_names_phases = robot_names_phases
@@ -789,6 +798,9 @@ class MultiPhaseKomoSolver:
         self.pose_rel_constraints = pose_rel_constraints
         self.pose_rel_weight = pose_rel_weight
         self.enable_constraint_verification = enable_constraint_verification
+        self.baselink_names_phases = baselink_names_phases
+        self.baselink_distance_weight = baselink_distance_weight
+        self.baselink_distance_target = baselink_distance_target
 
         # Validate number of phases match
         if len(robot_names_phases) != len(target_names_phases):
@@ -809,6 +821,28 @@ class MultiPhaseKomoSolver:
 
         # Build flattened robot-target pairs for each phase
         self._robot_target_pairs_by_phase = self._build_robot_target_pairs_by_phase()
+
+        # Build flattened baselink-target pairs for each phase (if baselink names provided)
+        if baselink_names_phases is not None:
+            # Validate baselink_names_phases structure matches robot_names_phases
+            if len(baselink_names_phases) != len(robot_names_phases):
+                raise ValueError(f"Number of phases in baselink_names ({len(baselink_names_phases)}) must match robot_names ({len(robot_names_phases)})")
+            
+            for phase_idx, (robot_names, baselink_names) in enumerate(zip(robot_names_phases, baselink_names_phases)):
+                if len(baselink_names) != len(robot_names):
+                    raise ValueError(f"Phase {phase_idx+1}: Number of baselink groups ({len(baselink_names)}) must match number of robot groups ({len(robot_names)})")
+                
+                for i, (robots, baselinks) in enumerate(zip(robot_names, baselink_names)):
+                    robots_is_list = isinstance(robots, list)
+                    baselinks_is_list = isinstance(baselinks, list)
+                    if robots_is_list != baselinks_is_list:
+                        raise ValueError(f"Phase {phase_idx+1}, Group {i}: robot_names and baselink_names must have matching structure (both list or both str)")
+                    if robots_is_list and len(robots) != len(baselinks):
+                        raise ValueError(f"Phase {phase_idx+1}, Group {i}: nested lists must have same length ({len(robots)} vs {len(baselinks)})")
+            
+            self._baselink_target_pairs_by_phase = self._build_baselink_target_pairs_by_phase()
+        else:
+            self._baselink_target_pairs_by_phase = None
 
         if freeze_arm_joints:
             if x_home is None:
@@ -838,6 +872,35 @@ class MultiPhaseKomoSolver:
                 else:
                     # Simple case: single robot-target pair
                     pairs.append((robots, targets))
+            pairs_by_phase.append(pairs)
+        return pairs_by_phase
+
+    def _build_baselink_target_pairs_by_phase(self) -> List[List[Tuple[str, str]]]:
+        """
+        Build a flattened list of (baselink_name, target_name) pairs for each phase.
+        Duplicate pairs within each phase are removed.
+        
+        Returns:
+            List of lists, where each inner list contains unique (baselink_name, target_name) tuples for that phase
+        """
+        pairs_by_phase = []
+        for baselink_names, target_names in zip(self.baselink_names_phases, self.target_names_phases):
+            pairs = []
+            seen_pairs = set()  # Track seen pairs to avoid duplicates
+            for baselinks, targets in zip(baselink_names, target_names):
+                if isinstance(baselinks, list):
+                    # Nested list case: multiple baselinks for potentially same/different targets
+                    for baselink, target in zip(baselinks, targets):
+                        pair = (baselink, target)
+                        if pair not in seen_pairs:
+                            pairs.append(pair)
+                            seen_pairs.add(pair)
+                else:
+                    # Simple case: single baselink-target pair
+                    pair = (baselinks, targets)
+                    if pair not in seen_pairs:
+                        pairs.append(pair)
+                        seen_pairs.add(pair)
             pairs_by_phase.append(pairs)
         return pairs_by_phase
 
@@ -1075,6 +1138,34 @@ class MultiPhaseKomoSolver:
                     )
                 )
 
+        # Soft constraints: maximize distance between baselink and element for each phase
+        if self._baselink_target_pairs_by_phase is not None and self.baselink_distance_weight > 0:
+            for phase_idx in range(self.num_phases):
+                for baselink_name, target_name in self._baselink_target_pairs_by_phase[phase_idx]:
+                    try:
+                        # Verify baselink frame exists in config
+                        self.config.getFrame(baselink_name)
+                        
+                        # a = self.config.eval(ry.FS.distance, [baselink_name, target_name])
+                        
+                        constraint_manager.register(
+                            Constraint(
+                                name=f"phase{phase_idx+1}_baselink_distance_{baselink_name}_{target_name}",
+                                constraint_type="sos",
+                                feature_type=ry.FS.distance,
+                                frames=[baselink_name, target_name],
+                                objective_type=ry.OT.sos,
+                                phase_idx=phase_idx,
+                                target=-self.baselink_distance_target,
+                                weight=[self.baselink_distance_weight],
+                            ),
+                            komo,
+                        )
+                    except Exception:
+                        # If baselink frame doesn't exist, skip this constraint
+                        # This allows the solver to work even if some baselink frames are missing
+                        pass
+
         # Directed pose/heading constraints (applies to all phases)
         # Position via positionRel; rotation via scalarProductXX (x-axes alignment)
         # Note: These are sos (soft) objectives, but we can still register them for verification
@@ -1146,7 +1237,7 @@ class MultiPhaseKomoSolver:
         r3_joint_indices = [i for i, name in enumerate(all_joint_names) if name.startswith("r2_")]
         if len(r3_joint_indices) > 0:
             weight = np.zeros(len(all_joint_names))
-            weight[r3_joint_indices] = self.joint_weight * 10  # stronger weight for equality
+            weight[r3_joint_indices] = 1.0  # stronger weight for equality
             # order=1 enforces zero velocity at the phase transition (q2 - q1 = 0) for selected joints
             constraint_manager.register(
                 Constraint(name="r2_joint_equality_phase2", constraint_type="eq", feature_type=ry.FS.qItself, frames=[], objective_type=ry.OT.eq, phase_idx=1, target=0.0, weight=weight.tolist(), order=1),  # Phase 2 (index 1, KOMO phase 2)

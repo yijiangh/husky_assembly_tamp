@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 # Utility Functions
 # ============================================================================
 
+
 def horizontal_cylinder_quaternion(direction: np.ndarray) -> List[float]:
     """Calculate quaternion for a horizontal cylinder aligned with the given direction."""
     dir_norm = direction / np.linalg.norm(direction)
@@ -44,6 +45,7 @@ def generate_random_initial_state(config: ry.Config) -> np.ndarray:
 # ============================================================================
 # Geometry and Element Classes
 # ============================================================================
+
 
 @dataclass
 class CylinderElement:
@@ -444,6 +446,7 @@ def create_vertical_element(
 # Constraint Management
 # ============================================================================
 
+
 @dataclass
 class Constraint:
     """
@@ -633,11 +636,75 @@ class ConstraintManager:
         all_ineq_satisfied = all(val <= upper and val >= lower for _, val, upper, lower in ineq_constraints)
 
         return all_eq_satisfied and all_ineq_satisfied, eq_constraints, ineq_constraints
+    
+    def check_collisions(self, keyframes: np.ndarray) -> List[List[str]]:
+        """
+        Find all collision pairs in each phase and return as a list of [frame1, frame2] pairs.
+        
+        Args:
+            keyframes: Keyframes array with shape (num_phases, num_joints) or (num_joints,)
+        
+        Returns:
+            List of collision pairs, where each pair is [frame1_name, frame2_name]
+        """
+        collision_pairs = []
+        num_phases = keyframes.shape[0] if keyframes.ndim == 2 else 1
+        
+        # Check collisions for each phase
+        for phase_idx in range(num_phases):
+            collisions_this_phase = []
+            q_state = keyframes[phase_idx] if keyframes.ndim == 2 else keyframes
+            self.config.setJointState(q_state)
+            self.config.computeCollisions()
+            
+            # Get collision pairs (returns list of (frame1_name, frame2_name, distance) tuples)
+            collisions = self.config.getCollisions(belowMargin=0.0)
+            
+            # Extract frame names from collision tuples (frame1 and frame2 are already strings)
+            for frame1_name, frame2_name, _ in collisions:
+                collisions_this_phase.append([frame1_name, frame2_name])
+                
+            collision_pairs.append(collisions_this_phase)
+        
+        return collision_pairs
+    
+    @staticmethod
+    def check_collisions_static(C: ry.Config, keyframes: np.ndarray) -> List[List[str]]:
+        """
+        Find all collision pairs in each phase and return as a list of [frame1, frame2] pairs.
+        
+        Args:
+            keyframes: Keyframes array with shape (num_phases, num_joints) or (num_joints,)
+        
+        Returns:
+            List of collision pairs, where each pair is [frame1_name, frame2_name]
+        """
+        collision_pairs = []
+        num_phases = keyframes.shape[0] if keyframes.ndim == 2 else 1
+        
+        # Check collisions for each phase
+        for phase_idx in range(num_phases):
+            collisions_this_phase = []
+            q_state = keyframes[phase_idx] if keyframes.ndim == 2 else keyframes
+            C.setJointState(q_state)
+            C.computeCollisions()
+            
+            # Get collision pairs (returns list of (frame1_name, frame2_name, distance) tuples)
+            collisions = C.getCollisions(belowMargin=0.0)
+            
+            # Extract frame names from collision tuples (frame1 and frame2 are already strings)
+            for frame1_name, frame2_name, _ in collisions:
+                collisions_this_phase.append([frame1_name, frame2_name])
+                
+            collision_pairs.append(collisions_this_phase)
+        
+        return collision_pairs
 
 
 # ============================================================================
 # Main Solver Class
 # ============================================================================
+
 
 class MultiPhaseKomoSolver:
     """
@@ -785,6 +852,8 @@ class MultiPhaseKomoSolver:
         Returns:
             Tuple of (all_satisfied, eq_constraints, ineq_constraints)
         """
+        # collisions = constraint_manager.check_collisions(keyframes)
+        # print(f"Collisions: {collisions}")
         return constraint_manager.check_all(keyframes)
 
     def solve_komo_problem(self, komo: ry.KOMO, constraint_manager: Optional[ConstraintManager] = None, initial_state: Optional[np.ndarray] = None, view: bool = False) -> Tuple[Dict[str, Any], Optional[np.ndarray]]:
@@ -875,6 +944,8 @@ class MultiPhaseKomoSolver:
         if view:
             print(retval)
             komo.view(True, "IK solution")
+            
+        is_feasible_tmp, eq_vals, ineq_vals = self.check_constraints(constraint_manager, komo.getPath())
 
         if retval["feasible"]:
             keyframes = komo.getPath()
@@ -1072,13 +1143,13 @@ class MultiPhaseKomoSolver:
 
         # Enforce r3 joint states equal between Phase 1 and Phase 2 (soft equality on velocity for r3 joints)
         all_joint_names = self.config.getJointNames()
-        r3_joint_indices = [i for i, name in enumerate(all_joint_names) if name.startswith("r3_")]
+        r3_joint_indices = [i for i, name in enumerate(all_joint_names) if name.startswith("r2_")]
         if len(r3_joint_indices) > 0:
             weight = np.zeros(len(all_joint_names))
             weight[r3_joint_indices] = self.joint_weight * 10  # stronger weight for equality
             # order=1 enforces zero velocity at the phase transition (q2 - q1 = 0) for selected joints
             constraint_manager.register(
-                Constraint(name="r3_joint_equality_phase2", constraint_type="eq", feature_type=ry.FS.qItself, frames=[], objective_type=ry.OT.eq, phase_idx=1, target=0.0, weight=weight.tolist(), order=1),  # Phase 2 (index 1, KOMO phase 2)
+                Constraint(name="r2_joint_equality_phase2", constraint_type="eq", feature_type=ry.FS.qItself, frames=[], objective_type=ry.OT.eq, phase_idx=1, target=0.0, weight=weight.tolist(), order=1),  # Phase 2 (index 1, KOMO phase 2)
                 komo,
             )
 
@@ -1120,4 +1191,3 @@ __all__ = [
     # Main solver
     "MultiPhaseKomoSolver",
 ]
-

@@ -225,6 +225,9 @@ if __name__ == "__main__":
     robot_names_phases = [robot_names_phase1, robot_names_phase2]
     target_names_phases = [target_names_phase1, target_names_phase2]
     baselink_names_phases = [baselink_names_phase1, baselink_names_phase2]
+    
+    phase_switch_robots = ["r2"]
+    phase_switch_weight = 1.0
 
     solver = MultiPhaseKomoSolver(
         config=C,
@@ -244,6 +247,8 @@ if __name__ == "__main__":
         baselink_distance_weight=baselink_distance_weight,
         baselink_distance_target=baselink_distance_target,
         baselink_names_phases=baselink_names_phases,
+        phase_switch_robots=phase_switch_robots,
+        phase_switch_weight=phase_switch_weight,
     )
 
     num_initial_states = 10

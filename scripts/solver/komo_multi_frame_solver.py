@@ -748,6 +748,8 @@ class MultiPhaseKomoSolver:
         baselink_names_phases: Optional[List[List[Union[str, List[str]]]]] = None,
         baselink_distance_weight: float = 1.0,
         baselink_distance_target: float = 10.0,
+        phase_switch_robots: List[str] = [],
+        phase_switch_weight: float = 1.0,
     ):
         """
         Initialize the solver.
@@ -801,6 +803,8 @@ class MultiPhaseKomoSolver:
         self.baselink_names_phases = baselink_names_phases
         self.baselink_distance_weight = baselink_distance_weight
         self.baselink_distance_target = baselink_distance_target
+        self.phase_switch_robots = phase_switch_robots
+        self.phase_switch_weight = phase_switch_weight
 
         # Validate number of phases match
         if len(robot_names_phases) != len(target_names_phases):
@@ -1234,13 +1238,15 @@ class MultiPhaseKomoSolver:
 
         # Enforce r3 joint states equal between Phase 1 and Phase 2 (soft equality on velocity for r3 joints)
         all_joint_names = self.config.getJointNames()
-        r3_joint_indices = [i for i, name in enumerate(all_joint_names) if name.startswith("r2_")]
-        if len(r3_joint_indices) > 0:
+        phase_switch_joint_indices = []
+        for robot_name in self.phase_switch_robots:
+            phase_switch_joint_indices.extend([i for i, name in enumerate(all_joint_names) if name.startswith(robot_name + "_")])
+        if len(phase_switch_joint_indices) > 0:
             weight = np.zeros(len(all_joint_names))
-            weight[r3_joint_indices] = 1.0  # stronger weight for equality
+            weight[phase_switch_joint_indices] = self.phase_switch_weight  # stronger weight for equality
             # order=1 enforces zero velocity at the phase transition (q2 - q1 = 0) for selected joints
             constraint_manager.register(
-                Constraint(name="r2_joint_equality_phase2", constraint_type="eq", feature_type=ry.FS.qItself, frames=[], objective_type=ry.OT.eq, phase_idx=1, target=0.0, weight=weight.tolist(), order=1),  # Phase 2 (index 1, KOMO phase 2)
+                Constraint(name=f"phase_switch_joint_equality_{robot_name}", constraint_type="eq", feature_type=ry.FS.qItself, frames=[], objective_type=ry.OT.eq, phase_idx=1, target=0.0, weight=weight.tolist(), order=1),  # Phase 2 (index 1, KOMO phase 2)
                 komo,
             )
 

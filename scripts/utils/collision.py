@@ -3,10 +3,10 @@ from collections import defaultdict, namedtuple
 import numpy as np
 import pybullet as p
 import pybullet_planning as pp
-import utils.load_multi_tangent as load_multi_tangent
-from multi_tangent.collision import create_swivel_coupler
-from multi_tangent.contact import compute_closest_t_between_lines
-from multi_tangent.convert import flatten_list, list_to_pairs
+# import utils.load_multi_tangent as load_multi_tangent
+# from multi_tangent.collision import create_swivel_coupler
+# from multi_tangent.contact import compute_closest_t_between_lines
+# from multi_tangent.convert import flatten_list, list_to_pairs
 
 Element = namedtuple("Element", ["index", "body", "init_pose", "goal_pose", "axis_endpoints"])
 
@@ -106,24 +106,24 @@ def init_pb() -> int:
     return client
 
 
-def create_couplers(line_pts_flattened, contact_id_pairs):
-    contact_ts = []
-    for ei, ej in contact_id_pairs:
-        t1, t2 = compute_closest_t_between_lines(
-            line_pts_flattened[ei * 2],
-            line_pts_flattened[ei * 2 + 1],
-            line_pts_flattened[ej * 2],
-            line_pts_flattened[ej * 2 + 1],
-        )
-        contact_ts.extend([t1, t2])
+# def create_couplers(line_pts_flattened, contact_id_pairs):
+#     contact_ts = []
+#     for ei, ej in contact_id_pairs:
+#         t1, t2 = compute_closest_t_between_lines(
+#             line_pts_flattened[ei * 2],
+#             line_pts_flattened[ei * 2 + 1],
+#             line_pts_flattened[ej * 2],
+#             line_pts_flattened[ej * 2 + 1],
+#         )
+#         contact_ts.extend([t1, t2])
 
-    node_pairs = list_to_pairs(line_pts_flattened)
-    contact_t_pairs = list_to_pairs(contact_ts)
-    half_couplers = defaultdict(list)
-    with pp.LockRenderer():
-        for contact_idp, contact_tp in zip(contact_id_pairs, contact_t_pairs):
-            e0, e1 = contact_idp
-            # collision checking between clamps and bars performed inside
-            coupler_pair = create_swivel_coupler(node_pairs, e0, e1, *contact_tp)
-            half_couplers[frozenset([e0, e1])] = coupler_pair
-    return half_couplers
+#     node_pairs = list_to_pairs(line_pts_flattened)
+#     contact_t_pairs = list_to_pairs(contact_ts)
+#     half_couplers = defaultdict(list)
+#     with pp.LockRenderer():
+#         for contact_idp, contact_tp in zip(contact_id_pairs, contact_t_pairs):
+#             e0, e1 = contact_idp
+#             # collision checking between clamps and bars performed inside
+#             coupler_pair = create_swivel_coupler(node_pairs, e0, e1, *contact_tp)
+#             half_couplers[frozenset([e0, e1])] = coupler_pair
+#     return half_couplers

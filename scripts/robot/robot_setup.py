@@ -34,7 +34,7 @@ from utils.util import calculate_pose_error, normalize_angles
 # -----------------------------------------------------------------------------
 
 # File paths
-HUSKY_URDF_PATH = os.path.join(DATA_DIR, "husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e.urdf")
+HUSKY_URDF_PATH = os.path.join(DATA_DIR, "husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e_no_base_joint.urdf")
 HUSKY_SRDF_PATH = os.path.join(DATA_DIR, "husky_urdf/mt_husky_moveit_config/config/husky.srdf")
 HUSKY_GRIPPER_OBJ = os.path.join(DATA_DIR, "husky_urdf/robotiq_85/meshes/static/robotiq_85_close_20mm.obj")
 
@@ -44,8 +44,10 @@ HUSKY_TOOL0_FROM_EE_POSE = pp.Pose(point=[0, 0, 0.160])
 
 # Joint configurations
 HUSKY_ARM_JOINT_NAMES = ["ur_arm_shoulder_pan_joint", "ur_arm_shoulder_lift_joint", "ur_arm_elbow_joint", "ur_arm_wrist_1_joint", "ur_arm_wrist_2_joint", "ur_arm_wrist_3_joint"]
-HUSKY_BASE_CONTROL_JOINT_NAMES = ["x", "y", "theta"]
-HUSKY_CONTROL_JOINT_NAMES = ["x", "y", "theta", "ur_arm_shoulder_pan_joint", "ur_arm_shoulder_lift_joint", "ur_arm_elbow_joint", "ur_arm_wrist_1_joint", "ur_arm_wrist_2_joint", "ur_arm_wrist_3_joint"]
+# HUSKY_BASE_CONTROL_JOINT_NAMES = ["x", "y", "theta"]
+HUSKY_BASE_CONTROL_JOINT_NAMES = []
+# HUSKY_CONTROL_JOINT_NAMES = ["x", "y", "theta", "ur_arm_shoulder_pan_joint", "ur_arm_shoulder_lift_joint", "ur_arm_elbow_joint", "ur_arm_wrist_1_joint", "ur_arm_wrist_2_joint", "ur_arm_wrist_3_joint"]
+HUSKY_CONTROL_JOINT_NAMES = ["ur_arm_shoulder_pan_joint", "ur_arm_shoulder_lift_joint", "ur_arm_elbow_joint", "ur_arm_wrist_1_joint", "ur_arm_wrist_2_joint", "ur_arm_wrist_3_joint"]
 HUSKY_BASE_REDUCED_MODEL_JOINT_NAMES = ["base_footprint_joint", "top_plate_joint", "top_plate_front_joint", "arm_mount_joint"]
 HUSKY_INIT_ARM_JOINT_ANGLES = np.array([0, -np.pi / 2, 0, 0, 0, 0])
 
@@ -131,6 +133,7 @@ class RobotSetup:
         robot_cell_state_path: str = None,
         use_scene_parser_gui: bool = True,
         scene_parser_verbose: bool = False,
+        robot_data: Dict = None,
     ):
         """Initialize the RobotSetup instance.
 
@@ -142,6 +145,17 @@ class RobotSetup:
                                  SceneParser will be used to reconstruct the complete scene.
             use_scene_parser_gui: Whether to use GUI when using SceneParser (default: True).
             scene_parser_verbose: Whether to enable verbose output for SceneParser (default: False).
+            robot_data: Optional dict containing direct robot loading data when robot_cell_state_path is None.
+                       Should contain: {
+                           "robot_id": int (optional),  # PyBullet ID of the robot. If None, robot will be loaded from URDF.
+                           "obstacles": List[int],  # List of obstacle PyBullet IDs
+                           "target_bar": int (optional),  # PyBullet ID of target bar
+                           "initial_attachments": List[Attachment] (optional),  # Initial attachments
+                           "joint_values": np.ndarray (optional),  # Initial joint configuration
+                           "joint_types": List[str] (optional),  # Joint types
+                           "joint_names": List[str] (optional),  # Joint names
+                           "robot_pose": Pose (optional),  # Initial pose for robot if loading from URDF
+                       }
         """
         self.name = robot_name
         self.attachments = attachments or []
@@ -153,6 +167,9 @@ class RobotSetup:
         self.robot_cell_state_path = robot_cell_state_path
         self.use_scene_parser_gui = use_scene_parser_gui
         self.scene_parser_verbose = scene_parser_verbose
+
+        # Store direct robot data
+        self.robot_data = robot_data
 
         # Initialize SceneParser if path is provided
         self.scene_parser = None
@@ -191,7 +208,7 @@ class RobotSetup:
             self.robot_params["grasp_mask_links"] = HUSKY_GRASP_MASK_LINKS
 
             # Pre-calculate base_from_connect for Husky
-            base_from_connect_sym = RobotSetup.symbolic_forward(URDF_PATH, HUSKY_BASE_REDUCED_MODEL_JOINT_NAMES, [], output_type="matrix")
+            base_from_connect_sym = RobotSetup.symbolic_forward(HUSKY_URDF_PATH, HUSKY_BASE_REDUCED_MODEL_JOINT_NAMES, [], output_type="matrix")
             self.robot_params["base_from_connect"] = eval("base_from_connect", base_from_connect_sym, [], [])
 
         elif robot_type == "abb":
@@ -348,7 +365,10 @@ class RobotSetup:
         Raises:
             FileNotFoundError: If required files are missing.
         """
-        return self._load_robot_with_scene_parser()
+        if self.robot_cell_state_path is not None:
+            return self._load_robot_with_scene_parser()
+        else:
+            return self._load_robot_direct()
 
     def _load_robot_with_scene_parser(self) -> Dict:
         """Load robot using SceneParser for complete scene reconstruction.
@@ -427,6 +447,114 @@ class RobotSetup:
             if "AR" in client.tools_puids:
                 right_ee = client.tools_puids["AR"]
                 right_ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, self._tool0_name_right), right_ee)
+
+            # For backward compatibility, set ee_attachment to left
+            ee_attachment = left_ee_attachment
+        else:
+            if gripper_obj and os.path.exists(gripper_obj):
+                tool0_pose = pp.get_link_pose(robot, pp.link_from_name(robot, tool0_name))
+                ee = pp.create_obj(gripper_obj, scale=1)
+                pp.set_pose(ee, pp.multiply(tool0_pose, pp.Pose(euler=pp.Euler(yaw=-np.pi / 2))))
+                ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, tool0_name), ee)
+
+        if self.robot_type == "husky_dual":
+            return {
+                "robot": robot,
+                "ee_attachment": ee_attachment,
+                "left_ee_attachment": left_ee_attachment,
+                "right_ee_attachment": right_ee_attachment,
+                "disabled_collisions": disabled_collisions,
+                "obstacles": obstacles,
+                "target_bar": target_bar,
+            }
+        else:
+            return {"robot": robot, "obstacles": obstacles, "ee_attachment": ee_attachment, "disabled_collisions": disabled_collisions, "target_bar": target_bar}
+
+    def _load_robot_direct(self) -> Dict:
+        """Load robot using direct inputs when robot_cell_state_path is None.
+
+        Returns:
+            Dict containing robot, ee_attachment(s), ik_solver_relative(s), and disabled_collisions.
+            For dual-arm robots, also includes left_ee_attachment, right_ee_attachment,
+            ik_solver_relative_left, and ik_solver_relative_right.
+        """
+        if self.robot_data is None:
+            raise ValueError("robot_data must be provided when robot_cell_state_path is None")
+
+        # Extract robot data
+        robot = self.robot_data.get("robot_id")
+        obstacles = self.robot_data.get("obstacles", [])
+        target_bar = self.robot_data.get("target_bar", None)
+        initial_attachments = self.robot_data.get("initial_attachments", [])
+        joint_values = self.robot_data.get("joint_values", None)
+        joint_types = self.robot_data.get("joint_types", None)
+        joint_names = self.robot_data.get("joint_names", None)
+        robot_pose = self.robot_data.get("robot_pose", None)
+
+        # Load robot from URDF if robot_id is not provided
+        if robot is None:
+            robot_urdf = self._urdf_path
+            if robot_pose is not None:
+                robot = pp.load_model(robot_urdf, pose=robot_pose)
+            else:
+                robot = pp.load_model(robot_urdf)
+
+        # Store joint configuration if provided
+        if joint_values is not None:
+            self.arm_target_angles = np.array(joint_values)
+        if joint_types is not None:
+            self.joint_types = joint_types
+        if joint_names is not None:
+            self.joint_names = joint_names
+
+        # Remove target_bar from obstacles if it exists
+        if target_bar is not None and target_bar in obstacles:
+            obstacles = [obs for obs in obstacles if obs != target_bar]
+
+        # Add initial attachments to self.attachments
+        if initial_attachments:
+            self.attachments.extend(initial_attachments)
+
+        # Create attachment for target_bar if provided
+        if target_bar is not None:
+            if self.robot_type == "husky_dual":
+                tool0_name = self._tool0_name_right
+            else:
+                tool0_name = self._tool0_name
+            attachment = pp.create_attachment(robot, pp.link_from_name(robot, tool0_name), target_bar)
+            self.attachments.append(attachment)
+
+        # Get robot parameters for setting up IK solvers and attachments
+        robot_urdf = self._urdf_path
+        robot_srdf = self._srdf_path
+        gripper_obj = self._gripper_obj
+
+        # Handle tool0_name for different robot types
+        if self.robot_type == "husky_dual":
+            tool0_name = None
+        else:
+            tool0_name = self._tool0_name
+
+        # Load robot semantics for disabled collisions
+        robot_model = RobotModel.from_urdf_file(robot_urdf)
+        semantics = RobotSemantics.from_srdf_file(robot_srdf, robot_model)
+        disabled_collisions = self.get_disabled_collisions_from_link_names(robot, semantics.disabled_collisions)
+
+        # Create ee attachment if gripper exists
+        ee_attachment = None
+        left_ee_attachment = None
+        right_ee_attachment = None
+
+        if self.robot_type == "husky_dual":
+            # For dual-arm, check if grippers are provided in robot_data
+            left_gripper_id = self.robot_data.get("left_gripper_id", None)
+            right_gripper_id = self.robot_data.get("right_gripper_id", None)
+
+            if left_gripper_id is not None:
+                left_ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, self._tool0_name_left), left_gripper_id)
+
+            if right_gripper_id is not None:
+                right_ee_attachment = pp.create_attachment(robot, pp.link_from_name(robot, self._tool0_name_right), right_gripper_id)
 
             # For backward compatibility, set ee_attachment to left
             ee_attachment = left_ee_attachment

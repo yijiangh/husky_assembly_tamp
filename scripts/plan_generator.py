@@ -70,7 +70,8 @@ if __name__ == "__main__":
                 pp.add_text(str(i), pp.get_point(e))
                 goal_poses.append(pp.get_pose(e))
                 pp.set_pose(e, pp.Pose(point=(5, 0, 0), euler=pp.Euler(0, 1.5708, 0)))
-        element_from_index = {
+        
+        = {
             i: Element(i, e, pp.get_pose(e), goal_poses[i], [line_pts_flattened[2 * i], line_pts_flattened[2 * i + 1]])
             for i, e in enumerate(element_bodies)
         }

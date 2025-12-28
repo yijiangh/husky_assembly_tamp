@@ -750,6 +750,7 @@ class MultiPhaseKomoSolver:
         baselink_distance_target: float = 10.0,
         phase_switch_robots: List[str] = [],
         phase_switch_weight: float = 1.0,
+        external_collision_checker = None,
     ):
         """
         Initialize the solver.
@@ -805,6 +806,7 @@ class MultiPhaseKomoSolver:
         self.baselink_distance_target = baselink_distance_target
         self.phase_switch_robots = phase_switch_robots
         self.phase_switch_weight = phase_switch_weight
+        self.external_collision_checker = external_collision_checker
 
         # Validate number of phases match
         if len(robot_names_phases) != len(target_names_phases):
@@ -1012,15 +1014,19 @@ class MultiPhaseKomoSolver:
             print(retval)
             komo.view(True, "IK solution")
             
-        is_feasible_tmp, eq_vals, ineq_vals = self.check_constraints(constraint_manager, komo.getPath())
-
         if retval["feasible"]:
             keyframes = komo.getPath()
             if keyframes is not None and len(keyframes) >= self.num_phases:
                 # Only check constraints if verification is enabled and constraint_manager is provided
                 if self.enable_constraint_verification and constraint_manager is not None:
                     is_feasible, eq_vals, ineq_vals = self.check_constraints(constraint_manager, keyframes)
-                    if is_feasible:
+                    external_is_feasible = True
+                    if self.external_collision_checker is not None:
+                        for keyframe in keyframes:
+                            if self.external_collision_checker(keyframe):
+                                external_is_feasible = False
+                                break
+                    if is_feasible and external_is_feasible:
                         return retval, keyframes
                 else:
                     # If verification is disabled, accept the solution directly
@@ -1321,7 +1327,6 @@ if __name__ == "__main__":
     v2_pos = np.array([-0.25, 0.433, VERTICAL_Z])
     v3_pos = np.array([-0.25, -0.433, VERTICAL_Z])
     
-    
     # Create horizontal elements (beams) using the new class-based approach
     # element_6 has contact=True so robots avoid collision in both phases
     element_4 = create_horizontal_element(C, "element_4", v2_pos, v3_pos, v1_pos, HORIZONTAL_Z[0], [1, 1, 0], length=CYLINDER_LENGTH, radius=CYLINDER_RADIUS, protrusion_offset=PROTRUSION_OFFSET, contact=True)
@@ -1341,7 +1346,7 @@ if __name__ == "__main__":
     # Create vertical elements (columns)
     element_1 = create_vertical_element(C, "element_1", v1_final, [1, 0, 0], length=CYLINDER_LENGTH, radius=CYLINDER_RADIUS, contact=True)
     element_2 = create_vertical_element(C, "element_2", v2_final, [0, 1, 0], length=CYLINDER_LENGTH, radius=CYLINDER_RADIUS, contact=True)
-    element_3 = create_vertical_element(C, "element_3", v3_final, [0, 0, 1], length=CYLINDER_LENGTH, radius=CYLINDER_RADIUS, contact=True)
+    element_3 = create_vertical_element(C, "element_3", v3_final, [0, 0, 1], length=CYLINDER_LENGTH, radius=CYLINDER_RADIUS, contact=True)    
 
     # Calculate robot base poses (position + yaw quaternion) for each phase
     # Phase 1: r1 face element_4, r2 face element_5

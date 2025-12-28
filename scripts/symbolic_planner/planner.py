@@ -336,8 +336,8 @@ class Planner(object):
         GroundedHeightHeuristic.Update(element_object_list)
         # CenterDistanceHeuristic.Update(element_object_list)
 
-        path_index = self.Search(element_object_list)
-        # path_index = self.BackwardSearchWithoutMotionPlan(element_object_list)
+        # path_index = self.Search(element_object_list)
+        path_index = self.BackwardSearchWithoutMotionPlan(element_object_list)
 
         # TODO: 多机优化
         # self.robots[0].BaseMotionPlan(path_index)
@@ -579,6 +579,7 @@ class Planner(object):
         while len(not_visited_index) != 0:
             # -------------------- pop --------------------#
             element_object_index, _ = Planner.FindMax(list(not_visited_index), element_object_list)
+            # element_object_index, _ = Planner.FindMin(list(not_visited_index), element_object_list)
             not_visited_index.remove(element_object_index)
 
             # -------------------- disassemble --------------------#

@@ -328,19 +328,26 @@ if __name__ == "__main__":
                 path[phase_idx, robot_joint_indices[robot_idx][:3]] = [pos[0], pos[1], yaw]
         return path
     
-    # Solve configurations for each step in the sequence
-    print(f"\nSolving configurations for {len(path_index)} steps...")
-    all_keyframes = []
-    all_baselink_names_phases = []  # Track which baselinks were used for each step
-    
-    for step_num, element_indices in enumerate(path_index):
-        print(f"\n--- Step {step_num + 1}: Assembling elements {element_indices} ---")
+    def arrange_frames_for_step(
+        element_indices: List[int],
+        robot_gripper_frames: List[List[str]],
+        robot_base_frame_names: List[str]
+    ) -> Tuple[List[List[str]], List[List[str]], List[List[str]]]:
+        """
+        Arrange elements into frames based on the number of valid robots.
         
+        Args:
+            element_indices: List of element indices to arrange
+            robot_gripper_frames: List of gripper frame names for each robot
+            robot_base_frame_names: List of base frame names for each robot
+        
+        Returns:
+            Tuple of (robot_names_phases, target_names_phases, baselink_names_phases)
+        """
         num_elements = len(element_indices)
         
         if num_elements == 0:
-            print(f"  Warning: No elements in step {step_num + 1}, skipping...")
-            continue
+            return [], [], []
         
         if num_elements == 1:
             # Single element: single frame (single robot grasps single element)
@@ -352,7 +359,7 @@ if __name__ == "__main__":
             # Use first available robot
             if len(robot_gripper_frames) == 0:
                 print(f"  Warning: No robots available, skipping...")
-                continue
+                return [], [], []
             
             robot_idx = 1
             grippers = robot_gripper_frames[robot_idx]
@@ -375,138 +382,259 @@ if __name__ == "__main__":
             print(f"  Robot(s): {robot_gripper_names}")
             print(f"  Target: {element_name}")
             
-        else:
-            # Multiple elements: arrange into frames
-            print(f"  Multiple elements step ({num_elements} elements): arranging into frames")
+            return robot_names_phases, target_names_phases, baselink_names_phases
+        
+        # Multiple elements: arrange into frames
+        print(f"  Multiple elements step ({num_elements} elements): arranging into frames")
+        
+        # Check the number of valid robots
+        robot_num = len(robot_gripper_frames)
+        
+        # Identify single-arm and dual-arm robots
+        single_arm_robot_indices = []
+        dual_arm_robot_indices = []
+        for i, grippers in enumerate(robot_gripper_frames):
+            if len(grippers) == 1:
+                single_arm_robot_indices.append(i)
+            else:
+                dual_arm_robot_indices.append(i)
+        
+        dual_robot_num = len(dual_arm_robot_indices)
+        
+        # Check if robot_num >= len(element_indices): arrange as single frame
+        if robot_num >= num_elements:
+            # Enough robots: one robot per element, single frame
+            print(f"  Enough robots ({robot_num}): using single frame with all robots")
             
-            num_robots = len(robot_gripper_frames)
+            robot_names_phases = [[]]
+            target_names_phases = [[]]
+            baselink_names_phases = [[]]
             
-            if num_elements <= num_robots:
-                # Enough robots: one robot per element, single frame
-                print(f"  Enough robots ({num_robots}): using single frame with all robots")
+            for i, element_idx in enumerate(element_indices):
+                element_name = f"element_{element_idx + 1}"
+                grippers = robot_gripper_frames[i]
                 
-                robot_names_phases = [[]]
-                target_names_phases = [[]]
-                baselink_names_phases = [[]]
+                # For dual-arm robots, use both left and right tools for the same element
+                if len(grippers) > 1:
+                    # Dual-arm: use both arms
+                    robot_gripper_names = grippers  # [right_ur_arm_tool0, left_ur_arm_tool0]
+                    robot_names_phases[0].extend(robot_gripper_names)
+                    target_names_phases[0].extend([element_name, element_name])
+                    baselink_names_phases[0].extend([robot_base_frame_names[i], robot_base_frame_names[i]])
+                    print(f"  Frame 1: Robot {robot_gripper_names[0]} & {robot_gripper_names[1]} -> {element_name}")
+                else:
+                    # Single-arm: use the only gripper
+                    robot_gripper_name = grippers[0]
+                    robot_names_phases[0].append(robot_gripper_name)
+                    target_names_phases[0].append(element_name)
+                    baselink_names_phases[0].append(robot_base_frame_names[i])
+                    print(f"  Frame 1: Robot {robot_gripper_name} -> {element_name}")
+            
+            return robot_names_phases, target_names_phases, baselink_names_phases
+        
+        # Check if robot_num < len(element_indices) and dual_robot_num + robot_num >= len(element_indices)
+        # Arrange as dual-frames task and keep the conf of all single-arm robots
+        if robot_num < num_elements and dual_robot_num + robot_num >= num_elements:
+            print(f"  More elements ({num_elements}) than robots ({robot_num}), but dual_robot_num ({dual_robot_num}) + robot_num ({robot_num}) >= num_elements: arranging as dual-frames task")
+            
+            # Calculate number of frames needed (at least 2 frames)
+            num_frames = 2
+            
+            # Determine which elements will be held unchanged (by single-arm robots)
+            # Use single-arm robots for elements that need to persist across frames
+            num_unchanged_elements = min(len(single_arm_robot_indices), num_elements - robot_num)
+            unchanged_element_indices = element_indices[:num_unchanged_elements] if num_unchanged_elements > 0 else []
+            new_element_indices = element_indices[num_unchanged_elements:] if num_unchanged_elements > 0 else element_indices
+            
+            robot_names_phases = []
+            target_names_phases = []
+            baselink_names_phases = []
+            
+            # Distribute new elements across frames
+            elements_per_frame = len(new_element_indices) // num_frames if num_frames > 0 else 0
+            remaining_elements = len(new_element_indices) % num_frames if num_frames > 0 else 0
+            
+            new_element_idx = 0
+            for frame_idx in range(num_frames):
+                frame_robots = []
+                frame_targets = []
+                frame_baselinks = []
                 
-                for i, element_idx in enumerate(element_indices):
+                # First, assign unchanged elements (held by single-arm robots in all frames)
+                # Keep the conf of all single-arm robots
+                for unchanged_idx, unchanged_element_idx in enumerate(unchanged_element_indices):
+                    if unchanged_idx < len(single_arm_robot_indices):
+                        robot_idx = single_arm_robot_indices[unchanged_idx]
+                        element_name = f"element_{unchanged_element_idx + 1}"
+                        grippers = robot_gripper_frames[robot_idx]
+                        
+                        # Single-arm robot: use the only gripper
+                        robot_gripper_name = grippers[0]
+                        
+                        frame_robots.append(robot_gripper_name)
+                        frame_targets.append(element_name)
+                        frame_baselinks.append(robot_base_frame_names[robot_idx])
+                
+                # Then, assign new elements for this frame
+                num_new_elements_this_frame = elements_per_frame + (1 if frame_idx < remaining_elements else 0)
+                
+                # Use remaining robots (dual-arm or unused single-arm) for new elements
+                available_robot_indices = list(range(len(robot_gripper_frames)))
+                # Remove robots already used for unchanged elements
+                for unchanged_idx in range(len(unchanged_element_indices)):
+                    if unchanged_idx < len(single_arm_robot_indices):
+                        if single_arm_robot_indices[unchanged_idx] in available_robot_indices:
+                            available_robot_indices.remove(single_arm_robot_indices[unchanged_idx])
+                
+                # Assign new elements to available robots
+                for _ in range(num_new_elements_this_frame):
+                    if new_element_idx >= len(new_element_indices) or len(available_robot_indices) == 0:
+                        break
+                    
+                    element_idx = new_element_indices[new_element_idx]
                     element_name = f"element_{element_idx + 1}"
-                    grippers = robot_gripper_frames[i]
+                    robot_idx = available_robot_indices.pop(0)
+                    grippers = robot_gripper_frames[robot_idx]
                     
                     # For dual-arm robots, use both left and right tools for the same element
                     if len(grippers) > 1:
                         # Dual-arm: use both arms
                         robot_gripper_names = grippers  # [right_ur_arm_tool0, left_ur_arm_tool0]
-                        robot_names_phases[0].extend(robot_gripper_names)
-                        target_names_phases[0].extend([element_name, element_name])
-                        baselink_names_phases[0].extend([robot_base_frame_names[i], robot_base_frame_names[i]])
-                        print(f"  Frame 1: Robot {robot_gripper_names[0]} & {robot_gripper_names[1]} -> {element_name}")
+                        frame_robots.extend(robot_gripper_names)
+                        frame_targets.extend([element_name, element_name])
+                        frame_baselinks.extend([robot_base_frame_names[robot_idx], robot_base_frame_names[robot_idx]])
                     else:
                         # Single-arm: use the only gripper
                         robot_gripper_name = grippers[0]
-                        robot_names_phases[0].append(robot_gripper_name)
-                        target_names_phases[0].append(element_name)
-                        baselink_names_phases[0].append(robot_base_frame_names[i])
-                        print(f"  Frame 1: Robot {robot_gripper_name} -> {element_name}")
-            else:
-                # More elements than robots: arrange into multiple frames
-                # Strategy: Use single-arm robots to hold unchanged elements across frames
-                print(f"  More elements ({num_elements}) than robots ({num_robots}): arranging into multiple frames")
-                
-                # Identify single-arm and dual-arm robots
-                single_arm_robot_indices = []
-                dual_arm_robot_indices = []
-                for i, grippers in enumerate(robot_gripper_frames):
-                    if len(grippers) == 1:
-                        single_arm_robot_indices.append(i)
-                    else:
-                        dual_arm_robot_indices.append(i)
-                
-                # Calculate number of frames needed
-                # Each frame can handle num_robots elements
-                num_frames = (num_elements + num_robots - 1) // num_robots  # Ceiling division
-                if num_frames < 2:
-                    num_frames = 2  # At least 2 frames
-                
-                # Determine which elements will be held unchanged (by single-arm robots)
-                # Use single-arm robots for elements that need to persist across frames
-                num_unchanged_elements = min(len(single_arm_robot_indices), num_elements - num_robots)
-                unchanged_element_indices = element_indices[:num_unchanged_elements] if num_unchanged_elements > 0 else []
-                new_element_indices = element_indices[num_unchanged_elements:] if num_unchanged_elements > 0 else element_indices
-                
-                robot_names_phases = []
-                target_names_phases = []
-                baselink_names_phases = []
-                
-                # Distribute new elements across frames
-                elements_per_frame = len(new_element_indices) // num_frames if num_frames > 0 else 0
-                remaining_elements = len(new_element_indices) % num_frames if num_frames > 0 else 0
-                
-                new_element_idx = 0
-                for frame_idx in range(num_frames):
-                    frame_robots = []
-                    frame_targets = []
-                    frame_baselinks = []
+                        frame_robots.append(robot_gripper_name)
+                        frame_targets.append(element_name)
+                        frame_baselinks.append(robot_base_frame_names[robot_idx])
                     
-                    # First, assign unchanged elements (held by single-arm robots in all frames)
-                    for unchanged_idx, unchanged_element_idx in enumerate(unchanged_element_indices):
-                        if unchanged_idx < len(single_arm_robot_indices):
-                            robot_idx = single_arm_robot_indices[unchanged_idx]
-                            element_name = f"element_{unchanged_element_idx + 1}"
-                            grippers = robot_gripper_frames[robot_idx]
-                            
-                            # Single-arm robot: use the only gripper
-                            robot_gripper_name = grippers[0]
-                            
-                            frame_robots.append(robot_gripper_name)
-                            frame_targets.append(element_name)
-                            frame_baselinks.append(robot_base_frame_names[robot_idx])
+                    new_element_idx += 1
+                
+                if len(frame_robots) > 0:
+                    robot_names_phases.append(frame_robots)
+                    target_names_phases.append(frame_targets)
+                    baselink_names_phases.append(frame_baselinks)
                     
-                    # Then, assign new elements for this frame
-                    num_new_elements_this_frame = elements_per_frame + (1 if frame_idx < remaining_elements else 0)
+                    print(f"  Frame {frame_idx + 1}:")
+                    for r, t in zip(frame_robots, frame_targets):
+                        print(f"    {r} -> {t}")
+            
+            return robot_names_phases, target_names_phases, baselink_names_phases
+        
+        # Fallback: More elements than robots, arrange into multiple frames
+        # Strategy: Use single-arm robots to hold unchanged elements across frames
+        print(f"  More elements ({num_elements}) than robots ({robot_num}): arranging into multiple frames")
+        
+        # Calculate number of frames needed
+        # Each frame can handle num_robots elements
+        num_frames = (num_elements + robot_num - 1) // robot_num  # Ceiling division
+        if num_frames < 2:
+            num_frames = 2  # At least 2 frames
+        
+        # Determine which elements will be held unchanged (by single-arm robots)
+        # Use single-arm robots for elements that need to persist across frames
+        num_unchanged_elements = min(len(single_arm_robot_indices), num_elements - robot_num)
+        unchanged_element_indices = element_indices[:num_unchanged_elements] if num_unchanged_elements > 0 else []
+        new_element_indices = element_indices[num_unchanged_elements:] if num_unchanged_elements > 0 else element_indices
+        
+        robot_names_phases = []
+        target_names_phases = []
+        baselink_names_phases = []
+        
+        # Distribute new elements across frames
+        elements_per_frame = len(new_element_indices) // num_frames if num_frames > 0 else 0
+        remaining_elements = len(new_element_indices) % num_frames if num_frames > 0 else 0
+        
+        new_element_idx = 0
+        for frame_idx in range(num_frames):
+            frame_robots = []
+            frame_targets = []
+            frame_baselinks = []
+            
+            # First, assign unchanged elements (held by single-arm robots in all frames)
+            for unchanged_idx, unchanged_element_idx in enumerate(unchanged_element_indices):
+                if unchanged_idx < len(single_arm_robot_indices):
+                    robot_idx = single_arm_robot_indices[unchanged_idx]
+                    element_name = f"element_{unchanged_element_idx + 1}"
+                    grippers = robot_gripper_frames[robot_idx]
                     
-                    # Use remaining robots (dual-arm or unused single-arm) for new elements
-                    available_robot_indices = list(range(len(robot_gripper_frames)))
-                    # Remove robots already used for unchanged elements
-                    for unchanged_idx in range(len(unchanged_element_indices)):
-                        if unchanged_idx < len(single_arm_robot_indices):
-                            if single_arm_robot_indices[unchanged_idx] in available_robot_indices:
-                                available_robot_indices.remove(single_arm_robot_indices[unchanged_idx])
+                    # Single-arm robot: use the only gripper
+                    robot_gripper_name = grippers[0]
                     
-                    # Assign new elements to available robots
-                    for _ in range(num_new_elements_this_frame):
-                        if new_element_idx >= len(new_element_indices) or len(available_robot_indices) == 0:
-                            break
-                        
-                        element_idx = new_element_indices[new_element_idx]
-                        element_name = f"element_{element_idx + 1}"
-                        robot_idx = available_robot_indices.pop(0)
-                        grippers = robot_gripper_frames[robot_idx]
-                        
-                        # For dual-arm robots, use both left and right tools for the same element
-                        if len(grippers) > 1:
-                            # Dual-arm: use both arms
-                            robot_gripper_names = grippers  # [right_ur_arm_tool0, left_ur_arm_tool0]
-                            frame_robots.extend(robot_gripper_names)
-                            frame_targets.extend([element_name, element_name])
-                            frame_baselinks.extend([robot_base_frame_names[robot_idx], robot_base_frame_names[robot_idx]])
-                        else:
-                            # Single-arm: use the only gripper
-                            robot_gripper_name = grippers[0]
-                            frame_robots.append(robot_gripper_name)
-                            frame_targets.append(element_name)
-                            frame_baselinks.append(robot_base_frame_names[robot_idx])
-                        
-                        new_element_idx += 1
-                    
-                    if len(frame_robots) > 0:
-                        robot_names_phases.append(frame_robots)
-                        target_names_phases.append(frame_targets)
-                        baselink_names_phases.append(frame_baselinks)
-                        
-                        print(f"  Frame {frame_idx + 1}:")
-                        for r, t in zip(frame_robots, frame_targets):
-                            print(f"    {r} -> {t}")
+                    frame_robots.append(robot_gripper_name)
+                    frame_targets.append(element_name)
+                    frame_baselinks.append(robot_base_frame_names[robot_idx])
+            
+            # Then, assign new elements for this frame
+            num_new_elements_this_frame = elements_per_frame + (1 if frame_idx < remaining_elements else 0)
+            
+            # Use remaining robots (dual-arm or unused single-arm) for new elements
+            available_robot_indices = list(range(len(robot_gripper_frames)))
+            # Remove robots already used for unchanged elements
+            for unchanged_idx in range(len(unchanged_element_indices)):
+                if unchanged_idx < len(single_arm_robot_indices):
+                    if single_arm_robot_indices[unchanged_idx] in available_robot_indices:
+                        available_robot_indices.remove(single_arm_robot_indices[unchanged_idx])
+            
+            # Assign new elements to available robots
+            for _ in range(num_new_elements_this_frame):
+                if new_element_idx >= len(new_element_indices) or len(available_robot_indices) == 0:
+                    break
+                
+                element_idx = new_element_indices[new_element_idx]
+                element_name = f"element_{element_idx + 1}"
+                robot_idx = available_robot_indices.pop(0)
+                grippers = robot_gripper_frames[robot_idx]
+                
+                # For dual-arm robots, use both left and right tools for the same element
+                if len(grippers) > 1:
+                    # Dual-arm: use both arms
+                    robot_gripper_names = grippers  # [right_ur_arm_tool0, left_ur_arm_tool0]
+                    frame_robots.extend(robot_gripper_names)
+                    frame_targets.extend([element_name, element_name])
+                    frame_baselinks.extend([robot_base_frame_names[robot_idx], robot_base_frame_names[robot_idx]])
+                else:
+                    # Single-arm: use the only gripper
+                    robot_gripper_name = grippers[0]
+                    frame_robots.append(robot_gripper_name)
+                    frame_targets.append(element_name)
+                    frame_baselinks.append(robot_base_frame_names[robot_idx])
+                
+                new_element_idx += 1
+            
+            if len(frame_robots) > 0:
+                robot_names_phases.append(frame_robots)
+                target_names_phases.append(frame_targets)
+                baselink_names_phases.append(frame_baselinks)
+                
+                print(f"  Frame {frame_idx + 1}:")
+                for r, t in zip(frame_robots, frame_targets):
+                    print(f"    {r} -> {t}")
+        
+        return robot_names_phases, target_names_phases, baselink_names_phases
+    
+    # Solve configurations for each step in the sequence
+    print(f"\nSolving configurations for {len(path_index)} steps...")
+    all_keyframes = []
+    all_baselink_names_phases = []  # Track which baselinks were used for each step
+    
+    for step_num, element_indices in enumerate(path_index):
+        print(f"\n--- Step {step_num + 1}: Assembling elements {element_indices} ---")
+        
+        num_elements = len(element_indices)
+        
+        if num_elements == 0:
+            print(f"  Warning: No elements in step {step_num + 1}, skipping...")
+            continue
+        
+        # Arrange elements into frames based on robot availability
+        robot_names_phases, target_names_phases, baselink_names_phases = arrange_frames_for_step(
+            element_indices,
+            robot_gripper_frames,
+            robot_base_frame_names
+        )
         
         if len(robot_names_phases) == 0:
             print(f"  Warning: No valid robot-element pairs for step {step_num + 1}, skipping...")
@@ -633,7 +761,7 @@ if __name__ == "__main__":
             enable_constraint_verification=False,
             baselink_names_phases=baselink_names_phases,
             baselink_distance_weight=1.0,
-            baselink_distance_target=1.5,
+            baselink_distance_target=1.4,
             phase_switch_robots=phase_switch_robots,
             phase_switch_weight=1.0,
         )

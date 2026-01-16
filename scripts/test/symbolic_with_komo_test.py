@@ -233,30 +233,11 @@ if __name__ == "__main__":
             rb = RobotSetup(robot_name, robot_type=robot_type, robot_data=robot_data)
             robots.append(Robot(i, rb, element_from_index, counter, [], path_storage))
     
-    # Create planner and plan the symbolic sequence
-    planner = Planner(robot_num=robot_num, robots=robots)
-    print("\n" + "="*60)
-    print("Planning symbolic assembly sequence...")
-    print("="*60)
-    path_index = planner.Plan(element_from_index, contact_id_pairs, grounded_elements_index)
-    
-    # Get element objects for visualization
-    element_object_list = Planner.GetElementObjects(element_from_index, contact_id_pairs, grounded_elements_index)
-    
-    # Print the planned sequence
-    print("\n" + "="*60)
-    print("Planned Assembly Sequence:")
-    print("="*60)
-    for step_num, index_list in enumerate(path_index):
-        element_names = [f"element_{i+1}" for i in index_list]
-        print(f"Step {step_num + 1}: Assemble {index_list} ({', '.join(element_names)})")
-    print("="*60 + "\n")
-    
     # =========================================================================
-    # KOMO Solver: Solve configurations for each keyframe in the sequence
+    # Setup KOMO solver configuration (needed for planner validation)
     # =========================================================================
     print("\n" + "="*60)
-    print("Setting up KOMO solver for keyframe configurations...")
+    print("Setting up KOMO solver configuration for planner...")
     print("="*60)
     
     # Robot .g file paths for adding to ry.Config
@@ -296,6 +277,40 @@ if __name__ == "__main__":
         # Set base joint for mobile base
         base_frame_obj = C.getFrame(base_frame_name)
         base_frame_obj.setJoint(ry.JT.transXYPhi, [-5, -5, -np.pi, 5, 5, np.pi])
+    
+    # Create planner and plan the symbolic sequence with solver validation
+    planner = Planner(robot_num=robot_num, robots=robots)
+    print("\n" + "="*60)
+    print("Planning symbolic assembly sequence with solver validation...")
+    print("="*60)
+    path_index, keyframes_list = planner.Plan(
+        element_from_index, 
+        contact_id_pairs, 
+        grounded_elements_index,
+        config=C,
+        robot_gripper_frames=robot_gripper_frames,
+        robot_base_frame_names=robot_base_frame_names,
+    )
+    
+    # Get element objects for visualization
+    element_object_list = Planner.GetElementObjects(element_from_index, contact_id_pairs, grounded_elements_index)
+    
+    # Print the planned sequence
+    print("\n" + "="*60)
+    print("Planned Assembly Sequence:")
+    print("="*60)
+    for step_num, index_list in enumerate(path_index):
+        element_names = [f"element_{i+1}" for i in index_list]
+        keyframe_status = "✓ Solved" if keyframes_list[step_num] is not None else "✗ Not solved"
+        print(f"Step {step_num + 1}: Assemble {index_list} ({', '.join(element_names)}) - {keyframe_status}")
+    print("="*60 + "\n")
+    
+    # =========================================================================
+    # Use saved keyframes from planner (no need to solve again)
+    # =========================================================================
+    print("\n" + "="*60)
+    print("Using saved keyframes from planner...")
+    print("="*60)
     
     # Get all joint names
     all_joint_names = C.getJointNames()
@@ -615,8 +630,8 @@ if __name__ == "__main__":
         
         return robot_names_phases, target_names_phases, baselink_names_phases
     
-    # Solve configurations for each step in the sequence
-    print(f"\nSolving configurations for {len(path_index)} steps...")
+    # Use saved keyframes from planner
+    print(f"\nUsing saved keyframes for {len(path_index)} steps...")
     all_keyframes = []
     all_baselink_names_phases = []  # Track which baselinks were used for each step
     
@@ -627,177 +642,44 @@ if __name__ == "__main__":
         
         if num_elements == 0:
             print(f"  Warning: No elements in step {step_num + 1}, skipping...")
+            all_keyframes.append(None)
+            all_baselink_names_phases.append(None)
             continue
         
-        # Arrange elements into frames based on robot availability
+        # Get saved keyframes for this step
+        keyframes = keyframes_list[step_num]
+        
+        # Get baselink names for visualization (needed for later visualization)
         robot_names_phases, target_names_phases, baselink_names_phases = arrange_frames_for_step(
             element_indices,
             robot_gripper_frames,
             robot_base_frame_names
         )
         
-        if len(robot_names_phases) == 0:
-            print(f"  Warning: No valid robot-element pairs for step {step_num + 1}, skipping...")
-            continue
-        
-        # Calculate robot base poses for each phase based on target elements
-        robot_base_poses_phases = []
-        phase_baselinks_list = []
-        for phase_idx, (phase_robots, phase_targets, phase_baselinks) in enumerate(zip(robot_names_phases, target_names_phases, baselink_names_phases)):
-            # Map baselink names to their target elements (handle dual-arm robots)
-            baselink_to_target = {}
-            for robot_name, target_name, baselink_name in zip(phase_robots, phase_targets, phase_baselinks):
-                # For dual-arm robots, both arms target the same element, so we only need one entry
-                if baselink_name not in baselink_to_target:
-                    baselink_to_target[baselink_name] = target_name
+        if keyframes is not None and len(keyframes) > 0:
+            print(f"  ✓ Using saved keyframes ({len(keyframes)} phase(s))")
+            all_keyframes.extend(keyframes)
+            all_baselink_names_phases.extend([baselink_names_phases] * len(keyframes))
             
-            # Process baselinks in the order they appear in robot_base_frame_names
-            # This ensures the order matches robot_joint_indices
-            # IMPORTANT: We must include poses for ALL robots, even if they're not used in this phase
-            # This ensures phase_poses has the same length as robot_joint_indices
-            phase_poses = []
-            phase_baselinks_ordered = []
-            for baselink_name in robot_base_frame_names:
-                if baselink_name in baselink_to_target:
-                    target_name = baselink_to_target[baselink_name]
-                    
-                    # Get the element object
-                    if target_name not in element_dict:
-                        print(f"  Warning: Element {target_name} not found in element_dict, using default pose")
-                        phase_poses.append((np.array([0, 0, 0]), [1, 0, 0, 0]))
-                        phase_baselinks_ordered.append(baselink_name)
-                        continue
-                    
-                    element = element_dict[target_name]
-                    
-                    # Calculate robot base pose facing the target element
-                    if element.direction is not None:
-                        # Horizontal element: use direction for perpendicular calculation
-                        edge_dir = element.direction
-                    else:
-                        # Vertical element: use default direction (pointing towards element)
-                        edge_dir = np.array([1, 0, 0])
-                    
-                    base_pose = RobotPositionCalculator.calculate_pose_toward_target(
-                        element.position,
-                        edge_dir,
-                        ROBOT_DISTANCE,
-                        element.position
-                    )
-                    phase_poses.append(base_pose)
-                    phase_baselinks_ordered.append(baselink_name)
-                    print(f"    Phase {phase_idx + 1}: {baselink_name} -> {target_name}, base_pose: pos={base_pose[0]}, yaw={2*np.arctan2(base_pose[1][3], base_pose[1][0]):.3f}")
-                else:
-                    # Robot not used in this phase - use default pose (will be overridden by template_state in build_base_pose_path)
-                    # But we still need to add a placeholder to maintain the order
-                    phase_poses.append((np.array([0, 0, 0]), [1, 0, 0, 0]))
-                    phase_baselinks_ordered.append(baselink_name)
-                    print(f"    Phase {phase_idx + 1}: {baselink_name} not used in this phase, using placeholder pose")
-            
-            robot_base_poses_phases.append(phase_poses)
-            phase_baselinks_list.append(phase_baselinks_ordered)
-            print(f"  Phase {phase_idx + 1}: Calculated {len(phase_poses)} base poses for {len(phase_baselinks_ordered)} robots")
-        
-        # Apply first phase base poses to config (similar to komo_multi_frame_solver.py)
-        # This ensures the config reflects the initial base poses before capturing joint state
-        # Note: Each phase will have its own base poses set in build_base_pose_path
-        if len(robot_base_poses_phases) > 0 and len(phase_baselinks_list) > 0:
-            first_phase_poses = robot_base_poses_phases[0]
-            first_phase_baselinks = phase_baselinks_list[0]
-            # Map baselinks to poses
-            baselink_to_pose = {}
-            for baselink_name, pose in zip(first_phase_baselinks, first_phase_poses):
-                baselink_to_pose[baselink_name] = pose
-            
-            # Apply poses to config in order of robot_base_frame_names
-            # Only include robots that are actually used in the first phase
-            first_phase_baselinks_ordered = []
-            first_phase_poses_ordered = []
-            for baselink_name in robot_base_frame_names:
-                if baselink_name in baselink_to_pose:
-                    first_phase_baselinks_ordered.append(baselink_name)
-                    first_phase_poses_ordered.append(baselink_to_pose[baselink_name])
-            
-            if len(first_phase_poses_ordered) > 0:
-                RobotPositionCalculator.apply_base_poses(C, first_phase_baselinks_ordered, first_phase_poses_ordered)
-        
-        # Get joint state after applying first phase base poses
-        x_home = C.getJointState()
-        
-        # Clear all arm joint angles to zero and set specific arm joint angles
-        x_home[3] = 0
-        x_home[4] = -np.pi / 2 - np.pi / 4
-        x_home[5:10] = 0
-        x_home[10] = -np.pi / 2 + np.pi / 4
-        x_home[18] = 0
-        x_home[19] = -np.pi / 2
-        x_home[20:] = 0
-        
-        # Note: Base poses from first phase are in x_home, but build_base_pose_path will
-        # override them for each phase with phase-specific base poses
-        
-        # Build per-phase initial state path
-        initial_state_path = build_base_pose_path(robot_base_poses_phases, x_home, robot_joint_indices_real)
-        
-        # If single phase, convert to 1D array
-        if len(robot_names_phases) == 1:
-            initial_state_path = initial_state_path[0]
-            
-        if len(initial_state_path) > 1:
-            phase_switch_robots = ["r1"]
-        
-        # Create solver
-        solver = MultiPhaseKomoSolver(
-            config=C,
-            robot_names_phases=robot_names_phases,
-            target_names_phases=target_names_phases,
-            joint_weight=0.1,
-            gripper_weight=5.11,
-            position_rel_z_bounds=(0.45, -0.45),
-            constraint_eps=1e-3,
-            freeze_arm_joints=False,
-            collision_weight=1.0,
-            pose_rel_weight=0.0,
-            enable_constraint_verification=False,
-            baselink_names_phases=baselink_names_phases,
-            baselink_distance_weight=1.0,
-            baselink_distance_target=1.4,
-            phase_switch_robots=phase_switch_robots,
-            phase_switch_weight=1.0,
-        )
-        
-        # Solve for this step
-        print(f"  Solving KOMO problem ({len(robot_names_phases)} phase(s))...")
-        ret, komo = solver.solve(initial_state_path, view=False)
-        
-        if ret.feasible:
-            keyframes = ret.keyframes
-            print(f"  ✓ Solution found (eq={ret.eq:.3e}, ineq={ret.ineq:.3e}, sos={ret.sos:.3e})")
-            
-            # Store the solution (but don't use it as initial guess for next step)
-            if keyframes is not None and len(keyframes) > 0:
-                all_keyframes.extend(keyframes)
-                all_baselink_names_phases.extend([baselink_names_phases] * len(keyframes))
-                
-                # Visualize solution
-                if num_elements == 1:
-                    # Single frame: show the one solution
-                    C.setJointState(keyframes[0])
+            # Visualize solution
+            if num_elements == 1:
+                # Single frame: show the one solution
+                C.setJointState(keyframes[0])
+                C.view()
+                print(f"  Press Enter to continue to next step...")
+                # pp.wait_for_user()
+            else:
+                # Multi-phase: show each phase
+                for phase_idx, keyframe in enumerate(keyframes):
+                    print(f"  Showing phase {phase_idx + 1}/{len(keyframes)}...")
+                    C.setJointState(keyframe)
                     C.view()
-                    print(f"  Press Enter to continue to next step...")
-                    # pp.wait_for_user()
-                else:
-                    # Multi-phase: show each phase
-                    for phase_idx, keyframe in enumerate(keyframes):
-                        print(f"  Showing phase {phase_idx + 1}/{len(keyframes)}...")
-                        C.setJointState(keyframe)
-                        C.view()
-                        # if phase_idx < len(keyframes) - 1:
-                        #     pp.wait_for_user()
-                    print(f"  Press Enter to continue to next step...")
-                    # pp.wait_for_user()
+                    # if phase_idx < len(keyframes) - 1:
+                    #     pp.wait_for_user()
+                print(f"  Press Enter to continue to next step...")
+                # pp.wait_for_user()
         else:
-            print(f"  ✗ Solution not found (eq={ret.eq:.3e}, ineq={ret.ineq:.3e})")
+            print(f"  ✗ No saved keyframes for this step")
             all_keyframes.append(None)
             all_baselink_names_phases.append(None)
     

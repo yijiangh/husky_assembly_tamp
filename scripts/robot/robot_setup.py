@@ -7,7 +7,7 @@ from typing import Callable, Dict, List, Set, Tuple, Union
 
 TYPE_CHECKING = True
 
-import casadi as ca
+# import casadi as ca
 import numpy as np
 from utils.params import DATA_DIR, PICK_DIRECTION, PROJECT_DIR
 
@@ -16,12 +16,10 @@ sys.path.extend([HUSKY_ASSEMBLY_PATH, PROJECT_DIR])
 
 import pybullet
 import pybullet_planning as pp
-import tracikpy
 from compas_fab.robots import RobotSemantics
 from compas_robots import RobotModel
 from model.scene_parse import SceneParser
 from pybullet_planning import Attachment, Euler, Point, Pose, multiply
-from utils.utils_casadi import eval
 from utils.util import calculate_pose_error, normalize_angles
 
 
@@ -208,8 +206,9 @@ class RobotSetup:
             self.robot_params["grasp_mask_links"] = HUSKY_GRASP_MASK_LINKS
 
             # Pre-calculate base_from_connect for Husky
+            from utils.utils_casadi import eval as casadi_eval
             base_from_connect_sym = RobotSetup.symbolic_forward(HUSKY_URDF_PATH, HUSKY_BASE_REDUCED_MODEL_JOINT_NAMES, [], output_type="matrix")
-            self.robot_params["base_from_connect"] = eval("base_from_connect", base_from_connect_sym, [], [])
+            self.robot_params["base_from_connect"] = casadi_eval("base_from_connect", base_from_connect_sym, [], [])
 
         elif robot_type == "abb":
             self.robot_params["urdf_path"] = ABB_URDF_PATH

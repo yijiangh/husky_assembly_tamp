@@ -37,19 +37,20 @@ class DualArmProjection:
         Args:
             right: Right arm joint angles
             left_init_guess: Initial guess for left arm joint angles
-        
+
         ---
         Returns:
-            np.ndarray or None: Combined joint configuration [left_joints, right_joints] that 
+            np.ndarray or None: Combined joint configuration [left_joints, right_joints] that
                 satisfies the relative constraint, or None if no valid solution found
         """
         q_right = np.array(right)
         q_left = np.array(left_init_guess)
-        self.robot_setup.set_joint_positions(self.robot_setup.arm_joints_right, q_right)
+        with pp.LockRenderer():
+            self.robot_setup.set_joint_positions(self.robot_setup.arm_joints_right, q_right)
 
-        world_from_right = pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link_right)
-        world_from_left = pp.multiply(world_from_right, self.desired_right_from_left)
-        q_left_new = self.robot_setup.ik_solver_left(world_from_left, q_left)
+            world_from_right = pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link_right)
+            world_from_left = pp.multiply(world_from_right, self.desired_right_from_left)
+            q_left_new = self.robot_setup.ik_solver_left(world_from_left, q_left)
 
         if q_left_new is None:
             return None
@@ -65,19 +66,20 @@ class DualArmProjection:
         Args:
             left: Left arm joint angles
             right_init_guess: Initial guess for right arm joint angles
-        
+
         ---
         Returns:
-            np.ndarray or None: Combined joint configuration [left_joints, right_joints] that 
+            np.ndarray or None: Combined joint configuration [left_joints, right_joints] that
                 satisfies the relative constraint, or None if no valid solution found
         """
         q_left = np.array(left)
         q_right = np.array(right_init_guess)
-        self.robot_setup.set_joint_positions(self.robot_setup.arm_joints_left, q_left)
+        with pp.LockRenderer():
+            self.robot_setup.set_joint_positions(self.robot_setup.arm_joints_left, q_left)
 
-        world_from_left = pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link_left)
-        world_from_right = pp.multiply(world_from_left, pp.invert(self.desired_right_from_left))
-        q_right_new = self.robot_setup.ik_solver_right(world_from_right, q_right)
+            world_from_left = pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link_left)
+            world_from_right = pp.multiply(world_from_left, pp.invert(self.desired_right_from_left))
+            q_right_new = self.robot_setup.ik_solver_right(world_from_right, q_right)
 
         if q_right_new is None:
             return None
@@ -100,11 +102,12 @@ class DualArmProjection:
                 where each row is [left_joints, right_joints], or None if no valid solutions found
         """
         projected_confs = []
-        for _ in range(max_attempts):
-            left_init_guess = np.random.uniform(-np.pi, np.pi, 6)
-            projected_conf = self.project(right, left_init_guess)
-            if projected_conf is not None:
-                projected_confs.append(projected_conf)
+        with pp.LockRenderer():
+            for _ in range(max_attempts):
+                left_init_guess = np.random.uniform(-np.pi, np.pi, 6)
+                projected_conf = self.project(right, left_init_guess)
+                if projected_conf is not None:
+                    projected_confs.append(projected_conf)
         if not projected_confs:
             return None
         unique_confs = []
@@ -134,18 +137,19 @@ class DualArmProjection:
             left: Left arm joint angles
             max_attempts: Maximum number of attempts to project
             collision_fn: Collision function to check if the configuration is valid
-        
+
         ---
         Returns:
-            np.ndarray or None: Stack of valid joint configurations (shape: [n_configs, 12]) 
+            np.ndarray or None: Stack of valid joint configurations (shape: [n_configs, 12])
                 where each row is [left_joints, right_joints], or None if no valid solutions found
         """
         projected_confs = []
-        for _ in range(max_attempts):
-            right_init_guess = np.random.uniform(-np.pi, np.pi, 6)
-            projected_conf = self.project_inv(left, right_init_guess)
-            if projected_conf is not None:
-                projected_confs.append(projected_conf)
+        with pp.LockRenderer():
+            for _ in range(max_attempts):
+                right_init_guess = np.random.uniform(-np.pi, np.pi, 6)
+                projected_conf = self.project_inv(left, right_init_guess)
+                if projected_conf is not None:
+                    projected_confs.append(projected_conf)
         if not projected_confs:
             return None
         unique_confs = []
@@ -171,23 +175,22 @@ class DualArmProjection:
         """
         projected_confs = []
         delta_angles = np.linspace(0, delta, max_attempts)
-        for attempt_idx, delta_angle in enumerate(delta_angles):
-            # print(f"Creating valid configurations... {attempt_idx+1}/{max_attempts}")
-            right_ik_init_guess = np.random.uniform(-np.pi, np.pi, 6)
-            delta_pose = pp.Pose(point = [0.0, 0.0, 0.0], euler = [0, 0, delta_angle])
-            # print(f"Delta pose: {delta_pose}")
-            new_bar_pose = pp.multiply(bar_pose, delta_pose)
-            right_tool0_pose = pp.multiply(new_bar_pose, bar_from_right)
-            right_conf = right_ik_handle(right_tool0_pose, right_ik_init_guess)
-            if right_conf is not None:
-                right_conf = np.array(right_conf)
-                right_conf = (right_conf + np.pi) % (2 * np.pi) - np.pi
-                projected_confs_temp = self.project_multiple(right_conf, max_attempts=max_attempts, collision_fn=collision_fn)
-                if projected_confs_temp is not None:
-                    for projected_conf in projected_confs_temp:
-                        projected_confs.append(projected_conf)
-                        if immediate:
-                            return projected_conf
+        with pp.LockRenderer():
+            for attempt_idx, delta_angle in enumerate(delta_angles):
+                right_ik_init_guess = np.random.uniform(-np.pi, np.pi, 6)
+                delta_pose = pp.Pose(point = [0.0, 0.0, 0.0], euler = [0, 0, delta_angle])
+                new_bar_pose = pp.multiply(bar_pose, delta_pose)
+                right_tool0_pose = pp.multiply(new_bar_pose, bar_from_right)
+                right_conf = right_ik_handle(right_tool0_pose, right_ik_init_guess)
+                if right_conf is not None:
+                    right_conf = np.array(right_conf)
+                    right_conf = (right_conf + np.pi) % (2 * np.pi) - np.pi
+                    projected_confs_temp = self.project_multiple(right_conf, max_attempts=max_attempts, collision_fn=collision_fn)
+                    if projected_confs_temp is not None:
+                        for projected_conf in projected_confs_temp:
+                            projected_confs.append(projected_conf)
+                            if immediate:
+                                return projected_conf
         unique_confs = []
         atol = 1e-2
         for conf in projected_confs:

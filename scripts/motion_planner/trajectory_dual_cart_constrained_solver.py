@@ -559,9 +559,8 @@ def rrt_connect_capsule(
             def _js_dist(q1: np.ndarray, q2: np.ndarray) -> float:
                 return float(np.linalg.norm(angles_distance(np.asarray(q1, dtype=float), np.asarray(q2, dtype=float)), ord=2))
 
-            # with pp.LockRenderer():
-            #     expended_path, updates = solver.expand_path(capsule_path)
-            expended_path, updates = solver.expand_path(capsule_path)
+            with pp.LockRenderer():
+                expended_path, updates = solver.expand_path(capsule_path)
             results = configs_capsule(expended_path, distance_fn=_js_dist, instant=False)
             if results is None or len(results) == 0:
                 for debug_body in bodies:
@@ -775,6 +774,9 @@ class TrajectoryDualCartConstrainedSolver(object):
         self.robot_setup = robot_setup
         self.target_parser = target_parser
         self.projector = projector
+        self._cached_collision_fn = self.robot_setup.create_collision_fn(
+            obstacle_bodies=self.robot_setup.obstacles
+        )
 
     def cart_linear_interp_z(self, q1: Capsule, q2: Capsule, position_res: float = 0.1, rotation_res: float = 0.1):
         def _quat_angle_between(q0, q1):
@@ -920,7 +922,7 @@ class TrajectoryDualCartConstrainedSolver(object):
                 world_from_bar = pp.Pose(point=[x, y, z], euler=pp.Euler(roll, pitch, yaw))
                 if enable_ik:
                     confs = self.projector.create_valid_confs(
-                        self.robot_setup.ik_solver_right, world_from_bar, bar_from_right, delta=0.0, max_attempts=20, collision_fn=self.robot_setup.create_collision_fn(obstacle_bodies=self.robot_setup.obstacles)
+                        self.robot_setup.ik_solver_right, world_from_bar, bar_from_right, delta=0.0, max_attempts=20, collision_fn=self._cached_collision_fn
                     )
                 else:
                     confs = None
@@ -1049,7 +1051,7 @@ class TrajectoryDualCartConstrainedSolver(object):
 
     def _get_collision_fn(self):
         floating_collision_fn = self.robot_setup.create_floating_body_collision_fn(obstacle_bodies=self.robot_setup.obstacles)
-        collision_fn = self.robot_setup.create_collision_fn(obstacle_bodies=self.robot_setup.obstacles)
+        collision_fn = self._cached_collision_fn
 
         def fn(c: Capsule):
             # self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, np.array([0] * 12))
@@ -1135,7 +1137,7 @@ class TrajectoryDualCartConstrainedSolver(object):
 
         # Generate valid configurations using dual-arm constraint projection
         start_confs = projector.create_valid_confs(
-            right_start_ik_handle, world_from_bar, bar_from_right, delta=delta_angle, max_attempts=max_attempts, collision_fn=self.robot_setup.create_collision_fn(obstacle_bodies=self.robot_setup.obstacles)
+            right_start_ik_handle, world_from_bar, bar_from_right, delta=delta_angle, max_attempts=max_attempts, collision_fn=self._cached_collision_fn
         )
 
         # Select first valid configuration or exit if none found
@@ -1163,7 +1165,7 @@ class TrajectoryDualCartConstrainedSolver(object):
         global bar_from_right
         bar_pose = capsule.pose
         right_ik_handle = self.robot_setup.ik_solver_right
-        confs = self.projector.create_valid_confs(right_ik_handle, bar_pose, bar_from_right, delta=0.0, max_attempts=20, collision_fn=self.robot_setup.create_collision_fn(obstacle_bodies=self.robot_setup.obstacles))
+        confs = self.projector.create_valid_confs(right_ik_handle, bar_pose, bar_from_right, delta=0.0, max_attempts=20, collision_fn=self._cached_collision_fn)
         return Capsule(bar_pose, config=confs, parent=None, robot_setup=self.robot_setup, projector=self.projector)
 
     def expand_path(self, path: List[Capsule]):
@@ -1261,7 +1263,7 @@ class TrajectoryDualCartConstrainedSolver(object):
         world_from_bar_target = _bar_pose_from_conf(target_conf)
 
         # Prepare confs (plural) for capsules using projector; fallback to provided confs
-        robot_collision_fn = self.robot_setup.create_collision_fn(obstacle_bodies=self.robot_setup.obstacles)
+        robot_collision_fn = self._cached_collision_fn
 
         start_confs_candidates = self.projector.create_valid_confs(
             self.robot_setup.ik_solver_right,
@@ -1298,7 +1300,7 @@ class TrajectoryDualCartConstrainedSolver(object):
         draw_fn = self._get_draw_fn(start_capsule, target_capsule) if use_draw else None
 
         cspace_extend_fn = self._get_cspace_extend_fn(enable_ik=True)
-        cspace_collision_fn = self.robot_setup.create_collision_fn(obstacle_bodies=self.robot_setup.obstacles)
+        cspace_collision_fn = self._cached_collision_fn
 
         for _ in range(max_attempts):
             
@@ -1347,18 +1349,18 @@ def main():
     design_study_path = os.path.join(DATA_DIR, "husky_assembly_design_study")
 
     # ------------------------------
-    # design_case = "250904_transfer_path_test"
-    # target_name = "IK_test__20250909_235058"
-    # # target_name = "IK_test__20250905_101010"
-    # state_name = "IK_test__GraspTargets"
+    design_case = "250904_transfer_path_test"
+    target_name = "IK_test__20250909_235058"
+    # target_name = "IK_test__20250905_101010"
+    state_name = "IK_test__GraspTargets"
     # ------------------------------ failed
     # design_case = "250707_RobotX_box_demo"
     # target_name = "robotx_box_A13-S_end"
     # state_name = "robotx_box_A13-S_end_GraspTargets"
     # ------------------------------
-    design_case = "250707_RobotX_box_demo"
-    target_name = "robotx_box_A6-S4_end"
-    state_name = "robotx_box_A6-S4_end_GraspTargets"
+    # design_case = "250929_New_Antenna_with_GH_RH_Packed"
+    # target_name = "D1"
+    # state_name = "D1_GraspTargets"
 
     target_cell_state_path = os.path.join(design_study_path, design_case, "RobotCellStates", f"{target_name}_RobotCellState.json")
 

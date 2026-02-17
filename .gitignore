@@ -3,3 +3,6 @@
 __pycache__/
 
 z.log.global
+husky_assembly_tamp/husky_assembly_tamp.egg-info
+husky_assembly_tamp.egg-info
+build

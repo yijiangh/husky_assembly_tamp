@@ -24,6 +24,9 @@ import numpy as np
 import pybullet
 import pybullet_planning as pp
 
+from compas.data import json_dump, json_load
+from compas_fab.robots import JointTrajectory, JointTrajectoryPoint
+
 from husky_assembly_tamp.robot.dual_arm_projection import DualArmProjection
 from husky_assembly_tamp.robot.robot_setup import (
     HUSKY_DUAL_ARM_JOINT_NAMES,
@@ -162,6 +165,68 @@ def pose_to_slider_values(pose):
 
 
 # ---------------------------------------------------------------------------
+# Trajectory save / load helpers
+# ---------------------------------------------------------------------------
+
+def save_path_as_joint_trajectory(path, joint_names, out_path):
+    """Save a list of joint configurations as a compas_fab JointTrajectory JSON.
+
+    Parameters
+    ----------
+    path : list of array-like
+        Each element is a list/array of joint values (12 floats for dual arm).
+    joint_names : list of str
+        Joint names matching the values in each configuration.
+    out_path : str
+        File path to write the JSON to.
+    """
+    points = []
+    for conf in path:
+        pt = JointTrajectoryPoint(
+            joint_values=[float(v) for v in conf],
+            joint_names=joint_names,
+        )
+        points.append(pt)
+    traj = JointTrajectory(
+        trajectory_points=points,
+        joint_names=joint_names,
+    )
+    json_dump(traj, out_path)
+    logger.info(f"Trajectory saved to {out_path}  ({len(path)} points)")
+
+
+def load_joint_trajectory_as_path(json_path, joint_names=None):
+    """Load a compas_fab JointTrajectory JSON and return a list of numpy arrays.
+
+    Parameters
+    ----------
+    json_path : str
+        Path to the JointTrajectory JSON file.
+    joint_names : list of str, optional
+        If given, reorder loaded values to match this joint name order.
+
+    Returns
+    -------
+    list of np.ndarray
+    """
+    traj = json_load(json_path)
+    if joint_names and traj.joint_names and traj.joint_names != joint_names:
+        # Reorder to match expected joint_names
+        idx_map = [traj.joint_names.index(n) for n in joint_names]
+        return [np.array([pt.joint_values[i] for i in idx_map]) for pt in traj.points]
+    return [np.array(pt.joint_values) for pt in traj.points]
+
+
+def scan_trajectory_files(directory):
+    """Return sorted list of *_JointTrajectory.json filenames in directory."""
+    if not os.path.isdir(directory):
+        return []
+    files = [f for f in os.listdir(directory) if f.endswith("_JointTrajectory.json")]
+    files.sort()
+    return files
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -180,6 +245,9 @@ def main():
     parser.add_argument("--end-state", type=str, 
                         default=os.path.join(default_data_dir, "IK_test__20250909_235058_RobotCellState.json"),
                         help="Path to RobotCellState JSON for goal configuration")
+    parser.add_argument("--traj-dir", type=str,
+                        default=default_data_dir,
+                        help="Directory to save/load JointTrajectory JSON files")
     args = parser.parse_args()
     timer = Timer()
 
@@ -381,6 +449,17 @@ def main():
     ghost_start = pp.create_cylinder(radius=0.015, height=bar_height, color=(0.0, 0.8, 0.0, 0.4))
     ghost_end = pp.create_cylinder(radius=0.015, height=bar_height, color=(0.8, 0.0, 0.0, 0.4))
 
+    # ---- Trajectory file loading UI ----
+    available_trajs = scan_trajectory_files(args.traj_dir)
+    if available_trajs:
+        logger.info(f"Found {len(available_trajs)} trajectory files in {args.traj_dir}")
+        for i, f in enumerate(available_trajs):
+            logger.info(f"  [{i}] {f}")
+    else:
+        logger.info(f"No trajectory files found in {args.traj_dir}")
+    traj_file_slider = pybullet.addUserDebugParameter("Traj file idx", 0.0, 1.0, 0.0, physicsClientId=cid)
+    btn_load_traj = Button("Load Trajectory", cid=cid)
+
     # ------------------------------------------------------------------
     # 4. Main loop
     # ------------------------------------------------------------------
@@ -517,10 +596,40 @@ def main():
                     if path is not None:
                         logger.info(f"Path found! {len(path)} waypoints in {elapsed:.3f}s")
                         path_current_idx = -1
+                        # Save trajectory as JointTrajectory JSON
+                        os.makedirs(args.traj_dir, exist_ok=True)
+                        timestamp = time.strftime("%Y%m%d_%H%M%S")
+                        traj_filename = f"testbench_{timestamp}_JointTrajectory.json"
+                        traj_path = os.path.join(args.traj_dir, traj_filename)
+                        save_path_as_joint_trajectory(path, HUSKY_DUAL_ARM_JOINT_NAMES, traj_path)
+                        # Refresh file list for the load slider
+                        available_trajs = scan_trajectory_files(args.traj_dir)
+                        logger.info(f"Trajectory dir now has {len(available_trajs)} files")
                     else:
                         logger.warning(f"No path found ({elapsed:.3f}s)")
 
                     timer.summary()
+
+            # ---- Load Trajectory from file ----
+            if btn_load_traj.pressed():
+                available_trajs = scan_trajectory_files(args.traj_dir)
+                if not available_trajs:
+                    logger.warning(f"No trajectory files in {args.traj_dir}")
+                else:
+                    t = pybullet.readUserDebugParameter(traj_file_slider, physicsClientId=cid)
+                    idx = int(round(t * (len(available_trajs) - 1)))
+                    idx = max(0, min(idx, len(available_trajs) - 1))
+                    selected_file = available_trajs[idx]
+                    traj_path = os.path.join(args.traj_dir, selected_file)
+                    logger.info(f"Loading trajectory [{idx}/{len(available_trajs)}]: {selected_file}")
+                    try:
+                        path = load_joint_trajectory_as_path(traj_path, HUSKY_DUAL_ARM_JOINT_NAMES)
+                        path_current_idx = -1
+                        logger.info(f"Loaded {len(path)} waypoints from {selected_file}")
+                        # Switch to path playback mode
+                        mode = 2
+                    except Exception as e:
+                        logger.error(f"Failed to load trajectory: {e}")
 
             # ---- Browse start configs (mode 0) ----
             if mode == 0 and start_confs is not None:

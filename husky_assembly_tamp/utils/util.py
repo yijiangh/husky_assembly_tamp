@@ -5,6 +5,7 @@ import sys
 import time
 from collections import defaultdict
 from contextlib import contextmanager
+from datetime import datetime
 from functools import partial
 from typing import Dict, List, Set, Tuple, Union
 import random
@@ -19,7 +20,104 @@ import pybullet_planning as pp
 from pybullet_planning import Attachment
 from pybullet_planning.utils import CIRCULAR_LIMITS, DEFAULT_RESOLUTION, MAX_DISTANCE
 from termcolor import colored, cprint
-from .params import PROJECT_DIR
+from .params import PROJECT_DIR, LOG_DIR
+
+
+# ---------------------------------------------------------------------------
+# Colorful Logging Setup
+# ---------------------------------------------------------------------------
+
+class ColoredFormatter(logging.Formatter):
+    """Custom formatter with colors for terminal output."""
+    
+    # ANSI color codes
+    COLORS = {
+        'DEBUG': '\033[36m',     # Cyan
+        'INFO': '\033[32m',      # Green
+        'WARNING': '\033[33m',   # Yellow
+        'ERROR': '\033[31m',     # Red
+        'CRITICAL': '\033[35m',  # Magenta
+        'RESET': '\033[0m',      # Reset
+        'BOLD': '\033[1m',       # Bold
+        'DIM': '\033[2m',        # Dim
+    }
+    
+    def format(self, record):
+        # Add color based on log level
+        color = self.COLORS.get(record.levelname, self.COLORS['RESET'])
+        reset = self.COLORS['RESET']
+        dim = self.COLORS['DIM']
+        
+        # Format timestamp in dim
+        timestamp = datetime.fromtimestamp(record.created).strftime('%H:%M:%S.%f')[:-3]
+        
+        # Build the colored message
+        formatted = f"{dim}[{timestamp}]{reset} {color}{record.levelname:8}{reset} {record.getMessage()}"
+        return formatted
+
+
+class FileFormatter(logging.Formatter):
+    """Plain formatter for file output (no ANSI codes)."""
+    
+    def format(self, record):
+        timestamp = datetime.fromtimestamp(record.created).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+        return f"[{timestamp}] {record.levelname:8} {record.getMessage()}"
+
+
+def setup_logger(name: str = "husky_assembly", log_dir: str = None, level: int = logging.DEBUG) -> logging.Logger:
+    """Set up logger with both console (colored) and file handlers.
+    
+    Args:
+        name: Logger name (used for both the logger and log filename prefix)
+        log_dir: Directory for log files. Defaults to LOG_DIR from params.
+        level: Logging level. Defaults to DEBUG.
+    
+    Returns:
+        Configured logger instance.
+    """
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+    
+    # Remove existing handlers to avoid duplicates
+    logger.handlers.clear()
+    
+    # Console handler with colors
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(level)
+    console_handler.setFormatter(ColoredFormatter())
+    logger.addHandler(console_handler)
+    
+    # File handler
+    if log_dir is None:
+        log_dir = LOG_DIR
+    os.makedirs(log_dir, exist_ok=True)
+    
+    # log_filename = f"{name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    log_filename = f"{name}.log"
+    log_path = os.path.join(log_dir, log_filename)
+    
+    file_handler = logging.FileHandler(log_path, encoding='utf-8')
+    file_handler.setLevel(level)
+    file_handler.setFormatter(FileFormatter())
+    logger.addHandler(file_handler)
+    
+    logger.info(f"Log file: {log_path}")
+    
+    return logger
+
+
+def reinit_logger_stream(logger: logging.Logger, stream=None) -> None:
+    """Reinitialize the console handler's stream (useful after pybullet GUI on Windows).
+    
+    Args:
+        logger: Logger instance to update.
+        stream: New stream to use. Defaults to sys.stdout.
+    """
+    if stream is None:
+        stream = sys.stdout
+    for handler in logger.handlers:
+        if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+            handler.stream = stream
 
 
 ###########################################

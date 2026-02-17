@@ -1,0 +1,138 @@
+[2026-02-17 16:50:49.202] INFO     Log file: d:\0_project\03-2025_husky_assembly\code\husky-assembly-teleop\external\husky_assembly_tamp\husky_assembly_tamp\logs\trajectory_testbench.log
+[2026-02-17 16:50:49.926] INFO     Robot loaded in 0.722s (direct URDF, no compas_fab)
+[2026-02-17 16:50:49.926] INFO     Grasp loaded from d:\0_Project\03-2025_husky_assembly\Code\husky-assembly-teleop\external\husky_assembly_tamp\husky_assembly_tamp\motion_planner\..\..\..\..\data\husky_assembly_design_study\250904_transfer_path_test\RobotCellStates\IK_test__GraspTargets.json
+[2026-02-17 16:50:49.927] DEBUG      bar_from_right: pos=[ 1.00e-04  9.38e-02 -2.80e-01], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-17 16:50:49.927] DEBUG      bar_from_left:  pos=[0.0001 0.0938 0.07  ], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-17 16:50:50.060] WARNING  Bar poses computed from left and right arms do not match!
+[2026-02-17 16:50:50.060] WARNING    From left:  pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-17 16:50:50.061] WARNING    From right: pos=[0.7912 0.0902 0.8623], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-17 16:50:50.126] INFO     Start state loaded from d:\0_Project\03-2025_husky_assembly\Code\husky-assembly-teleop\external\husky_assembly_tamp\husky_assembly_tamp\motion_planner\..\..\..\..\data\husky_assembly_design_study\250904_transfer_path_test\RobotCellStates\IK_test__20250905_101010_RobotCellState.json
+[2026-02-17 16:50:50.126] DEBUG      joint_values: [0.8279, -0.8458, 1.7519, 2.2332, -0.8336, 0.7891, 1.7768, -0.8916, 1.7788, 2.2635, -1.7757, -0.7746]
+[2026-02-17 16:50:50.127] DEBUG      bar_pose (from FK): pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-17 16:50:50.327] INFO     End state loaded from d:\0_Project\03-2025_husky_assembly\Code\husky-assembly-teleop\external\husky_assembly_tamp\husky_assembly_tamp\motion_planner\..\..\..\..\data\husky_assembly_design_study\250904_transfer_path_test\RobotCellStates\IK_test__20250909_235058_RobotCellState.json
+[2026-02-17 16:50:50.327] DEBUG      joint_values: [1.4161, 0.1434, 1.0411, 1.9571, -1.4223, 0.7873, 1.0282, -0.1722, 1.2628, 2.057, -1.0274, -0.78]
+[2026-02-17 16:50:50.327] DEBUG      bar_pose (from FK): pos=[ 0.897  -0.0046  0.3443], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-17 16:50:50.327] INFO     === GUI Controls ===
+[2026-02-17 16:50:50.327] INFO       Buttons: Plan Path (auto-solves IK for start & end)
+[2026-02-17 16:50:50.328] INFO       Sliders: Start bar pose, End bar pose
+[2026-02-17 16:50:50.328] INFO     ====================
+[2026-02-17 16:52:20.265] INFO     Log file: d:\0_project\03-2025_husky_assembly\code\husky-assembly-teleop\external\husky_assembly_tamp\husky_assembly_tamp\logs\trajectory_testbench.log
+[2026-02-17 16:52:21.015] INFO     Robot loaded in 0.750s (direct URDF, no compas_fab)
+[2026-02-17 16:52:21.016] INFO     Grasp loaded from d:\0_Project\03-2025_husky_assembly\Code\husky-assembly-teleop\external\husky_assembly_tamp\husky_assembly_tamp\motion_planner\..\..\..\..\data\husky_assembly_design_study\250904_transfer_path_test\RobotCellStates\IK_test__GraspTargets.json
+[2026-02-17 16:52:21.016] DEBUG      bar_from_right: pos=[ 1.00e-04  9.38e-02 -2.80e-01], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-17 16:52:21.016] DEBUG      bar_from_left:  pos=[0.0001 0.0938 0.07  ], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-17 16:52:21.141] WARNING  Bar poses computed from left and right arms do not match!
+[2026-02-17 16:52:21.142] WARNING    From left:  pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-17 16:52:21.142] WARNING    From right: pos=[0.7912 0.0902 0.8623], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-17 16:52:21.207] INFO     Start state loaded from d:\0_Project\03-2025_husky_assembly\Code\husky-assembly-teleop\external\husky_assembly_tamp\husky_assembly_tamp\motion_planner\..\..\..\..\data\husky_assembly_design_study\250904_transfer_path_test\RobotCellStates\IK_test__20250905_101010_RobotCellState.json
+[2026-02-17 16:52:21.208] DEBUG      joint_values: [0.8279, -0.8458, 1.7519, 2.2332, -0.8336, 0.7891, 1.7768, -0.8916, 1.7788, 2.2635, -1.7757, -0.7746]
+[2026-02-17 16:52:21.208] DEBUG      bar_pose (from FK): pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-17 16:52:21.408] INFO     End state loaded from d:\0_Project\03-2025_husky_assembly\Code\husky-assembly-teleop\external\husky_assembly_tamp\husky_assembly_tamp\motion_planner\..\..\..\..\data\husky_assembly_design_study\250904_transfer_path_test\RobotCellStates\IK_test__20250909_235058_RobotCellState.json
+[2026-02-17 16:52:21.408] DEBUG      joint_values: [1.4161, 0.1434, 1.0411, 1.9571, -1.4223, 0.7873, 1.0282, -0.1722, 1.2628, 2.057, -1.0274, -0.78]
+[2026-02-17 16:52:21.408] DEBUG      bar_pose (from FK): pos=[ 0.897  -0.0046  0.3443], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-17 16:52:21.408] INFO     === GUI Controls ===
+[2026-02-17 16:52:21.408] INFO       Buttons: Plan Path (auto-solves IK for start & end)
+[2026-02-17 16:52:21.409] INFO       Sliders: Start bar pose, End bar pose
+[2026-02-17 16:52:21.409] INFO     ====================
+[2026-02-17 16:52:38.260] INFO     Log file: d:\0_project\03-2025_husky_assembly\code\husky-assembly-teleop\external\husky_assembly_tamp\husky_assembly_tamp\logs\trajectory_testbench.log
+[2026-02-17 16:52:38.987] INFO     Robot loaded in 0.726s (direct URDF, no compas_fab)
+[2026-02-17 16:52:38.987] INFO     Grasp loaded from d:\0_Project\03-2025_husky_assembly\Code\husky-assembly-teleop\external\husky_assembly_tamp\husky_assembly_tamp\motion_planner\..\..\..\..\data\husky_assembly_design_study\250904_transfer_path_test\RobotCellStates\IK_test__GraspTargets.json
+[2026-02-17 16:52:38.988] DEBUG      bar_from_right: pos=[ 1.00e-04  9.38e-02 -2.80e-01], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-17 16:52:38.988] DEBUG      bar_from_left:  pos=[0.0001 0.0938 0.07  ], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-17 16:52:39.107] WARNING  Bar poses computed from left and right arms do not match!
+[2026-02-17 16:52:39.108] WARNING    From left:  pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-17 16:52:39.108] WARNING    From right: pos=[0.7912 0.0902 0.8623], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-17 16:52:39.174] INFO     Start state loaded from d:\0_Project\03-2025_husky_assembly\Code\husky-assembly-teleop\external\husky_assembly_tamp\husky_assembly_tamp\motion_planner\..\..\..\..\data\husky_assembly_design_study\250904_transfer_path_test\RobotCellStates\IK_test__20250905_101010_RobotCellState.json
+[2026-02-17 16:52:39.175] DEBUG      joint_values: [0.8279, -0.8458, 1.7519, 2.2332, -0.8336, 0.7891, 1.7768, -0.8916, 1.7788, 2.2635, -1.7757, -0.7746]
+[2026-02-17 16:52:39.175] DEBUG      bar_pose (from FK): pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-17 16:52:39.375] INFO     End state loaded from d:\0_Project\03-2025_husky_assembly\Code\husky-assembly-teleop\external\husky_assembly_tamp\husky_assembly_tamp\motion_planner\..\..\..\..\data\husky_assembly_design_study\250904_transfer_path_test\RobotCellStates\IK_test__20250909_235058_RobotCellState.json
+[2026-02-17 16:52:39.375] DEBUG      joint_values: [1.4161, 0.1434, 1.0411, 1.9571, -1.4223, 0.7873, 1.0282, -0.1722, 1.2628, 2.057, -1.0274, -0.78]
+[2026-02-17 16:52:39.376] DEBUG      bar_pose (from FK): pos=[ 0.897  -0.0046  0.3443], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-17 16:52:39.376] INFO     === GUI Controls ===
+[2026-02-17 16:52:39.376] INFO       Buttons: Plan Path (auto-solves IK for start & end)
+[2026-02-17 16:52:39.376] INFO       Sliders: Start bar pose, End bar pose
+[2026-02-17 16:52:39.376] INFO     ====================
+[2026-02-17 16:54:57.931] INFO     Log file: d:\0_project\03-2025_husky_assembly\code\husky-assembly-teleop\external\husky_assembly_tamp\husky_assembly_tamp\logs\trajectory_testbench.log
+[2026-02-17 16:54:58.656] INFO     Robot loaded in 0.723s (direct URDF, no compas_fab)
+[2026-02-17 16:54:58.656] INFO     Grasp loaded from d:\0_Project\03-2025_husky_assembly\Code\husky-assembly-teleop\external\husky_assembly_tamp\husky_assembly_tamp\motion_planner\..\..\..\..\data\husky_assembly_design_study\250904_transfer_path_test\RobotCellStates\IK_test__GraspTargets.json
+[2026-02-17 16:54:58.657] DEBUG      bar_from_right: pos=[ 1.00e-04  9.38e-02 -2.80e-01], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-17 16:54:58.657] DEBUG      bar_from_left:  pos=[0.0001 0.0938 0.07  ], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-17 16:54:58.787] WARNING  Bar poses computed from left and right arms do not match!
+[2026-02-17 16:54:58.788] WARNING    From left:  pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-17 16:54:58.788] WARNING    From right: pos=[0.7912 0.0902 0.8623], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-17 16:54:58.854] INFO     Start state loaded from d:\0_Project\03-2025_husky_assembly\Code\husky-assembly-teleop\external\husky_assembly_tamp\husky_assembly_tamp\motion_planner\..\..\..\..\data\husky_assembly_design_study\250904_transfer_path_test\RobotCellStates\IK_test__20250905_101010_RobotCellState.json
+[2026-02-17 16:54:58.854] DEBUG      joint_values: [0.8279, -0.8458, 1.7519, 2.2332, -0.8336, 0.7891, 1.7768, -0.8916, 1.7788, 2.2635, -1.7757, -0.7746]
+[2026-02-17 16:54:58.855] DEBUG      bar_pose (from FK): pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-17 16:54:59.054] INFO     End state loaded from d:\0_Project\03-2025_husky_assembly\Code\husky-assembly-teleop\external\husky_assembly_tamp\husky_assembly_tamp\motion_planner\..\..\..\..\data\husky_assembly_design_study\250904_transfer_path_test\RobotCellStates\IK_test__20250909_235058_RobotCellState.json
+[2026-02-17 16:54:59.055] DEBUG      joint_values: [1.4161, 0.1434, 1.0411, 1.9571, -1.4223, 0.7873, 1.0282, -0.1722, 1.2628, 2.057, -1.0274, -0.78]
+[2026-02-17 16:54:59.055] DEBUG      bar_pose (from FK): pos=[ 0.897  -0.0046  0.3443], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-17 16:54:59.055] INFO     === GUI Controls ===
+[2026-02-17 16:54:59.055] INFO       Buttons: Plan Path (auto-solves IK for start & end)
+[2026-02-17 16:54:59.055] INFO       Sliders: Start bar pose, End bar pose
+[2026-02-17 16:54:59.055] INFO     ====================
+[2026-02-17 16:54:59.440] INFO     Ready. Adjust sliders and press buttons in the PyBullet GUI.
+[2026-02-17 16:55:02.590] INFO     Start IK: 45 solutions found in 1.124s
+[2026-02-17 16:55:04.029] INFO     End IK: 12 solutions found in 1.439s
+[2026-02-17 16:55:04.034] INFO     Planning path...
+[2026-02-17 16:55:45.616] INFO     Profile saved to d:\0_Project\03-2025_husky_assembly\Code\husky-assembly-teleop\external\husky_assembly_tamp\husky_assembly_tamp\motion_planner\plan_profile.prof
+[2026-02-17 16:55:45.620] INFO     Path found! 18 waypoints in 41.570s
+[2026-02-17 16:55:45.620] INFO     --- Timing Summary ---
+[2026-02-17 16:55:45.620] INFO       robot_loading: 0.723s
+[2026-02-17 16:55:45.620] INFO       solve_start_ik: 1.124s
+[2026-02-17 16:55:45.621] INFO       solve_end_ik: 1.439s
+[2026-02-17 16:55:45.621] INFO       plan_path: 41.570s
+[2026-02-17 16:55:45.621] INFO     ----------------------
+[2026-02-17 16:59:46.487] INFO     Start IK: 25 solutions found in 1.936s
+[2026-02-17 16:59:47.471] INFO     End IK: 18 solutions found in 0.984s
+[2026-02-17 16:59:47.477] INFO     Planning path...
+[2026-02-17 17:00:20.529] INFO     Profile saved to d:\0_Project\03-2025_husky_assembly\Code\husky-assembly-teleop\external\husky_assembly_tamp\husky_assembly_tamp\motion_planner\plan_profile.prof
+[2026-02-17 17:00:20.569] INFO     Path found! 29 waypoints in 33.051s
+[2026-02-17 17:00:20.569] INFO     --- Timing Summary ---
+[2026-02-17 17:00:20.569] INFO       robot_loading: 0.723s
+[2026-02-17 17:00:20.570] INFO       solve_start_ik: 1.936s
+[2026-02-17 17:00:20.570] INFO       solve_end_ik: 0.984s
+[2026-02-17 17:00:20.570] INFO       plan_path: 33.051s
+[2026-02-17 17:00:20.570] INFO     ----------------------
+[2026-02-17 17:00:37.917] INFO     Log file: d:\0_project\03-2025_husky_assembly\code\husky-assembly-teleop\external\husky_assembly_tamp\husky_assembly_tamp\logs\trajectory_testbench.log
+[2026-02-17 17:00:38.855] INFO     Robot loaded in 0.937s (direct URDF, no compas_fab)
+[2026-02-17 17:00:38.856] INFO     Grasp loaded from d:\0_Project\03-2025_husky_assembly\Code\husky-assembly-teleop\external\husky_assembly_tamp\husky_assembly_tamp\motion_planner\..\..\..\..\data\husky_assembly_design_study\250904_transfer_path_test\RobotCellStates\IK_test__GraspTargets.json
+[2026-02-17 17:00:38.856] DEBUG      bar_from_right: pos=[ 1.00e-04  9.38e-02 -2.80e-01], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-17 17:00:38.857] DEBUG      bar_from_left:  pos=[0.0001 0.0938 0.07  ], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-17 17:00:38.980] WARNING  Bar poses computed from left and right arms do not match!
+[2026-02-17 17:00:38.980] WARNING    From left:  pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-17 17:00:38.980] WARNING    From right: pos=[0.7912 0.0902 0.8623], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-17 17:00:39.047] INFO     Start state loaded from d:\0_Project\03-2025_husky_assembly\Code\husky-assembly-teleop\external\husky_assembly_tamp\husky_assembly_tamp\motion_planner\..\..\..\..\data\husky_assembly_design_study\250904_transfer_path_test\RobotCellStates\IK_test__20250905_101010_RobotCellState.json
+[2026-02-17 17:00:39.047] DEBUG      joint_values: [0.8279, -0.8458, 1.7519, 2.2332, -0.8336, 0.7891, 1.7768, -0.8916, 1.7788, 2.2635, -1.7757, -0.7746]
+[2026-02-17 17:00:39.048] DEBUG      bar_pose (from FK): pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-17 17:00:39.246] INFO     End state loaded from d:\0_Project\03-2025_husky_assembly\Code\husky-assembly-teleop\external\husky_assembly_tamp\husky_assembly_tamp\motion_planner\..\..\..\..\data\husky_assembly_design_study\250904_transfer_path_test\RobotCellStates\IK_test__20250909_235058_RobotCellState.json
+[2026-02-17 17:00:39.247] DEBUG      joint_values: [1.4161, 0.1434, 1.0411, 1.9571, -1.4223, 0.7873, 1.0282, -0.1722, 1.2628, 2.057, -1.0274, -0.78]
+[2026-02-17 17:00:39.247] DEBUG      bar_pose (from FK): pos=[ 0.897  -0.0046  0.3443], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-17 17:00:39.247] INFO     === GUI Controls ===
+[2026-02-17 17:00:39.247] INFO       Buttons: Plan Path (auto-solves IK for start & end)
+[2026-02-17 17:00:39.247] INFO       Sliders: Start bar pose, End bar pose
+[2026-02-17 17:00:39.247] INFO     ====================
+[2026-02-17 17:00:39.631] INFO     Ready. Adjust sliders and press buttons in the PyBullet GUI.
+[2026-02-17 17:00:44.243] INFO     Start IK: 33 solutions found in 0.999s
+[2026-02-17 17:00:45.474] INFO     End IK: 16 solutions found in 1.231s
+[2026-02-17 17:00:45.481] INFO     Planning path...
+[2026-02-17 17:01:19.015] INFO     Profile saved to d:\0_Project\03-2025_husky_assembly\Code\husky-assembly-teleop\external\husky_assembly_tamp\husky_assembly_tamp\motion_planner\plan_profile.prof
+[2026-02-17 17:01:19.024] INFO     Launched snakeviz (check your browser)
+[2026-02-17 17:01:19.024] INFO     Path found! 18 waypoints in 33.532s
+[2026-02-17 17:01:19.024] INFO     --- Timing Summary ---
+[2026-02-17 17:01:19.024] INFO       robot_loading: 0.937s
+[2026-02-17 17:01:19.024] INFO       solve_start_ik: 0.999s
+[2026-02-17 17:01:19.024] INFO       solve_end_ik: 1.231s
+[2026-02-17 17:01:19.025] INFO       plan_path: 33.532s
+[2026-02-17 17:01:19.025] INFO     ----------------------
+[2026-02-17 17:02:22.117] INFO     Start IK: 10 solutions found in 2.478s
+[2026-02-17 17:02:24.047] INFO     End IK: 16 solutions found in 1.930s
+[2026-02-17 17:02:24.053] INFO     Planning path...
+[2026-02-17 17:18:01.489] INFO     Profile saved to d:\0_Project\03-2025_husky_assembly\Code\husky-assembly-teleop\external\husky_assembly_tamp\husky_assembly_tamp\motion_planner\plan_profile.prof
+[2026-02-17 17:18:01.495] INFO     Launched snakeviz (check your browser)
+[2026-02-17 17:18:01.495] WARNING  No path found (937.435s)
+[2026-02-17 17:18:01.496] INFO     --- Timing Summary ---
+[2026-02-17 17:18:01.496] INFO       robot_loading: 0.937s
+[2026-02-17 17:18:01.496] INFO       solve_start_ik: 2.478s
+[2026-02-17 17:18:01.496] INFO       solve_end_ik: 1.930s
+[2026-02-17 17:18:01.496] INFO       plan_path: 937.435s
+[2026-02-17 17:18:01.496] INFO     ----------------------

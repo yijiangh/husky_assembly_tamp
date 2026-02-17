@@ -12,8 +12,11 @@ Usage:
 """
 
 import argparse
+import cProfile
 import json
 import os
+import subprocess
+import pstats
 import sys
 import time
 
@@ -32,7 +35,11 @@ import husky_assembly_tamp.motion_planner.trajectory_dual_cart_constrained_solve
 from husky_assembly_tamp.motion_planner.trajectory_dual_cart_constrained_solver import (
     TrajectoryDualCartConstrainedSolver,
 )
-from husky_assembly_tamp.utils.util import normalize_angles
+from husky_assembly_tamp.utils.util import normalize_angles, setup_logger, reinit_logger_stream
+
+
+# Global logger instance
+logger = setup_logger("trajectory_testbench")
 
 
 # ---------------------------------------------------------------------------
@@ -106,10 +113,10 @@ class Timer:
         return elapsed
 
     def summary(self):
-        print("\n--- Timing Summary ---")
+        logger.info("--- Timing Summary ---")
         for name, val in self.records.items():
-            print(f"  {name}: {val:.3f}s")
-        print("----------------------\n")
+            logger.info(f"  {name}: {val:.3f}s")
+        logger.info("----------------------")
 
 
 # ---------------------------------------------------------------------------
@@ -130,37 +137,28 @@ def load_grasp_targets(json_path):
 
 
 def load_robot_cell_state(json_path):
-    """Parse RobotCellState JSON -> (joint_values, bar_pose).
+    """Parse RobotCellState JSON -> joint_values (12 floats).
 
-    Lightweight loading using standard json + pp.pose_from_tform,
-    no compas_fab scene reconstruction.
+    Lightweight loading using standard json, no compas_fab scene reconstruction.
     """
     with open(json_path) as f:
         data = json.load(f)
     state = data["data"]
-    joint_values = state["robot_configuration"]["data"]["joint_values"]
-
-    # Parse bar frame from rigid_body_states (first entry)
-    bar_key = list(state["rigid_body_states"].keys())[0]
-    frame = state["rigid_body_states"][bar_key]["data"]["frame"]["data"]
-    xaxis = np.array(frame["xaxis"])
-    yaxis = np.array(frame["yaxis"])
-    zaxis = np.cross(xaxis, yaxis)
-    tform = np.eye(4)
-    tform[:3, 0] = xaxis
-    tform[:3, 1] = yaxis
-    tform[:3, 2] = zaxis
-    tform[:3, 3] = frame["point"]
-    bar_pose = pp.pose_from_tform(tform)
-
-    return joint_values, bar_pose
+    return state["robot_configuration"]["data"]["joint_values"]
 
 
 def pose_to_slider_values(pose):
-    """Convert PyBullet pose (point, quat) to slider values [x, y, z, roll, pitch, yaw]."""
+    """Convert PyBullet pose (point, quat) to slider values [x, y, z, roll, pitch, yaw].
+
+    Euler angles are wrapped to [-pi, pi] so they stay within slider bounds.
+    pybullet's getEulerFromQuaternion can return values outside this range
+    (e.g. yaw = -3pi/2 instead of +pi/2).
+    """
     point, quat = pose
     euler = pp.euler_from_quat(quat)
-    return list(point) + list(euler)
+    # Wrap euler angles to [-pi, pi]
+    euler = [((e + np.pi) % (2 * np.pi)) - np.pi for e in euler]
+    return list(point) + euler
 
 
 # ---------------------------------------------------------------------------
@@ -177,9 +175,10 @@ def main():
                         default=os.path.join(default_data_dir, "IK_test__GraspTargets.json"),
                         help="Path to GraspTargets JSON file")
     parser.add_argument("--start-state", type=str,
-                        default=os.path.join(default_data_dir, "IK_test__20250909_235058_RobotCellState.json"),
+                        default=os.path.join(default_data_dir, "IK_test__20250905_101010_RobotCellState.json"),
                         help="Path to RobotCellState JSON for start configuration")
-    parser.add_argument("--end-state", type=str, default=None,
+    parser.add_argument("--end-state", type=str, 
+                        default=os.path.join(default_data_dir, "IK_test__20250909_235058_RobotCellState.json"),
                         help="Path to RobotCellState JSON for goal configuration")
     args = parser.parse_args()
     timer = Timer()
@@ -195,6 +194,8 @@ def main():
     if sys.platform == "win32":
         sys.stdout = open("CONOUT$", "w")
         sys.stderr = open("CONOUT$", "w")
+        # Re-initialize logger's console handler after stdout is restored
+        reinit_logger_stream(logger)
 
     # pp.connect disables the debug GUI panel — re-enable it for sliders/buttons
     pybullet.configureDebugVisualizer(pybullet.COV_ENABLE_GUI, 1, physicsClientId=cid)
@@ -210,11 +211,12 @@ def main():
     pp.set_joint_positions(robot, arm_joints, HUSKY_DUAL_INIT_ARM_JOINT_ANGLES)
 
     # Create a simple bar (box primitive)
-    bar = pp.create_box(0.5, 0.03, 0.03, color=(0.8, 0.4, 0.1, 1.0))
+    bar_height = 1
+    bar = pp.create_cylinder(radius=0.015, height=bar_height, color=(0.8, 0.4, 0.1, 0.6))
 
     # Place bar at a reasonable initial position relative to robot
-    init_bar_pose = pp.Pose(point=[0.4, 0.0, 0.75], euler=pp.Euler(np.pi, np.pi / 2, np.pi / 2))
-    pp.set_pose(bar, init_bar_pose)
+    # init_bar_pose = pp.Pose(point=[0.4, 0.0, 0.75], euler=pp.Euler(np.pi, np.pi / 2, np.pi / 2))
+    # pp.set_pose(bar, init_bar_pose)
 
     # Create RobotSetup via robot_data dict (bypasses SceneParser/compas_fab)
     robot_setup = RobotSetup(
@@ -229,7 +231,7 @@ def main():
     )
 
     load_time = timer.stop("robot_loading")
-    print(f"Robot loaded in {load_time:.3f}s (direct URDF, no compas_fab)")
+    logger.info(f"Robot loaded in {load_time:.3f}s (direct URDF, no compas_fab)")
 
     # ------------------------------------------------------------------
     # 2. Load scene from JSON (if provided)
@@ -244,35 +246,18 @@ def main():
 
     start_confs = None
     end_confs = None
-    start_conf_idx_slider = None
-    end_conf_idx_slider = None
+    start_conf_idx_slider = None  # created in GUI section
+    end_conf_idx_slider = None  # created in GUI section
 
     path = None
-    path_slider = None
     path_current_idx = -1
 
-    if args.start_state:
-        joint_values, bar_pose = load_robot_cell_state(args.start_state)
-        pp.set_joint_positions(robot, arm_joints, joint_values)
-        robot_setup.robot_data["joint_values"] = list(joint_values)
-        start_defaults = pose_to_slider_values(bar_pose)
-        pp.set_pose(bar, bar_pose)
-        print(f"Start state loaded from {args.start_state}")
-        print(f"  joint_values: {[round(v, 4) for v in joint_values]}")
-        print(f"  bar_pose: pos={np.round(bar_pose[0], 4)}, quat={np.round(bar_pose[1], 4)}")
-
-    if args.end_state:
-        end_joint_values, end_bar_pose = load_robot_cell_state(args.end_state)
-        end_defaults = pose_to_slider_values(end_bar_pose)
-        print(f"End state loaded from {args.end_state}")
-        print(f"  joint_values: {[round(v, 4) for v in end_joint_values]}")
-        print(f"  bar_pose: pos={np.round(end_bar_pose[0], 4)}, quat={np.round(end_bar_pose[1], 4)}")
-
+    # Load grasp first (needed to derive bar pose from FK)
     if args.grasp_json:
         grasp_targets = load_grasp_targets(args.grasp_json)
         # targets[0] = right arm, targets[1] = left arm
-        world_from_bar_r, world_from_tool0_right = grasp_targets[0]
-        world_from_bar_l, world_from_tool0_left = grasp_targets[1]
+        world_from_bar_l, world_from_tool0_left = grasp_targets[0]
+        world_from_bar_r, world_from_tool0_right = grasp_targets[1]
 
         grasp_bar_from_right = pp.multiply(pp.invert(world_from_bar_r), world_from_tool0_right)
         grasp_bar_from_left = pp.multiply(pp.invert(world_from_bar_l), world_from_tool0_left)
@@ -283,46 +268,123 @@ def main():
         solver_mod.bar_from_right = grasp_bar_from_right
         solver_mod.bar_from_left = grasp_bar_from_left
 
-        print(f"Grasp loaded from {args.grasp_json}")
-        print(f"  bar_from_right: pos={np.round(grasp_bar_from_right[0], 4)}, "
+        logger.info(f"Grasp loaded from {args.grasp_json}")
+        logger.debug(f"  bar_from_right: pos={np.round(grasp_bar_from_right[0], 4)}, "
               f"quat={np.round(grasp_bar_from_right[1], 4)}")
-        print(f"  bar_from_left:  pos={np.round(grasp_bar_from_left[0], 4)}, "
+        logger.debug(f"  bar_from_left:  pos={np.round(grasp_bar_from_left[0], 4)}, "
               f"quat={np.round(grasp_bar_from_left[1], 4)}")
+
+    # Load start/end states and derive bar pose via FK + grasp
+    if args.start_state:
+        joint_values = load_robot_cell_state(args.start_state)
+        pp.set_joint_positions(robot, arm_joints, joint_values)
+        robot_setup.robot_data["joint_values"] = list(joint_values)
+        if grasp_bar_from_left is not None:
+            world_from_tool0_left = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_left)
+            bar_pose_left = pp.multiply(world_from_tool0_left, pp.invert(grasp_bar_from_left))
+
+            # Draw tool0 poses for left and right arms (start state)
+            pp.draw_pose(world_from_tool0_left)
+            pp.add_text("start_tool0_left", world_from_tool0_left[0], color=(0.0, 0.5, 1.0, 1.0))
+
+            world_from_tool0_right = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
+            bar_pose_right = pp.multiply(world_from_tool0_right, pp.invert(grasp_bar_from_right))
+
+            pp.draw_pose(world_from_tool0_right)
+            pp.add_text("start_tool0_right", world_from_tool0_right[0], color=(1.0, 0.5, 0.0, 1.0))
+
+            pos_equal = np.allclose(bar_pose_left[0], bar_pose_right[0], atol=1e-4)
+            quat_equal = np.allclose(bar_pose_left[1], bar_pose_right[1], atol=1e-4)
+            if not pos_equal or not quat_equal:
+                logger.warning("Bar poses computed from left and right arms do not match!")
+                logger.warning(f"  From left:  pos={np.round(bar_pose_left[0], 4)}, quat={np.round(bar_pose_left[1], 4)}")
+                logger.warning(f"  From right: pos={np.round(bar_pose_right[0], 4)}, quat={np.round(bar_pose_right[1], 4)}")
+
+            # Use left arm result (default), but this block can easily be swapped to right if desired
+            bar_pose = bar_pose_left
+            start_defaults = pose_to_slider_values(bar_pose)
+            pp.set_pose(bar, bar_pose)
+            pp.draw_pose(bar_pose)
+            pp.add_text("Loaded Start", bar_pose[0], color=(0.0, 0.8, 0.0, 1.0))
+
+        logger.info(f"Start state loaded from {args.start_state}")
+        logger.debug(f"  joint_values: {[round(v, 4) for v in joint_values]}")
+        if grasp_bar_from_left is not None:
+            logger.debug(f"  bar_pose (from FK): pos={np.round(bar_pose[0], 4)}, quat={np.round(bar_pose[1], 4)}")
+
+    if args.end_state:
+        end_joint_values = load_robot_cell_state(args.end_state)
+        if grasp_bar_from_left is not None:
+            # Temporarily set end joints to compute FK, then restore start
+            pp.set_joint_positions(robot, arm_joints, end_joint_values)
+            world_from_tool0_left = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_left)
+            end_bar_pose = pp.multiply(world_from_tool0_left, pp.invert(grasp_bar_from_left))
+            end_defaults = pose_to_slider_values(end_bar_pose)
+            pp.draw_pose(end_bar_pose)
+            pp.add_text("Loaded End", end_bar_pose[0], color=(0.8, 0.0, 0.0, 1.0))
+
+            # Draw tool0 poses for left and right arms (end state)
+            pp.draw_pose(world_from_tool0_left)
+            pp.add_text("end_tool0_left", world_from_tool0_left[0], color=(0.0, 0.5, 1.0, 1.0))
+
+            # Do a left-right agreement check for the end state bar pose, similar to the start state
+            world_from_tool0_right = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
+            pp.draw_pose(world_from_tool0_right)
+            pp.add_text("end_tool0_right", world_from_tool0_right[0], color=(1.0, 0.5, 0.0, 1.0))
+
+            end_bar_pose_right = pp.multiply(world_from_tool0_right, pp.invert(grasp_bar_from_right))
+
+            pos_equal = np.allclose(end_bar_pose[0], end_bar_pose_right[0], atol=1e-4)
+            quat_equal = np.allclose(end_bar_pose[1], end_bar_pose_right[1], atol=1e-4)
+            if not pos_equal or not quat_equal:
+                logger.warning("Bar poses for END computed from left and right arms do not match!")
+                logger.warning(f"  From left:  pos={np.round(end_bar_pose[0], 4)}, quat={np.round(end_bar_pose[1], 4)}")
+                logger.warning(f"  From right: pos={np.round(end_bar_pose_right[0], 4)}, quat={np.round(end_bar_pose_right[1], 4)}")
+
+            # Restore start configuration
+            if args.start_state:
+                pp.set_joint_positions(robot, arm_joints, joint_values)
+        logger.info(f"End state loaded from {args.end_state}")
+        logger.debug(f"  joint_values: {[round(v, 4) for v in end_joint_values]}")
+        if grasp_bar_from_left is not None:
+            logger.debug(f"  bar_pose (from FK): pos={np.round(end_bar_pose[0], 4)}, quat={np.round(end_bar_pose[1], 4)}")
 
     # ------------------------------------------------------------------
     # 3. Create GUI
     # ------------------------------------------------------------------
-    print("\n=== GUI Controls ===")
-    print("  Sliders: Start bar pose, End bar pose, Grasp offset")
-    print("  Buttons: Set Grasp, Solve Start IK, Solve End IK, Plan Path")
-    print("====================\n")
+    logger.info("=== GUI Controls ===")
+    logger.info("  Buttons: Plan Path (auto-solves IK for start & end)")
+    logger.info("  Sliders: Start bar pose, End bar pose")
+    logger.info("====================")
 
+    # btn_set_grasp = Button("Set Grasp From Current", cid=cid)
+    btn_plan = Button("Plan Path", cid=cid)
+    path_slider = pybullet.addUserDebugParameter("Path t", 0.0, 1.0, 0.0, physicsClientId=cid)
+    start_conf_idx_slider = pybullet.addUserDebugParameter("Start conf t", 0.0, 1.0, 0.0, physicsClientId=cid)
+    end_conf_idx_slider = pybullet.addUserDebugParameter("End conf t", 0.0, 1.0, 0.0, physicsClientId=cid)
+
+    # Mode selector: 0=start, 1=end, 2=path playback
+    mode_slider = pybullet.addUserDebugParameter("Mode (0=start, 1=end, 2=path)", 0, 2, 0, physicsClientId=cid)
+
+    # ---- Pose sliders (for adjusting start/end bar poses) ----
     start_sliders = PoseSliders("Start", cid=cid, defaults=start_defaults)
     end_sliders = PoseSliders("End", cid=cid, defaults=end_defaults)
-    grasp_sliders = PoseSliders(
-        "Grasp",
-        cid=cid,
-        defaults=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        pos_range=0.3,
-        angle_range=np.pi,
-    )
-
-    btn_set_grasp = Button("Set Grasp From Current", cid=cid)
-    btn_solve_start = Button("Solve Start IK", cid=cid)
-    btn_solve_end = Button("Solve End IK", cid=cid)
-    btn_plan = Button("Plan Path", cid=cid)
-
-    # Mode selector: which bar pose to show
-    mode_slider = pybullet.addUserDebugParameter("Show (0=start, 1=end)", 0, 1, 0, physicsClientId=cid)
+    # grasp_sliders = PoseSliders(
+    #     "Grasp",
+    #     cid=cid,
+    #     defaults=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    #     pos_range=0.3,
+    #     angle_range=np.pi,
+    # )
 
     # Ghost bars for showing start (green) and end (red) simultaneously
-    ghost_start = pp.create_box(0.5, 0.03, 0.03, color=(0.0, 0.8, 0.0, 0.4))
-    ghost_end = pp.create_box(0.5, 0.03, 0.03, color=(0.8, 0.0, 0.0, 0.4))
+    ghost_start = pp.create_cylinder(radius=0.015, height=bar_height, color=(0.0, 0.8, 0.0, 0.4))
+    ghost_end = pp.create_cylinder(radius=0.015, height=bar_height, color=(0.8, 0.0, 0.0, 0.4))
 
     # ------------------------------------------------------------------
     # 4. Main loop
     # ------------------------------------------------------------------
-    print("Ready. Adjust sliders and press buttons in the PyBullet GUI.")
+    logger.info("Ready. Adjust sliders and press buttons in the PyBullet GUI.")
 
     while True:
         try:
@@ -334,47 +396,51 @@ def main():
             pp.set_pose(ghost_start, start_pose)
             pp.set_pose(ghost_end, end_pose)
 
-            # Move the actual bar to whichever mode is selected
+            # Mode: 0=start, 1=end, 2=path playback
             mode = int(round(pybullet.readUserDebugParameter(mode_slider, physicsClientId=cid)))
             if mode == 0:
                 pp.set_pose(bar, start_pose)
-            else:
+            elif mode == 1:
                 pp.set_pose(bar, end_pose)
+            # mode == 2: bar pose updated by path playback below
 
             # ---- Set Grasp ----
-            if btn_set_grasp.pressed():
-                # Compute grasp from current right/left tool pose relative to bar
-                world_from_right = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
-                world_from_left = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_left)
-                world_from_bar = pp.get_pose(bar)
+            # if btn_set_grasp.pressed():
+            #     # Compute grasp from current right/left tool pose relative to bar
+            #     world_from_right = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
+            #     world_from_left = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_left)
+            #     world_from_bar = pp.get_pose(bar)
 
-                grasp_bar_from_right = pp.multiply(pp.invert(world_from_bar), world_from_right)
-                grasp_bar_from_left = pp.multiply(pp.invert(world_from_bar), world_from_left)
+            #     grasp_bar_from_right = pp.multiply(pp.invert(world_from_bar), world_from_right)
+            #     grasp_bar_from_left = pp.multiply(pp.invert(world_from_bar), world_from_left)
 
-                # Compute relative transform for dual-arm projection
-                desired_right_from_left = pp.multiply(pp.invert(world_from_right), world_from_left)
-                projector = DualArmProjection(robot_setup, desired_right_from_left)
+            #     # Compute relative transform for dual-arm projection
+            #     desired_right_from_left = pp.multiply(pp.invert(world_from_right), world_from_left)
+            #     projector = DualArmProjection(robot_setup, desired_right_from_left)
 
-                # Set globals for the solver
-                solver_mod.bar_from_right = grasp_bar_from_right
-                solver_mod.bar_from_left = grasp_bar_from_left
+            #     # Set globals for the solver
+            #     solver_mod.bar_from_right = grasp_bar_from_right
+            #     solver_mod.bar_from_left = grasp_bar_from_left
 
-                print(f"Grasp set!")
-                print(f"  bar_from_right: pos={np.round(grasp_bar_from_right[0], 4)}, "
-                      f"quat={np.round(grasp_bar_from_right[1], 4)}")
-                print(f"  bar_from_left:  pos={np.round(grasp_bar_from_left[0], 4)}, "
-                      f"quat={np.round(grasp_bar_from_left[1], 4)}")
+            #     print(f"Grasp set!")
+            #     print(f"  bar_from_right: pos={np.round(grasp_bar_from_right[0], 4)}, "
+            #           f"quat={np.round(grasp_bar_from_right[1], 4)}")
+            #     print(f"  bar_from_left:  pos={np.round(grasp_bar_from_left[0], 4)}, "
+            #           f"quat={np.round(grasp_bar_from_left[1], 4)}")
 
-                # Reset path since grasp changed
-                path = None
-                start_confs = None
-                end_confs = None
+            #     # Reset path since grasp changed
+            #     path = None
+            #     start_confs = None
+            #     end_confs = None
 
-            # ---- Solve Start IK ----
-            if btn_solve_start.pressed():
+            # ---- Plan Path (auto-solves IK) ----
+            if btn_plan.pressed():
                 if projector is None or grasp_bar_from_right is None:
-                    print("Set grasp first!")
+                    logger.error("Set grasp first!")
                 else:
+                    collision_fn = robot_setup.create_collision_fn(obstacle_bodies=robot_setup.obstacles)
+
+                    # Solve Start IK
                     timer.start("solve_start_ik")
                     with pp.LockRenderer():
                         start_confs = projector.create_valid_confs(
@@ -383,27 +449,17 @@ def main():
                             grasp_bar_from_right,
                             delta=np.pi,
                             max_attempts=20,
-                            collision_fn=robot_setup.create_collision_fn(obstacle_bodies=robot_setup.obstacles),
+                            collision_fn=collision_fn,
                         )
                     elapsed = timer.stop("solve_start_ik")
-
                     if start_confs is not None:
                         start_confs = normalize_angles(start_confs)
-                        print(f"Start IK: {len(start_confs)} solutions found in {elapsed:.3f}s")
-                        # Show first solution
-                        robot_setup.set_joint_positions(robot_setup.arm_joints, start_confs[0])
-                        if len(start_confs) > 1:
-                            start_conf_idx_slider = pybullet.addUserDebugParameter(
-                                "Start conf idx", 0, len(start_confs) - 1, 0, physicsClientId=cid
-                            )
+                        logger.info(f"Start IK: {len(start_confs)} solutions found in {elapsed:.3f}s")
                     else:
-                        print(f"Start IK: no solution found ({elapsed:.3f}s)")
+                        logger.warning(f"Start IK: no solution found ({elapsed:.3f}s)")
+                        continue
 
-            # ---- Solve End IK ----
-            if btn_solve_end.pressed():
-                if projector is None or grasp_bar_from_right is None:
-                    print("Set grasp first!")
-                else:
+                    # Solve End IK
                     timer.start("solve_end_ik")
                     with pp.LockRenderer():
                         end_confs = projector.create_valid_confs(
@@ -412,36 +468,27 @@ def main():
                             grasp_bar_from_right,
                             delta=np.pi,
                             max_attempts=20,
-                            collision_fn=robot_setup.create_collision_fn(obstacle_bodies=robot_setup.obstacles),
+                            collision_fn=collision_fn,
                         )
                     elapsed = timer.stop("solve_end_ik")
-
                     if end_confs is not None:
                         end_confs = normalize_angles(end_confs)
-                        print(f"End IK: {len(end_confs)} solutions found in {elapsed:.3f}s")
-                        robot_setup.set_joint_positions(robot_setup.arm_joints, end_confs[0])
-                        if len(end_confs) > 1:
-                            end_conf_idx_slider = pybullet.addUserDebugParameter(
-                                "End conf idx", 0, len(end_confs) - 1, 0, physicsClientId=cid
-                            )
+                        logger.info(f"End IK: {len(end_confs)} solutions found in {elapsed:.3f}s")
                     else:
-                        print(f"End IK: no solution found ({elapsed:.3f}s)")
+                        logger.warning(f"End IK: no solution found ({elapsed:.3f}s)")
+                        continue
 
-            # ---- Plan Path ----
-            if btn_plan.pressed():
-                if start_confs is None or end_confs is None:
-                    print("Solve start and end IK first!")
-                elif projector is None:
-                    print("Set grasp first!")
-                else:
                     start_conf = start_confs[0]
                     end_conf = end_confs[0]
 
                     # Create solver (uses cached collision fn)
                     solver = TrajectoryDualCartConstrainedSolver(robot_setup, None, projector)
 
-                    print("Planning path...")
+                    logger.info("Planning path...")
                     timer.start("plan_path")
+                    profile_path = os.path.join(os.path.dirname(__file__), "plan_profile.prof")
+                    profiler = cProfile.Profile()
+                    profiler.enable()
                     path = solver.plan(
                         start_conf=start_conf,
                         target_conf=end_conf,
@@ -451,44 +498,62 @@ def main():
                         use_draw=True,
                         verbose=True,
                     )
+                    profiler.disable()
                     elapsed = timer.stop("plan_path")
 
+                    # Save and display profile
+                    profiler.dump_stats(profile_path)
+                    logger.info(f"Profile saved to {profile_path}")
+
+                    # Print top 30 cumulative-time entries
+                    stats = pstats.Stats(profiler)
+                    stats.sort_stats("cumulative")
+                    stats.print_stats(30)
+
+                    # # Launch snakeviz in background
+                    subprocess.Popen([sys.executable, "-m", "snakeviz", profile_path])
+                    logger.info("Launched snakeviz (check your browser)")
+
                     if path is not None:
-                        print(f"Path found! {len(path)} waypoints in {elapsed:.3f}s")
-                        path_slider = pybullet.addUserDebugParameter(
-                            "Path idx", 0, len(path) - 1, 0, physicsClientId=cid
-                        )
+                        logger.info(f"Path found! {len(path)} waypoints in {elapsed:.3f}s")
                         path_current_idx = -1
                     else:
-                        print(f"No path found ({elapsed:.3f}s)")
+                        logger.warning(f"No path found ({elapsed:.3f}s)")
 
                     timer.summary()
 
-            # ---- Browse start configs ----
-            if start_confs is not None and start_conf_idx_slider is not None and path is None:
-                idx = int(pybullet.readUserDebugParameter(start_conf_idx_slider, physicsClientId=cid))
-                idx = min(idx, len(start_confs) - 1)
+            # ---- Browse start configs (mode 0) ----
+            if mode == 0 and start_confs is not None:
+                t = pybullet.readUserDebugParameter(start_conf_idx_slider, physicsClientId=cid)
+                idx = int(round(t * (len(start_confs) - 1)))
+                idx = max(0, min(idx, len(start_confs) - 1))
                 robot_setup.set_joint_positions(robot_setup.arm_joints, start_confs[idx])
 
-            # ---- Browse end configs ----
-            if end_confs is not None and end_conf_idx_slider is not None and path is None:
-                if mode == 1:
-                    idx = int(pybullet.readUserDebugParameter(end_conf_idx_slider, physicsClientId=cid))
-                    idx = min(idx, len(end_confs) - 1)
-                    robot_setup.set_joint_positions(robot_setup.arm_joints, end_confs[idx])
+            # ---- Browse end configs (mode 1) ----
+            if mode == 1 and end_confs is not None:
+                t = pybullet.readUserDebugParameter(end_conf_idx_slider, physicsClientId=cid)
+                idx = int(round(t * (len(end_confs) - 1)))
+                idx = max(0, min(idx, len(end_confs) - 1))
+                robot_setup.set_joint_positions(robot_setup.arm_joints, end_confs[idx])
 
-            # ---- Path playback ----
-            if path is not None and path_slider is not None:
-                idx = int(pybullet.readUserDebugParameter(path_slider, physicsClientId=cid))
-                idx = min(idx, len(path) - 1)
+            # ---- Path playback (mode 2) ----
+            if mode == 2 and path is not None:
+                t = pybullet.readUserDebugParameter(path_slider, physicsClientId=cid)
+                idx = int(round(t * (len(path) - 1)))
+                idx = max(0, min(idx, len(path) - 1))
                 if idx != path_current_idx:
                     path_current_idx = idx
                     robot_setup.set_joint_positions(robot_setup.arm_joints, path[idx])
+                    # Update bar pose from FK to match robot configuration
+                    if grasp_bar_from_left is not None:
+                        world_from_tool0 = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_left)
+                        bar_pose = pp.multiply(world_from_tool0, pp.invert(grasp_bar_from_left))
+                        pp.set_pose(bar, bar_pose)
 
             time.sleep(0.01)
 
         except KeyboardInterrupt:
-            print("\nExiting...")
+            logger.info("Exiting...")
             break
 
     pp.disconnect()

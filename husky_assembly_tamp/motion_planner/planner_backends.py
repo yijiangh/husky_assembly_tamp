@@ -63,7 +63,7 @@ class BiRRTBackend(PlannerBackend):
         projector=None,
         **kwargs,
     ) -> Optional[List[np.ndarray]]:
-        from motion_planner.trajectory_dual_cart_constrained_solver import (
+        from husky_assembly_tamp.motion_planner.trajectory_dual_cart_constrained_solver import (
             TrajectoryDualCartConstrainedSolver,
         )
 

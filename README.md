@@ -16,7 +16,7 @@ pip install -e .
 
 This module implements a dual-arm constrained motion planner that maintains a fixed relative pose between the two end-effectors while planning a collision-aware joint-space trajectory.
 
-File: `scripts/motion_planner/trajectory_dual_constrained_solver.py`
+File: `husky_assembly_tamp/motion_planner/trajectory_dual_constrained_solver.py`
 
 ## Overview
 - Enforces a dual-arm constraint via a projector that keeps a constant transform between the left and right tool links.
@@ -66,14 +66,14 @@ The `main()` function demonstrates end-to-end usage:
 
 Minimal runnable example (GUI recommended):
 ```bash
-python scripts/motion_planner/trajectory_dual_constrained_solver.py
+python -m husky_assembly_tamp.motion_planner.trajectory_dual_constrained_solver
 ```
 
 # Dual-arm Cartesian-based Constrained Planner
 
 This module plans a dual-arm trajectory by interpolating in Cartesian space (tool pose) and projecting to joint space while maintaining a fixed relative pose constraint between tool frames. It organizes intermediate IK solutions into a ladder-graph-like structure and can render this as an SVG.
 
-File: `scripts/motion_planner/trajectory_dual_cart_constrained_solver.py`
+File: `husky_assembly_tamp/motion_planner/trajectory_dual_cart_constrained_solver.py`
 
 ## Overview
 - Samples and interpolates end-effector poses between start and goal in Cartesian space, then solves IK with a dual-arm projector to obtain paired joint configs.
@@ -144,7 +144,7 @@ Methods:
 
 ## How to run (GUI recommended)
 ```bash
-python scripts/motion_planner/trajectory_dual_cart_constrained_solver.py
+python -m husky_assembly_tamp.motion_planner.trajectory_dual_cart_constrained_solver
 ```
 
 What it does:

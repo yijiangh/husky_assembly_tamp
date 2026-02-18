@@ -8,9 +8,10 @@ instrumentation for bottleneck identification.
 
 Usage:
     cd external/husky_assembly_tamp/scripts
-    python -m motion_planner.trajectory_testbenc
+    python -m motion_planner.trajectory_testbench [--planner birrt|constrained_bimanual]
 """
 
+import argparse
 import os
 import sys
 import time
@@ -30,9 +31,7 @@ from robot.robot_setup import (
     RobotSetup,
 )
 import motion_planner.trajectory_dual_cart_constrained_solver as solver_mod
-from motion_planner.trajectory_dual_cart_constrained_solver import (
-    TrajectoryDualCartConstrainedSolver,
-)
+from motion_planner.planner_backends import get_backend, list_backends
 from utils.util import normalize_angles
 
 
@@ -117,7 +116,22 @@ class Timer:
 # Main
 # ---------------------------------------------------------------------------
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Dual-arm trajectory testbench")
+    parser.add_argument(
+        "--planner",
+        choices=list_backends(),
+        default="birrt",
+        help=f"Planner backend to use (default: birrt). Available: {', '.join(list_backends())}",
+    )
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
+    backend = get_backend(args.planner)
+    print(f"Planner backend: {backend.name} — {backend.description}")
+
     timer = Timer()
 
     # ------------------------------------------------------------------
@@ -327,14 +341,13 @@ def main():
                     start_conf = start_confs[0]
                     end_conf = end_confs[0]
 
-                    # Create solver (uses cached collision fn)
-                    solver = TrajectoryDualCartConstrainedSolver(robot_setup, None, projector)
-
-                    print("Planning path...")
+                    print(f"Planning path with '{backend.name}'...")
                     timer.start("plan_path")
-                    path = solver.plan(
+                    path = backend.plan(
                         start_conf=start_conf,
-                        target_conf=end_conf,
+                        goal_conf=end_conf,
+                        robot_setup=robot_setup,
+                        projector=projector,
                         max_time=60,
                         max_iterations=5000,
                         max_attempts=10,

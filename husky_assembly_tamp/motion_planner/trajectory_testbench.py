@@ -26,6 +26,7 @@ import pybullet_planning as pp
 
 from compas.data import json_dump, json_load
 from compas_fab.robots import JointTrajectory, JointTrajectoryPoint
+from compas_robots.model import Joint
 
 from husky_assembly_tamp.robot.dual_arm_projection import DualArmProjection
 from husky_assembly_tamp.robot.robot_setup import (
@@ -182,6 +183,7 @@ def save_path_as_joint_trajectory(path, joint_names, out_path):
     for conf in path:
         pt = JointTrajectoryPoint(
             joint_values=[float(v) for v in conf],
+            joint_types=[Joint.REVOLUTE] * len(conf),
             joint_names=joint_names,
         )
         points.append(pt)
@@ -257,6 +259,10 @@ def main():
     logger.info(f"Planner backend: {backend.name} — {backend.description}")
     timer = Timer()
 
+    is_mac = sys.platform == "darwin"
+    if is_mac:
+        logger.info("macOS detected — skipping GUI buttons/sliders, will auto-run planning")
+
     # ------------------------------------------------------------------
     # 1. Direct URDF loading (no compas_fab)
     # ------------------------------------------------------------------
@@ -273,6 +279,7 @@ def main():
 
     # pp.connect disables the debug GUI panel — re-enable it for sliders/buttons
     pybullet.configureDebugVisualizer(pybullet.COV_ENABLE_GUI, 1, physicsClientId=cid)
+
     pybullet.resetDebugVisualizerCamera(
         cameraDistance=2.5, cameraYaw=45, cameraPitch=-30,
         cameraTargetPosition=[0, 0, 0.5], physicsClientId=cid,
@@ -284,7 +291,6 @@ def main():
     arm_joints = pp.joints_from_names(robot, HUSKY_DUAL_ARM_JOINT_NAMES)
     pp.set_joint_positions(robot, arm_joints, HUSKY_DUAL_INIT_ARM_JOINT_ANGLES)
 
-    # Create a simple bar (box primitive)
     bar_height = 1
     bar = pp.create_cylinder(radius=0.015, height=bar_height, color=(0.8, 0.4, 0.1, 0.6))
 
@@ -424,38 +430,205 @@ def main():
             logger.debug(f"  bar_pose (from FK): pos={np.round(end_bar_pose[0], 4)}, quat={np.round(end_bar_pose[1], 4)}")
 
     # ------------------------------------------------------------------
-    # 3. Create GUI
+    # 3. Plan path & create GUI
     # ------------------------------------------------------------------
+    # On macOS, pybullet GUI buttons/sliders are broken on Apple Silicon.
+    # Skip interactive controls and auto-run planning, then visualize.
+    if is_mac:
+        path = _run_planning_headless(
+            projector, grasp_bar_from_right, robot_setup, backend, timer,
+            start_defaults, end_defaults, args, bar_height,
+        )
+        _run_visualization_loop(path, robot_setup, grasp_bar_from_left, bar, cid)
+    else:
+        _run_interactive_gui(
+            projector, grasp_bar_from_right, grasp_bar_from_left, robot_setup, backend, timer,
+            start_defaults, end_defaults, start_confs, end_confs, path, path_current_idx,
+            args, bar, bar_height, cid,
+        )
+
+    pp.disconnect()
+
+
+def _execute_plan(start_pose, end_pose, projector, grasp_bar_from_right, robot_setup, backend, timer, traj_dir):
+    """Shared IK + planning core used by both headless and interactive GUI paths.
+
+    Returns
+    -------
+    tuple: (path, start_confs, end_confs)
+        path is None if planning failed; start_confs/end_confs are None if IK failed.
+    """
+    collision_fn = robot_setup.create_collision_fn(obstacle_bodies=robot_setup.obstacles)
+
+    # Solve Start IK
+    timer.start("solve_start_ik")
+    with pp.LockRenderer():
+        start_confs = projector.create_valid_confs(
+            robot_setup.ik_solver_right,
+            start_pose,
+            grasp_bar_from_right,
+            delta=np.pi,
+            max_attempts=20,
+            collision_fn=collision_fn,
+        )
+    elapsed = timer.stop("solve_start_ik")
+    if start_confs is not None:
+        start_confs = normalize_angles(start_confs)
+        logger.info(f"Start IK: {len(start_confs)} solutions found in {elapsed:.3f}s")
+    else:
+        logger.warning(f"Start IK: no solution found ({elapsed:.3f}s)")
+        return None, None, None
+
+    # Solve End IK
+    timer.start("solve_end_ik")
+    with pp.LockRenderer():
+        end_confs = projector.create_valid_confs(
+            robot_setup.ik_solver_right,
+            end_pose,
+            grasp_bar_from_right,
+            delta=np.pi,
+            max_attempts=20,
+            collision_fn=collision_fn,
+        )
+    elapsed = timer.stop("solve_end_ik")
+    if end_confs is not None:
+        end_confs = normalize_angles(end_confs)
+        logger.info(f"End IK: {len(end_confs)} solutions found in {elapsed:.3f}s")
+    else:
+        logger.warning(f"End IK: no solution found ({elapsed:.3f}s)")
+        return None, start_confs, None
+
+    start_conf = start_confs[0]
+    end_conf = end_confs[0]
+
+    logger.info(f"Planning path with '{backend.name}'...")
+    timer.start("plan_path")
+    profile_path = os.path.join(os.path.dirname(__file__), "plan_profile.prof")
+    profiler = cProfile.Profile()
+    profiler.enable()
+    path = backend.plan(
+        start_conf=start_conf,
+        goal_conf=end_conf,
+        robot_setup=robot_setup,
+        projector=projector,
+        max_time=60,
+        max_iterations=5000,
+        max_attempts=10,
+        use_draw=True,
+        verbose=True,
+    )
+    profiler.disable()
+    elapsed = timer.stop("plan_path")
+
+    # Save and display profile
+    profiler.dump_stats(profile_path)
+    logger.info(f"Profile saved to {profile_path}")
+    stats = pstats.Stats(profiler)
+    stats.sort_stats("cumulative")
+    stats.print_stats(30)
+    subprocess.Popen([sys.executable, "-m", "snakeviz", profile_path])
+    logger.info("Launched snakeviz (check your browser)")
+
+    if path is not None:
+        logger.info(f"Path found! {len(path)} waypoints in {elapsed:.3f}s")
+        os.makedirs(traj_dir, exist_ok=True)
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        traj_filename = f"testbench_{timestamp}_JointTrajectory.json"
+        traj_path = os.path.join(traj_dir, traj_filename)
+        save_path_as_joint_trajectory(path, HUSKY_DUAL_ARM_JOINT_NAMES, traj_path)
+    else:
+        logger.warning(f"No path found ({elapsed:.3f}s)")
+
+    timer.summary()
+    return path, start_confs, end_confs
+
+
+def _run_planning_headless(
+    projector, grasp_bar_from_right, robot_setup, backend, timer,
+    start_defaults, end_defaults, args, bar_height,
+):
+    """Derive poses from loaded JSON defaults and auto-run planning (macOS path)."""
+    if projector is None or grasp_bar_from_right is None:
+        logger.error("Cannot auto-plan: grasp data not loaded. Provide --grasp-json.")
+        return None
+
+    start_pose = pp.Pose(point=start_defaults[:3], euler=pp.Euler(*start_defaults[3:]))
+    end_pose = pp.Pose(point=end_defaults[:3], euler=pp.Euler(*end_defaults[3:]))
+
+    # Ghost bars for start/end visualization
+    ghost_start = pp.create_cylinder(radius=0.015, height=bar_height, color=(0.0, 0.8, 0.0, 0.4))
+    ghost_end = pp.create_cylinder(radius=0.015, height=bar_height, color=(0.8, 0.0, 0.0, 0.4))
+    pp.set_pose(ghost_start, start_pose)
+    pp.set_pose(ghost_end, end_pose)
+
+    path, _, _ = _execute_plan(
+        start_pose, end_pose, projector, grasp_bar_from_right,
+        robot_setup, backend, timer, args.traj_dir,
+    )
+    return path
+
+
+def _run_visualization_loop(path, robot_setup, grasp_bar_from_left, bar, cid):
+    """Minimal GUI loop for path playback only (macOS path).
+
+    Uses a single 'Path t' slider to scrub through the trajectory.
+    """
+    if path is None:
+        logger.info("No path to visualize. Press Ctrl+C to exit.")
+        try:
+            while True:
+                time.sleep(0.1)
+        except KeyboardInterrupt:
+            logger.info("Exiting...")
+        return
+
+    logger.info(f"Visualizing path ({len(path)} waypoints). Use 'Path t' slider to scrub.")
+    path_slider = pybullet.addUserDebugParameter("Path t", 0.0, 1.0, 0.0, physicsClientId=cid)
+    path_current_idx = -1
+
+    while True:
+        try:
+            t = pybullet.readUserDebugParameter(path_slider, physicsClientId=cid)
+            idx = int(round(t * (len(path) - 1)))
+            idx = max(0, min(idx, len(path) - 1))
+            if idx != path_current_idx:
+                path_current_idx = idx
+                robot_setup.set_joint_positions(robot_setup.arm_joints, path[idx])
+                if grasp_bar_from_left is not None:
+                    world_from_tool0 = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_left)
+                    bar_pose = pp.multiply(world_from_tool0, pp.invert(grasp_bar_from_left))
+                    pp.set_pose(bar, bar_pose)
+
+            time.sleep(0.01)
+        except KeyboardInterrupt:
+            logger.info("Exiting...")
+            break
+
+
+def _run_interactive_gui(
+    projector, grasp_bar_from_right, grasp_bar_from_left, robot_setup, backend, timer,
+    start_defaults, end_defaults, start_confs, end_confs, path, path_current_idx,
+    args, bar, bar_height, cid,
+):
+    """Full interactive GUI with buttons and sliders (Windows/Linux path)."""
     logger.info("=== GUI Controls ===")
     logger.info("  Buttons: Plan Path (auto-solves IK for start & end)")
     logger.info("  Sliders: Start bar pose, End bar pose")
     logger.info("====================")
 
-    # btn_set_grasp = Button("Set Grasp From Current", cid=cid)
     btn_plan = Button("Plan Path", cid=cid)
     path_slider = pybullet.addUserDebugParameter("Path t", 0.0, 1.0, 0.0, physicsClientId=cid)
     start_conf_idx_slider = pybullet.addUserDebugParameter("Start conf t", 0.0, 1.0, 0.0, physicsClientId=cid)
     end_conf_idx_slider = pybullet.addUserDebugParameter("End conf t", 0.0, 1.0, 0.0, physicsClientId=cid)
 
-    # Mode selector: 0=start, 1=end, 2=path playback
     mode_slider = pybullet.addUserDebugParameter("Mode (0=start, 1=end, 2=path)", 0, 2, 0, physicsClientId=cid)
 
-    # ---- Pose sliders (for adjusting start/end bar poses) ----
     start_sliders = PoseSliders("Start", cid=cid, defaults=start_defaults)
     end_sliders = PoseSliders("End", cid=cid, defaults=end_defaults)
-    # grasp_sliders = PoseSliders(
-    #     "Grasp",
-    #     cid=cid,
-    #     defaults=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    #     pos_range=0.3,
-    #     angle_range=np.pi,
-    # )
 
-    # Ghost bars for showing start (green) and end (red) simultaneously
     ghost_start = pp.create_cylinder(radius=0.015, height=bar_height, color=(0.0, 0.8, 0.0, 0.4))
     ghost_end = pp.create_cylinder(radius=0.015, height=bar_height, color=(0.8, 0.0, 0.0, 0.4))
 
-    # ---- Trajectory file loading UI ----
     available_trajs = scan_trajectory_files(args.traj_dir)
     if available_trajs:
         logger.info(f"Found {len(available_trajs)} trajectory files in {args.traj_dir}")
@@ -466,154 +639,35 @@ def main():
     traj_file_slider = pybullet.addUserDebugParameter("Traj file idx", 0.0, 1.0, 0.0, physicsClientId=cid)
     btn_load_traj = Button("Load Trajectory", cid=cid)
 
-    # ------------------------------------------------------------------
-    # 4. Main loop
-    # ------------------------------------------------------------------
     logger.info("Ready. Adjust sliders and press buttons in the PyBullet GUI.")
 
     while True:
         try:
-            # Read current slider poses
             start_pose = start_sliders.as_pose()
             end_pose = end_sliders.as_pose()
 
-            # Show ghost bars for start and end
             pp.set_pose(ghost_start, start_pose)
             pp.set_pose(ghost_end, end_pose)
 
-            # Mode: 0=start, 1=end, 2=path playback
             mode = int(round(pybullet.readUserDebugParameter(mode_slider, physicsClientId=cid)))
             if mode == 0:
                 pp.set_pose(bar, start_pose)
             elif mode == 1:
                 pp.set_pose(bar, end_pose)
-            # mode == 2: bar pose updated by path playback below
-
-            # ---- Set Grasp ----
-            # if btn_set_grasp.pressed():
-            #     # Compute grasp from current right/left tool pose relative to bar
-            #     world_from_right = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
-            #     world_from_left = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_left)
-            #     world_from_bar = pp.get_pose(bar)
-
-            #     grasp_bar_from_right = pp.multiply(pp.invert(world_from_bar), world_from_right)
-            #     grasp_bar_from_left = pp.multiply(pp.invert(world_from_bar), world_from_left)
-
-            #     # Compute relative transform for dual-arm projection
-            #     desired_right_from_left = pp.multiply(pp.invert(world_from_right), world_from_left)
-            #     projector = DualArmProjection(robot_setup, desired_right_from_left)
-
-            #     # Set globals for the solver
-            #     solver_mod.bar_from_right = grasp_bar_from_right
-            #     solver_mod.bar_from_left = grasp_bar_from_left
-
-            #     print(f"Grasp set!")
-            #     print(f"  bar_from_right: pos={np.round(grasp_bar_from_right[0], 4)}, "
-            #           f"quat={np.round(grasp_bar_from_right[1], 4)}")
-            #     print(f"  bar_from_left:  pos={np.round(grasp_bar_from_left[0], 4)}, "
-            #           f"quat={np.round(grasp_bar_from_left[1], 4)}")
-
-            #     # Reset path since grasp changed
-            #     path = None
-            #     start_confs = None
-            #     end_confs = None
 
             # ---- Plan Path (auto-solves IK) ----
             if btn_plan.pressed():
                 if projector is None or grasp_bar_from_right is None:
                     logger.error("Set grasp first!")
                 else:
-                    collision_fn = robot_setup.create_collision_fn(obstacle_bodies=robot_setup.obstacles)
-
-                    # Solve Start IK
-                    timer.start("solve_start_ik")
-                    with pp.LockRenderer():
-                        start_confs = projector.create_valid_confs(
-                            robot_setup.ik_solver_right,
-                            start_pose,
-                            grasp_bar_from_right,
-                            delta=np.pi,
-                            max_attempts=20,
-                            collision_fn=collision_fn,
-                        )
-                    elapsed = timer.stop("solve_start_ik")
-                    if start_confs is not None:
-                        start_confs = normalize_angles(start_confs)
-                        logger.info(f"Start IK: {len(start_confs)} solutions found in {elapsed:.3f}s")
-                    else:
-                        logger.warning(f"Start IK: no solution found ({elapsed:.3f}s)")
-                        continue
-
-                    # Solve End IK
-                    timer.start("solve_end_ik")
-                    with pp.LockRenderer():
-                        end_confs = projector.create_valid_confs(
-                            robot_setup.ik_solver_right,
-                            end_pose,
-                            grasp_bar_from_right,
-                            delta=np.pi,
-                            max_attempts=20,
-                            collision_fn=collision_fn,
-                        )
-                    elapsed = timer.stop("solve_end_ik")
-                    if end_confs is not None:
-                        end_confs = normalize_angles(end_confs)
-                        logger.info(f"End IK: {len(end_confs)} solutions found in {elapsed:.3f}s")
-                    else:
-                        logger.warning(f"End IK: no solution found ({elapsed:.3f}s)")
-                        continue
-
-                    start_conf = start_confs[0]
-                    end_conf = end_confs[0]
-
-                    logger.info(f"Planning path with '{backend.name}'...")
-                    timer.start("plan_path")
-                    profile_path = os.path.join(os.path.dirname(__file__), "plan_profile.prof")
-                    profiler = cProfile.Profile()
-                    profiler.enable()
-                    path = backend.plan(
-                        start_conf=start_conf,
-                        goal_conf=end_conf,
-                        robot_setup=robot_setup,
-                        projector=projector,
-                        max_time=60,
-                        max_iterations=5000,
-                        max_attempts=10,
-                        use_draw=True,
-                        verbose=True,
+                    path, start_confs, end_confs = _execute_plan(
+                        start_pose, end_pose, projector, grasp_bar_from_right,
+                        robot_setup, backend, timer, args.traj_dir,
                     )
-                    profiler.disable()
-                    elapsed = timer.stop("plan_path")
-
-                    # Save and display profile
-                    profiler.dump_stats(profile_path)
-                    logger.info(f"Profile saved to {profile_path}")
-
-                    # Print top 30 cumulative-time entries
-                    stats = pstats.Stats(profiler)
-                    stats.sort_stats("cumulative")
-                    stats.print_stats(30)
-
-                    # # Launch snakeviz in background
-                    subprocess.Popen([sys.executable, "-m", "snakeviz", profile_path])
-                    logger.info("Launched snakeviz (check your browser)")
-
                     if path is not None:
-                        logger.info(f"Path found! {len(path)} waypoints in {elapsed:.3f}s")
                         path_current_idx = -1
-                        # Save trajectory as JointTrajectory JSON
-                        os.makedirs(args.traj_dir, exist_ok=True)
-                        timestamp = time.strftime("%Y%m%d_%H%M%S")
-                        traj_filename = f"testbench_{timestamp}_JointTrajectory.json"
-                        traj_path = os.path.join(args.traj_dir, traj_filename)
-                        save_path_as_joint_trajectory(path, HUSKY_DUAL_ARM_JOINT_NAMES, traj_path)
-                        # Refresh file list for the load slider
                         available_trajs = scan_trajectory_files(args.traj_dir)
                         logger.info(f"Trajectory dir now has {len(available_trajs)} files")
-                    else:
-                        logger.warning(f"No path found ({elapsed:.3f}s)")
-
-                    timer.summary()
 
             # ---- Load Trajectory from file ----
             if btn_load_traj.pressed():
@@ -631,7 +685,6 @@ def main():
                         path = load_joint_trajectory_as_path(traj_path, HUSKY_DUAL_ARM_JOINT_NAMES)
                         path_current_idx = -1
                         logger.info(f"Loaded {len(path)} waypoints from {selected_file}")
-                        # Switch to path playback mode
                         mode = 2
                     except Exception as e:
                         logger.error(f"Failed to load trajectory: {e}")
@@ -658,7 +711,6 @@ def main():
                 if idx != path_current_idx:
                     path_current_idx = idx
                     robot_setup.set_joint_positions(robot_setup.arm_joints, path[idx])
-                    # Update bar pose from FK to match robot configuration
                     if grasp_bar_from_left is not None:
                         world_from_tool0 = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_left)
                         bar_pose = pp.multiply(world_from_tool0, pp.invert(grasp_bar_from_left))
@@ -669,8 +721,6 @@ def main():
         except KeyboardInterrupt:
             logger.info("Exiting...")
             break
-
-    pp.disconnect()
 
 
 if __name__ == "__main__":

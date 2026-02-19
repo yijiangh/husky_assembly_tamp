@@ -36,6 +36,58 @@ bar_from_left = None
 np.set_printoptions(precision=4, suppress=False)
 
 
+class PlanProfiler:
+    """Lightweight accumulator for targeted timing of planning sub-operations.
+
+    Usage:
+        profiler = PlanProfiler()
+        with profiler.measure("expand_path"):
+            ...
+        profiler.report()
+    """
+
+    def __init__(self):
+        self._totals: dict = {}   # label -> total seconds
+        self._counts: dict = {}   # label -> call count
+
+    class _Ctx:
+        def __init__(self, profiler: "PlanProfiler", label: str):
+            self._p = profiler
+            self._label = label
+            self._t0 = None
+
+        def __enter__(self):
+            self._t0 = time.perf_counter()
+            return self
+
+        def __exit__(self, *_):
+            elapsed = time.perf_counter() - self._t0
+            self._p._totals[self._label] = self._p._totals.get(self._label, 0.0) + elapsed
+            self._p._counts[self._label] = self._p._counts.get(self._label, 0) + 1
+
+    def measure(self, label: str) -> "_Ctx":
+        return self._Ctx(self, label)
+
+    def report(self, title: str = "Planning Profiler Report") -> None:
+        if not self._totals:
+            print(f"[{title}] No data recorded.")
+            return
+        total_all = sum(self._totals.values())
+        print(f"\n{'=' * 60}")
+        print(f"  {title}")
+        print(f"{'=' * 60}")
+        print(f"  {'Operation':<35} {'Total(s)':>8}  {'Calls':>6}  {'Avg(ms)':>9}  {'%':>6}")
+        print(f"  {'-' * 35}  {'-' * 8}  {'-' * 6}  {'-' * 9}  {'-' * 6}")
+        for label in sorted(self._totals, key=lambda k: -self._totals[k]):
+            tot = self._totals[label]
+            cnt = self._counts[label]
+            avg_ms = (tot / cnt * 1000) if cnt > 0 else 0.0
+            pct = (tot / total_all * 100) if total_all > 0 else 0.0
+            print(f"  {label:<35} {tot:>8.3f}  {cnt:>6}  {avg_ms:>9.2f}  {pct:>5.1f}%")
+        print(f"  {'TOTAL':<35} {total_all:>8.3f}")
+        print(f"{'=' * 60}\n")
+
+
 def cspace_linear_extend(q1: np.ndarray, q2: np.ndarray, robot_setup: RobotSetup, projector: DualArmProjection):
     """Create extension function for path planning."""
     resolutions = np.array([DEFAULT_RESOLUTION for _ in robot_setup.arm_joints])
@@ -485,6 +537,7 @@ def rrt_connect_capsule(
     verbose=False,
     draw_fn=None,
     enforce_alternate=False,
+    profiler: Optional["PlanProfiler"] = None,
     **kwargs,
 ):
     start_time = time.time()
@@ -556,9 +609,12 @@ def rrt_connect_capsule(
             def _js_dist(q1: np.ndarray, q2: np.ndarray) -> float:
                 return float(np.linalg.norm(angles_distance(np.asarray(q1, dtype=float), np.asarray(q2, dtype=float)), ord=2))
 
+            _prof = profiler if profiler is not None else PlanProfiler()
             with pp.LockRenderer():
-                expended_path, updates = solver.expand_path(capsule_path)
-            results = configs_capsule(expended_path, distance_fn=_js_dist, instant=False)
+                with _prof.measure("expand_path (total)"):
+                    expended_path, _ = solver.expand_path(capsule_path, profiler=_prof)
+            with _prof.measure("configs_capsule"):
+                results = configs_capsule(expended_path, distance_fn=_js_dist, instant=False)
             if results is None or len(results) == 0:
                 for debug_body in bodies:
                     pp.remove_debug(debug_body)
@@ -1165,7 +1221,7 @@ class TrajectoryDualCartConstrainedSolver(object):
         confs = self.projector.create_valid_confs(right_ik_handle, bar_pose, bar_from_right, delta=0.0, max_attempts=20, collision_fn=self._cached_collision_fn)
         return Capsule(bar_pose, config=confs, parent=None, robot_setup=self.robot_setup, projector=self.projector)
 
-    def expand_path(self, path: List[Capsule]):
+    def expand_path(self, path: List[Capsule], profiler: Optional["PlanProfiler"] = None):
         # Returns: (expended_path, updates) where updates is a list of (origin_node, new_config)
         expended_path: List[Capsule] = []
         updates: List[Tuple[Capsule, Optional[List[np.ndarray]]]] = []
@@ -1187,7 +1243,9 @@ class TrajectoryDualCartConstrainedSolver(object):
                         pass
                     updates.append((origin, new_conf))
             else:
-                expanded = self.expand(capsule)
+                _prof = profiler if profiler is not None else PlanProfiler()
+                with _prof.measure("expand_single (create_valid_confs)"):
+                    expanded = self.expand(capsule)
                 expended_path.append(expanded)
                 if origin is not None:
                     try:
@@ -1297,48 +1355,65 @@ class TrajectoryDualCartConstrainedSolver(object):
         draw_fn = self._get_draw_fn(start_capsule, target_capsule) if use_draw else None
 
         cspace_extend_fn = self._get_cspace_extend_fn(enable_ik=True)
-        cspace_collision_fn = self._cached_collision_fn
+
+        profiler = PlanProfiler()
 
         for _ in range(max_attempts):
-            
+
             pp.remove_all_debug()
 
-            path = rrt_connect_capsule(
-                self,
-                start_capsule,
-                target_capsule,
-                distance_fn,
-                sample_fn,
-                extend_fn,
-                collision_fn,
-                self.robot_setup,
-                self.projector,
-                max_iterations=max_iterations,
-                max_time=max_time,
-                verbose=verbose,
-                draw_fn=draw_fn,
-                enforce_alternate=False,
-            )
+            with profiler.measure("rrt_connect_capsule"):
+                path = rrt_connect_capsule(
+                    self,
+                    start_capsule,
+                    target_capsule,
+                    distance_fn,
+                    sample_fn,
+                    extend_fn,
+                    collision_fn,
+                    self.robot_setup,
+                    self.projector,
+                    max_iterations=max_iterations,
+                    max_time=max_time,
+                    verbose=verbose,
+                    draw_fn=draw_fn,
+                    enforce_alternate=False,
+                    profiler=profiler,
+                )
 
             if path is None:
                 continue
 
             # Post-process in joint space using provided helpers
-            path_smooth = smooth(path, cspace_extend_fn, robot_setup=self.robot_setup)
-            path_res = interpolate(path_smooth, cspace_extend_fn, robot_setup=self.robot_setup)
-            
+            with profiler.measure("smooth"):
+                path_smooth = smooth(path, cspace_extend_fn, robot_setup=self.robot_setup)
+            with profiler.measure("interpolate"):
+                path_res = interpolate(path_smooth, cspace_extend_fn, robot_setup=self.robot_setup)
+
+            profiler.report("plan() sub-operation breakdown")
+
             for q in path_res:
                 self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, q)
                 pp.draw_pose(pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link_right), length=0.01)
-        
+
             return path_res
-        
+
+        profiler.report("plan() sub-operation breakdown (no path found)")
         return None
 
 def main():
     """
     Example usage of TrajectoryDualConstrainedSolver.
+
+    Usage:
+        python trajectory_dual_cart_constrained_solver.py          # GUI on (default)
+        python trajectory_dual_cart_constrained_solver.py --no-gui # GUI off (faster)
     """
+    import argparse as _argparse
+    _parser = _argparse.ArgumentParser(add_help=False)
+    _parser.add_argument("--no-gui", action="store_true", help="Disable PyBullet GUI")
+    _args, _ = _parser.parse_known_args()
+    gui = not _args.no_gui
 
     # np.random.seed(1281712)
 
@@ -1365,7 +1440,7 @@ def main():
     # Initialize Robot Setup for Planning
     # ------------------------------------------------------------------
     robot_setup, target_conf, projector = TrajectoryDualCartConstrainedSolver.initialize_robot_setup_for_planning(
-        robot_name="r0", robot_type="husky_dual", target_cell_state_path=target_cell_state_path, use_scene_parser_gui=True, scene_parser_verbose=True
+        robot_name="r0", robot_type="husky_dual", target_cell_state_path=target_cell_state_path, use_scene_parser_gui=gui, scene_parser_verbose=True
     )
 
     world_from_right = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
@@ -1393,21 +1468,25 @@ def main():
     robot_setup.set_joint_positions(robot_setup.arm_joints, start_confs[0])
 
     time_start = time.time()
-    path = solver.plan(start_conf=start_confs[0], target_conf=target_conf, max_time=120, max_iterations=10000, use_draw=True, verbose=True)
+    path = solver.plan(start_conf=start_confs[0], target_conf=target_conf, max_time=120, max_iterations=10000, use_draw=gui, verbose=True)
     print(f"Planning took {time.time() - time_start:.2f} seconds")
 
     if path is not None:
-        slider = pybullet.addUserDebugParameter("path_idx", 0, len(path) - 1, 0)
-        current_index = -1
-        while True:
-            idx = int(pybullet.readUserDebugParameter(slider))
-            if idx != current_index:
-                current_index = idx
-                conf = path[current_index]
-                robot_setup.set_joint_positions(robot_setup.arm_joints, conf)
-            time.sleep(0.01)
+        print(f"Path found: {len(path)} waypoints")
+        if gui:
+            slider = pybullet.addUserDebugParameter("path_idx", 0, len(path) - 1, 0)
+            current_index = -1
+            while True:
+                idx = int(pybullet.readUserDebugParameter(slider))
+                if idx != current_index:
+                    current_index = idx
+                    conf = path[current_index]
+                    robot_setup.set_joint_positions(robot_setup.arm_joints, conf)
+                time.sleep(0.01)
     else:
-        pp.wait_for_user("No path found")
+        print("No path found")
+        if gui:
+            pp.wait_for_user("No path found")
 
 
 if __name__ == "__main__":

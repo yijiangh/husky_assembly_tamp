@@ -41,7 +41,7 @@ class PlanProfiler:
 
     Usage:
         profiler = PlanProfiler()
-        with profiler.measure("expand_path"):
+        with profiler.measure("expand_cart_path_ladder_graph"):
             ...
         profiler.report()
     """
@@ -86,6 +86,10 @@ class PlanProfiler:
             print(f"  {label:<35} {tot:>8.3f}  {cnt:>6}  {avg_ms:>9.2f}  {pct:>5.1f}%")
         print(f"  {'TOTAL':<35} {total_all:>8.3f}")
         print(f"{'=' * 60}\n")
+
+    def get_cumulative(self, label: str) -> float:
+        """Return total accumulated seconds for *label*, or 0.0 if never recorded."""
+        return self._totals.get(label, 0.0)
 
 
 def cspace_linear_extend(q1: np.ndarray, q2: np.ndarray, robot_setup: RobotSetup, projector: DualArmProjection):
@@ -171,7 +175,7 @@ def asymmetric_extend(c1: Capsule, c2: Capsule, extend_fn, backward=False):
     return extend_fn(c1, c2)
 
 
-def extend_towards_capsule(tree: List[Capsule], target: Capsule, distance_fn, extend_fn, collision_fn, robot_setup, projector, swap=False, tree_frequency=1, **kwargs):
+def cart_extend_towards_capsule(tree: List[Capsule], target: Capsule, distance_fn, extend_fn, collision_fn, robot_setup, projector, swap=False, tree_frequency=1, **kwargs):
     target = copy.deepcopy(target)
     target.parent = None
     last = pp.utils.argmin(lambda n: float(np.linalg.norm(np.asarray(distance_fn(n, target), dtype=float), ord=2)), tree)
@@ -192,7 +196,7 @@ def extend_towards_capsule(tree: List[Capsule], target: Capsule, distance_fn, ex
     return last, success, tree
 
 
-def configs_capsule(nodes: List[Capsule], distance_fn: Optional[Callable[[np.ndarray, np.ndarray], float]] = None, instant: bool = False):
+def ladder_graph_search(nodes: List[Capsule], distance_fn: Optional[Callable[[np.ndarray, np.ndarray], float]] = None, instant: bool = False):
     """Enumerate all feasible configuration paths across capsule rungs.
 
     Args:
@@ -317,7 +321,7 @@ def plot_ladder_graph(capsule_path: List[Capsule], highlight_feasible: bool = Fa
     """
     Draw ladder graph nodes (per-rung IK solutions) and inter-rung connections, then save as SVG.
 
-    When highlight_feasible is True, computes a feasible joint sequence via configs_capsule
+    When highlight_feasible is True, computes a feasible joint sequence via ladder_graph_search
     and highlights its nodes and connecting edges.
     """
     if capsule_path is None or len(capsule_path) == 0:
@@ -403,7 +407,7 @@ def plot_ladder_graph(capsule_path: List[Capsule], highlight_feasible: bool = Fa
         def _js_dist(q1: np.ndarray, q2: np.ndarray) -> float:
             return float(np.linalg.norm(angles_distance(np.asarray(q1, dtype=float), np.asarray(q2, dtype=float)), ord=2))
 
-        results = configs_capsule(capsule_path, distance_fn=_js_dist)
+        results = ladder_graph_search(capsule_path, distance_fn=_js_dist)
         if results is not None and len(results) > 0:
             distances = [d for (_, _, d) in results]
             dmin = min(distances)
@@ -538,6 +542,7 @@ def rrt_connect_capsule(
     draw_fn=None,
     enforce_alternate=False,
     profiler: Optional["PlanProfiler"] = None,
+    enable_ik: bool = True,
     **kwargs,
 ):
     start_time = time.time()
@@ -567,10 +572,10 @@ def rrt_connect_capsule(
             bodies = pp.draw_pose(target.pose, length=0.1)
             # draw_fn(target, [])
 
-        last1, _, tree1 = extend_towards_capsule(tree1, target, distance_fn, extend_fn, collision_fn, robot_setup, projector, swap, **kwargs)
+        last1, _, tree1 = cart_extend_towards_capsule(tree1, target, distance_fn, extend_fn, collision_fn, robot_setup, projector, swap, **kwargs)
         last1_independent = copy.deepcopy(last1)
         last1_independent.parent = None
-        last2, success, tree2 = extend_towards_capsule(tree2, last1_independent, distance_fn, extend_fn, collision_fn, robot_setup, projector, not swap, **kwargs)
+        last2, success, tree2 = cart_extend_towards_capsule(tree2, last1_independent, distance_fn, extend_fn, collision_fn, robot_setup, projector, not swap, **kwargs)
 
         # if draw_fn:
         #     for sp in tree1 + tree2:
@@ -584,6 +589,17 @@ def rrt_connect_capsule(
                 sp.draw(draw_fn, color="blue")
 
         if success:
+            if not enable_ik:
+                # Stage 1: task-space connection found; no joint configs to extract.
+                # Keep iterating so draw_fn can fill the workspace view.
+                if verbose:
+                    print(f"[Stage 1] Task-space connection at iter {iteration} "
+                          f"(nodes: {len(nodes1)+len(nodes2)}); skipping ladder graph.")
+                if draw_fn:
+                    for debug_body in bodies:
+                        pp.remove_debug(debug_body)
+                continue
+
             path1, path2 = last1.retrace(), last2.retrace()
             if swap:
                 path1, path2 = path2, path1
@@ -611,10 +627,10 @@ def rrt_connect_capsule(
 
             _prof = profiler if profiler is not None else PlanProfiler()
             with pp.LockRenderer():
-                with _prof.measure("expand_path (total)"):
-                    expended_path, _ = solver.expand_path(capsule_path, profiler=_prof)
-            with _prof.measure("configs_capsule"):
-                results = configs_capsule(expended_path, distance_fn=_js_dist, instant=False)
+                with _prof.measure("expand_cart_path_ladder_graph (total)"):
+                    expended_path, _ = solver.expand_cart_path_ladder_graph(capsule_path, profiler=_prof)
+            with _prof.measure("ladder_graph_search"):
+                results = ladder_graph_search(expended_path, distance_fn=_js_dist, instant=False)
             if results is None or len(results) == 0:
                 for debug_body in bodies:
                     pp.remove_debug(debug_body)
@@ -633,7 +649,7 @@ def rrt_connect_capsule(
     return None
 
 
-def smooth(path, extend_fn, max_iterations: int = 50, robot_setup: RobotSetup = None):
+def joint_space_smooth(path, extend_fn, max_iterations: int = 50, robot_setup: RobotSetup = None):
     if path is None or len(path) < 3:
         return path
 
@@ -1023,7 +1039,7 @@ class TrajectoryDualCartConstrainedSolver(object):
 
         return fn
     
-    def _get_cspace_extend_fn(self, enable_ik: bool = True):
+    def _get_cspace_extend_with_projection_fn(self, enable_ik: bool = True):
         def fn(q1, q2):
             """Extend in configuration space by interpolating the RIGHT arm joints.
 
@@ -1068,7 +1084,7 @@ class TrajectoryDualCartConstrainedSolver(object):
                     yield None
         return fn
 
-    def _get_distance_fn(self):
+    def _get_cart_dist_fn(self):
         def _pose_to_Rp(pose):
             T = pp.tform_from_pose(pose)
             R = T[:3, :3]
@@ -1102,16 +1118,33 @@ class TrajectoryDualCartConstrainedSolver(object):
 
         return fn
 
-    def _get_collision_fn(self):
-        floating_collision_fn = self.robot_setup.create_floating_body_collision_fn(obstacle_bodies=self.robot_setup.obstacles)
-        collision_fn = self._cached_collision_fn
+    def _get_collision_fn(self, enable_ik: bool = True, enable_collision: bool = True):
+        """Build the collision predicate for a given planning stage.
+
+        Stage 1  (enable_ik=False):
+            No joint configs are available; use the floating-body collision
+            check (bar pose vs. static obstacles at the neutral robot config).
+        Stage 2  (enable_ik=True, enable_collision=False):
+            Capsules carry joint configs.  Reject IK-failure sentinels (empty
+            config) but skip the full robot-collision check.
+        Stage 3  (enable_ik=True, enable_collision=True):
+            Full check: reject empty configs + run joint-space collision fn.
+        """
+        floating_collision_fn = self.robot_setup.create_floating_body_collision_fn(
+            obstacle_bodies=self.robot_setup.obstacles
+        )
+        joint_collision_fn = self._cached_collision_fn
 
         def fn(c: Capsule):
-            # self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, np.array([0] * 12))
-            # return floating_collision_fn(c.pose)
+            if not enable_ik:
+                # Stage 1: no joint config expected; check bar pose against obstacles
+                return floating_collision_fn(c.pose)
+            # Stages 2 & 3: IK is active
             if len(c.config) == 0:
-                return True
-            return collision_fn(c.config[0])
+                return True   # IK-failure sentinel → reject
+            if not enable_collision:
+                return False  # Stage 2: valid config but skip robot collision
+            return joint_collision_fn(c.config[0])  # Stage 3: full check
 
         return fn
 
@@ -1221,7 +1254,7 @@ class TrajectoryDualCartConstrainedSolver(object):
         confs = self.projector.create_valid_confs(right_ik_handle, bar_pose, bar_from_right, delta=0.0, max_attempts=20, collision_fn=self._cached_collision_fn)
         return Capsule(bar_pose, config=confs, parent=None, robot_setup=self.robot_setup, projector=self.projector)
 
-    def expand_path(self, path: List[Capsule], profiler: Optional["PlanProfiler"] = None):
+    def expand_cart_path_ladder_graph(self, path: List[Capsule], profiler: Optional["PlanProfiler"] = None):
         # Returns: (expended_path, updates) where updates is a list of (origin_node, new_config)
         expended_path: List[Capsule] = []
         updates: List[Tuple[Capsule, Optional[List[np.ndarray]]]] = []
@@ -1276,21 +1309,37 @@ class TrajectoryDualCartConstrainedSolver(object):
         smooth_iterations: int = 10,
         use_draw: bool = False,
         verbose: bool = False,
+        enable_ik: bool = True,
+        enable_collision: bool = True,
     ) -> Optional[List[np.ndarray]]:
         """Plan a dual-arm path from start_conf to target_conf.
 
-        Builds capsules from the bar poses implied by the configurations,
-        runs RRT-Connect in the capsule space, and post-processes with
-        shortcut smoothing and interpolation in joint space.
+        Three debug stages are selectable via enable_ik / enable_collision:
+
+          Stage 1 — task-space only  (enable_ik=False, enable_collision=True)
+            Bar poses are interpolated with no IK.  Collision uses the
+            floating-body check (bar pose vs. static obstacles).  The planner
+            always returns None; use use_draw=True + verbose=True to inspect
+            the RRT workspace coverage.
+
+          Stage 2 — IK on, collision off  (enable_ik=True, enable_collision=False)
+            Each waypoint solves dual-arm IK; IK failures stop extension.
+            Robot self/environment collision is not checked.
+
+          Stage 3 — full  (enable_ik=True, enable_collision=True)  [default]
+            Full IK + joint-space collision checking.
 
         Args:
             start_conf: 12-DOF joint configuration (left+right).
             target_conf: 12-DOF joint configuration (left+right).
-            max_time: Maximum planning time.
-            max_iterations: Maximum RRT-Connect iterations.
-            smooth_iterations: Shortcut iterations (not used directly here; kept for API symmetry).
+            max_time: Maximum planning time per attempt.
+            max_iterations: Maximum RRT-Connect iterations per attempt.
+            max_attempts: Number of random restarts.
+            smooth_iterations: Shortcut iterations (kept for API symmetry).
             use_draw: If True, enable debug drawing during planning.
             verbose: If True, print planner progress.
+            enable_ik: Enable IK solving in extend/cspace functions (Stage 2+).
+            enable_collision: Enable full joint-space collision checking (Stage 3).
 
         Returns:
             List of joint configurations (path) or None if planning fails.
@@ -1317,25 +1366,30 @@ class TrajectoryDualCartConstrainedSolver(object):
         world_from_bar_start = _bar_pose_from_conf(start_conf)
         world_from_bar_target = _bar_pose_from_conf(target_conf)
 
-        # Prepare confs (plural) for capsules using projector; fallback to provided confs
+        # Prepare confs (plural) for capsules using projector; fallback to provided confs.
+        # In Stage 1 (enable_ik=False) the start/goal configs are already known; skip IK.
         robot_collision_fn = self._cached_collision_fn
 
-        start_confs_candidates = self.projector.create_valid_confs(
-            self.robot_setup.ik_solver_right,
-            world_from_bar_start,
-            bar_from_right,
-            delta=0.0,
-            max_attempts=40,
-            collision_fn=robot_collision_fn,
-        )
-        target_confs_candidates = self.projector.create_valid_confs(
-            self.robot_setup.ik_solver_right,
-            world_from_bar_target,
-            bar_from_right,
-            delta=0.0,
-            max_attempts=40,
-            collision_fn=robot_collision_fn,
-        )
+        if enable_ik:
+            start_confs_candidates = self.projector.create_valid_confs(
+                self.robot_setup.ik_solver_right,
+                world_from_bar_start,
+                bar_from_right,
+                delta=0.0,
+                max_attempts=40,
+                collision_fn=robot_collision_fn,
+            )
+            target_confs_candidates = self.projector.create_valid_confs(
+                self.robot_setup.ik_solver_right,
+                world_from_bar_target,
+                bar_from_right,
+                delta=0.0,
+                max_attempts=40,
+                collision_fn=robot_collision_fn,
+            )
+        else:
+            start_confs_candidates = None   # _prepare_confs falls back to start_conf
+            target_confs_candidates = None  # _prepare_confs falls back to target_conf
 
         def _prepare_confs(default_conf, confs_list):
             if confs_list is None or len(confs_list) == 0:
@@ -1348,17 +1402,29 @@ class TrajectoryDualCartConstrainedSolver(object):
         start_capsule = Capsule(world_from_bar_start, config=start_confs_prepared, parent=None, robot_setup=self.robot_setup, projector=self.projector)
         target_capsule = Capsule(world_from_bar_target, config=target_confs_prepared, parent=None, robot_setup=self.robot_setup, projector=self.projector)
 
-        extend_fn = self._get_extend_fn(enable_ik=True)
-        collision_fn = self._get_collision_fn()
-        distance_fn = self._get_distance_fn()
-        sample_fn = self._get_sample_fn(enable_ik=False)
+        stage_label = (
+            "Stage 1 (task-space only)" if not enable_ik else
+            "Stage 2 (IK, no collision)" if not enable_collision else
+            "Stage 3 (full)"
+        )
+        if verbose:
+            print(f"[plan] Planning stage: {stage_label}")
+
+        extend_fn = self._get_extend_fn(enable_ik=enable_ik)
+        collision_fn = self._get_collision_fn(enable_ik=enable_ik, enable_collision=enable_collision)
+        distance_fn = self._get_cart_dist_fn()
+        sample_fn = self._get_sample_fn(enable_ik=False)  # sampling always pose-only
         draw_fn = self._get_draw_fn(start_capsule, target_capsule) if use_draw else None
 
-        cspace_extend_fn = self._get_cspace_extend_fn(enable_ik=True)
+        cspace_extend_fn = self._get_cspace_extend_with_projection_fn(enable_ik=enable_ik)
 
         profiler = PlanProfiler()
 
-        for _ in range(max_attempts):
+        # Failure attribution counters
+        n_rrt_failed = 0      # RRT did not connect (task-space failure)
+        n_ladder_failed = 0   # RRT connected, but ladder graph found no joint path
+
+        for attempt in range(max_attempts):
 
             pp.remove_all_debug()
 
@@ -1379,14 +1445,29 @@ class TrajectoryDualCartConstrainedSolver(object):
                     draw_fn=draw_fn,
                     enforce_alternate=False,
                     profiler=profiler,
+                    enable_ik=enable_ik,
                 )
 
             if path is None:
+                # Distinguish: did RRT not connect, or did it connect but ladder fail?
+                # rrt_connect_capsule returns None in both cases; the profiler timing
+                # for "ladder_graph_search" being nonzero indicates at least one connection.
+                ladder_time = profiler.get_cumulative("ladder_graph_search")
+                if ladder_time > 0:
+                    n_ladder_failed += 1
+                    if verbose:
+                        print(f"[plan] Attempt {attempt+1}/{max_attempts}: "
+                              f"RRT connected but ladder search failed.")
+                else:
+                    n_rrt_failed += 1
+                    if verbose:
+                        print(f"[plan] Attempt {attempt+1}/{max_attempts}: "
+                              f"RRT did not connect (task-space failure).")
                 continue
 
             # Post-process in joint space using provided helpers
             with profiler.measure("smooth"):
-                path_smooth = smooth(path, cspace_extend_fn, robot_setup=self.robot_setup)
+                path_smooth = joint_space_smooth(path, cspace_extend_fn, robot_setup=self.robot_setup)
             with profiler.measure("interpolate"):
                 path_res = interpolate(path_smooth, cspace_extend_fn, robot_setup=self.robot_setup)
 
@@ -1398,6 +1479,8 @@ class TrajectoryDualCartConstrainedSolver(object):
 
             return path_res
 
+        print(f"[plan] {stage_label} — failed after {max_attempts} attempts: "
+              f"RRT-failed={n_rrt_failed}, ladder-failed={n_ladder_failed}")
         profiler.report("plan() sub-operation breakdown (no path found)")
         return None
 

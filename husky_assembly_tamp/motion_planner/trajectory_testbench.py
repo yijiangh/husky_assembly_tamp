@@ -254,6 +254,71 @@ def main():
         default="birrt",
         help=f"Planner backend to use (default: birrt). Available: {', '.join(list_backends())}",
     )
+    parser.add_argument(
+        "--stage",
+        type=int,
+        choices=[1, 2, 3],
+        default=3,
+        help="Planning stage: 1=task-space only (no collision), 2=IK on (no collision), 3=full",
+    )
+    parser.add_argument(
+        "--dist-metric",
+        choices=["feature", "pose6d"],
+        default="feature",
+        help="Task-space distance metric (default: feature)",
+    )
+    parser.add_argument(
+        "--ladder-search",
+        choices=["shortest", "enumerate"],
+        default="shortest",
+        help="Ladder graph search mode (default: shortest)",
+    )
+    parser.add_argument(
+        "--expand-delta",
+        type=float,
+        default=np.pi / 4.0,
+        help="Delta (rad) for IK sweep during ladder expansion",
+    )
+    parser.add_argument(
+        "--start-goal-delta",
+        type=float,
+        default=np.pi / 4.0,
+        help="Delta (rad) for IK sweep at start/goal",
+    )
+    parser.add_argument(
+        "--no-gui",
+        action="store_true",
+        help="Run headless (no PyBullet GUI)",
+    )
+    parser.add_argument(
+        "--goal-bias",
+        type=float,
+        default=0.1,
+        help="Goal bias probability for task-space sampling (0..1)",
+    )
+    parser.add_argument(
+        "--return-task-path",
+        action="store_true",
+        help="In Stage 1, return the raw task-space path for diagnosis",
+    )
+    parser.add_argument(
+        "--max-time",
+        type=float,
+        default=30.0,
+        help="Max planning time per attempt (seconds)",
+    )
+    parser.add_argument(
+        "--max-iterations",
+        type=int,
+        default=2000,
+        help="Max RRT iterations per attempt",
+    )
+    parser.add_argument(
+        "--max-attempts",
+        type=int,
+        default=5,
+        help="Number of random restarts",
+    )
     args = parser.parse_args()
     backend = get_backend(args.planner)
     logger.info(f"Planner backend: {backend.name} — {backend.description}")
@@ -268,7 +333,8 @@ def main():
     # ------------------------------------------------------------------
     timer.start("robot_loading")
 
-    cid = pp.connect(use_gui=True)
+    use_gui = (not args.no_gui)
+    cid = pp.connect(use_gui=use_gui)
     # On Windows, pybullet.GUI can invalidate stdout/stderr handles (WinError 6).
     # Reopen them to avoid OSError on subsequent print() calls.
     if sys.platform == "win32":
@@ -278,12 +344,14 @@ def main():
         reinit_logger_stream(logger)
 
     # pp.connect disables the debug GUI panel — re-enable it for sliders/buttons
-    pybullet.configureDebugVisualizer(pybullet.COV_ENABLE_GUI, 1, physicsClientId=cid)
+    if use_gui:
+        pybullet.configureDebugVisualizer(pybullet.COV_ENABLE_GUI, 1, physicsClientId=cid)
 
-    pybullet.resetDebugVisualizerCamera(
-        cameraDistance=2.5, cameraYaw=45, cameraPitch=-30,
-        cameraTargetPosition=[0, 0, 0.5], physicsClientId=cid,
-    )
+    if use_gui:
+        pybullet.resetDebugVisualizerCamera(
+            cameraDistance=2.5, cameraYaw=45, cameraPitch=-30,
+            cameraTargetPosition=[0, 0, 0.5], physicsClientId=cid,
+        )
 
     with pp.LockRenderer():
         robot = pp.load_pybullet(HUSKY_DUAL_URDF_PATH, fixed_base=True)
@@ -434,12 +502,13 @@ def main():
     # ------------------------------------------------------------------
     # On macOS, pybullet GUI buttons/sliders are broken on Apple Silicon.
     # Skip interactive controls and auto-run planning, then visualize.
-    if is_mac:
+    if is_mac or args.no_gui:
         path = _run_planning_headless(
             projector, grasp_bar_from_right, robot_setup, backend, timer,
             start_defaults, end_defaults, args, bar_height,
         )
-        _run_visualization_loop(path, robot_setup, grasp_bar_from_left, bar, cid)
+        if use_gui:
+            _run_visualization_loop(path, robot_setup, grasp_bar_from_left, bar, cid)
     else:
         _run_interactive_gui(
             projector, grasp_bar_from_right, grasp_bar_from_left, robot_setup, backend, timer,
@@ -450,7 +519,7 @@ def main():
     pp.disconnect()
 
 
-def _execute_plan(start_pose, end_pose, projector, grasp_bar_from_right, robot_setup, backend, timer, traj_dir):
+def _execute_plan(start_pose, end_pose, projector, grasp_bar_from_right, robot_setup, backend, timer, traj_dir, args):
     """Shared IK + planning core used by both headless and interactive GUI paths.
 
     Returns
@@ -501,21 +570,70 @@ def _execute_plan(start_pose, end_pose, projector, grasp_bar_from_right, robot_s
     start_conf = start_confs[0]
     end_conf = end_confs[0]
 
-    logger.info(f"Planning path with '{backend.name}'...")
+    enable_ik = args.stage >= 2
+    enable_collision = args.stage >= 3
+    logger.info(
+        f"Planning path with '{backend.name}' "
+        f"(stage={args.stage}, metric={args.dist_metric}, ladder={args.ladder_search})..."
+    )
     timer.start("plan_path")
     profile_path = os.path.join(os.path.dirname(__file__), "plan_profile.prof")
     profiler = cProfile.Profile()
     profiler.enable()
+    # Stage 3 warm-start: run Stage 2 first to get a guide path (if requested)
+    warm_start_path = None
+    guide_poses = None
+    if args.stage == 3:
+        logger.info("Stage 3 warm-start: running Stage 2 to seed guide poses...")
+        warm_start_path = backend.plan(
+            start_conf=start_conf,
+            goal_conf=end_conf,
+            robot_setup=robot_setup,
+            projector=projector,
+            max_time=args.max_time,
+            max_iterations=args.max_iterations,
+            max_attempts=max(1, args.max_attempts // 2),
+            use_draw=False,
+            verbose=False,
+            enable_ik=True,
+            enable_collision=False,
+            dist_metric=args.dist_metric,
+            ladder_search=args.ladder_search,
+            ladder_expand_delta=args.expand_delta,
+            start_goal_delta=args.start_goal_delta,
+            goal_sample_prob=args.goal_bias,
+        )
+        if warm_start_path is not None:
+            guide_poses = []
+            for q in warm_start_path:
+                robot_setup.set_joint_positions(robot_setup.arm_joints, q)
+                world_from_tool0 = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_right)
+                bar_pose = pp.multiply(world_from_tool0, pp.invert(grasp_bar_from_right))
+                guide_poses.append(bar_pose)
+            logger.info(f"Stage 3 warm-start: {len(guide_poses)} guide poses prepared.")
+        else:
+            logger.warning("Stage 3 warm-start: failed to get Stage 2 path.")
+
     path = backend.plan(
         start_conf=start_conf,
         goal_conf=end_conf,
         robot_setup=robot_setup,
         projector=projector,
-        max_time=60,
-        max_iterations=5000,
-        max_attempts=10,
-        use_draw=True,
+        max_time=args.max_time,
+        max_iterations=args.max_iterations,
+        max_attempts=args.max_attempts,
+        use_draw=not args.no_gui,
         verbose=True,
+        enable_ik=enable_ik,
+        enable_collision=enable_collision,
+        dist_metric=args.dist_metric,
+        ladder_search=args.ladder_search,
+        ladder_expand_delta=args.expand_delta,
+        start_goal_delta=args.start_goal_delta,
+        goal_sample_prob=args.goal_bias,
+        return_task_path=args.return_task_path,
+        guide_poses=guide_poses,
+        warm_start_path=warm_start_path,
     )
     profiler.disable()
     elapsed = timer.stop("plan_path")
@@ -531,11 +649,14 @@ def _execute_plan(start_pose, end_pose, projector, grasp_bar_from_right, robot_s
 
     if path is not None:
         logger.info(f"Path found! {len(path)} waypoints in {elapsed:.3f}s")
-        os.makedirs(traj_dir, exist_ok=True)
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        traj_filename = f"testbench_{timestamp}_JointTrajectory.json"
-        traj_path = os.path.join(traj_dir, traj_filename)
-        save_path_as_joint_trajectory(path, HUSKY_DUAL_ARM_JOINT_NAMES, traj_path)
+        if len(path) > 0 and isinstance(path[0], (list, tuple, np.ndarray)) and len(path[0]) == len(HUSKY_DUAL_ARM_JOINT_NAMES):
+            os.makedirs(traj_dir, exist_ok=True)
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            traj_filename = f"testbench_{timestamp}_JointTrajectory.json"
+            traj_path = os.path.join(traj_dir, traj_filename)
+            save_path_as_joint_trajectory(path, HUSKY_DUAL_ARM_JOINT_NAMES, traj_path)
+        else:
+            logger.info("Stage 1 returned task-space poses; skipping JointTrajectory save.")
     else:
         logger.warning(f"No path found ({elapsed:.3f}s)")
 
@@ -563,7 +684,7 @@ def _run_planning_headless(
 
     path, _, _ = _execute_plan(
         start_pose, end_pose, projector, grasp_bar_from_right,
-        robot_setup, backend, timer, args.traj_dir,
+        robot_setup, backend, timer, args.traj_dir, args,
     )
     return path
 
@@ -662,7 +783,7 @@ def _run_interactive_gui(
                 else:
                     path, start_confs, end_confs = _execute_plan(
                         start_pose, end_pose, projector, grasp_bar_from_right,
-                        robot_setup, backend, timer, args.traj_dir,
+                        robot_setup, backend, timer, args.traj_dir, args,
                     )
                     if path is not None:
                         path_current_idx = -1

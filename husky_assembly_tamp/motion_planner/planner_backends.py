@@ -77,6 +77,16 @@ class BiRRTBackend(PlannerBackend):
             max_attempts=kwargs.get("max_attempts", 10),
             use_draw=kwargs.get("use_draw", True),
             verbose=kwargs.get("verbose", True),
+            enable_ik=kwargs.get("enable_ik", True),
+            enable_collision=kwargs.get("enable_collision", True),
+            dist_metric=kwargs.get("dist_metric", "feature"),
+            ladder_search=kwargs.get("ladder_search", "shortest"),
+            ladder_expand_delta=kwargs.get("ladder_expand_delta", None),
+            start_goal_delta=kwargs.get("start_goal_delta", None),
+            goal_sample_prob=kwargs.get("goal_sample_prob", None),
+            return_task_path=kwargs.get("return_task_path", False),
+            guide_poses=kwargs.get("guide_poses", None),
+            warm_start_path=kwargs.get("warm_start_path", None),
         )
 
 

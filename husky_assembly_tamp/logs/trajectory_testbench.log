@@ -313,3 +313,516 @@
 [2026-02-19 10:50:39.338] INFO       plan_path: 83.115s
 [2026-02-19 10:50:39.338] INFO     ----------------------
 [2026-02-19 10:50:39.338] INFO     Visualizing path (16 waypoints). Use 'Path t' slider to scrub.
+[2026-02-23 22:05:07.239] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/trajectory_testbench.log
+[2026-02-23 22:05:07.240] INFO     Planner backend: birrt — Capsule-space BiRRT with dual-arm projection (UR5e)
+[2026-02-23 22:05:07.241] INFO     macOS detected — skipping GUI buttons/sliders, will auto-run planning
+[2026-02-23 22:05:07.449] INFO     Robot loaded in 0.208s (direct URDF, no compas_fab)
+[2026-02-23 22:05:07.450] INFO     Grasp loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__GraspTargets.json
+[2026-02-23 22:05:07.451] DEBUG      bar_from_right: pos=[ 1.00e-04  9.38e-02 -2.80e-01], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:05:07.451] DEBUG      bar_from_left:  pos=[0.0001 0.0938 0.07  ], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:05:07.452] WARNING  Bar poses computed from left and right arms do not match!
+[2026-02-23 22:05:07.453] WARNING    From left:  pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:05:07.453] WARNING    From right: pos=[0.7912 0.0902 0.8623], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:05:07.453] INFO     Start state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250905_101010_RobotCellState.json
+[2026-02-23 22:05:07.454] DEBUG      joint_values: [0.8279, -0.8458, 1.7519, 2.2332, -0.8336, 0.7891, 1.7768, -0.8916, 1.7788, 2.2635, -1.7757, -0.7746]
+[2026-02-23 22:05:07.454] DEBUG      bar_pose (from FK): pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:05:07.455] INFO     End state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250909_235058_RobotCellState.json
+[2026-02-23 22:05:07.455] DEBUG      joint_values: [1.4161, 0.1434, 1.0411, 1.9571, -1.4223, 0.7873, 1.0282, -0.1722, 1.2628, 2.057, -1.0274, -0.78]
+[2026-02-23 22:05:07.456] DEBUG      bar_pose (from FK): pos=[ 0.897  -0.0046  0.3443], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:05:07.798] INFO     Start IK: 29 solutions found in 0.339s
+[2026-02-23 22:05:08.284] INFO     End IK: 16 solutions found in 0.485s
+[2026-02-23 22:05:08.286] INFO     Planning path with 'birrt' (stage=1, metric=feature, ladder=shortest)...
+[2026-02-23 22:05:27.366] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/trajectory_testbench.log
+[2026-02-23 22:05:27.368] INFO     Planner backend: birrt — Capsule-space BiRRT with dual-arm projection (UR5e)
+[2026-02-23 22:05:27.368] INFO     macOS detected — skipping GUI buttons/sliders, will auto-run planning
+[2026-02-23 22:05:27.558] INFO     Robot loaded in 0.189s (direct URDF, no compas_fab)
+[2026-02-23 22:05:27.559] INFO     Grasp loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__GraspTargets.json
+[2026-02-23 22:05:27.559] DEBUG      bar_from_right: pos=[ 1.00e-04  9.38e-02 -2.80e-01], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:05:27.560] DEBUG      bar_from_left:  pos=[0.0001 0.0938 0.07  ], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:05:27.561] WARNING  Bar poses computed from left and right arms do not match!
+[2026-02-23 22:05:27.561] WARNING    From left:  pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:05:27.562] WARNING    From right: pos=[0.7912 0.0902 0.8623], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:05:27.562] INFO     Start state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250905_101010_RobotCellState.json
+[2026-02-23 22:05:27.562] DEBUG      joint_values: [0.8279, -0.8458, 1.7519, 2.2332, -0.8336, 0.7891, 1.7768, -0.8916, 1.7788, 2.2635, -1.7757, -0.7746]
+[2026-02-23 22:05:27.563] DEBUG      bar_pose (from FK): pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:05:27.563] INFO     End state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250909_235058_RobotCellState.json
+[2026-02-23 22:05:27.564] DEBUG      joint_values: [1.4161, 0.1434, 1.0411, 1.9571, -1.4223, 0.7873, 1.0282, -0.1722, 1.2628, 2.057, -1.0274, -0.78]
+[2026-02-23 22:05:27.564] DEBUG      bar_pose (from FK): pos=[ 0.897  -0.0046  0.3443], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:05:27.838] INFO     Start IK: 13 solutions found in 0.270s
+[2026-02-23 22:05:28.316] INFO     End IK: 17 solutions found in 0.477s
+[2026-02-23 22:05:28.316] INFO     Planning path with 'birrt' (stage=1, metric=feature, ladder=shortest)...
+[2026-02-23 22:07:25.682] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/trajectory_testbench.log
+[2026-02-23 22:07:25.684] INFO     Planner backend: birrt — Capsule-space BiRRT with dual-arm projection (UR5e)
+[2026-02-23 22:07:25.684] INFO     macOS detected — skipping GUI buttons/sliders, will auto-run planning
+[2026-02-23 22:07:25.860] INFO     Robot loaded in 0.176s (direct URDF, no compas_fab)
+[2026-02-23 22:07:25.861] INFO     Grasp loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__GraspTargets.json
+[2026-02-23 22:07:25.862] DEBUG      bar_from_right: pos=[ 1.00e-04  9.38e-02 -2.80e-01], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:07:25.862] DEBUG      bar_from_left:  pos=[0.0001 0.0938 0.07  ], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:07:25.863] WARNING  Bar poses computed from left and right arms do not match!
+[2026-02-23 22:07:25.863] WARNING    From left:  pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:07:25.864] WARNING    From right: pos=[0.7912 0.0902 0.8623], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:07:25.864] INFO     Start state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250905_101010_RobotCellState.json
+[2026-02-23 22:07:25.864] DEBUG      joint_values: [0.8279, -0.8458, 1.7519, 2.2332, -0.8336, 0.7891, 1.7768, -0.8916, 1.7788, 2.2635, -1.7757, -0.7746]
+[2026-02-23 22:07:25.865] DEBUG      bar_pose (from FK): pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:07:25.866] INFO     End state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250909_235058_RobotCellState.json
+[2026-02-23 22:07:25.866] DEBUG      joint_values: [1.4161, 0.1434, 1.0411, 1.9571, -1.4223, 0.7873, 1.0282, -0.1722, 1.2628, 2.057, -1.0274, -0.78]
+[2026-02-23 22:07:25.866] DEBUG      bar_pose (from FK): pos=[ 0.897  -0.0046  0.3443], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:07:26.259] INFO     Start IK: 32 solutions found in 0.389s
+[2026-02-23 22:07:26.677] INFO     End IK: 18 solutions found in 0.417s
+[2026-02-23 22:07:26.677] INFO     Planning path with 'birrt' (stage=1, metric=feature, ladder=shortest)...
+[2026-02-23 22:08:11.852] INFO     Profile saved to /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/plan_profile.prof
+[2026-02-23 22:08:11.859] INFO     Launched snakeviz (check your browser)
+[2026-02-23 22:08:11.860] WARNING  No path found (45.171s)
+[2026-02-23 22:08:11.860] INFO     --- Timing Summary ---
+[2026-02-23 22:08:11.860] INFO       robot_loading: 0.176s
+[2026-02-23 22:08:11.861] INFO       solve_start_ik: 0.389s
+[2026-02-23 22:08:11.861] INFO       solve_end_ik: 0.417s
+[2026-02-23 22:08:11.861] INFO       plan_path: 45.171s
+[2026-02-23 22:08:11.862] INFO     ----------------------
+[2026-02-23 22:08:33.064] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/trajectory_testbench.log
+[2026-02-23 22:08:33.065] INFO     Planner backend: birrt — Capsule-space BiRRT with dual-arm projection (UR5e)
+[2026-02-23 22:08:33.066] INFO     macOS detected — skipping GUI buttons/sliders, will auto-run planning
+[2026-02-23 22:08:33.246] INFO     Robot loaded in 0.180s (direct URDF, no compas_fab)
+[2026-02-23 22:08:33.247] INFO     Grasp loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__GraspTargets.json
+[2026-02-23 22:08:33.248] DEBUG      bar_from_right: pos=[ 1.00e-04  9.38e-02 -2.80e-01], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:08:33.248] DEBUG      bar_from_left:  pos=[0.0001 0.0938 0.07  ], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:08:33.249] WARNING  Bar poses computed from left and right arms do not match!
+[2026-02-23 22:08:33.250] WARNING    From left:  pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:08:33.250] WARNING    From right: pos=[0.7912 0.0902 0.8623], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:08:33.251] INFO     Start state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250905_101010_RobotCellState.json
+[2026-02-23 22:08:33.251] DEBUG      joint_values: [0.8279, -0.8458, 1.7519, 2.2332, -0.8336, 0.7891, 1.7768, -0.8916, 1.7788, 2.2635, -1.7757, -0.7746]
+[2026-02-23 22:08:33.252] DEBUG      bar_pose (from FK): pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:08:33.253] INFO     End state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250909_235058_RobotCellState.json
+[2026-02-23 22:08:33.253] DEBUG      joint_values: [1.4161, 0.1434, 1.0411, 1.9571, -1.4223, 0.7873, 1.0282, -0.1722, 1.2628, 2.057, -1.0274, -0.78]
+[2026-02-23 22:08:33.253] DEBUG      bar_pose (from FK): pos=[ 0.897  -0.0046  0.3443], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:08:33.625] INFO     Start IK: 35 solutions found in 0.368s
+[2026-02-23 22:08:33.970] INFO     End IK: 18 solutions found in 0.345s
+[2026-02-23 22:08:33.971] INFO     Planning path with 'birrt' (stage=1, metric=feature, ladder=shortest)...
+[2026-02-23 22:09:19.139] INFO     Profile saved to /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/plan_profile.prof
+[2026-02-23 22:09:19.146] INFO     Launched snakeviz (check your browser)
+[2026-02-23 22:09:19.146] WARNING  No path found (45.168s)
+[2026-02-23 22:09:19.147] INFO     --- Timing Summary ---
+[2026-02-23 22:09:19.147] INFO       robot_loading: 0.180s
+[2026-02-23 22:09:19.148] INFO       solve_start_ik: 0.368s
+[2026-02-23 22:09:19.148] INFO       solve_end_ik: 0.345s
+[2026-02-23 22:09:19.148] INFO       plan_path: 45.168s
+[2026-02-23 22:09:19.149] INFO     ----------------------
+[2026-02-23 22:09:32.154] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/trajectory_testbench.log
+[2026-02-23 22:09:32.155] INFO     Planner backend: birrt — Capsule-space BiRRT with dual-arm projection (UR5e)
+[2026-02-23 22:09:32.155] INFO     macOS detected — skipping GUI buttons/sliders, will auto-run planning
+[2026-02-23 22:09:32.333] INFO     Robot loaded in 0.177s (direct URDF, no compas_fab)
+[2026-02-23 22:09:32.334] INFO     Grasp loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__GraspTargets.json
+[2026-02-23 22:09:32.335] DEBUG      bar_from_right: pos=[ 1.00e-04  9.38e-02 -2.80e-01], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:09:32.335] DEBUG      bar_from_left:  pos=[0.0001 0.0938 0.07  ], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:09:32.336] WARNING  Bar poses computed from left and right arms do not match!
+[2026-02-23 22:09:32.336] WARNING    From left:  pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:09:32.337] WARNING    From right: pos=[0.7912 0.0902 0.8623], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:09:32.337] INFO     Start state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250905_101010_RobotCellState.json
+[2026-02-23 22:09:32.338] DEBUG      joint_values: [0.8279, -0.8458, 1.7519, 2.2332, -0.8336, 0.7891, 1.7768, -0.8916, 1.7788, 2.2635, -1.7757, -0.7746]
+[2026-02-23 22:09:32.338] DEBUG      bar_pose (from FK): pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:09:32.339] INFO     End state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250909_235058_RobotCellState.json
+[2026-02-23 22:09:32.339] DEBUG      joint_values: [1.4161, 0.1434, 1.0411, 1.9571, -1.4223, 0.7873, 1.0282, -0.1722, 1.2628, 2.057, -1.0274, -0.78]
+[2026-02-23 22:09:32.340] DEBUG      bar_pose (from FK): pos=[ 0.897  -0.0046  0.3443], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:09:32.805] INFO     Start IK: 50 solutions found in 0.461s
+[2026-02-23 22:09:33.182] INFO     End IK: 21 solutions found in 0.376s
+[2026-02-23 22:09:33.182] INFO     Planning path with 'birrt' (stage=2, metric=feature, ladder=shortest)...
+[2026-02-23 22:10:00.997] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/trajectory_testbench.log
+[2026-02-23 22:10:00.998] INFO     Planner backend: birrt — Capsule-space BiRRT with dual-arm projection (UR5e)
+[2026-02-23 22:10:00.999] INFO     macOS detected — skipping GUI buttons/sliders, will auto-run planning
+[2026-02-23 22:10:01.157] INFO     Robot loaded in 0.158s (direct URDF, no compas_fab)
+[2026-02-23 22:10:01.158] INFO     Grasp loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__GraspTargets.json
+[2026-02-23 22:10:01.159] DEBUG      bar_from_right: pos=[ 1.00e-04  9.38e-02 -2.80e-01], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:10:01.159] DEBUG      bar_from_left:  pos=[0.0001 0.0938 0.07  ], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:10:01.160] WARNING  Bar poses computed from left and right arms do not match!
+[2026-02-23 22:10:01.160] WARNING    From left:  pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:10:01.161] WARNING    From right: pos=[0.7912 0.0902 0.8623], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:10:01.161] INFO     Start state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250905_101010_RobotCellState.json
+[2026-02-23 22:10:01.161] DEBUG      joint_values: [0.8279, -0.8458, 1.7519, 2.2332, -0.8336, 0.7891, 1.7768, -0.8916, 1.7788, 2.2635, -1.7757, -0.7746]
+[2026-02-23 22:10:01.162] DEBUG      bar_pose (from FK): pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:10:01.163] INFO     End state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250909_235058_RobotCellState.json
+[2026-02-23 22:10:01.163] DEBUG      joint_values: [1.4161, 0.1434, 1.0411, 1.9571, -1.4223, 0.7873, 1.0282, -0.1722, 1.2628, 2.057, -1.0274, -0.78]
+[2026-02-23 22:10:01.164] DEBUG      bar_pose (from FK): pos=[ 0.897  -0.0046  0.3443], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:10:01.642] INFO     Start IK: 37 solutions found in 0.475s
+[2026-02-23 22:10:02.117] INFO     End IK: 18 solutions found in 0.474s
+[2026-02-23 22:10:02.117] INFO     Planning path with 'birrt' (stage=2, metric=feature, ladder=shortest)...
+[2026-02-23 22:10:50.238] INFO     Profile saved to /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/plan_profile.prof
+[2026-02-23 22:10:50.243] INFO     Launched snakeviz (check your browser)
+[2026-02-23 22:10:50.244] WARNING  No path found (48.120s)
+[2026-02-23 22:10:50.244] INFO     --- Timing Summary ---
+[2026-02-23 22:10:50.245] INFO       robot_loading: 0.158s
+[2026-02-23 22:10:50.245] INFO       solve_start_ik: 0.475s
+[2026-02-23 22:10:50.245] INFO       solve_end_ik: 0.474s
+[2026-02-23 22:10:50.246] INFO       plan_path: 48.120s
+[2026-02-23 22:10:50.246] INFO     ----------------------
+[2026-02-23 22:11:02.427] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/trajectory_testbench.log
+[2026-02-23 22:11:02.428] INFO     Planner backend: birrt — Capsule-space BiRRT with dual-arm projection (UR5e)
+[2026-02-23 22:11:02.429] INFO     macOS detected — skipping GUI buttons/sliders, will auto-run planning
+[2026-02-23 22:11:02.611] INFO     Robot loaded in 0.182s (direct URDF, no compas_fab)
+[2026-02-23 22:11:02.612] INFO     Grasp loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__GraspTargets.json
+[2026-02-23 22:11:02.613] DEBUG      bar_from_right: pos=[ 1.00e-04  9.38e-02 -2.80e-01], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:11:02.613] DEBUG      bar_from_left:  pos=[0.0001 0.0938 0.07  ], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:11:02.614] WARNING  Bar poses computed from left and right arms do not match!
+[2026-02-23 22:11:02.615] WARNING    From left:  pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:11:02.615] WARNING    From right: pos=[0.7912 0.0902 0.8623], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:11:02.615] INFO     Start state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250905_101010_RobotCellState.json
+[2026-02-23 22:11:02.616] DEBUG      joint_values: [0.8279, -0.8458, 1.7519, 2.2332, -0.8336, 0.7891, 1.7768, -0.8916, 1.7788, 2.2635, -1.7757, -0.7746]
+[2026-02-23 22:11:02.616] DEBUG      bar_pose (from FK): pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:11:02.617] INFO     End state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250909_235058_RobotCellState.json
+[2026-02-23 22:11:02.617] DEBUG      joint_values: [1.4161, 0.1434, 1.0411, 1.9571, -1.4223, 0.7873, 1.0282, -0.1722, 1.2628, 2.057, -1.0274, -0.78]
+[2026-02-23 22:11:02.618] DEBUG      bar_pose (from FK): pos=[ 0.897  -0.0046  0.3443], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:11:02.906] INFO     Start IK: 25 solutions found in 0.284s
+[2026-02-23 22:11:03.296] INFO     End IK: 25 solutions found in 0.390s
+[2026-02-23 22:11:03.297] INFO     Planning path with 'birrt' (stage=3, metric=feature, ladder=shortest)...
+[2026-02-23 22:11:51.020] INFO     Profile saved to /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/plan_profile.prof
+[2026-02-23 22:11:51.027] INFO     Launched snakeviz (check your browser)
+[2026-02-23 22:11:51.028] WARNING  No path found (47.722s)
+[2026-02-23 22:11:51.028] INFO     --- Timing Summary ---
+[2026-02-23 22:11:51.029] INFO       robot_loading: 0.182s
+[2026-02-23 22:11:51.029] INFO       solve_start_ik: 0.284s
+[2026-02-23 22:11:51.029] INFO       solve_end_ik: 0.390s
+[2026-02-23 22:11:51.030] INFO       plan_path: 47.722s
+[2026-02-23 22:11:51.030] INFO     ----------------------
+[2026-02-23 22:24:06.094] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/trajectory_testbench.log
+[2026-02-23 22:24:06.095] INFO     Planner backend: birrt — Capsule-space BiRRT with dual-arm projection (UR5e)
+[2026-02-23 22:24:06.096] INFO     macOS detected — skipping GUI buttons/sliders, will auto-run planning
+[2026-02-23 22:24:06.335] INFO     Robot loaded in 0.239s (direct URDF, no compas_fab)
+[2026-02-23 22:24:06.336] INFO     Grasp loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__GraspTargets.json
+[2026-02-23 22:24:06.336] DEBUG      bar_from_right: pos=[ 1.00e-04  9.38e-02 -2.80e-01], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:24:06.337] DEBUG      bar_from_left:  pos=[0.0001 0.0938 0.07  ], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:24:06.338] WARNING  Bar poses computed from left and right arms do not match!
+[2026-02-23 22:24:06.338] WARNING    From left:  pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:24:06.339] WARNING    From right: pos=[0.7912 0.0902 0.8623], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:24:06.339] INFO     Start state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250905_101010_RobotCellState.json
+[2026-02-23 22:24:06.339] DEBUG      joint_values: [0.8279, -0.8458, 1.7519, 2.2332, -0.8336, 0.7891, 1.7768, -0.8916, 1.7788, 2.2635, -1.7757, -0.7746]
+[2026-02-23 22:24:06.340] DEBUG      bar_pose (from FK): pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:24:06.341] INFO     End state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250909_235058_RobotCellState.json
+[2026-02-23 22:24:06.341] DEBUG      joint_values: [1.4161, 0.1434, 1.0411, 1.9571, -1.4223, 0.7873, 1.0282, -0.1722, 1.2628, 2.057, -1.0274, -0.78]
+[2026-02-23 22:24:06.341] DEBUG      bar_pose (from FK): pos=[ 0.897  -0.0046  0.3443], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:24:06.752] INFO     Start IK: 36 solutions found in 0.406s
+[2026-02-23 22:24:07.326] INFO     End IK: 23 solutions found in 0.574s
+[2026-02-23 22:24:07.327] INFO     Planning path with 'birrt' (stage=1, metric=feature, ladder=shortest)...
+[2026-02-23 22:24:52.388] INFO     Profile saved to /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/plan_profile.prof
+[2026-02-23 22:24:52.393] INFO     Launched snakeviz (check your browser)
+[2026-02-23 22:24:52.394] WARNING  No path found (45.060s)
+[2026-02-23 22:24:52.394] INFO     --- Timing Summary ---
+[2026-02-23 22:24:52.394] INFO       robot_loading: 0.239s
+[2026-02-23 22:24:52.395] INFO       solve_start_ik: 0.406s
+[2026-02-23 22:24:52.396] INFO       solve_end_ik: 0.574s
+[2026-02-23 22:24:52.396] INFO       plan_path: 45.060s
+[2026-02-23 22:24:52.398] INFO     ----------------------
+[2026-02-23 22:25:26.078] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/trajectory_testbench.log
+[2026-02-23 22:25:26.079] INFO     Planner backend: birrt — Capsule-space BiRRT with dual-arm projection (UR5e)
+[2026-02-23 22:25:26.079] INFO     macOS detected — skipping GUI buttons/sliders, will auto-run planning
+[2026-02-23 22:25:26.249] INFO     Robot loaded in 0.169s (direct URDF, no compas_fab)
+[2026-02-23 22:25:26.250] INFO     Grasp loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__GraspTargets.json
+[2026-02-23 22:25:26.250] DEBUG      bar_from_right: pos=[ 1.00e-04  9.38e-02 -2.80e-01], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:25:26.251] DEBUG      bar_from_left:  pos=[0.0001 0.0938 0.07  ], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:25:26.251] WARNING  Bar poses computed from left and right arms do not match!
+[2026-02-23 22:25:26.252] WARNING    From left:  pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:25:26.252] WARNING    From right: pos=[0.7912 0.0902 0.8623], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:25:26.253] INFO     Start state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250905_101010_RobotCellState.json
+[2026-02-23 22:25:26.253] DEBUG      joint_values: [0.8279, -0.8458, 1.7519, 2.2332, -0.8336, 0.7891, 1.7768, -0.8916, 1.7788, 2.2635, -1.7757, -0.7746]
+[2026-02-23 22:25:26.254] DEBUG      bar_pose (from FK): pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:25:26.255] INFO     End state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250909_235058_RobotCellState.json
+[2026-02-23 22:25:26.255] DEBUG      joint_values: [1.4161, 0.1434, 1.0411, 1.9571, -1.4223, 0.7873, 1.0282, -0.1722, 1.2628, 2.057, -1.0274, -0.78]
+[2026-02-23 22:25:26.255] DEBUG      bar_pose (from FK): pos=[ 0.897  -0.0046  0.3443], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:25:26.571] INFO     Start IK: 29 solutions found in 0.311s
+[2026-02-23 22:25:26.883] INFO     End IK: 18 solutions found in 0.311s
+[2026-02-23 22:25:26.883] INFO     Planning path with 'birrt' (stage=1, metric=feature, ladder=shortest)...
+[2026-02-23 22:25:26.914] INFO     Profile saved to /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/plan_profile.prof
+[2026-02-23 22:25:26.923] INFO     Launched snakeviz (check your browser)
+[2026-02-23 22:25:26.923] INFO     Path found! 63 waypoints in 0.030s
+[2026-02-23 22:25:26.924] INFO     Stage 1 returned task-space poses; skipping JointTrajectory save.
+[2026-02-23 22:25:26.924] INFO     --- Timing Summary ---
+[2026-02-23 22:25:26.925] INFO       robot_loading: 0.169s
+[2026-02-23 22:25:26.925] INFO       solve_start_ik: 0.311s
+[2026-02-23 22:25:26.925] INFO       solve_end_ik: 0.311s
+[2026-02-23 22:25:26.926] INFO       plan_path: 0.030s
+[2026-02-23 22:25:26.926] INFO     ----------------------
+[2026-02-23 22:25:41.289] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/trajectory_testbench.log
+[2026-02-23 22:25:41.291] INFO     Planner backend: birrt — Capsule-space BiRRT with dual-arm projection (UR5e)
+[2026-02-23 22:25:41.291] INFO     macOS detected — skipping GUI buttons/sliders, will auto-run planning
+[2026-02-23 22:25:41.472] INFO     Robot loaded in 0.180s (direct URDF, no compas_fab)
+[2026-02-23 22:25:41.473] INFO     Grasp loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__GraspTargets.json
+[2026-02-23 22:25:41.473] DEBUG      bar_from_right: pos=[ 1.00e-04  9.38e-02 -2.80e-01], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:25:41.474] DEBUG      bar_from_left:  pos=[0.0001 0.0938 0.07  ], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:25:41.474] WARNING  Bar poses computed from left and right arms do not match!
+[2026-02-23 22:25:41.475] WARNING    From left:  pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:25:41.475] WARNING    From right: pos=[0.7912 0.0902 0.8623], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:25:41.476] INFO     Start state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250905_101010_RobotCellState.json
+[2026-02-23 22:25:41.476] DEBUG      joint_values: [0.8279, -0.8458, 1.7519, 2.2332, -0.8336, 0.7891, 1.7768, -0.8916, 1.7788, 2.2635, -1.7757, -0.7746]
+[2026-02-23 22:25:41.476] DEBUG      bar_pose (from FK): pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:25:41.477] INFO     End state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250909_235058_RobotCellState.json
+[2026-02-23 22:25:41.478] DEBUG      joint_values: [1.4161, 0.1434, 1.0411, 1.9571, -1.4223, 0.7873, 1.0282, -0.1722, 1.2628, 2.057, -1.0274, -0.78]
+[2026-02-23 22:25:41.478] DEBUG      bar_pose (from FK): pos=[ 0.897  -0.0046  0.3443], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:25:41.945] INFO     Start IK: 44 solutions found in 0.464s
+[2026-02-23 22:25:42.433] INFO     End IK: 24 solutions found in 0.487s
+[2026-02-23 22:25:42.434] INFO     Planning path with 'birrt' (stage=2, metric=feature, ladder=shortest)...
+[2026-02-23 22:26:35.027] INFO     Profile saved to /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/plan_profile.prof
+[2026-02-23 22:26:35.034] INFO     Launched snakeviz (check your browser)
+[2026-02-23 22:26:35.035] WARNING  No path found (52.590s)
+[2026-02-23 22:26:35.035] INFO     --- Timing Summary ---
+[2026-02-23 22:26:35.035] INFO       robot_loading: 0.180s
+[2026-02-23 22:26:35.036] INFO       solve_start_ik: 0.464s
+[2026-02-23 22:26:35.036] INFO       solve_end_ik: 0.487s
+[2026-02-23 22:26:35.037] INFO       plan_path: 52.590s
+[2026-02-23 22:26:35.037] INFO     ----------------------
+[2026-02-23 22:26:49.436] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/trajectory_testbench.log
+[2026-02-23 22:26:49.437] INFO     Planner backend: birrt — Capsule-space BiRRT with dual-arm projection (UR5e)
+[2026-02-23 22:26:49.437] INFO     macOS detected — skipping GUI buttons/sliders, will auto-run planning
+[2026-02-23 22:26:49.597] INFO     Robot loaded in 0.159s (direct URDF, no compas_fab)
+[2026-02-23 22:26:49.598] INFO     Grasp loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__GraspTargets.json
+[2026-02-23 22:26:49.598] DEBUG      bar_from_right: pos=[ 1.00e-04  9.38e-02 -2.80e-01], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:26:49.599] DEBUG      bar_from_left:  pos=[0.0001 0.0938 0.07  ], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:26:49.599] WARNING  Bar poses computed from left and right arms do not match!
+[2026-02-23 22:26:49.600] WARNING    From left:  pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:26:49.600] WARNING    From right: pos=[0.7912 0.0902 0.8623], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:26:49.601] INFO     Start state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250905_101010_RobotCellState.json
+[2026-02-23 22:26:49.601] DEBUG      joint_values: [0.8279, -0.8458, 1.7519, 2.2332, -0.8336, 0.7891, 1.7768, -0.8916, 1.7788, 2.2635, -1.7757, -0.7746]
+[2026-02-23 22:26:49.601] DEBUG      bar_pose (from FK): pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:26:49.602] INFO     End state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250909_235058_RobotCellState.json
+[2026-02-23 22:26:49.603] DEBUG      joint_values: [1.4161, 0.1434, 1.0411, 1.9571, -1.4223, 0.7873, 1.0282, -0.1722, 1.2628, 2.057, -1.0274, -0.78]
+[2026-02-23 22:26:49.603] DEBUG      bar_pose (from FK): pos=[ 0.897  -0.0046  0.3443], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:26:49.921] INFO     Start IK: 28 solutions found in 0.314s
+[2026-02-23 22:26:50.321] INFO     End IK: 18 solutions found in 0.399s
+[2026-02-23 22:26:50.322] INFO     Planning path with 'birrt' (stage=3, metric=feature, ladder=shortest)...
+[2026-02-23 22:27:40.076] INFO     Profile saved to /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/plan_profile.prof
+[2026-02-23 22:27:40.082] INFO     Launched snakeviz (check your browser)
+[2026-02-23 22:27:40.083] WARNING  No path found (49.753s)
+[2026-02-23 22:27:40.083] INFO     --- Timing Summary ---
+[2026-02-23 22:27:40.084] INFO       robot_loading: 0.159s
+[2026-02-23 22:27:40.084] INFO       solve_start_ik: 0.314s
+[2026-02-23 22:27:40.084] INFO       solve_end_ik: 0.399s
+[2026-02-23 22:27:40.085] INFO       plan_path: 49.753s
+[2026-02-23 22:27:40.085] INFO     ----------------------
+[2026-02-23 22:28:08.406] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/trajectory_testbench.log
+[2026-02-23 22:28:08.407] INFO     Planner backend: birrt — Capsule-space BiRRT with dual-arm projection (UR5e)
+[2026-02-23 22:28:08.408] INFO     macOS detected — skipping GUI buttons/sliders, will auto-run planning
+[2026-02-23 22:28:08.666] INFO     Robot loaded in 0.259s (direct URDF, no compas_fab)
+[2026-02-23 22:28:08.667] INFO     Grasp loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__GraspTargets.json
+[2026-02-23 22:28:08.668] DEBUG      bar_from_right: pos=[ 1.00e-04  9.38e-02 -2.80e-01], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:28:08.668] DEBUG      bar_from_left:  pos=[0.0001 0.0938 0.07  ], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:28:08.669] WARNING  Bar poses computed from left and right arms do not match!
+[2026-02-23 22:28:08.670] WARNING    From left:  pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:28:08.670] WARNING    From right: pos=[0.7912 0.0902 0.8623], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:28:08.670] INFO     Start state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250905_101010_RobotCellState.json
+[2026-02-23 22:28:08.671] DEBUG      joint_values: [0.8279, -0.8458, 1.7519, 2.2332, -0.8336, 0.7891, 1.7768, -0.8916, 1.7788, 2.2635, -1.7757, -0.7746]
+[2026-02-23 22:28:08.671] DEBUG      bar_pose (from FK): pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:28:08.672] INFO     End state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250909_235058_RobotCellState.json
+[2026-02-23 22:28:08.672] DEBUG      joint_values: [1.4161, 0.1434, 1.0411, 1.9571, -1.4223, 0.7873, 1.0282, -0.1722, 1.2628, 2.057, -1.0274, -0.78]
+[2026-02-23 22:28:08.673] DEBUG      bar_pose (from FK): pos=[ 0.897  -0.0046  0.3443], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:28:09.233] INFO     Start IK: 45 solutions found in 0.556s
+[2026-02-23 22:28:09.781] INFO     End IK: 24 solutions found in 0.547s
+[2026-02-23 22:28:09.781] INFO     Planning path with 'birrt' (stage=1, metric=feature, ladder=shortest)...
+[2026-02-23 22:28:09.829] INFO     Profile saved to /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/plan_profile.prof
+[2026-02-23 22:28:09.837] INFO     Launched snakeviz (check your browser)
+[2026-02-23 22:28:09.838] INFO     Path found! 92 waypoints in 0.047s
+[2026-02-23 22:28:09.838] INFO     Stage 1 returned task-space poses; skipping JointTrajectory save.
+[2026-02-23 22:28:09.838] INFO     --- Timing Summary ---
+[2026-02-23 22:28:09.839] INFO       robot_loading: 0.259s
+[2026-02-23 22:28:09.839] INFO       solve_start_ik: 0.556s
+[2026-02-23 22:28:09.840] INFO       solve_end_ik: 0.547s
+[2026-02-23 22:28:09.840] INFO       plan_path: 0.047s
+[2026-02-23 22:28:09.840] INFO     ----------------------
+[2026-02-23 22:28:23.670] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/trajectory_testbench.log
+[2026-02-23 22:28:23.672] INFO     Planner backend: birrt — Capsule-space BiRRT with dual-arm projection (UR5e)
+[2026-02-23 22:28:23.672] INFO     macOS detected — skipping GUI buttons/sliders, will auto-run planning
+[2026-02-23 22:28:23.843] INFO     Robot loaded in 0.171s (direct URDF, no compas_fab)
+[2026-02-23 22:28:23.844] INFO     Grasp loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__GraspTargets.json
+[2026-02-23 22:28:23.845] DEBUG      bar_from_right: pos=[ 1.00e-04  9.38e-02 -2.80e-01], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:28:23.845] DEBUG      bar_from_left:  pos=[0.0001 0.0938 0.07  ], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:28:23.846] WARNING  Bar poses computed from left and right arms do not match!
+[2026-02-23 22:28:23.846] WARNING    From left:  pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:28:23.847] WARNING    From right: pos=[0.7912 0.0902 0.8623], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:28:23.847] INFO     Start state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250905_101010_RobotCellState.json
+[2026-02-23 22:28:23.847] DEBUG      joint_values: [0.8279, -0.8458, 1.7519, 2.2332, -0.8336, 0.7891, 1.7768, -0.8916, 1.7788, 2.2635, -1.7757, -0.7746]
+[2026-02-23 22:28:23.848] DEBUG      bar_pose (from FK): pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:28:23.848] INFO     End state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250909_235058_RobotCellState.json
+[2026-02-23 22:28:23.849] DEBUG      joint_values: [1.4161, 0.1434, 1.0411, 1.9571, -1.4223, 0.7873, 1.0282, -0.1722, 1.2628, 2.057, -1.0274, -0.78]
+[2026-02-23 22:28:23.849] DEBUG      bar_pose (from FK): pos=[ 0.897  -0.0046  0.3443], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:28:24.260] INFO     Start IK: 37 solutions found in 0.407s
+[2026-02-23 22:28:24.591] INFO     End IK: 27 solutions found in 0.330s
+[2026-02-23 22:28:24.591] INFO     Planning path with 'birrt' (stage=2, metric=feature, ladder=shortest)...
+[2026-02-23 22:29:26.834] INFO     Profile saved to /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/plan_profile.prof
+[2026-02-23 22:29:26.840] INFO     Launched snakeviz (check your browser)
+[2026-02-23 22:29:26.841] WARNING  No path found (62.239s)
+[2026-02-23 22:29:26.841] INFO     --- Timing Summary ---
+[2026-02-23 22:29:26.842] INFO       robot_loading: 0.171s
+[2026-02-23 22:29:26.842] INFO       solve_start_ik: 0.407s
+[2026-02-23 22:29:26.842] INFO       solve_end_ik: 0.330s
+[2026-02-23 22:29:26.843] INFO       plan_path: 62.239s
+[2026-02-23 22:29:26.843] INFO     ----------------------
+[2026-02-23 22:30:25.569] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/trajectory_testbench.log
+[2026-02-23 22:30:25.570] INFO     Planner backend: birrt — Capsule-space BiRRT with dual-arm projection (UR5e)
+[2026-02-23 22:30:25.571] INFO     macOS detected — skipping GUI buttons/sliders, will auto-run planning
+[2026-02-23 22:30:25.819] INFO     Robot loaded in 0.248s (direct URDF, no compas_fab)
+[2026-02-23 22:30:25.820] INFO     Grasp loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__GraspTargets.json
+[2026-02-23 22:30:25.820] DEBUG      bar_from_right: pos=[ 1.00e-04  9.38e-02 -2.80e-01], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:30:25.821] DEBUG      bar_from_left:  pos=[0.0001 0.0938 0.07  ], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:30:25.821] WARNING  Bar poses computed from left and right arms do not match!
+[2026-02-23 22:30:25.822] WARNING    From left:  pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:30:25.822] WARNING    From right: pos=[0.7912 0.0902 0.8623], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:30:25.823] INFO     Start state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250905_101010_RobotCellState.json
+[2026-02-23 22:30:25.823] DEBUG      joint_values: [0.8279, -0.8458, 1.7519, 2.2332, -0.8336, 0.7891, 1.7768, -0.8916, 1.7788, 2.2635, -1.7757, -0.7746]
+[2026-02-23 22:30:25.824] DEBUG      bar_pose (from FK): pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:30:25.825] INFO     End state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250909_235058_RobotCellState.json
+[2026-02-23 22:30:25.825] DEBUG      joint_values: [1.4161, 0.1434, 1.0411, 1.9571, -1.4223, 0.7873, 1.0282, -0.1722, 1.2628, 2.057, -1.0274, -0.78]
+[2026-02-23 22:30:25.825] DEBUG      bar_pose (from FK): pos=[ 0.897  -0.0046  0.3443], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:30:26.102] INFO     Start IK: 30 solutions found in 0.273s
+[2026-02-23 22:30:26.529] INFO     End IK: 14 solutions found in 0.426s
+[2026-02-23 22:30:26.530] INFO     Planning path with 'birrt' (stage=2, metric=feature, ladder=shortest)...
+[2026-02-23 22:30:45.804] INFO     Profile saved to /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/plan_profile.prof
+[2026-02-23 22:30:45.809] INFO     Launched snakeviz (check your browser)
+[2026-02-23 22:30:45.810] INFO     Path found! 18 waypoints in 19.273s
+[2026-02-23 22:30:45.811] INFO     Trajectory saved to /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/testbench_20260223_223045_JointTrajectory.json  (18 points)
+[2026-02-23 22:30:45.812] INFO     --- Timing Summary ---
+[2026-02-23 22:30:45.812] INFO       robot_loading: 0.248s
+[2026-02-23 22:30:45.813] INFO       solve_start_ik: 0.273s
+[2026-02-23 22:30:45.813] INFO       solve_end_ik: 0.426s
+[2026-02-23 22:30:45.813] INFO       plan_path: 19.273s
+[2026-02-23 22:30:45.814] INFO     ----------------------
+[2026-02-23 22:31:04.076] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/trajectory_testbench.log
+[2026-02-23 22:31:04.077] INFO     Planner backend: birrt — Capsule-space BiRRT with dual-arm projection (UR5e)
+[2026-02-23 22:31:04.078] INFO     macOS detected — skipping GUI buttons/sliders, will auto-run planning
+[2026-02-23 22:31:04.244] INFO     Robot loaded in 0.166s (direct URDF, no compas_fab)
+[2026-02-23 22:31:04.245] INFO     Grasp loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__GraspTargets.json
+[2026-02-23 22:31:04.245] DEBUG      bar_from_right: pos=[ 1.00e-04  9.38e-02 -2.80e-01], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:31:04.246] DEBUG      bar_from_left:  pos=[0.0001 0.0938 0.07  ], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:31:04.246] WARNING  Bar poses computed from left and right arms do not match!
+[2026-02-23 22:31:04.247] WARNING    From left:  pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:31:04.247] WARNING    From right: pos=[0.7912 0.0902 0.8623], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:31:04.248] INFO     Start state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250905_101010_RobotCellState.json
+[2026-02-23 22:31:04.248] DEBUG      joint_values: [0.8279, -0.8458, 1.7519, 2.2332, -0.8336, 0.7891, 1.7768, -0.8916, 1.7788, 2.2635, -1.7757, -0.7746]
+[2026-02-23 22:31:04.248] DEBUG      bar_pose (from FK): pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:31:04.249] INFO     End state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250909_235058_RobotCellState.json
+[2026-02-23 22:31:04.250] DEBUG      joint_values: [1.4161, 0.1434, 1.0411, 1.9571, -1.4223, 0.7873, 1.0282, -0.1722, 1.2628, 2.057, -1.0274, -0.78]
+[2026-02-23 22:31:04.250] DEBUG      bar_pose (from FK): pos=[ 0.897  -0.0046  0.3443], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:31:04.529] INFO     Start IK: 34 solutions found in 0.275s
+[2026-02-23 22:31:05.028] INFO     End IK: 23 solutions found in 0.498s
+[2026-02-23 22:31:05.028] INFO     Planning path with 'birrt' (stage=3, metric=feature, ladder=shortest)...
+[2026-02-23 22:31:23.476] INFO     Profile saved to /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/plan_profile.prof
+[2026-02-23 22:31:23.485] INFO     Launched snakeviz (check your browser)
+[2026-02-23 22:31:23.485] INFO     Path found! 19 waypoints in 18.447s
+[2026-02-23 22:31:23.486] INFO     Trajectory saved to /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/testbench_20260223_223123_JointTrajectory.json  (19 points)
+[2026-02-23 22:31:23.487] INFO     --- Timing Summary ---
+[2026-02-23 22:31:23.487] INFO       robot_loading: 0.166s
+[2026-02-23 22:31:23.488] INFO       solve_start_ik: 0.275s
+[2026-02-23 22:31:23.488] INFO       solve_end_ik: 0.498s
+[2026-02-23 22:31:23.488] INFO       plan_path: 18.447s
+[2026-02-23 22:31:23.489] INFO     ----------------------
+[2026-02-23 22:35:54.028] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/trajectory_testbench.log
+[2026-02-23 22:35:54.030] INFO     Planner backend: birrt — Capsule-space BiRRT with dual-arm projection (UR5e)
+[2026-02-23 22:35:54.030] INFO     macOS detected — skipping GUI buttons/sliders, will auto-run planning
+[2026-02-23 22:35:54.265] INFO     Robot loaded in 0.234s (direct URDF, no compas_fab)
+[2026-02-23 22:35:54.266] INFO     Grasp loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__GraspTargets.json
+[2026-02-23 22:35:54.267] DEBUG      bar_from_right: pos=[ 1.00e-04  9.38e-02 -2.80e-01], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:35:54.268] DEBUG      bar_from_left:  pos=[0.0001 0.0938 0.07  ], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:35:54.269] WARNING  Bar poses computed from left and right arms do not match!
+[2026-02-23 22:35:54.269] WARNING    From left:  pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:35:54.270] WARNING    From right: pos=[0.7912 0.0902 0.8623], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:35:54.270] INFO     Start state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250905_101010_RobotCellState.json
+[2026-02-23 22:35:54.271] DEBUG      joint_values: [0.8279, -0.8458, 1.7519, 2.2332, -0.8336, 0.7891, 1.7768, -0.8916, 1.7788, 2.2635, -1.7757, -0.7746]
+[2026-02-23 22:35:54.271] DEBUG      bar_pose (from FK): pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:35:54.272] INFO     End state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250909_235058_RobotCellState.json
+[2026-02-23 22:35:54.272] DEBUG      joint_values: [1.4161, 0.1434, 1.0411, 1.9571, -1.4223, 0.7873, 1.0282, -0.1722, 1.2628, 2.057, -1.0274, -0.78]
+[2026-02-23 22:35:54.273] DEBUG      bar_pose (from FK): pos=[ 0.897  -0.0046  0.3443], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:35:54.680] INFO     Start IK: 41 solutions found in 0.403s
+[2026-02-23 22:35:55.025] INFO     End IK: 21 solutions found in 0.344s
+[2026-02-23 22:35:55.025] INFO     Planning path with 'birrt' (stage=2, metric=feature, ladder=shortest)...
+[2026-02-23 22:35:58.305] INFO     Profile saved to /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/plan_profile.prof
+[2026-02-23 22:35:58.313] INFO     Launched snakeviz (check your browser)
+[2026-02-23 22:35:58.313] INFO     Path found! 15 waypoints in 3.279s
+[2026-02-23 22:35:58.315] INFO     Trajectory saved to /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/testbench_20260223_223558_JointTrajectory.json  (15 points)
+[2026-02-23 22:35:58.315] INFO     --- Timing Summary ---
+[2026-02-23 22:35:58.315] INFO       robot_loading: 0.234s
+[2026-02-23 22:35:58.316] INFO       solve_start_ik: 0.403s
+[2026-02-23 22:35:58.316] INFO       solve_end_ik: 0.344s
+[2026-02-23 22:35:58.317] INFO       plan_path: 3.279s
+[2026-02-23 22:35:58.317] INFO     ----------------------
+[2026-02-23 22:36:12.239] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/trajectory_testbench.log
+[2026-02-23 22:36:12.240] INFO     Planner backend: birrt — Capsule-space BiRRT with dual-arm projection (UR5e)
+[2026-02-23 22:36:12.240] INFO     macOS detected — skipping GUI buttons/sliders, will auto-run planning
+[2026-02-23 22:36:12.405] INFO     Robot loaded in 0.164s (direct URDF, no compas_fab)
+[2026-02-23 22:36:12.406] INFO     Grasp loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__GraspTargets.json
+[2026-02-23 22:36:12.406] DEBUG      bar_from_right: pos=[ 1.00e-04  9.38e-02 -2.80e-01], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:36:12.407] DEBUG      bar_from_left:  pos=[0.0001 0.0938 0.07  ], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:36:12.407] WARNING  Bar poses computed from left and right arms do not match!
+[2026-02-23 22:36:12.408] WARNING    From left:  pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:36:12.408] WARNING    From right: pos=[0.7912 0.0902 0.8623], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:36:12.409] INFO     Start state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250905_101010_RobotCellState.json
+[2026-02-23 22:36:12.409] DEBUG      joint_values: [0.8279, -0.8458, 1.7519, 2.2332, -0.8336, 0.7891, 1.7768, -0.8916, 1.7788, 2.2635, -1.7757, -0.7746]
+[2026-02-23 22:36:12.409] DEBUG      bar_pose (from FK): pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:36:12.410] INFO     End state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250909_235058_RobotCellState.json
+[2026-02-23 22:36:12.410] DEBUG      joint_values: [1.4161, 0.1434, 1.0411, 1.9571, -1.4223, 0.7873, 1.0282, -0.1722, 1.2628, 2.057, -1.0274, -0.78]
+[2026-02-23 22:36:12.411] DEBUG      bar_pose (from FK): pos=[ 0.897  -0.0046  0.3443], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:36:12.704] INFO     Start IK: 38 solutions found in 0.289s
+[2026-02-23 22:36:13.150] INFO     End IK: 15 solutions found in 0.446s
+[2026-02-23 22:36:13.151] INFO     Planning path with 'birrt' (stage=3, metric=feature, ladder=shortest)...
+[2026-02-23 22:37:02.187] INFO     Profile saved to /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/plan_profile.prof
+[2026-02-23 22:37:02.191] INFO     Launched snakeviz (check your browser)
+[2026-02-23 22:37:02.191] WARNING  No path found (49.034s)
+[2026-02-23 22:37:02.192] INFO     --- Timing Summary ---
+[2026-02-23 22:37:02.192] INFO       robot_loading: 0.164s
+[2026-02-23 22:37:02.193] INFO       solve_start_ik: 0.289s
+[2026-02-23 22:37:02.193] INFO       solve_end_ik: 0.446s
+[2026-02-23 22:37:02.193] INFO       plan_path: 49.034s
+[2026-02-23 22:37:02.194] INFO     ----------------------
+[2026-02-23 22:46:28.590] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/trajectory_testbench.log
+[2026-02-23 22:46:28.591] INFO     Planner backend: birrt — Capsule-space BiRRT with dual-arm projection (UR5e)
+[2026-02-23 22:46:28.592] INFO     macOS detected — skipping GUI buttons/sliders, will auto-run planning
+[2026-02-23 22:46:28.790] INFO     Robot loaded in 0.198s (direct URDF, no compas_fab)
+[2026-02-23 22:46:28.792] INFO     Grasp loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__GraspTargets.json
+[2026-02-23 22:46:28.793] DEBUG      bar_from_right: pos=[ 1.00e-04  9.38e-02 -2.80e-01], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:46:28.793] DEBUG      bar_from_left:  pos=[0.0001 0.0938 0.07  ], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-23 22:46:28.794] WARNING  Bar poses computed from left and right arms do not match!
+[2026-02-23 22:46:28.795] WARNING    From left:  pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:46:28.795] WARNING    From right: pos=[0.7912 0.0902 0.8623], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:46:28.798] INFO     Start state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250905_101010_RobotCellState.json
+[2026-02-23 22:46:28.799] DEBUG      joint_values: [0.8279, -0.8458, 1.7519, 2.2332, -0.8336, 0.7891, 1.7768, -0.8916, 1.7788, 2.2635, -1.7757, -0.7746]
+[2026-02-23 22:46:28.800] DEBUG      bar_pose (from FK): pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-23 22:46:28.801] INFO     End state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250909_235058_RobotCellState.json
+[2026-02-23 22:46:28.801] DEBUG      joint_values: [1.4161, 0.1434, 1.0411, 1.9571, -1.4223, 0.7873, 1.0282, -0.1722, 1.2628, 2.057, -1.0274, -0.78]
+[2026-02-23 22:46:28.802] DEBUG      bar_pose (from FK): pos=[ 0.897  -0.0046  0.3443], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-23 22:46:29.169] INFO     Start IK: 32 solutions found in 0.361s
+[2026-02-23 22:46:29.659] INFO     End IK: 11 solutions found in 0.490s
+[2026-02-23 22:46:29.659] INFO     Planning path with 'birrt' (stage=3, metric=feature, ladder=shortest)...
+[2026-02-23 22:47:18.707] INFO     Profile saved to /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/plan_profile.prof
+[2026-02-23 22:47:18.716] INFO     Launched snakeviz (check your browser)
+[2026-02-23 22:47:18.716] WARNING  No path found (49.046s)
+[2026-02-23 22:47:18.717] INFO     --- Timing Summary ---
+[2026-02-23 22:47:18.717] INFO       robot_loading: 0.198s
+[2026-02-23 22:47:18.718] INFO       solve_start_ik: 0.361s
+[2026-02-23 22:47:18.718] INFO       solve_end_ik: 0.490s
+[2026-02-23 22:47:18.718] INFO       plan_path: 49.046s
+[2026-02-23 22:47:18.719] INFO     ----------------------
+[2026-02-24 10:23:19.453] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/trajectory_testbench.log
+[2026-02-24 10:23:19.454] INFO     Planner backend: birrt — Capsule-space BiRRT with dual-arm projection (UR5e)
+[2026-02-24 10:23:19.454] INFO     macOS detected — skipping GUI buttons/sliders, will auto-run planning
+[2026-02-24 10:23:19.622] INFO     Robot loaded in 0.167s (direct URDF, no compas_fab)
+[2026-02-24 10:23:19.623] INFO     Grasp loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__GraspTargets.json
+[2026-02-24 10:23:19.624] DEBUG      bar_from_right: pos=[ 1.00e-04  9.38e-02 -2.80e-01], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-24 10:23:19.624] DEBUG      bar_from_left:  pos=[0.0001 0.0938 0.07  ], quat=[ 0.5  0.5 -0.5  0.5]
+[2026-02-24 10:23:19.625] WARNING  Bar poses computed from left and right arms do not match!
+[2026-02-24 10:23:19.625] WARNING    From left:  pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-24 10:23:19.626] WARNING    From right: pos=[0.7912 0.0902 0.8623], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-24 10:23:19.626] INFO     Start state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250905_101010_RobotCellState.json
+[2026-02-24 10:23:19.626] DEBUG      joint_values: [0.8279, -0.8458, 1.7519, 2.2332, -0.8336, 0.7891, 1.7768, -0.8916, 1.7788, 2.2635, -1.7757, -0.7746]
+[2026-02-24 10:23:19.627] DEBUG      bar_pose (from FK): pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-02-24 10:23:19.627] INFO     End state loaded from /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/IK_test__20250909_235058_RobotCellState.json
+[2026-02-24 10:23:19.628] DEBUG      joint_values: [1.4161, 0.1434, 1.0411, 1.9571, -1.4223, 0.7873, 1.0282, -0.1722, 1.2628, 2.057, -1.0274, -0.78]
+[2026-02-24 10:23:19.628] DEBUG      bar_pose (from FK): pos=[ 0.897  -0.0046  0.3443], quat=[-0.5  0.5  0.5  0.5]
+[2026-02-24 10:23:20.034] INFO     Start IK: 32 solutions found in 0.402s
+[2026-02-24 10:23:20.509] INFO     End IK: 27 solutions found in 0.474s
+[2026-02-24 10:23:20.509] INFO     Planning path with 'birrt' (stage=3, metric=feature, ladder=shortest)...
+[2026-02-24 10:23:20.512] INFO     Stage 3 warm-start: running Stage 2 to seed guide poses...
+[2026-02-24 10:23:23.794] INFO     Stage 3 warm-start: 17 guide poses prepared.
+[2026-02-24 10:23:27.196] INFO     Profile saved to /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/plan_profile.prof
+[2026-02-24 10:23:27.206] INFO     Launched snakeviz (check your browser)
+[2026-02-24 10:23:27.207] INFO     Path found! 17 waypoints in 6.686s
+[2026-02-24 10:23:27.208] INFO     Trajectory saved to /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/../../../../data/husky_assembly_design_study/250904_transfer_path_test/RobotCellStates/testbench_20260224_102327_JointTrajectory.json  (17 points)
+[2026-02-24 10:23:27.209] INFO     --- Timing Summary ---
+[2026-02-24 10:23:27.209] INFO       robot_loading: 0.167s
+[2026-02-24 10:23:27.209] INFO       solve_start_ik: 0.402s
+[2026-02-24 10:23:27.210] INFO       solve_end_ik: 0.474s
+[2026-02-24 10:23:27.210] INFO       plan_path: 6.686s
+[2026-02-24 10:23:27.211] INFO     ----------------------

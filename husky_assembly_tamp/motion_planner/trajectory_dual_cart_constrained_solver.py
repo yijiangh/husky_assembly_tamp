@@ -18,6 +18,7 @@ import pybullet_planning as pp
 from pybullet_planning.interfaces.planner_interface.joint_motion_planning import get_difference_fn, get_refine_fn
 from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import Slerp
+from scipy.spatial import KDTree
 import matplotlib.pyplot as plt
 
 from husky_assembly_tamp.model.target_parse import TargetParser
@@ -138,6 +139,7 @@ class Capsule(object):
             self.config = []
         self.parent = parent
         self.connection = []
+        self.feature_vec = None
 
     def retrace(self):
         sequence = []
@@ -151,7 +153,7 @@ class Capsule(object):
         segment = [] if self.parent is None else [self, self.parent]
         draw_fn(self, segment, **kwargs)
 
-    def set_parent(self, parent: "Capsule"):
+    def set_parent(self, parent: "Capsule", dist_thresh: float = 2.0):
         self.parent = parent
         for _ in range(len(self.config)):
             self.connection.append([])
@@ -159,7 +161,7 @@ class Capsule(object):
             for j in range(len(parent.config)):
                 dist = np.linalg.norm(angles_distance(self.config[i], parent.config[j]))
                 # print(f"i: {i}, j: {j}, dist: {dist}")
-                if dist < 2.0:
+                if dist < dist_thresh:
                 # if dist < 100.0:
                     self.connection[i].append(j)
 
@@ -178,7 +180,38 @@ def asymmetric_extend(c1: Capsule, c2: Capsule, extend_fn, backward=False):
 def cart_extend_towards_capsule(tree: List[Capsule], target: Capsule, distance_fn, extend_fn, collision_fn, robot_setup, projector, swap=False, tree_frequency=1, **kwargs):
     target = copy.deepcopy(target)
     target.parent = None
-    last = pp.utils.argmin(lambda n: float(np.linalg.norm(np.asarray(distance_fn(n, target), dtype=float), ord=2)), tree)
+    # Fast nearest-neighbor search using KDTree when feature vectors are available
+    try:
+        if hasattr(target, "feature_vec") and target.feature_vec is not None:
+            vecs = []
+            for n in tree:
+                v = getattr(n, "feature_vec", None)
+                if v is None:
+                    vecs = []
+                    break
+                vecs.append(v)
+            if vecs:
+                kdt = KDTree(np.vstack(vecs))
+                _, idx = kdt.query(target.feature_vec)
+                last = tree[int(idx)]
+            else:
+                last = None
+        else:
+            last = None
+    except Exception:
+        last = None
+
+    def _dist(n):
+        d = distance_fn(n, target)
+        if np.isscalar(d):
+            return float(d)
+        arr = np.asarray(d, dtype=float)
+        if arr.shape == ():
+            return float(arr)
+        return float(np.linalg.norm(arr, ord=2))
+
+    if last is None:
+        last = pp.utils.argmin(_dist, tree)
     # extend = list(asymmetric_extend(last, target, extend_fn, backward=swap))
     extend = list(extend_fn(last, target))
     safe = list(takewhile(pp.utils.negate(collision_fn), extend))
@@ -315,6 +348,100 @@ def ladder_graph_search(nodes: List[Capsule], distance_fn: Optional[Callable[[np
     # Sort by total cost ascending
     results.sort(key=lambda item: item[2])
     return results
+
+
+def ladder_graph_shortest_path(nodes: List[Capsule], distance_fn: Optional[Callable[[np.ndarray, np.ndarray], float]] = None):
+    """Compute the minimum-cost path across ladder rungs via dynamic programming.
+
+    Returns:
+        Tuple (path, chosen_indices, total_cost) or None if no feasible path exists.
+    """
+    if nodes is None or len(nodes) == 0:
+        return None
+    for n in nodes:
+        if n is None or n.config is None or len(n.config) == 0:
+            return None
+
+    def _default_dist(q1: np.ndarray, q2: np.ndarray) -> float:
+        return float(np.linalg.norm(angles_distance(np.asarray(q1, dtype=float), np.asarray(q2, dtype=float)), ord=2))
+
+    dist_fn = distance_fn if distance_fn is not None else _default_dist
+
+    num_nodes = len(nodes)
+    if num_nodes == 1:
+        return ([nodes[0].config[0]], [0], 0.0)
+
+    # Build adjacency maps for each consecutive rung pair: prev_idx -> List[curr_idx]
+    edges_per_level: List[dict] = []
+    for level in range(num_nodes - 1):
+        prev_node = nodes[level]
+        curr_node = nodes[level + 1]
+        prev_size = len(prev_node.config)
+        curr_size = len(curr_node.config)
+        edges = {i: [] for i in range(prev_size)}
+
+        if getattr(curr_node, "parent", None) is prev_node:
+            for curr_idx in range(curr_size):
+                conns = curr_node.connection[curr_idx] if curr_idx < len(curr_node.connection) else []
+                for prev_idx in conns:
+                    if 0 <= prev_idx < prev_size:
+                        edges[prev_idx].append(curr_idx)
+        elif getattr(prev_node, "parent", None) is curr_node:
+            for prev_idx in range(prev_size):
+                conns = prev_node.connection[prev_idx] if prev_idx < len(prev_node.connection) else []
+                for curr_idx in conns:
+                    if 0 <= curr_idx < curr_size:
+                        edges[prev_idx].append(curr_idx)
+        else:
+            return None
+
+        edges_per_level.append(edges)
+
+    # DP over rungs
+    prev_costs = [0.0 for _ in range(len(nodes[0].config))]
+    backpointers: List[List[Optional[int]]] = []
+
+    for level in range(num_nodes - 1):
+        prev_node = nodes[level]
+        curr_node = nodes[level + 1]
+        curr_costs = [math.inf for _ in range(len(curr_node.config))]
+        curr_prev = [None for _ in range(len(curr_node.config))]
+
+        edges = edges_per_level[level]
+        for prev_idx, curr_indices in edges.items():
+            if prev_idx < 0 or prev_idx >= len(prev_node.config):
+                continue
+            prev_cost = prev_costs[prev_idx]
+            if not math.isfinite(prev_cost):
+                continue
+            q_prev = prev_node.config[prev_idx]
+            for curr_idx in curr_indices:
+                q_curr = curr_node.config[curr_idx]
+                cost = prev_cost + dist_fn(q_prev, q_curr)
+                if cost < curr_costs[curr_idx]:
+                    curr_costs[curr_idx] = cost
+                    curr_prev[curr_idx] = prev_idx
+
+        backpointers.append(curr_prev)
+        prev_costs = curr_costs
+
+    # Pick best end node
+    if all(not math.isfinite(c) for c in prev_costs):
+        return None
+    end_idx = int(np.argmin(prev_costs))
+    total_cost = float(prev_costs[end_idx])
+
+    # Reconstruct indices backward
+    indices = [end_idx]
+    for level in reversed(range(num_nodes - 1)):
+        prev_idx = backpointers[level][indices[-1]]
+        if prev_idx is None:
+            return None
+        indices.append(prev_idx)
+    indices = list(reversed(indices))
+
+    path = [nodes[r].config[idx] for r, idx in enumerate(indices)]
+    return path, indices, total_cost
 
 
 def plot_ladder_graph(capsule_path: List[Capsule], highlight_feasible: bool = False) -> Optional[str]:
@@ -543,6 +670,9 @@ def rrt_connect_capsule(
     enforce_alternate=False,
     profiler: Optional["PlanProfiler"] = None,
     enable_ik: bool = True,
+    ladder_search: str = "shortest",
+    return_task_path: bool = False,
+    enable_collision: bool = True,
     **kwargs,
 ):
     start_time = time.time()
@@ -568,6 +698,7 @@ def rrt_connect_capsule(
             tree1, tree2 = nodes2, nodes1
 
         target = sample_fn()
+        bodies = []
         if draw_fn:
             bodies = pp.draw_pose(target.pose, length=0.1)
             # draw_fn(target, [])
@@ -595,6 +726,12 @@ def rrt_connect_capsule(
                 if verbose:
                     print(f"[Stage 1] Task-space connection at iter {iteration} "
                           f"(nodes: {len(nodes1)+len(nodes2)}); skipping ladder graph.")
+                if return_task_path:
+                    path1, path2 = last1.retrace(), last2.retrace()
+                    if swap:
+                        path1, path2 = path2, path1
+                    capsule_nodes = path1 + path2[::-1]
+                    return check_capsule_path(capsule_nodes)
                 if draw_fn:
                     for debug_body in bodies:
                         pp.remove_debug(debug_body)
@@ -607,6 +744,14 @@ def rrt_connect_capsule(
                 print(f"RRT connect capsule: {iteration} iterations, {len(nodes1) + len(nodes2)} nodes")
             capsule_nodes = path1 + path2[::-1]
             capsule_path = check_capsule_path(capsule_nodes)
+            capsule_path = solver._decimate_capsule_path(capsule_path)
+
+            # Fast attempt: project continuously along the capsule pose chain.
+            _prof = profiler if profiler is not None else PlanProfiler()
+            with _prof.measure("project_chain"):
+                proj_path = solver.try_project_chain(capsule_path, enable_collision=enable_collision)
+            if proj_path is not None:
+                return proj_path
 
             # Fast skip: if every rung in this path is already expanded (config length > 1),
             # we assume this path has been checked before and skip heavy processing.
@@ -625,13 +770,16 @@ def rrt_connect_capsule(
             def _js_dist(q1: np.ndarray, q2: np.ndarray) -> float:
                 return float(np.linalg.norm(angles_distance(np.asarray(q1, dtype=float), np.asarray(q2, dtype=float)), ord=2))
 
-            _prof = profiler if profiler is not None else PlanProfiler()
             with pp.LockRenderer():
                 with _prof.measure("expand_cart_path_ladder_graph (total)"):
                     expended_path, _ = solver.expand_cart_path_ladder_graph(capsule_path, profiler=_prof)
             with _prof.measure("ladder_graph_search"):
-                results = ladder_graph_search(expended_path, distance_fn=_js_dist, instant=False)
-            if results is None or len(results) == 0:
+                if ladder_search == "enumerate":
+                    results = ladder_graph_search(expended_path, distance_fn=_js_dist, instant=False)
+                else:
+                    shortest = ladder_graph_shortest_path(expended_path, distance_fn=_js_dist)
+                    results = [shortest] if shortest is not None else []
+            if results is None or len(results) == 0 or results[0] is None:
                 for debug_body in bodies:
                     pp.remove_debug(debug_body)
                 continue  # way 1: restart in the loop
@@ -839,13 +987,76 @@ class TrajectoryDualCartConstrainedSolver(object):
         print("✓ Robot setup initialization completed")
         return robot_setup, target_conf, projector
 
-    def __init__(self, robot_setup: RobotSetup, target_parser: TargetParser, projector: DualArmProjection):
+    def __init__(
+        self,
+        robot_setup: RobotSetup,
+        target_parser: TargetParser,
+        projector: DualArmProjection,
+        ladder_expand_delta: float = np.pi / 4.0,
+        start_goal_delta: float = np.pi / 4.0,
+        dist_metric: str = "feature",
+        ladder_search: str = "shortest",
+        goal_sample_prob: float = 0.1,
+        ladder_edge_thresh: float = 2.5,
+        ladder_expand_attempts_small: int = 5,
+        ladder_expand_attempts_full: int = 20,
+        ladder_decimate_pos: float = 0.05,
+        ladder_decimate_ang: float = 0.1,
+        guide_sample_prob: float = 0.2,
+    ):
         self.robot_setup = robot_setup
         self.target_parser = target_parser
         self.projector = projector
+        self.ladder_expand_delta = float(ladder_expand_delta)
+        self.start_goal_delta = float(start_goal_delta)
+        self.dist_metric = dist_metric
+        self.ladder_search = ladder_search
+        self.goal_sample_prob = float(goal_sample_prob)
+        self.ladder_edge_thresh = float(ladder_edge_thresh)
+        self.ladder_expand_attempts_small = int(ladder_expand_attempts_small)
+        self.ladder_expand_attempts_full = int(ladder_expand_attempts_full)
+        self._goal_pose = None
         self._cached_collision_fn = self.robot_setup.create_collision_fn(
             obstacle_bodies=self.robot_setup.obstacles
         )
+        self._bar_local_feature_points = self._compute_bar_feature_points()
+        self._ik_cache = {}
+        self._collision_cache = {}
+        self.ladder_decimate_pos = float(ladder_decimate_pos)
+        self.ladder_decimate_ang = float(ladder_decimate_ang)
+        self.guide_sample_prob = float(guide_sample_prob)
+        self._guide_poses = None
+
+    def _compute_bar_feature_points(self) -> Optional[List[np.ndarray]]:
+        """Compute a small set of feature points in the bar's local frame.
+
+        Uses the current bar pose and its AABB in world coordinates, then
+        transforms AABB corners into the bar frame. This yields a consistent
+        set of points in the bar frame for the feature-point distance metric.
+        """
+        try:
+            bar_id = self.robot_setup.target_bar
+            world_from_bar = pp.get_pose(bar_id)
+            aabb_min, aabb_max = pybullet.getAABB(bar_id)
+            if aabb_min is None or aabb_max is None:
+                return None
+
+            aabb_min = np.asarray(aabb_min, dtype=float)
+            aabb_max = np.asarray(aabb_max, dtype=float)
+            corners_world = [
+                np.array([aabb_min[0], aabb_min[1], aabb_min[2]]),
+                np.array([aabb_min[0], aabb_max[1], aabb_max[2]]),
+                np.array([aabb_max[0], aabb_min[1], aabb_max[2]]),
+                np.array([aabb_max[0], aabb_max[1], aabb_min[2]]),
+            ]
+            bar_from_world = pp.invert(world_from_bar)
+            corners_local = []
+            for p_w in corners_world:
+                p_local, _ = pp.multiply(bar_from_world, (p_w, [0, 0, 0, 1]))
+                corners_local.append(np.asarray(p_local, dtype=float))
+            return corners_local
+        except Exception:
+            return None
 
     def cart_linear_interp_z(self, q1: Capsule, q2: Capsule, position_res: float = 0.1, rotation_res: float = 0.1):
         def _quat_angle_between(q0, q1):
@@ -971,6 +1182,8 @@ class TrajectoryDualCartConstrainedSolver(object):
         pitch_range = (-np.pi, np.pi)
         yaw_range = (-np.pi, np.pi)
 
+        rng = np.random.default_rng()
+
         def fn():
 
             global bar_from_right
@@ -980,15 +1193,21 @@ class TrajectoryDualCartConstrainedSolver(object):
 
             confs = None
             while confs is None:
-                x = cx + np.random.uniform(-l / 2, l / 2)
-                y = cy + np.random.uniform(-w / 2, w / 2)
-                z = cz + h / 2
+                r = rng.random()
+                if (self._goal_pose is not None) and (r < self.goal_sample_prob):
+                    world_from_bar = self._goal_pose
+                elif (self._guide_poses is not None) and (r < self.goal_sample_prob + self.guide_sample_prob):
+                    world_from_bar = self._guide_poses[int(rng.integers(low=0, high=len(self._guide_poses)))]
+                else:
+                    x = cx + np.random.uniform(-l / 2, l / 2)
+                    y = cy + np.random.uniform(-w / 2, w / 2)
+                    z = cz + h / 2
 
-                roll = np.random.uniform(*roll_range)
-                pitch = np.random.uniform(*pitch_range)
-                yaw = np.random.uniform(*yaw_range)
+                    roll = np.random.uniform(*roll_range)
+                    pitch = np.random.uniform(*pitch_range)
+                    yaw = np.random.uniform(*yaw_range)
 
-                world_from_bar = pp.Pose(point=[x, y, z], euler=pp.Euler(roll, pitch, yaw))
+                    world_from_bar = pp.Pose(point=[x, y, z], euler=pp.Euler(roll, pitch, yaw))
                 if enable_ik:
                     confs = self.projector.create_valid_confs(
                         self.robot_setup.ik_solver_right, world_from_bar, bar_from_right, delta=0.0, max_attempts=20, collision_fn=self._cached_collision_fn
@@ -997,13 +1216,19 @@ class TrajectoryDualCartConstrainedSolver(object):
                     confs = None
 
                 if enable_ik and confs is not None:
-                    return Capsule(world_from_bar, confs, parent=None, robot_setup=self.robot_setup, projector=self.projector)
+                    cap = Capsule(world_from_bar, confs, parent=None, robot_setup=self.robot_setup, projector=self.projector)
+                    self._attach_feature_vec(cap)
+                    return cap
                 elif not enable_ik:
-                    return Capsule(world_from_bar, confs, parent=None, robot_setup=self.robot_setup, projector=self.projector)
+                    cap = Capsule(world_from_bar, confs, parent=None, robot_setup=self.robot_setup, projector=self.projector)
+                    self._attach_feature_vec(cap)
+                    return cap
 
         return fn
 
     def _get_extend_fn(self, enable_ik: bool = True):
+
+        rng = np.random.default_rng()
 
         def fn(c1: Capsule, c2: Capsule):
             way_points = self.cart_linear_interp(c1, c2, position_res=0.05, rotation_res=0.1)
@@ -1018,8 +1243,9 @@ class TrajectoryDualCartConstrainedSolver(object):
 
                 conf = None
                 if enable_ik and hasattr(last_capsule, "config") and last_capsule.config is not None and len(last_capsule.config) > 0:
-                    seed_right = last_capsule.config[0][6:]
-                    seed_left = last_capsule.config[0][:6]
+                    seed_idx = int(rng.integers(low=0, high=len(last_capsule.config)))
+                    seed_right = last_capsule.config[seed_idx][6:]
+                    seed_left = last_capsule.config[seed_idx][:6]
 
                     right_conf = self.robot_setup.ik_solver_right(world_from_right, seed_right)
                     if right_conf is not None:
@@ -1027,10 +1253,12 @@ class TrajectoryDualCartConstrainedSolver(object):
 
                 if conf is not None:
                     capsule = Capsule(world_from_bar, config=[conf], parent=None, robot_setup=self.robot_setup, projector=self.projector)
+                    self._attach_feature_vec(capsule)
                     yield capsule
                     last_capsule = capsule
                 else:
                     capsule = Capsule(world_from_bar, parent=None, robot_setup=self.robot_setup, projector=self.projector)
+                    self._attach_feature_vec(capsule)
                     yield capsule
                     if enable_ik:
                         break
@@ -1084,7 +1312,16 @@ class TrajectoryDualCartConstrainedSolver(object):
                     yield None
         return fn
 
-    def _get_cart_dist_fn(self):
+    def _get_cart_dist_fn(self, metric: Optional[str] = None):
+        metric = metric or self.dist_metric
+
+        def _pose_to_world_points(pose, local_pts: List[np.ndarray]) -> List[np.ndarray]:
+            pts = []
+            for p_local in local_pts:
+                p_world, _ = pp.multiply(pose, (p_local, [0, 0, 0, 1]))
+                pts.append(np.asarray(p_world, dtype=float))
+            return pts
+
         def _pose_to_Rp(pose):
             T = pp.tform_from_pose(pose)
             R = T[:3, :3]
@@ -1104,7 +1341,7 @@ class TrajectoryDualCartConstrainedSolver(object):
             dot = max(-1.0, min(1.0, dot))
             return float(np.arccos(dot))
 
-        def fn(c1: Capsule, c2: Capsule):
+        def fn_pose6d(c1: Capsule, c2: Capsule):
             R1, p1 = _pose_to_Rp(c1.pose)
             R2, p2 = _pose_to_Rp(c2.pose)
 
@@ -1116,12 +1353,141 @@ class TrajectoryDualCartConstrainedSolver(object):
 
             return np.array([dp[0], dp[1], dp[2], ax, ay, az], dtype=float)
 
+        def fn_feature(c1: Capsule, c2: Capsule):
+            if not self._bar_local_feature_points:
+                return fn_pose6d(c1, c2)
+            v1 = self._get_or_compute_feature_vec(c1)
+            v2 = self._get_or_compute_feature_vec(c2)
+            if v1 is None or v2 is None:
+                return fn_pose6d(c1, c2)
+            diff = v2 - v1
+            return np.array([float(np.linalg.norm(diff))], dtype=float)
+
+        if metric == "pose6d":
+            return fn_pose6d
+        if metric == "feature":
+            return fn_feature
+        # Fallback
+        return fn_pose6d
+
         return fn
+
+    def _get_or_compute_feature_vec(self, cap: Capsule) -> Optional[np.ndarray]:
+        if cap is None:
+            return None
+        if getattr(cap, "feature_vec", None) is not None:
+            return cap.feature_vec
+        if not self._bar_local_feature_points:
+            return None
+        pts = []
+        for p_local in self._bar_local_feature_points:
+            p_world, _ = pp.multiply(cap.pose, (p_local, [0, 0, 0, 1]))
+            pts.append(np.asarray(p_world, dtype=float))
+        vec = np.concatenate(pts, axis=0)
+        cap.feature_vec = vec
+        return vec
+
+    def _attach_feature_vec(self, cap: Capsule) -> None:
+        if cap is None:
+            return
+        if self._bar_local_feature_points:
+            _ = self._get_or_compute_feature_vec(cap)
+
+    def _pose_key(self, pose, decimals: int = 3) -> Tuple[float, ...]:
+        try:
+            pos, orn = pose
+            pos = np.asarray(pos, dtype=float).reshape(3)
+            orn = np.asarray(orn, dtype=float).reshape(4)
+        except Exception:
+            T = pp.tform_from_pose(pose)
+            pos = np.asarray(T[:3, 3], dtype=float)
+            Rm = np.asarray(T[:3, :3], dtype=float)
+            orn = R.from_matrix(Rm).as_quat()
+        vals = tuple(np.round(pos, decimals=decimals)) + tuple(np.round(orn, decimals=decimals))
+        return vals
+
+    def _config_key(self, conf: np.ndarray, decimals: int = 3) -> Tuple[float, ...]:
+        try:
+            arr = np.asarray(conf, dtype=float).reshape(-1)
+            return tuple(np.round(arr, decimals=decimals))
+        except Exception:
+            return (id(conf),)
+
+    def _is_config_collision(self, conf: np.ndarray) -> bool:
+        key = self._config_key(conf)
+        if key in self._collision_cache:
+            return self._collision_cache[key]
+        coll = self._cached_collision_fn(conf)
+        self._collision_cache[key] = coll
+        return coll
+
+    def _pose_distance(self, pose_a, pose_b) -> Tuple[float, float]:
+        try:
+            pa, qa = pose_a
+            pb, qb = pose_b
+            pa = np.asarray(pa, dtype=float)
+            pb = np.asarray(pb, dtype=float)
+            qa = np.asarray(qa, dtype=float)
+            qb = np.asarray(qb, dtype=float)
+        except Exception:
+            Ta = pp.tform_from_pose(pose_a)
+            Tb = pp.tform_from_pose(pose_b)
+            pa = Ta[:3, 3]
+            pb = Tb[:3, 3]
+            qa = R.from_matrix(Ta[:3, :3]).as_quat()
+            qb = R.from_matrix(Tb[:3, :3]).as_quat()
+        dp = float(np.linalg.norm(pb - pa))
+        # shortest-arc angle
+        if float(np.dot(qa, qb)) < 0.0:
+            qb = -qb
+        ang = float(2.0 * math.acos(max(-1.0, min(1.0, float(np.dot(qa, qb)))))) / 2.0
+        return dp, ang
+
+    def _decimate_capsule_path(self, capsule_path: List[Capsule]) -> List[Capsule]:
+        if capsule_path is None or len(capsule_path) <= 2:
+            return capsule_path
+        kept = [capsule_path[0]]
+        last_pose = capsule_path[0].pose
+        for cap in capsule_path[1:-1]:
+            dp, dang = self._pose_distance(last_pose, cap.pose)
+            if dp >= self.ladder_decimate_pos or dang >= self.ladder_decimate_ang:
+                kept.append(cap)
+                last_pose = cap.pose
+        kept.append(capsule_path[-1])
+        return kept
+
+    def _bar_pose_from_conf(self, conf: np.ndarray):
+        global bar_from_right
+        self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, conf)
+        right_pose = pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link_right)
+        return pp.multiply(right_pose, pp.invert(bar_from_right))
+
+    def _smooth_with_collision(self, path: List[np.ndarray], extend_fn, collision_fn, max_iterations: int = 50):
+        if path is None or len(path) < 3:
+            return path
+        rng = np.random.default_rng()
+        current = list(path)
+        for _ in range(max_iterations):
+            n = len(current)
+            if n < 3:
+                break
+            i, j = sorted(rng.integers(low=0, high=n, size=2))
+            if j - i <= 1:
+                continue
+            seg = list(extend_fn(current[i], current[j]))
+            if not seg or any(s is None for s in seg):
+                continue
+            if any(collision_fn(Capsule(self._bar_pose_from_conf(s), config=[s])) for s in seg):
+                continue
+            current = current[:i] + seg + current[j:]
+        return current
 
     def _get_collision_fn(self, enable_ik: bool = True, enable_collision: bool = True):
         """Build the collision predicate for a given planning stage.
 
-        Stage 1  (enable_ik=False):
+        Stage 1  (enable_ik=False, enable_collision=False):
+            No IK, no collision. Collision predicate always returns False.
+        Stage 1b (enable_ik=False, enable_collision=True):
             No joint configs are available; use the floating-body collision
             check (bar pose vs. static obstacles at the neutral robot config).
         Stage 2  (enable_ik=True, enable_collision=False):
@@ -1137,7 +1503,9 @@ class TrajectoryDualCartConstrainedSolver(object):
 
         def fn(c: Capsule):
             if not enable_ik:
-                # Stage 1: no joint config expected; check bar pose against obstacles
+                if not enable_collision:
+                    return False
+                # Stage 1b: no joint config expected; check bar pose against obstacles
                 return floating_collision_fn(c.pose)
             # Stages 2 & 3: IK is active
             if len(c.config) == 0:
@@ -1247,55 +1615,131 @@ class TrajectoryDualCartConstrainedSolver(object):
             capsule_path = pp.direct_path(start_capsule, target_capsule, extend_fn, collision_fn)
         return capsule_path
 
-    def expand(self, capsule: Capsule) -> Capsule:
+    def try_project_chain(self, capsule_path: List[Capsule], enable_collision: bool) -> Optional[List[np.ndarray]]:
+        """Attempt to recover a continuous joint path by chaining IK + projection along poses."""
+        if capsule_path is None or len(capsule_path) == 0:
+            return None
+        if capsule_path[0].config is None or len(capsule_path[0].config) == 0:
+            return None
+
+        global bar_from_right
+        q_prev = np.asarray(capsule_path[0].config[0], dtype=float)
+        path = [q_prev]
+
+        seed_right = q_prev[6:]
+        seed_left = q_prev[:6]
+
+        for cap in capsule_path[1:]:
+            world_from_bar = cap.pose
+            world_from_right = pp.multiply(world_from_bar, bar_from_right)
+            right_conf = self.robot_setup.ik_solver_right(world_from_right, seed_right)
+            if right_conf is None:
+                return None
+            conf = self.projector.project(right_conf, seed_left)
+            if conf is None:
+                return None
+            if enable_collision and self._is_config_collision(conf):
+                return None
+            q_prev = np.asarray(conf, dtype=float)
+            seed_right = q_prev[6:]
+            seed_left = q_prev[:6]
+            path.append(q_prev)
+
+        return path
+
+    def expand(self, capsule: Capsule, max_attempts: Optional[int] = None, delta: Optional[float] = None) -> Capsule:
         global bar_from_right
         bar_pose = capsule.pose
         right_ik_handle = self.robot_setup.ik_solver_right
-        confs = self.projector.create_valid_confs(right_ik_handle, bar_pose, bar_from_right, delta=0.0, max_attempts=20, collision_fn=self._cached_collision_fn)
+        if max_attempts is None:
+            max_attempts = self.ladder_expand_attempts_full
+        if delta is None:
+            delta = self.ladder_expand_delta
+        cache_key = (self._pose_key(bar_pose), float(delta), int(max_attempts))
+        if cache_key in self._ik_cache:
+            confs = self._ik_cache[cache_key]
+        else:
+            confs = self.projector.create_valid_confs(
+                right_ik_handle,
+                bar_pose,
+                bar_from_right,
+                delta=delta,
+                max_attempts=max_attempts,
+                collision_fn=self._cached_collision_fn,
+            )
+            self._ik_cache[cache_key] = confs
         return Capsule(bar_pose, config=confs, parent=None, robot_setup=self.robot_setup, projector=self.projector)
 
     def expand_cart_path_ladder_graph(self, path: List[Capsule], profiler: Optional["PlanProfiler"] = None):
         # Returns: (expended_path, updates) where updates is a list of (origin_node, new_config)
+        def _copy_and_update(origin_capsule, new_capsule):
+            if origin_capsule is None:
+                return
+            try:
+                new_conf = copy.deepcopy(new_capsule.config)
+            except Exception:
+                new_conf = new_capsule.config
+            try:
+                origin_capsule.config = new_conf
+            except Exception:
+                pass
+            updates.append((origin_capsule, new_conf))
+
+        def _build_connections(rungs: List[Capsule]):
+            for i in range(1, len(rungs)):
+                rungs[i].set_parent(rungs[i - 1], dist_thresh=self.ladder_edge_thresh)
+
+        def _has_any_edge(rungs: List[Capsule]) -> bool:
+            for i in range(1, len(rungs)):
+                prev = rungs[i - 1]
+                curr = rungs[i]
+                if prev is None or curr is None:
+                    return False
+                if curr.connection is None or len(curr.connection) == 0:
+                    return False
+                if all(len(c) == 0 for c in curr.connection):
+                    return False
+            return True
+
         expended_path: List[Capsule] = []
         updates: List[Tuple[Capsule, Optional[List[np.ndarray]]]] = []
 
+        # Pass 1: small expansion for missing rungs
         for capsule in path:
             origin = getattr(capsule, "_origin", None)
-
             if len(capsule.config) > 1 or capsule.parent is None:
                 capsule.parent = None
                 expended_path.append(capsule)
-                if origin is not None:
-                    try:
-                        new_conf = copy.deepcopy(capsule.config)
-                    except Exception:
-                        new_conf = capsule.config
-                    try:
-                        origin.config = new_conf
-                    except Exception:
-                        pass
-                    updates.append((origin, new_conf))
+                _copy_and_update(origin, capsule)
             else:
                 _prof = profiler if profiler is not None else PlanProfiler()
                 with _prof.measure("expand_single (create_valid_confs)"):
-                    expanded = self.expand(capsule)
+                    expanded = self.expand(
+                        capsule,
+                        max_attempts=self.ladder_expand_attempts_small,
+                        delta=min(self.ladder_expand_delta, np.pi / 6.0),
+                    )
                 expended_path.append(expanded)
-                if origin is not None:
-                    try:
-                        new_conf = copy.deepcopy(expanded.config)
-                    except Exception:
-                        new_conf = expanded.config
-                    try:
-                        origin.config = new_conf
-                    except Exception:
-                        pass
-                    updates.append((origin, new_conf))
+                _copy_and_update(origin, expanded)
 
+        _build_connections(expended_path)
+        if _has_any_edge(expended_path):
+            return expended_path, updates
+
+        # Pass 2: full expansion only where needed
         for i, capsule in enumerate(expended_path):
-            if i == 0:
-                continue
-            expended_path[i].set_parent(expended_path[i - 1])
+            if capsule.config is None or len(capsule.config) <= 1:
+                _prof = profiler if profiler is not None else PlanProfiler()
+                with _prof.measure("expand_single (create_valid_confs)"):
+                    expanded = self.expand(
+                        capsule,
+                        max_attempts=self.ladder_expand_attempts_full,
+                        delta=self.ladder_expand_delta,
+                    )
+                expended_path[i] = expanded
+                _copy_and_update(getattr(capsule, "_origin", None), expanded)
 
+        _build_connections(expended_path)
         return expended_path, updates
 
 
@@ -1311,6 +1755,14 @@ class TrajectoryDualCartConstrainedSolver(object):
         verbose: bool = False,
         enable_ik: bool = True,
         enable_collision: bool = True,
+        dist_metric: Optional[str] = None,
+        ladder_search: Optional[str] = None,
+        ladder_expand_delta: Optional[float] = None,
+        start_goal_delta: Optional[float] = None,
+        goal_sample_prob: Optional[float] = None,
+        return_task_path: bool = False,
+        guide_poses: Optional[List[Tuple[np.ndarray, np.ndarray]]] = None,
+        warm_start_path: Optional[List[np.ndarray]] = None,
     ) -> Optional[List[np.ndarray]]:
         """Plan a dual-arm path from start_conf to target_conf.
 
@@ -1365,17 +1817,22 @@ class TrajectoryDualCartConstrainedSolver(object):
 
         world_from_bar_start = _bar_pose_from_conf(start_conf)
         world_from_bar_target = _bar_pose_from_conf(target_conf)
+        self._goal_pose = world_from_bar_target
+        if goal_sample_prob is not None:
+            self.goal_sample_prob = float(goal_sample_prob)
+        self._guide_poses = guide_poses
 
         # Prepare confs (plural) for capsules using projector; fallback to provided confs.
         # In Stage 1 (enable_ik=False) the start/goal configs are already known; skip IK.
         robot_collision_fn = self._cached_collision_fn
 
         if enable_ik:
+            delta_start_goal = self.start_goal_delta if start_goal_delta is None else float(start_goal_delta)
             start_confs_candidates = self.projector.create_valid_confs(
                 self.robot_setup.ik_solver_right,
                 world_from_bar_start,
                 bar_from_right,
-                delta=0.0,
+                delta=delta_start_goal,
                 max_attempts=40,
                 collision_fn=robot_collision_fn,
             )
@@ -1383,7 +1840,7 @@ class TrajectoryDualCartConstrainedSolver(object):
                 self.robot_setup.ik_solver_right,
                 world_from_bar_target,
                 bar_from_right,
-                delta=0.0,
+                delta=delta_start_goal,
                 max_attempts=40,
                 collision_fn=robot_collision_fn,
             )
@@ -1401,18 +1858,28 @@ class TrajectoryDualCartConstrainedSolver(object):
 
         start_capsule = Capsule(world_from_bar_start, config=start_confs_prepared, parent=None, robot_setup=self.robot_setup, projector=self.projector)
         target_capsule = Capsule(world_from_bar_target, config=target_confs_prepared, parent=None, robot_setup=self.robot_setup, projector=self.projector)
+        self._attach_feature_vec(start_capsule)
+        self._attach_feature_vec(target_capsule)
 
         stage_label = (
-            "Stage 1 (task-space only)" if not enable_ik else
+            "Stage 1 (task-space only, no collision)" if (not enable_ik and not enable_collision) else
+            "Stage 1b (task-space + floating collision)" if (not enable_ik and enable_collision) else
             "Stage 2 (IK, no collision)" if not enable_collision else
             "Stage 3 (full)"
         )
         if verbose:
             print(f"[plan] Planning stage: {stage_label}")
 
+        if ladder_expand_delta is not None:
+            self.ladder_expand_delta = float(ladder_expand_delta)
+        if dist_metric is not None:
+            self.dist_metric = dist_metric
+        if ladder_search is not None:
+            self.ladder_search = ladder_search
+
         extend_fn = self._get_extend_fn(enable_ik=enable_ik)
         collision_fn = self._get_collision_fn(enable_ik=enable_ik, enable_collision=enable_collision)
-        distance_fn = self._get_cart_dist_fn()
+        distance_fn = self._get_cart_dist_fn(metric=self.dist_metric)
         sample_fn = self._get_sample_fn(enable_ik=False)  # sampling always pose-only
         draw_fn = self._get_draw_fn(start_capsule, target_capsule) if use_draw else None
 
@@ -1446,6 +1913,9 @@ class TrajectoryDualCartConstrainedSolver(object):
                     enforce_alternate=False,
                     profiler=profiler,
                     enable_ik=enable_ik,
+                    ladder_search=self.ladder_search,
+                    return_task_path=return_task_path,
+                    enable_collision=enable_collision,
                 )
 
             if path is None:
@@ -1464,6 +1934,18 @@ class TrajectoryDualCartConstrainedSolver(object):
                         print(f"[plan] Attempt {attempt+1}/{max_attempts}: "
                               f"RRT did not connect (task-space failure).")
                 continue
+
+            if enable_collision and warm_start_path is not None:
+                with profiler.measure("warm_start_smooth"):
+                    smooth_path = self._smooth_with_collision(warm_start_path, cspace_extend_fn, collision_fn, max_iterations=30)
+                with profiler.measure("warm_start_interp"):
+                    smooth_path = interpolate(smooth_path, cspace_extend_fn, robot_setup=self.robot_setup)
+                if smooth_path is not None and len(smooth_path) > 1:
+                    return smooth_path
+
+            if not enable_ik and return_task_path:
+                # Return the raw task-space path (poses) for diagnosis
+                return [c.pose if hasattr(c, "pose") else c for c in path]
 
             # Post-process in joint space using provided helpers
             with profiler.measure("smooth"):

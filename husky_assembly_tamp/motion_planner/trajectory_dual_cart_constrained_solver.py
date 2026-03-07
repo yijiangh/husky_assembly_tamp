@@ -1512,7 +1512,7 @@ class TrajectoryDualCartConstrainedSolver(object):
                 return True   # IK-failure sentinel → reject
             if not enable_collision:
                 return False  # Stage 2: valid config but skip robot collision
-            return joint_collision_fn(c.config[0])  # Stage 3: full check
+            return self._is_config_collision(c.config[0])  # Stage 3: cached check
 
         return fn
 
@@ -1763,6 +1763,7 @@ class TrajectoryDualCartConstrainedSolver(object):
         return_task_path: bool = False,
         guide_poses: Optional[List[Tuple[np.ndarray, np.ndarray]]] = None,
         warm_start_path: Optional[List[np.ndarray]] = None,
+        warm_start_first: bool = True,
     ) -> Optional[List[np.ndarray]]:
         """Plan a dual-arm path from start_conf to target_conf.
 
@@ -1890,6 +1891,15 @@ class TrajectoryDualCartConstrainedSolver(object):
         # Failure attribution counters
         n_rrt_failed = 0      # RRT did not connect (task-space failure)
         n_ladder_failed = 0   # RRT connected, but ladder graph found no joint path
+
+        if enable_collision and warm_start_path is not None and warm_start_first:
+            with profiler.measure("warm_start_smooth"):
+                smooth_path = self._smooth_with_collision(warm_start_path, cspace_extend_fn, collision_fn, max_iterations=50)
+            with profiler.measure("warm_start_interp"):
+                smooth_path = interpolate(smooth_path, cspace_extend_fn, robot_setup=self.robot_setup)
+            if smooth_path is not None and len(smooth_path) > 1:
+                profiler.report("plan() sub-operation breakdown (warm-start)")
+                return smooth_path
 
         for attempt in range(max_attempts):
 

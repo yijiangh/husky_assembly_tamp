@@ -297,6 +297,17 @@ def main():
         help="Goal bias probability for task-space sampling (0..1)",
     )
     parser.add_argument(
+        "--guide-bias",
+        type=float,
+        default=0.2,
+        help="Guide-pose sampling probability for Stage 3 (0..1)",
+    )
+    parser.add_argument(
+        "--warm-start-first",
+        action="store_true",
+        help="Try warm-start smoothing before running Stage 3 RRT",
+    )
+    parser.add_argument(
         "--return-task-path",
         action="store_true",
         help="In Stage 1, return the raw task-space path for diagnosis",
@@ -634,6 +645,7 @@ def _execute_plan(start_pose, end_pose, projector, grasp_bar_from_right, robot_s
         return_task_path=args.return_task_path,
         guide_poses=guide_poses,
         warm_start_path=warm_start_path,
+        warm_start_first=args.warm_start_first,
     )
     profiler.disable()
     elapsed = timer.stop("plan_path")

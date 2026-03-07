@@ -87,6 +87,7 @@ class BiRRTBackend(PlannerBackend):
             return_task_path=kwargs.get("return_task_path", False),
             guide_poses=kwargs.get("guide_poses", None),
             warm_start_path=kwargs.get("warm_start_path", None),
+            warm_start_first=kwargs.get("warm_start_first", True),
         )
 
 

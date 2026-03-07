@@ -1,0 +1,15 @@
+# Drake Model Directives for dual UR5e on Husky platform.
+#
+# This loads the calibrated Husky dual UR5e URDF (with 45-degree tilted arm
+# mounts) and welds it to the world frame. The URDF already contains the
+# world_link -> base_footprint -> base_link -> bulkhead -> arm kinematic chain.
+#
+# Additional collision objects (walls, tables, etc.) can be added here or
+# injected dynamically via the scene_exporter.
+
+directives:
+
+# Load the full Husky + dual UR5e robot
+- add_model:
+    name: husky
+    file: package://mt_husky_dual_ur5_e_moveit_config/urdf/husky_dual_ur5_e_no_base_joint_All_Calibrated.urdf

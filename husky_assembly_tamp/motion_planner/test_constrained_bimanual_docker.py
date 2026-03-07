@@ -7,7 +7,7 @@ This script:
 3. Reads and validates the response
 
 Prerequisites:
-    cd docker/constrained_bimanual && ./run.sh up
+    cd external/husky_assembly_tamp/docker/constrained_bimanual && ./run.sh up
 
 Usage:
     python -m motion_planner.test_constrained_bimanual_docker
@@ -145,7 +145,7 @@ def main():
     if not check_container_running():
         print(
             f"\nContainer '{CONTAINER_NAME}' is not running."
-            f"\nStart it with: cd docker/constrained_bimanual && ./run.sh up"
+            f"\nStart it with: cd external/husky_assembly_tamp/docker/constrained_bimanual && ./run.sh up"
         )
         sys.exit(1)
 

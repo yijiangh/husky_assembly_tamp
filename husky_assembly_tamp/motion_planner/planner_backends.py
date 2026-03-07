@@ -153,7 +153,7 @@ class ConstrainedBimanualDockerBackend(PlannerBackend):
         if not self.is_available():
             print(
                 f"ERROR: Docker container '{self.CONTAINER_NAME}' is not running.\n"
-                f"Start it: cd docker/constrained_bimanual && ./run.sh up"
+                f"Start it: cd external/husky_assembly_tamp/docker/constrained_bimanual && ./run.sh up"
             )
             return None
 

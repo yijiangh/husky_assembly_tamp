@@ -1,0 +1,9 @@
+[2026-03-16 16:52:32.260] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_debug_runner.log
+[2026-03-16 16:55:39.761] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_debug_runner.log
+[2026-03-16 16:56:06.201] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_debug_runner.log
+[2026-03-16 16:56:12.348] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_debug_runner.log
+[2026-03-16 16:56:16.236] INFO     Saved analysis CSV: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/failure_analysis_20260316_165612.csv
+[2026-03-16 16:56:16.236] INFO     Saved analysis JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/failure_analysis_20260316_165612.json
+[2026-03-16 16:56:16.236] INFO     Saved debug report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/debug_report_20260316_165612.md
+[2026-03-16 16:56:16.236] INFO     Saved profile dump: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/plan_profile_seed0_20260316_165612.prof
+[2026-03-16 16:56:16.236] INFO     Saved profile text: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/plan_profile_seed0_20260316_165612.txt

@@ -97,6 +97,62 @@ Each run provides:
 - Snakeviz launch attempt for profile browsing
 - saved trajectory JSON in `--traj-dir` as `testbench_<timestamp>_JointTrajectory.json` (joint-space paths only)
 
+## Stage 1 Benchmarking
+
+For the standalone Stage 1 pose-space planner, use:
+
+`husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py`
+
+For repeated trials, plots, profile dumps, and Markdown report generation, use:
+
+`husky_assembly_tamp/motion_planner/stage1/debug_runner.py`
+
+Run a single Stage 1 debug session:
+
+```bash
+python -m husky_assembly_tamp.motion_planner.stage1.minimal_rrt \
+  --position-res 0.1 \
+  --rotation-res 0.2 \
+  --max-time 30 \
+  --max-iterations 2000 \
+  --max-attempts 5
+```
+
+Run the Stage 1 benchmarking batch headlessly:
+
+```bash
+python -m husky_assembly_tamp.motion_planner.stage1.debug_runner \
+  --analysis-trials 10 \
+  --analysis-seed-start 0 \
+  --position-res 0.1 \
+  --rotation-res 0.2 \
+  --max-time 30 \
+  --max-iterations 2000 \
+  --max-attempts 5
+```
+
+Outputs are written under:
+
+`husky_assembly_tamp/motion_planner/stage1/reports`
+
+Expected benchmarking artifacts:
+- `failure_analysis_<timestamp>.csv`
+- `failure_analysis_<timestamp>.json`
+- `failure_distribution_<timestamp>.png`
+- `stage1_success_<timestamp>.png`
+- `runtime_by_seed_<timestamp>.png`
+- `tree_structure_stage1_seed<seed>_<timestamp>.png`
+- `planner_breakdown_<timestamp>.png`
+- `plan_profile_seed<seed>_<timestamp>.prof`
+- `plan_profile_seed<seed>_<timestamp>.txt`
+- `debug_report_<timestamp>.md`
+
+Useful options:
+- `--gui` to run the debug runner with PyBullet GUI; headless is the default
+- `--lock-renderer-during-search` to suppress live redraw during tree expansion and only visualize the result afterward
+- `--no-floating-collision` to disable floating-body collision checks
+- `--profile-seed <seed>` to choose which analysis seed gets full `cProfile` capture
+
 ## GUI Notes
 
 - Windows/Linux: full interactive sliders/buttons (`Plan Path`, start/end pose sliders, path scrubber, load trajectory).

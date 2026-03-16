@@ -6,6 +6,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BASE_COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
 SERVICE="trajectory-testbench"
 CONTAINER_WORKDIR="/workspace/husky-assembly-teleop/external/husky_assembly_tamp"
+VIRTUAL_DESKTOP_SCRIPT="/workspace/husky-assembly-teleop/external/husky_assembly_tamp/docker/trajectory_testbench/start_virtual_desktop.sh"
+VIRTUAL_DISPLAY="${VIRTUAL_DISPLAY:-:99}"
+NOVNC_URL="http://localhost:6080/vnc_lite.html?autoconnect=1&resize=remote&host=localhost&port=6080&path=websockify"
 HOST_PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 HOST_XAUTH_FILE="${HOST_XAUTH_FILE:-/tmp/husky-trajectory-testbench.xauth}"
 HOST_OS="$(uname -s)"
@@ -51,7 +54,9 @@ prepare_mac_env() {
         return
     fi
 
-    export DISPLAY="${DISPLAY:-host.docker.internal:0}"
+    # On macOS the container must talk to XQuartz over TCP via the host alias.
+    # Do not inherit a host shell DISPLAY like :0 or a local launchd socket path.
+    export DISPLAY="${HUSKY_DOCKER_DISPLAY:-host.docker.internal:0}"
 
     if [ ! -d /Applications/Utilities/XQuartz.app ] && [ ! -d /Applications/XQuartz.app ]; then
         echo "XQuartz is not installed." >&2
@@ -93,8 +98,21 @@ compose() {
 }
 
 ensure_up() {
+    local mode="${1:-host-gui}"
+    local saved_headless="$HEADLESS"
+    if [ "$mode" = "headless" ]; then
+        HEADLESS=1
+    fi
     prepare_env
+    HEADLESS="$saved_headless"
     compose up -d --build
+}
+
+ensure_virtual_desktop() {
+    ensure_up headless
+    compose exec -w "$CONTAINER_WORKDIR" "$SERVICE" \
+        bash "$VIRTUAL_DESKTOP_SCRIPT" start
+    echo "noVNC desktop: $NOVNC_URL"
 }
 
 ACTION="${1:-up}"
@@ -112,6 +130,8 @@ case "$ACTION" in
         echo "Shell: $0 shell"
         echo "Run testbench: $0 testbench -- --stage 3"
         echo "Run Stage 1: $0 stage1"
+        echo "Start browser desktop: $0 desktop-up"
+        echo "Run Stage 1 in noVNC desktop: $0 stage1-vnc"
         echo "Debug on localhost:5678: $0 debug -- --stage 3"
         echo "Debug Stage 1 on localhost:5678: $0 debug-stage1"
         echo "Headless example: HUSKY_DOCKER_HEADLESS=1 $0 stage1 -- --no-gui"
@@ -124,28 +144,53 @@ case "$ACTION" in
         ensure_up
         compose exec -w "$CONTAINER_WORKDIR" "$SERVICE" bash
         ;;
+    desktop-up)
+        ensure_virtual_desktop
+        ;;
+    desktop-down)
+        ensure_up headless
+        compose exec -w "$CONTAINER_WORKDIR" "$SERVICE" \
+            bash "$VIRTUAL_DESKTOP_SCRIPT" stop
+        ;;
+    desktop-status)
+        ensure_up headless
+        compose exec -w "$CONTAINER_WORKDIR" "$SERVICE" \
+            bash "$VIRTUAL_DESKTOP_SCRIPT" status
+        ;;
     testbench)
         ensure_up
         compose exec -w "$CONTAINER_WORKDIR" "$SERVICE" \
-            python -m husky_assembly_tamp.motion_planner.trajectory_testbench "$@"
+            python -B -m husky_assembly_tamp.motion_planner.trajectory_testbench "$@"
+        ;;
+    testbench-vnc)
+        ensure_virtual_desktop
+        compose exec -w "$CONTAINER_WORKDIR" "$SERVICE" \
+            env DISPLAY="$VIRTUAL_DISPLAY" \
+            python -B -m husky_assembly_tamp.motion_planner.trajectory_testbench "$@"
         ;;
     stage1)
         ensure_up
         compose exec -w "$CONTAINER_WORKDIR" "$SERVICE" \
-            python -m husky_assembly_tamp.motion_planner.stage1.minimal_rrt "$@"
+            python -B -m husky_assembly_tamp.motion_planner.stage1.minimal_rrt "$@"
+        ;;
+    stage1-vnc)
+        ensure_virtual_desktop
+        compose exec -w "$CONTAINER_WORKDIR" "$SERVICE" \
+            env DISPLAY="$VIRTUAL_DISPLAY" \
+            python -B -m husky_assembly_tamp.motion_planner.stage1.minimal_rrt "$@"
         ;;
     debug)
         ensure_up
         echo "Waiting for a debugger on localhost:5678 ..."
         compose exec -w "$CONTAINER_WORKDIR" "$SERVICE" \
-            python -m debugpy --listen 0.0.0.0:5678 --wait-for-client \
+            python -B -m debugpy --listen 0.0.0.0:5678 --wait-for-client \
             -m husky_assembly_tamp.motion_planner.trajectory_testbench "$@"
         ;;
     debug-stage1)
         ensure_up
         echo "Waiting for a debugger on localhost:5678 ..."
         compose exec -w "$CONTAINER_WORKDIR" "$SERVICE" \
-            python -m debugpy --listen 0.0.0.0:5678 --wait-for-client \
+            python -B -m debugpy --listen 0.0.0.0:5678 --wait-for-client \
             -m husky_assembly_tamp.motion_planner.stage1.minimal_rrt "$@"
         ;;
     logs)
@@ -158,7 +203,7 @@ case "$ACTION" in
         compose up -d
         ;;
     *)
-        echo "Usage: $0 [up|down|shell|testbench|stage1|debug|debug-stage1|logs|rebuild] [-- <module args>]" >&2
+        echo "Usage: $0 [up|down|shell|desktop-up|desktop-down|desktop-status|testbench|testbench-vnc|stage1|stage1-vnc|debug|debug-stage1|logs|rebuild] [-- <module args>]" >&2
         exit 1
         ;;
 esac

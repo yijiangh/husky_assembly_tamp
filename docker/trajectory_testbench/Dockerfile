@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     build-essential \
     ca-certificates \
+    fluxbox \
     git \
     less \
     libegl1 \
@@ -23,13 +24,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrandr2 \
     libxrender1 \
     libxxf86vm1 \
+    novnc \
     python-is-python3 \
     python3 \
     python3-dev \
     python3-pip \
     python3-venv \
+    python3-websockify \
+    x11-utils \
     x11-apps \
     xauth \
+    x11vnc \
+    xterm \
+    xvfb \
     && rm -rf /var/lib/apt/lists/*
 
 RUN python3 -m venv /opt/venv

@@ -1,0 +1,40 @@
+Mon Mar 16 16:56:12 2026    /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/plan_profile_seed0_20260316_165612.prof
+
+         269765 function calls (269687 primitive calls) in 0.274 seconds
+
+   Ordered by: cumulative time
+   List reduced from 286 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000    0.274    0.274 /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:539(run_stage1_trial)
+        1    0.000    0.000    0.195    0.195 /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:435(setup_stage1_scene)
+        1    0.000    0.000    0.186    0.186 /Users/huangyijiang/Code/husky-assembly-teleop/external/pybullet_planning/src/pybullet_planning/interfaces/env_manager/simulation.py:201(load_pybullet)
+        1    0.186    0.186    0.186    0.186 {built-in method pybullet.loadURDF}
+        1    0.000    0.000    0.078    0.078 /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:257(plan_pose_rrt)
+       47    0.001    0.000    0.049    0.001 /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:196(extend_toward)
+      614    0.000    0.000    0.038    0.000 /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:181(<lambda>)
+      614    0.003    0.000    0.038    0.000 /Users/huangyijiang/Code/husky-assembly-teleop/external/pybullet_planning/src/pybullet_planning/interfaces/robots/collision.py:557(collision_fn)
+    22484    0.004    0.000    0.034    0.000 /Users/huangyijiang/Code/husky-assembly-teleop/external/pybullet_planning/src/pybullet_planning/interfaces/robots/collision.py:92(pairwise_link_collision)
+    22484    0.002    0.000    0.030    0.000 /Users/huangyijiang/Code/husky-assembly-teleop/external/pybullet_planning/src/pybullet_planning/interfaces/robots/collision.py:32(pairwise_link_collision_info)
+    22484    0.028    0.000    0.028    0.000 {built-in method pybullet.getClosestPoints}
+       45    0.000    0.000    0.025    0.001 /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:137(nearest_node)
+       98    0.001    0.000    0.024    0.000 {built-in method builtins.min}
+    13259    0.007    0.000    0.023    0.000 /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:149(<lambda>)
+    13338    0.007    0.000    0.015    0.000 /Users/huangyijiang/miniconda3/envs/husky/lib/python3.14/site-packages/numpy/linalg/_linalg.py:2598(norm)
+      708    0.003    0.000    0.009    0.000 /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:93(pose_to_feature_vec)
+     5670    0.001    0.000    0.005    0.000 /Users/huangyijiang/Code/husky-assembly-teleop/external/pybullet_planning/src/pybullet_planning/interfaces/env_manager/pose_transformation.py:84(multiply)
+        1    0.000    0.000    0.005    0.005 /Users/huangyijiang/Code/husky-assembly-teleop/external/pybullet_planning/src/pybullet_planning/interfaces/env_manager/simulation.py:74(connect)
+        1    0.005    0.005    0.005    0.005 {built-in method pybullet.connect}
+     5670    0.004    0.000    0.004    0.000 {built-in method pybullet.multiplyTransforms}
+    13338    0.003    0.000    0.003    0.000 {method 'dot' of 'numpy.ndarray' objects}
+      938    0.001    0.000    0.002    0.000 /Users/huangyijiang/Code/husky-assembly-teleop/external/pybullet_planning/src/pybullet_planning/interfaces/task_modeling/path_interpolation.py:27(interpolate_poses)
+    19655    0.002    0.000    0.002    0.000 {built-in method numpy.asarray}
+    13338    0.001    0.000    0.002    0.000 /Users/huangyijiang/miniconda3/envs/husky/lib/python3.14/site-packages/numpy/linalg/_linalg.py:169(isComplexType)
+    13338    0.001    0.000    0.001    0.000 {method 'ravel' of 'numpy.ndarray' objects}
+       45    0.001    0.000    0.001    0.000 /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:115(sample_pose)
+    26700    0.001    0.000    0.001    0.000 {built-in method builtins.issubclass}
+    23317    0.001    0.000    0.001    0.000 {built-in method builtins.len}
+       32    0.000    0.000    0.001    0.000 /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:102(pose_distance)
+        1    0.000    0.000    0.001    0.001 /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:238(update_debug_tree)
+
+

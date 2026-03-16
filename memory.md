@@ -27,16 +27,20 @@ What `minimal_rrt.py` does:
 - loads grasp transforms from `GraspTargets` JSON
 - reconstructs start/end bar poses from FK
 - runs a clean pose-space single-tree `RRT`
-- optionally checks floating-bar collision against the fixed robot
+- by default checks floating-bar collision against the robot and all other loaded scene bodies except the moving bar and debug ghosts
 - visualizes the resulting bar path in PyBullet when GUI is enabled
 
 Important design choices in this file:
 
-- `PoseNode` only stores `pose`, `parent`, and an optional cached feature vector
+- the planner is written in a functional style closer to Caelan's `pybullet_planning` motion-planner modules
+- avoid planner classes unless they are clearly justified; prefer small plain functions with explicit arguments and lightweight node reuse from upstream helpers
+- prefer reusing existing helpers from `../pybullet_planning` instead of rewriting basic geometry / interpolation / planner utilities locally
 - planning is purely in bar pose space
 - default success criterion is: find a task-space pose path from start bar pose to goal bar pose
 - no joint-space continuity or dual-arm compatibility logic yet
 - if both left/right grasp entries exist, Stage 1 computes both reconstructed bar poses and warns if they disagree, but uses the left-arm result as the planning reference
+- Stage 1 currently applies a debug-only world-frame start offset `[-0.5, 0.0, 0.5]` to force a non-trivial path; this intentionally breaks robot/bar consistency and is expected to be removed later
+- the floating bar is currently modeled as a box with the cylinder's bounding dimensions `(2r, 2r, L)` and feature points are the explicit local box corners
 
 ## Docker Feedback Loop
 
@@ -46,15 +50,29 @@ Updated files:
 
 - `docker/trajectory_testbench/run.sh`
 - `docker/trajectory_testbench/README.md`
+- `docker/trajectory_testbench/Dockerfile`
+- `docker/trajectory_testbench/docker-compose.yml`
+- `docker/trajectory_testbench/start_virtual_desktop.sh`
 
 New runner actions:
 
 - `./run.sh stage1`
 - `./run.sh debug-stage1`
+- `./run.sh desktop-up`
+- `./run.sh desktop-down`
+- `./run.sh desktop-status`
+- `./run.sh stage1-vnc`
+- `./run.sh testbench-vnc`
 
 New headless mode:
 
 - set `HUSKY_DOCKER_HEADLESS=1` to skip XQuartz / host GUI checks
+
+New browser-based GUI mode:
+
+- the container can now host its own X desktop with `Xvfb + fluxbox + x11vnc + noVNC`
+- noVNC is exposed at `http://localhost:6080/vnc.html`
+- this is the preferred GUI path on macOS because XQuartz + container OpenGL was not reliable for PyBullet
 
 ## Validated Command
 
@@ -78,11 +96,40 @@ floating collision: off
 Found Stage 1 pose path with 12 waypoints.
 ```
 
+## noVNC Validation
+
+Validated command:
+
+```bash
+./docker/trajectory_testbench/run.sh desktop-up
+```
+
+Observed result:
+
+- updated image built successfully with the desktop stack packages
+- container started successfully
+- desktop services started successfully:
+  - `xvfb`
+  - `fluxbox`
+  - `x11vnc`
+  - `novnc`
+- `curl -I http://localhost:6080/vnc.html` returned `HTTP/1.1 200 OK`
+
+Recommended GUI flow now:
+
+```bash
+./docker/trajectory_testbench/run.sh desktop-up
+open http://localhost:6080/vnc.html
+./docker/trajectory_testbench/run.sh stage1-vnc
+```
+
 ## Known Constraints
 
 - Local host sandbox here could not import `pybullet` or `pybullet_planning`
 - Docker container has the needed runtime and is the preferred validation path
 - `run.sh` originally assumed GUI support even for headless runs; that has been fixed with `HUSKY_DOCKER_HEADLESS=1`
+- macOS XQuartz forwarding no longer matters for noVNC runs
+- `run.sh` now uses `python -B -m ...` so the container ignores stale `.pyc` files and executes the current host-mounted source
 
 ## Likely Next Steps
 
@@ -101,3 +148,52 @@ If resuming later, read these first:
 - `husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py`
 - `docker/trajectory_testbench/run.sh`
 - `docker/trajectory_testbench/README.md`
+
+## Session Addendum: Stage 1 Preferences And Tooling
+
+- Coding style preference: keep `husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py` focused on the core algorithm plus a thin single-run entrypoint. Avoid planner classes when plain functions are sufficient. Prefer Caelan-style functional structure and reuse helpers from `../pybullet_planning` whenever possible.
+- `minimal_rrt.py` now owns the single-run Stage 1 workflow:
+  - direct runnable `main()`
+  - scene setup / teardown
+  - `run_stage1_trial(...)`
+  - visualization loop
+  - core planner `plan_pose_rrt(...)`
+- `husky_assembly_tamp/motion_planner/stage1/debug_runner.py` is the heavier wrapper for benchmarking / reporting. It should call into `minimal_rrt.py`, not the other way around.
+
+## Session Addendum: Stage 1 Planner Decisions
+
+- Replaced local quaternion helper usage with `pybullet_planning` helpers where appropriate:
+  - `pp.is_pose_close`
+  - `pp.interpolate_poses`
+  - `pp.quat_angle_between`
+- The floating bar geometry is currently modeled as a box with the cylinder bounding dimensions `(2r, 2r, L)`.
+- Feature points are explicit local box corners, transformed by pose; do not recover them from AABB each time.
+- Floating collision is enabled by default.
+- Floating-body collision now checks the bar against all loaded scene bodies except the moving bar and the debug ghosts, not just the robot.
+- Stage 1 currently uses a debug-only start pose offset in world coordinates `[-0.5, 0.0, 0.5]` to force a non-trivial path. This intentionally breaks consistency with the start robot configuration and is expected to be removed later.
+
+## Session Addendum: Exposed Hyperparameters
+
+- `position_res` and `rotation_res` are exposed at the highest level in both Stage 1 entrypoints.
+- The CLI/help text should state units explicitly:
+  - `position_res`: meters
+  - `rotation_res`: radians
+- There is a `--lock-renderer-during-search` option for GUI runs. This wraps the search in `pp.LockRenderer()` so live tree redraw is suppressed during planning, then the result can be visualized afterward.
+
+## Session Addendum: Stage 1 Benchmarking / Reports
+
+- `husky_assembly_tamp/motion_planner/stage1/debug_runner.py` now supports batch analysis with `--analysis-trials`.
+- By default `debug_runner.py` is headless; use `--gui` to enable PyBullet GUI.
+- The runner is intended to generate artifacts similar in coverage to the archived report under `husky_assembly_tamp/motion_planner/zh_archive/reports/debug_report_20260310_121640.md`.
+- Current Stage 1 analysis artifacts include:
+  - `failure_analysis_<timestamp>.csv`
+  - `failure_analysis_<timestamp>.json`
+  - `failure_distribution_<timestamp>.png`
+  - `stage1_success_<timestamp>.png`
+  - `runtime_by_seed_<timestamp>.png`
+  - `tree_structure_stage1_seed<seed>_<timestamp>.png`
+  - `planner_breakdown_<timestamp>.png`
+  - `plan_profile_seed<seed>_<timestamp>.prof`
+  - `plan_profile_seed<seed>_<timestamp>.txt`
+  - `debug_report_<timestamp>.md`
+- The benchmarking instructions were added to the root `README.md` under `Stage 1 Benchmarking`.

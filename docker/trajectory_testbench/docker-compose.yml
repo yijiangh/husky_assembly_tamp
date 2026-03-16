@@ -18,6 +18,8 @@ services:
       - ${HOST_PROJECT_ROOT}:/workspace/husky-assembly-teleop
     ports:
       - "5678:5678"
+      - "5900:5900"
+      - "6080:6080"
     shm_size: "1gb"
     stdin_open: true
     tty: true

@@ -71,7 +71,7 @@ New headless mode:
 New browser-based GUI mode:
 
 - the container can now host its own X desktop with `Xvfb + fluxbox + x11vnc + noVNC`
-- noVNC is exposed at `http://localhost:6080/vnc.html`
+- noVNC is exposed at `http://localhost:6080/vnc_lite.html?autoconnect=1&resize=remote&host=localhost&port=6080&path=websockify`
 - this is the preferred GUI path on macOS because XQuartz + container OpenGL was not reliable for PyBullet
 
 ## Validated Command
@@ -113,13 +113,13 @@ Observed result:
   - `fluxbox`
   - `x11vnc`
   - `novnc`
-- `curl -I http://localhost:6080/vnc.html` returned `HTTP/1.1 200 OK`
+- `curl -I "http://localhost:6080/vnc_lite.html?autoconnect=1&resize=remote&host=localhost&port=6080&path=websockify"` returned `HTTP/1.1 200 OK`
 
 Recommended GUI flow now:
 
 ```bash
 ./docker/trajectory_testbench/run.sh desktop-up
-open http://localhost:6080/vnc.html
+open "http://localhost:6080/vnc_lite.html?autoconnect=1&resize=remote&host=localhost&port=6080&path=websockify"
 ./docker/trajectory_testbench/run.sh stage1-vnc
 ```
 

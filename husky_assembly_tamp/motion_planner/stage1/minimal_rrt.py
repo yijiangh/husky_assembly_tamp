@@ -660,7 +660,7 @@ def main() -> None:
         action="store_true",
         help="Lock the PyBullet renderer while the tree is being expanded, then show the result afterward",
     )
-    parser.set_defaults(floating_collision=True)
+    parser.set_defaults(floating_collision=True, lock_renderer_during_search=True)
     args = parser.parse_args()
 
     use_gui = not args.no_gui

@@ -13,12 +13,14 @@ Usage:
 
 import argparse
 import cProfile
+import csv
 import json
 import os
 import subprocess
 import pstats
 import sys
 import time
+from typing import Optional, Sequence, Tuple
 
 import numpy as np
 import pybullet
@@ -37,11 +39,17 @@ from husky_assembly_tamp.robot.robot_setup import (
 )
 import husky_assembly_tamp.motion_planner.trajectory_dual_cart_constrained_solver as solver_mod
 from husky_assembly_tamp.motion_planner.planner_backends import get_backend, list_backends
+from husky_assembly_tamp.motion_planner.trajectory_dual_cart_constrained_solver import (
+    TrajectoryDualCartConstrainedSolver,
+)
 from husky_assembly_tamp.utils.util import normalize_angles, setup_logger, reinit_logger_stream
 
 
 # Global logger instance
 logger = setup_logger("trajectory_testbench")
+
+
+PoseLike = Tuple[Sequence[float], Sequence[float]]
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +234,53 @@ def scan_trajectory_files(directory):
     return files
 
 
+def _is_pose_waypoint(wp):
+    """True if waypoint looks like a pose tuple: (pos[3], quat[4])."""
+    if not isinstance(wp, (list, tuple)) or len(wp) != 2:
+        return False
+    try:
+        pos = np.asarray(wp[0], dtype=float).reshape(-1)
+        quat = np.asarray(wp[1], dtype=float).reshape(-1)
+    except Exception:
+        return False
+    return pos.shape[0] == 3 and quat.shape[0] == 4
+
+
+def _is_joint_waypoint(wp):
+    """True if waypoint looks like a full dual-arm joint vector."""
+    try:
+        arr = np.asarray(wp, dtype=float).reshape(-1)
+    except Exception:
+        return False
+    return arr.shape[0] == len(HUSKY_DUAL_ARM_JOINT_NAMES)
+
+
+def _apply_path_waypoint(
+    waypoint,
+    robot_setup: RobotSetup,
+    grasp_bar_from_left: Optional[PoseLike],
+    bar: int,
+):
+    """Apply path waypoint for visualization.
+
+    - Joint waypoint: set robot joints, then update bar from FK
+    - Pose waypoint: set bar pose directly (Stage 1 task-space path)
+    """
+    if _is_joint_waypoint(waypoint):
+        robot_setup.set_joint_positions(robot_setup.arm_joints, waypoint)
+        if grasp_bar_from_left is not None:
+            world_from_tool0 = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_left)
+            bar_pose = pp.multiply(world_from_tool0, pp.invert(grasp_bar_from_left))
+            pp.set_pose(bar, bar_pose)
+        return
+
+    if _is_pose_waypoint(waypoint):
+        pp.set_pose(bar, waypoint)
+        return
+
+    logger.warning(f"Unsupported waypoint format in path playback: {type(waypoint)}")
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -259,7 +314,12 @@ def main():
         type=int,
         choices=[1, 2, 3],
         default=3,
-        help="Planning stage: 1=task-space only (no collision), 2=IK on (no collision), 3=full",
+        help="Planning stage: 1=task-space + floating collision (Stage 1b default), 2=IK on (no collision), 3=full",
+    )
+    parser.add_argument(
+        "--stage1-no-collision",
+        action="store_true",
+        help="When --stage 1, disable floating-bar collision and run legacy Stage 1 (task-space only)",
     )
     parser.add_argument(
         "--dist-metric",
@@ -330,8 +390,53 @@ def main():
         default=5,
         help="Number of random restarts",
     )
+    parser.add_argument(
+        "--smooth-iterations",
+        type=int,
+        default=10,
+        help="Joint-space shortcut smoothing iterations (set 0 to disable)",
+    )
+    parser.add_argument(
+        "--no-smoothing",
+        action="store_true",
+        help="Disable joint-space shortcut smoothing",
+    )
+    parser.add_argument(
+        "--random-seed",
+        type=int,
+        default=None,
+        help="Random seed for planner sampling (default: random)",
+    )
+    parser.add_argument(
+        "--failure-analysis",
+        action="store_true",
+        help="Run multi-seed failure-distribution and per-stage comparison analysis",
+    )
+    parser.add_argument(
+        "--analysis-trials",
+        type=int,
+        default=30,
+        help="Number of seeds/attempts to evaluate in failure analysis mode",
+    )
+    parser.add_argument(
+        "--analysis-seed-start",
+        type=int,
+        default=0,
+        help="Start seed for failure analysis (seeds = start..start+trials-1)",
+    )
+    parser.add_argument(
+        "--analysis-outdir",
+        type=str,
+        default=os.path.join(os.path.dirname(__file__), "reports"),
+        help="Output directory for failure-analysis CSV/JSON/plots",
+    )
+    parser.add_argument(
+        "--analysis-no-plot",
+        action="store_true",
+        help="Skip generating PNG plots for failure-analysis",
+    )
     args = parser.parse_args()
-    backend = get_backend(args.planner)
+    backend: TrajectoryDualCartConstrainedSolver = get_backend(args.planner)
     logger.info(f"Planner backend: {backend.name} — {backend.description}")
     timer = Timer()
 
@@ -398,9 +503,9 @@ def main():
     start_defaults = [0.4, 0.0, 0.75, np.pi, np.pi / 2, np.pi / 2]
     end_defaults = [0.3, 0.2, 0.6, np.pi, np.pi / 2, 0.0]
 
-    grasp_bar_from_right = None
-    grasp_bar_from_left = None
-    projector = None
+    grasp_bar_from_right: Optional[PoseLike] = None
+    grasp_bar_from_left: Optional[PoseLike] = None
+    projector: Optional[DualArmProjection] = None
     solver = None
 
     start_confs = None
@@ -530,7 +635,17 @@ def main():
     pp.disconnect()
 
 
-def _execute_plan(start_pose, end_pose, projector, grasp_bar_from_right, robot_setup, backend, timer, traj_dir, args):
+def _execute_plan(
+    start_pose: PoseLike,
+    end_pose: PoseLike,
+    projector: DualArmProjection,
+    grasp_bar_from_right: PoseLike,
+    robot_setup: RobotSetup,
+    backend: TrajectoryDualCartConstrainedSolver,
+    timer: Timer,
+    traj_dir: str,
+    args: argparse.Namespace,
+):
     """Shared IK + planning core used by both headless and interactive GUI paths.
 
     Returns
@@ -538,54 +653,66 @@ def _execute_plan(start_pose, end_pose, projector, grasp_bar_from_right, robot_s
     tuple: (path, start_confs, end_confs)
         path is None if planning failed; start_confs/end_confs are None if IK failed.
     """
-    collision_fn = robot_setup.create_collision_fn(obstacle_bodies=robot_setup.obstacles)
-
-    # Solve Start IK
-    timer.start("solve_start_ik")
-    with pp.LockRenderer():
-        start_confs = projector.create_valid_confs(
-            robot_setup.ik_solver_right,
-            start_pose,
-            grasp_bar_from_right,
-            delta=np.pi,
-            max_attempts=20,
-            collision_fn=collision_fn,
-        )
-    elapsed = timer.stop("solve_start_ik")
-    if start_confs is not None:
-        start_confs = normalize_angles(start_confs)
-        logger.info(f"Start IK: {len(start_confs)} solutions found in {elapsed:.3f}s")
-    else:
-        logger.warning(f"Start IK: no solution found ({elapsed:.3f}s)")
-        return None, None, None
-
-    # Solve End IK
-    timer.start("solve_end_ik")
-    with pp.LockRenderer():
-        end_confs = projector.create_valid_confs(
-            robot_setup.ik_solver_right,
-            end_pose,
-            grasp_bar_from_right,
-            delta=np.pi,
-            max_attempts=20,
-            collision_fn=collision_fn,
-        )
-    elapsed = timer.stop("solve_end_ik")
-    if end_confs is not None:
-        end_confs = normalize_angles(end_confs)
-        logger.info(f"End IK: {len(end_confs)} solutions found in {elapsed:.3f}s")
-    else:
-        logger.warning(f"End IK: no solution found ({elapsed:.3f}s)")
-        return None, start_confs, None
-
-    start_conf = start_confs[0]
-    end_conf = end_confs[0]
-
     enable_ik = args.stage >= 2
     enable_collision = args.stage >= 3
+    if args.stage == 1:
+        enable_collision = (not args.stage1_no_collision)
+    if enable_ik:
+        collision_fn = robot_setup.create_collision_fn(obstacle_bodies=robot_setup.obstacles)
+
+        # Solve Start IK
+        timer.start("solve_start_ik")
+        with pp.LockRenderer():
+            start_confs = projector.create_valid_confs(
+                robot_setup.ik_solver_right,
+                start_pose,
+                grasp_bar_from_right,
+                delta=np.pi,
+                max_attempts=20,
+                collision_fn=collision_fn,
+            )
+        elapsed = timer.stop("solve_start_ik")
+        if start_confs is not None:
+            start_confs = normalize_angles(start_confs)
+            logger.info(f"Start IK: {len(start_confs)} solutions found in {elapsed:.3f}s")
+        else:
+            logger.warning(f"Start IK: no solution found ({elapsed:.3f}s)")
+            return None, None, None
+
+        # Solve End IK
+        timer.start("solve_end_ik")
+        with pp.LockRenderer():
+            end_confs = projector.create_valid_confs(
+                robot_setup.ik_solver_right,
+                end_pose,
+                grasp_bar_from_right,
+                delta=np.pi,
+                max_attempts=20,
+                collision_fn=collision_fn,
+            )
+        elapsed = timer.stop("solve_end_ik")
+        if end_confs is not None:
+            end_confs = normalize_angles(end_confs)
+            logger.info(f"End IK: {len(end_confs)} solutions found in {elapsed:.3f}s")
+        else:
+            logger.warning(f"End IK: no solution found ({elapsed:.3f}s)")
+            return None, start_confs, None
+
+        start_conf = start_confs[0]
+        end_conf = end_confs[0]
+    else:
+        # Stage 1: no IK needed for endpoints; keep current robot configuration as a seed.
+        q_now = np.asarray(pp.get_joint_positions(robot_setup.robot, robot_setup.arm_joints), dtype=float)
+        start_confs = [q_now]
+        end_confs = [q_now]
+        start_conf = q_now
+        end_conf = q_now
+        logger.info("Stage 1: skipping start/end IK solve; planning directly in task space.")
+
     logger.info(
         f"Planning path with '{backend.name}' "
-        f"(stage={args.stage}, metric={args.dist_metric}, ladder={args.ladder_search})..."
+        f"(stage={args.stage}{'b' if (args.stage == 1 and enable_collision) else ''}, "
+        f"metric={args.dist_metric}, ladder={args.ladder_search})..."
     )
     timer.start("plan_path")
     profile_path = os.path.join(os.path.dirname(__file__), "plan_profile.prof")
@@ -606,13 +733,16 @@ def _execute_plan(start_pose, end_pose, projector, grasp_bar_from_right, robot_s
             max_attempts=max(1, args.max_attempts // 2),
             use_draw=False,
             verbose=False,
+            # key flags
             enable_ik=True,
             enable_collision=False,
+            ####
             dist_metric=args.dist_metric,
             ladder_search=args.ladder_search,
             ladder_expand_delta=args.expand_delta,
             start_goal_delta=args.start_goal_delta,
             goal_sample_prob=args.goal_bias,
+            random_seed=args.random_seed,
         )
         if warm_start_path is not None:
             guide_poses = []
@@ -646,6 +776,10 @@ def _execute_plan(start_pose, end_pose, projector, grasp_bar_from_right, robot_s
         guide_poses=guide_poses,
         warm_start_path=warm_start_path,
         warm_start_first=args.warm_start_first,
+        smooth_iterations=(0 if args.no_smoothing else args.smooth_iterations),
+        start_bar_pose=(start_pose if not enable_ik else None),
+        target_bar_pose=(end_pose if not enable_ik else None),
+        random_seed=args.random_seed,
     )
     profiler.disable()
     elapsed = timer.stop("plan_path")
@@ -676,14 +810,288 @@ def _execute_plan(start_pose, end_pose, projector, grasp_bar_from_right, robot_s
     return path, start_confs, end_confs
 
 
+def _run_failure_distribution_analysis(
+    start_pose: PoseLike,
+    end_pose: PoseLike,
+    projector: DualArmProjection,
+    grasp_bar_from_right: PoseLike,
+    robot_setup: RobotSetup,
+    backend: TrajectoryDualCartConstrainedSolver,
+    args: argparse.Namespace,
+):
+    """Run multi-seed stage comparison and classify dominant failure source."""
+    if args.analysis_trials <= 0:
+        logger.warning("failure-analysis requested with non-positive --analysis-trials; skipping.")
+        return
+    os.makedirs(args.analysis_outdir, exist_ok=True)
+
+    # Endpoint IK is shared across Stage 2/3 to isolate planner-stage effects from endpoint setup jitter.
+    collision_fn = robot_setup.create_collision_fn(obstacle_bodies=robot_setup.obstacles)
+    with pp.LockRenderer():
+        start_confs = projector.create_valid_confs(
+            robot_setup.ik_solver_right,
+            start_pose,
+            grasp_bar_from_right,
+            delta=np.pi,
+            max_attempts=40,
+            collision_fn=collision_fn,
+        )
+        end_confs = projector.create_valid_confs(
+            robot_setup.ik_solver_right,
+            end_pose,
+            grasp_bar_from_right,
+            delta=np.pi,
+            max_attempts=40,
+            collision_fn=collision_fn,
+        )
+
+    if start_confs is None or end_confs is None:
+        logger.error("Failure analysis aborted: endpoint IK failed (cannot evaluate Stage 2/3).")
+        return
+
+    start_conf = normalize_angles(start_confs)[0]
+    end_conf = normalize_angles(end_confs)[0]
+
+    def _plot_tree_3d(tree_data, stage_label, out_path):
+        t1 = tree_data.get("tree1", {"points": [], "edges": []})
+        t2 = tree_data.get("tree2", {"points": [], "edges": []})
+        p1 = np.asarray(t1.get("points", []), dtype=float).reshape((-1, 3)) if t1.get("points") else np.zeros((0, 3))
+        p2 = np.asarray(t2.get("points", []), dtype=float).reshape((-1, 3)) if t2.get("points") else np.zeros((0, 3))
+        e1 = t1.get("edges", [])
+        e2 = t2.get("edges", [])
+
+        fig = plt.figure(figsize=(8, 6))
+        ax = fig.add_subplot(111, projection="3d")
+        if len(p1) > 0:
+            ax.scatter(p1[:, 0], p1[:, 1], p1[:, 2], s=6, c="#d62728", alpha=0.7, label="tree A")
+            for i, j in e1:
+                ax.plot([p1[i, 0], p1[j, 0]], [p1[i, 1], p1[j, 1]], [p1[i, 2], p1[j, 2]], c="#d62728", alpha=0.35, linewidth=0.8)
+        if len(p2) > 0:
+            ax.scatter(p2[:, 0], p2[:, 1], p2[:, 2], s=6, c="#1f77b4", alpha=0.7, label="tree B")
+            for i, j in e2:
+                ax.plot([p2[i, 0], p2[j, 0]], [p2[i, 1], p2[j, 1]], [p2[i, 2], p2[j, 2]], c="#1f77b4", alpha=0.35, linewidth=0.8)
+
+        sp = np.asarray(tree_data.get("start_pose", start_pose[0]), dtype=float)
+        gp = np.asarray(tree_data.get("goal_pose", end_pose[0]), dtype=float)
+        ax.scatter([sp[0]], [sp[1]], [sp[2]], c="green", s=80, marker="o", label="start")
+        ax.scatter([gp[0]], [gp[1]], [gp[2]], c="black", s=80, marker="x", label="goal")
+
+        ax.set_xlabel("x")
+        ax.set_ylabel("y")
+        ax.set_zlabel("z")
+        ax.set_title(f"{stage_label} tree structure (seed {args.analysis_seed_start})")
+        ax.legend(loc="best")
+        plt.tight_layout()
+        plt.savefig(out_path, dpi=180)
+        plt.close()
+
+    def _plan_stage(stage_id, seed, collect_tree=False):
+        enable_ik = stage_id >= 2
+        enable_collision = stage_id >= 3
+        if stage_id == 1:
+            enable_collision = (not args.stage1_no_collision)
+        t0 = time.perf_counter()
+        diagnostics = {}
+        tree_data = {} if collect_tree else None
+        path = backend.plan(
+            start_conf=start_conf,
+            goal_conf=end_conf,
+            robot_setup=robot_setup,
+            projector=projector,
+            max_time=args.max_time,
+            max_iterations=args.max_iterations,
+            max_attempts=1,
+            use_draw=False,
+            verbose=False,
+            enable_ik=enable_ik,
+            enable_collision=enable_collision,
+            dist_metric=args.dist_metric,
+            ladder_search=args.ladder_search,
+            ladder_expand_delta=args.expand_delta,
+            start_goal_delta=args.start_goal_delta,
+            goal_sample_prob=args.goal_bias,
+            return_task_path=(stage_id == 1),
+            guide_poses=None,
+            warm_start_path=None,
+            warm_start_first=False,
+            smooth_iterations=0,
+            start_bar_pose=(start_pose if stage_id == 1 else None),
+            target_bar_pose=(end_pose if stage_id == 1 else None),
+            random_seed=seed,
+            diagnostics_out=diagnostics,
+            debug_tree_out=tree_data,
+        )
+        dt = time.perf_counter() - t0
+        return path, dt, diagnostics, tree_data
+
+    records = []
+    counts = {
+        "success": 0,
+        "task_space_failure": 0,
+        "ik_failure": 0,
+        "collision_failure": 0,
+    }
+    stage_success = {1: 0, 2: 0, 3: 0}
+    stage_runtime_sums = {1: 0.0, 2: 0.0, 3: 0.0}
+
+    for i in range(args.analysis_trials):
+        seed = args.analysis_seed_start + i
+        s1_path, t1, s1_diag, _ = _plan_stage(1, seed)
+        s2_path, t2, s2_diag, _ = _plan_stage(2, seed)
+        s3_path, t3, s3_diag, _ = _plan_stage(3, seed)
+
+        s1_ok = s1_path is not None
+        s2_ok = s2_path is not None
+        s3_ok = s3_path is not None
+
+        stage_success[1] += int(s1_ok)
+        stage_success[2] += int(s2_ok)
+        stage_success[3] += int(s3_ok)
+        stage_runtime_sums[1] += t1
+        stage_runtime_sums[2] += t2
+        stage_runtime_sums[3] += t3
+
+        if not s1_ok:
+            category = "task_space_failure"
+        elif not s2_ok:
+            category = "ik_failure"
+        elif not s3_ok:
+            category = "collision_failure"
+        else:
+            category = "success"
+        counts[category] += 1
+
+        records.append(
+            {
+                "seed": seed,
+                "stage1_success": int(s1_ok),
+                "stage2_success": int(s2_ok),
+                "stage3_success": int(s3_ok),
+                "stage1_runtime_s": round(t1, 4),
+                "stage2_runtime_s": round(t2, 4),
+                "stage3_runtime_s": round(t3, 4),
+                "stage1_rrt_failed": int(s1_diag.get("rrt_failed", 0)),
+                "stage2_rrt_failed": int(s2_diag.get("rrt_failed", 0)),
+                "stage3_rrt_failed": int(s3_diag.get("rrt_failed", 0)),
+                "stage2_ladder_failed": int(s2_diag.get("ladder_failed", 0)),
+                "stage3_ladder_failed": int(s3_diag.get("ladder_failed", 0)),
+                "category": category,
+            }
+        )
+
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    csv_path = os.path.join(args.analysis_outdir, f"failure_analysis_{timestamp}.csv")
+    json_path = os.path.join(args.analysis_outdir, f"failure_analysis_{timestamp}.json")
+
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(records[0].keys()))
+        writer.writeheader()
+        writer.writerows(records)
+
+    summary = {
+        "trials": args.analysis_trials,
+        "seed_start": args.analysis_seed_start,
+        "max_time_per_attempt_s": args.max_time,
+        "counts": counts,
+        "stage_success_rate": {
+            "stage1": stage_success[1] / max(1, args.analysis_trials),
+            "stage2": stage_success[2] / max(1, args.analysis_trials),
+            "stage3": stage_success[3] / max(1, args.analysis_trials),
+        },
+        "stage_avg_runtime_s": {
+            "stage1": stage_runtime_sums[1] / max(1, args.analysis_trials),
+            "stage2": stage_runtime_sums[2] / max(1, args.analysis_trials),
+            "stage3": stage_runtime_sums[3] / max(1, args.analysis_trials),
+        },
+    }
+    with open(json_path, "w") as f:
+        json.dump({"summary": summary, "records": records}, f, indent=2)
+
+    logger.info("Failure analysis summary:")
+    logger.info(f"  task_space_failure: {counts['task_space_failure']}")
+    logger.info(f"  ik_failure:         {counts['ik_failure']}")
+    logger.info(f"  collision_failure:  {counts['collision_failure']}")
+    logger.info(f"  success:            {counts['success']}")
+    logger.info(
+        "  stage success rates: "
+        f"S1={summary['stage_success_rate']['stage1']:.2%}, "
+        f"S2={summary['stage_success_rate']['stage2']:.2%}, "
+        f"S3={summary['stage_success_rate']['stage3']:.2%}"
+    )
+    logger.info(f"Saved analysis CSV: {csv_path}")
+    logger.info(f"Saved analysis JSON: {json_path}")
+
+    if args.analysis_no_plot:
+        return
+
+    try:
+        import matplotlib.pyplot as plt
+    except Exception as e:
+        logger.warning(f"Skipping plots (matplotlib unavailable): {e}")
+        return
+
+    fig1_path = os.path.join(args.analysis_outdir, f"failure_distribution_{timestamp}.png")
+    fig2_path = os.path.join(args.analysis_outdir, f"stage_success_{timestamp}.png")
+
+    labels = ["task_space_failure", "ik_failure", "collision_failure", "success"]
+    vals = [counts[k] for k in labels]
+    plt.figure(figsize=(7, 4))
+    plt.bar(labels, vals, color=["#d9534f", "#f0ad4e", "#5bc0de", "#5cb85c"])
+    plt.ylabel("Count")
+    plt.title("Failure Distribution Across Seeds")
+    plt.xticks(rotation=15, ha="right")
+    plt.tight_layout()
+    plt.savefig(fig1_path, dpi=180)
+    plt.close()
+
+    stage_labels = ["Stage 1", "Stage 2", "Stage 3"]
+    stage_vals = [
+        summary["stage_success_rate"]["stage1"],
+        summary["stage_success_rate"]["stage2"],
+        summary["stage_success_rate"]["stage3"],
+    ]
+    plt.figure(figsize=(6, 4))
+    plt.bar(stage_labels, stage_vals, color=["#777777", "#337ab7", "#5cb85c"])
+    plt.ylim(0.0, 1.0)
+    plt.ylabel("Success Rate")
+    plt.title("Per-Stage Success Rate")
+    plt.tight_layout()
+    plt.savefig(fig2_path, dpi=180)
+    plt.close()
+
+    logger.info(f"Saved plot: {fig1_path}")
+    logger.info(f"Saved plot: {fig2_path}")
+
+    # Tree-structure comparison using the first seed in this analysis batch
+    for stage_id, label in [(1, "Stage 1"), (2, "Stage 2"), (3, "Stage 3")]:
+        _, _, _, tree_data = _plan_stage(stage_id, args.analysis_seed_start, collect_tree=True)
+        if tree_data is None:
+            continue
+        tree_path = os.path.join(
+            args.analysis_outdir,
+            f"tree_structure_stage{stage_id}_seed{args.analysis_seed_start}_{timestamp}.png",
+        )
+        _plot_tree_3d(tree_data, label, tree_path)
+        logger.info(f"Saved tree plot: {tree_path}")
+
+
 def _run_planning_headless(
-    projector, grasp_bar_from_right, robot_setup, backend, timer,
-    start_defaults, end_defaults, args, bar_height,
+    projector: Optional[DualArmProjection],
+    grasp_bar_from_right: Optional[PoseLike],
+    robot_setup: RobotSetup,
+    backend: TrajectoryDualCartConstrainedSolver,
+    timer: Timer,
+    start_defaults: Sequence[float],
+    end_defaults: Sequence[float],
+    args: argparse.Namespace,
+    bar_height: float,
 ):
     """Derive poses from loaded JSON defaults and auto-run planning (macOS path)."""
     if projector is None or grasp_bar_from_right is None:
         logger.error("Cannot auto-plan: grasp data not loaded. Provide --grasp-json.")
         return None
+    assert projector is not None
+    assert grasp_bar_from_right is not None
 
     start_pose = pp.Pose(point=start_defaults[:3], euler=pp.Euler(*start_defaults[3:]))
     end_pose = pp.Pose(point=end_defaults[:3], euler=pp.Euler(*end_defaults[3:]))
@@ -694,6 +1102,12 @@ def _run_planning_headless(
     pp.set_pose(ghost_start, start_pose)
     pp.set_pose(ghost_end, end_pose)
 
+    if args.failure_analysis:
+        _run_failure_distribution_analysis(
+            start_pose, end_pose, projector, grasp_bar_from_right, robot_setup, backend, args
+        )
+        return None
+
     path, _, _ = _execute_plan(
         start_pose, end_pose, projector, grasp_bar_from_right,
         robot_setup, backend, timer, args.traj_dir, args,
@@ -701,7 +1115,13 @@ def _run_planning_headless(
     return path
 
 
-def _run_visualization_loop(path, robot_setup, grasp_bar_from_left, bar, cid):
+def _run_visualization_loop(
+    path,
+    robot_setup: RobotSetup,
+    grasp_bar_from_left: Optional[PoseLike],
+    bar: int,
+    cid: int,
+):
     """Minimal GUI loop for path playback only (macOS path).
 
     Uses a single 'Path t' slider to scrub through the trajectory.
@@ -726,11 +1146,7 @@ def _run_visualization_loop(path, robot_setup, grasp_bar_from_left, bar, cid):
             idx = max(0, min(idx, len(path) - 1))
             if idx != path_current_idx:
                 path_current_idx = idx
-                robot_setup.set_joint_positions(robot_setup.arm_joints, path[idx])
-                if grasp_bar_from_left is not None:
-                    world_from_tool0 = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_left)
-                    bar_pose = pp.multiply(world_from_tool0, pp.invert(grasp_bar_from_left))
-                    pp.set_pose(bar, bar_pose)
+                _apply_path_waypoint(path[idx], robot_setup, grasp_bar_from_left, bar)
 
             time.sleep(0.01)
         except KeyboardInterrupt:
@@ -739,9 +1155,17 @@ def _run_visualization_loop(path, robot_setup, grasp_bar_from_left, bar, cid):
 
 
 def _run_interactive_gui(
-    projector, grasp_bar_from_right, grasp_bar_from_left, robot_setup, backend, timer,
+    projector: Optional[DualArmProjection],
+    grasp_bar_from_right: Optional[PoseLike],
+    grasp_bar_from_left: Optional[PoseLike],
+    robot_setup: RobotSetup,
+    backend: TrajectoryDualCartConstrainedSolver,
+    timer: Timer,
     start_defaults, end_defaults, start_confs, end_confs, path, path_current_idx,
-    args, bar, bar_height, cid,
+    args: argparse.Namespace,
+    bar: int,
+    bar_height: float,
+    cid: int,
 ):
     """Full interactive GUI with buttons and sliders (Windows/Linux path)."""
     logger.info("=== GUI Controls ===")
@@ -843,11 +1267,7 @@ def _run_interactive_gui(
                 idx = max(0, min(idx, len(path) - 1))
                 if idx != path_current_idx:
                     path_current_idx = idx
-                    robot_setup.set_joint_positions(robot_setup.arm_joints, path[idx])
-                    if grasp_bar_from_left is not None:
-                        world_from_tool0 = pp.get_link_pose(robot_setup.robot, robot_setup.tool_link_left)
-                        bar_pose = pp.multiply(world_from_tool0, pp.invert(grasp_bar_from_left))
-                        pp.set_pose(bar, bar_pose)
+                    _apply_path_waypoint(path[idx], robot_setup, grasp_bar_from_left, bar)
 
             time.sleep(0.01)
 

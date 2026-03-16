@@ -673,8 +673,47 @@ def rrt_connect_capsule(
     ladder_search: str = "shortest",
     return_task_path: bool = False,
     enable_collision: bool = True,
+    debug_tree_out: Optional[dict] = None,
     **kwargs,
 ):
+    def _export_tree(nodes: List[Capsule]):
+        if nodes is None:
+            return {"points": [], "edges": []}
+        id_to_idx = {}
+        points = []
+        for n in nodes:
+            idx = len(points)
+            id_to_idx[id(n)] = idx
+            try:
+                p = np.asarray(n.pose[0], dtype=float).reshape(3)
+                points.append([float(p[0]), float(p[1]), float(p[2])])
+            except Exception:
+                points.append([0.0, 0.0, 0.0])
+        edges = []
+        for n in nodes:
+            if n.parent is None:
+                continue
+            pid = id(n.parent)
+            cid = id(n)
+            if pid in id_to_idx and cid in id_to_idx:
+                edges.append([id_to_idx[pid], id_to_idx[cid]])
+        return {"points": points, "edges": edges}
+
+    def _fill_tree_out(success_flag: bool, iterations_used: int):
+        if debug_tree_out is None:
+            return
+        start_pose_xyz = debug_tree_out.get("start_pose")
+        goal_pose_xyz = debug_tree_out.get("goal_pose")
+        debug_tree_out.clear()
+        debug_tree_out["success"] = bool(success_flag)
+        debug_tree_out["iterations"] = int(iterations_used)
+        if start_pose_xyz is not None:
+            debug_tree_out["start_pose"] = start_pose_xyz
+        if goal_pose_xyz is not None:
+            debug_tree_out["goal_pose"] = goal_pose_xyz
+        debug_tree_out["tree1"] = _export_tree(nodes1)
+        debug_tree_out["tree2"] = _export_tree(nodes2)
+
     start_time = time.time()
     if collision_fn(start):
         print(f"Start configuration in collision.")
@@ -731,6 +770,7 @@ def rrt_connect_capsule(
                     if swap:
                         path1, path2 = path2, path1
                     capsule_nodes = path1 + path2[::-1]
+                    _fill_tree_out(True, iteration + 1)
                     return check_capsule_path(capsule_nodes)
                 if draw_fn:
                     for debug_body in bodies:
@@ -751,6 +791,7 @@ def rrt_connect_capsule(
             with _prof.measure("project_chain"):
                 proj_path = solver.try_project_chain(capsule_path, enable_collision=enable_collision)
             if proj_path is not None:
+                _fill_tree_out(True, iteration + 1)
                 return proj_path
 
             # Fast skip: if every rung in this path is already expanded (config length > 1),
@@ -790,10 +831,12 @@ def rrt_connect_capsule(
             # plot_ladder_graph(expended_path, highlight_feasible=True)
 
             best_path, _, _ = results[0]
+            _fill_tree_out(True, iteration + 1)
             return best_path
 
         for debug_body in bodies:
             pp.remove_debug(debug_body)
+    _fill_tree_out(False, max_iterations)
     return None
 
 
@@ -1003,6 +1046,7 @@ class TrajectoryDualCartConstrainedSolver(object):
         ladder_decimate_pos: float = 0.05,
         ladder_decimate_ang: float = 0.1,
         guide_sample_prob: float = 0.2,
+        random_seed: Optional[int] = None,
     ):
         self.robot_setup = robot_setup
         self.target_parser = target_parser
@@ -1026,6 +1070,8 @@ class TrajectoryDualCartConstrainedSolver(object):
         self.ladder_decimate_ang = float(ladder_decimate_ang)
         self.guide_sample_prob = float(guide_sample_prob)
         self._guide_poses = None
+        self.random_seed = random_seed
+        self.rng = np.random.default_rng(random_seed)
 
     def _compute_bar_feature_points(self) -> Optional[List[np.ndarray]]:
         """Compute a small set of feature points in the bar's local frame.
@@ -1182,8 +1228,6 @@ class TrajectoryDualCartConstrainedSolver(object):
         pitch_range = (-np.pi, np.pi)
         yaw_range = (-np.pi, np.pi)
 
-        rng = np.random.default_rng()
-
         def fn():
 
             global bar_from_right
@@ -1193,19 +1237,19 @@ class TrajectoryDualCartConstrainedSolver(object):
 
             confs = None
             while confs is None:
-                r = rng.random()
+                r = self.rng.random()
                 if (self._goal_pose is not None) and (r < self.goal_sample_prob):
                     world_from_bar = self._goal_pose
                 elif (self._guide_poses is not None) and (r < self.goal_sample_prob + self.guide_sample_prob):
-                    world_from_bar = self._guide_poses[int(rng.integers(low=0, high=len(self._guide_poses)))]
+                    world_from_bar = self._guide_poses[int(self.rng.integers(low=0, high=len(self._guide_poses)))]
                 else:
-                    x = cx + np.random.uniform(-l / 2, l / 2)
-                    y = cy + np.random.uniform(-w / 2, w / 2)
+                    x = cx + self.rng.uniform(-l / 2, l / 2)
+                    y = cy + self.rng.uniform(-w / 2, w / 2)
                     z = cz + h / 2
 
-                    roll = np.random.uniform(*roll_range)
-                    pitch = np.random.uniform(*pitch_range)
-                    yaw = np.random.uniform(*yaw_range)
+                    roll = self.rng.uniform(*roll_range)
+                    pitch = self.rng.uniform(*pitch_range)
+                    yaw = self.rng.uniform(*yaw_range)
 
                     world_from_bar = pp.Pose(point=[x, y, z], euler=pp.Euler(roll, pitch, yaw))
                 if enable_ik:
@@ -1227,9 +1271,6 @@ class TrajectoryDualCartConstrainedSolver(object):
         return fn
 
     def _get_extend_fn(self, enable_ik: bool = True):
-
-        rng = np.random.default_rng()
-
         def fn(c1: Capsule, c2: Capsule):
             way_points = self.cart_linear_interp(c1, c2, position_res=0.05, rotation_res=0.1)
             global bar_from_right
@@ -1243,7 +1284,7 @@ class TrajectoryDualCartConstrainedSolver(object):
 
                 conf = None
                 if enable_ik and hasattr(last_capsule, "config") and last_capsule.config is not None and len(last_capsule.config) > 0:
-                    seed_idx = int(rng.integers(low=0, high=len(last_capsule.config)))
+                    seed_idx = int(self.rng.integers(low=0, high=len(last_capsule.config)))
                     seed_right = last_capsule.config[seed_idx][6:]
                     seed_left = last_capsule.config[seed_idx][:6]
 
@@ -1306,6 +1347,9 @@ class TrajectoryDualCartConstrainedSolver(object):
                 seed_left = last_q[:6]
                 conf = self.projector.project(q_right_interp, seed_left)
                 if conf is not None:
+                    # WARNING/TODO: continuity is currently implicit (small right-arm interpolation
+                    # + seed chaining). We do not explicitly reject projected states with a large
+                    # joint-space jump vs. last_q. Add an explicit continuity threshold check later.
                     yield conf
                     last_q = conf
                 else:
@@ -1465,13 +1509,12 @@ class TrajectoryDualCartConstrainedSolver(object):
     def _smooth_with_collision(self, path: List[np.ndarray], extend_fn, collision_fn, max_iterations: int = 50):
         if path is None or len(path) < 3:
             return path
-        rng = np.random.default_rng()
         current = list(path)
         for _ in range(max_iterations):
             n = len(current)
             if n < 3:
                 break
-            i, j = sorted(rng.integers(low=0, high=n, size=2))
+            i, j = sorted(self.rng.integers(low=0, high=n, size=2))
             if j - i <= 1:
                 continue
             seg = list(extend_fn(current[i], current[j]))
@@ -1764,6 +1807,11 @@ class TrajectoryDualCartConstrainedSolver(object):
         guide_poses: Optional[List[Tuple[np.ndarray, np.ndarray]]] = None,
         warm_start_path: Optional[List[np.ndarray]] = None,
         warm_start_first: bool = True,
+        start_bar_pose: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+        target_bar_pose: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+        random_seed: Optional[int] = None,
+        diagnostics_out: Optional[dict] = None,
+        debug_tree_out: Optional[dict] = None,
     ) -> Optional[List[np.ndarray]]:
         """Plan a dual-arm path from start_conf to target_conf.
 
@@ -1799,29 +1847,46 @@ class TrajectoryDualCartConstrainedSolver(object):
         """
         global bar_from_right, bar_from_left
 
-        # Ensure globals for bar_from_right/left are initialized from target pose
-        with pp.WorldSaver():
-            # Use target config to define consistent bar_from_right transform
-            self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, target_conf)
-            world_from_right = pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link_right)
-            world_from_left = pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link_left)
-            world_from_bar = pp.get_pose(self.robot_setup.target_bar)
+        # Preserve the caller-provided grasp transform when available.
+        # Re-deriving it from the current bar body pose is only a fallback, because the
+        # debug/GUI bar body may not match the start/goal configuration being planned.
+        if bar_from_right is None or bar_from_left is None:
+            with pp.WorldSaver():
+                self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, target_conf)
+                world_from_right = pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link_right)
+                world_from_left = pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link_left)
+                world_from_bar = pp.get_pose(self.robot_setup.target_bar)
 
-            bar_from_right = pp.multiply(pp.invert(world_from_bar), world_from_right)
-            bar_from_left = pp.multiply(pp.invert(world_from_bar), world_from_left)
+                bar_from_right = pp.multiply(pp.invert(world_from_bar), world_from_right)
+                bar_from_left = pp.multiply(pp.invert(world_from_bar), world_from_left)
 
-        # Compute bar poses for start and target configurations
+        # Compute bar poses for start and target.
+        # In Stage 1 callers may provide explicit task-space poses and skip IK entirely.
         def _bar_pose_from_conf(conf: np.ndarray):
             self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, conf)
             right_pose = pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link_right)
             return pp.multiply(right_pose, pp.invert(bar_from_right))
 
-        world_from_bar_start = _bar_pose_from_conf(start_conf)
-        world_from_bar_target = _bar_pose_from_conf(target_conf)
+        world_from_bar_start = start_bar_pose if start_bar_pose is not None else _bar_pose_from_conf(start_conf)
+        world_from_bar_target = target_bar_pose if target_bar_pose is not None else _bar_pose_from_conf(target_conf)
         self._goal_pose = world_from_bar_target
         if goal_sample_prob is not None:
             self.goal_sample_prob = float(goal_sample_prob)
         self._guide_poses = guide_poses
+        if random_seed is not None:
+            self.random_seed = int(random_seed)
+            self.rng = np.random.default_rng(self.random_seed)
+        if debug_tree_out is not None:
+            debug_tree_out["start_pose"] = [
+                float(world_from_bar_start[0][0]),
+                float(world_from_bar_start[0][1]),
+                float(world_from_bar_start[0][2]),
+            ]
+            debug_tree_out["goal_pose"] = [
+                float(world_from_bar_target[0][0]),
+                float(world_from_bar_target[0][1]),
+                float(world_from_bar_target[0][2]),
+            ]
 
         # Prepare confs (plural) for capsules using projector; fallback to provided confs.
         # In Stage 1 (enable_ik=False) the start/goal configs are already known; skip IK.
@@ -1899,6 +1964,18 @@ class TrajectoryDualCartConstrainedSolver(object):
                 smooth_path = interpolate(smooth_path, cspace_extend_fn, robot_setup=self.robot_setup)
             if smooth_path is not None and len(smooth_path) > 1:
                 profiler.report("plan() sub-operation breakdown (warm-start)")
+                if diagnostics_out is not None:
+                    diagnostics_out.clear()
+                    diagnostics_out.update(
+                        {
+                            "success": True,
+                            "stage_label": stage_label,
+                            "attempts": 0,
+                            "rrt_failed": n_rrt_failed,
+                            "ladder_failed": n_ladder_failed,
+                            "returned_from": "warm_start_pre_rrt",
+                        }
+                    )
                 return smooth_path
 
         for attempt in range(max_attempts):
@@ -1926,6 +2003,7 @@ class TrajectoryDualCartConstrainedSolver(object):
                     ladder_search=self.ladder_search,
                     return_task_path=return_task_path,
                     enable_collision=enable_collision,
+                    debug_tree_out=debug_tree_out,
                 )
 
             if path is None:
@@ -1951,15 +2029,47 @@ class TrajectoryDualCartConstrainedSolver(object):
                 with profiler.measure("warm_start_interp"):
                     smooth_path = interpolate(smooth_path, cspace_extend_fn, robot_setup=self.robot_setup)
                 if smooth_path is not None and len(smooth_path) > 1:
+                    if diagnostics_out is not None:
+                        diagnostics_out.clear()
+                        diagnostics_out.update(
+                            {
+                                "success": True,
+                                "stage_label": stage_label,
+                                "attempts": attempt + 1,
+                                "rrt_failed": n_rrt_failed,
+                                "ladder_failed": n_ladder_failed,
+                                "returned_from": "warm_start_post_rrt",
+                            }
+                        )
                     return smooth_path
 
             if not enable_ik and return_task_path:
                 # Return the raw task-space path (poses) for diagnosis
+                if diagnostics_out is not None:
+                    diagnostics_out.clear()
+                    diagnostics_out.update(
+                        {
+                            "success": True,
+                            "stage_label": stage_label,
+                            "attempts": attempt + 1,
+                            "rrt_failed": n_rrt_failed,
+                            "ladder_failed": n_ladder_failed,
+                            "returned_from": "task_path",
+                        }
+                    )
                 return [c.pose if hasattr(c, "pose") else c for c in path]
 
             # Post-process in joint space using provided helpers
-            with profiler.measure("smooth"):
-                path_smooth = joint_space_smooth(path, cspace_extend_fn, robot_setup=self.robot_setup)
+            if smooth_iterations is not None and int(smooth_iterations) > 0:
+                with profiler.measure("smooth"):
+                    path_smooth = joint_space_smooth(
+                        path,
+                        cspace_extend_fn,
+                        max_iterations=int(smooth_iterations),
+                        robot_setup=self.robot_setup,
+                    )
+            else:
+                path_smooth = path
             with profiler.measure("interpolate"):
                 path_res = interpolate(path_smooth, cspace_extend_fn, robot_setup=self.robot_setup)
 
@@ -1969,11 +2079,33 @@ class TrajectoryDualCartConstrainedSolver(object):
                 self.robot_setup.set_joint_positions(self.robot_setup.arm_joints, q)
                 pp.draw_pose(pp.get_link_pose(self.robot_setup.robot, self.robot_setup.tool_link_right), length=0.01)
 
+            if diagnostics_out is not None:
+                diagnostics_out.clear()
+                diagnostics_out.update(
+                    {
+                        "success": True,
+                        "stage_label": stage_label,
+                        "attempts": attempt + 1,
+                        "rrt_failed": n_rrt_failed,
+                        "ladder_failed": n_ladder_failed,
+                    }
+                )
             return path_res
 
         print(f"[plan] {stage_label} — failed after {max_attempts} attempts: "
               f"RRT-failed={n_rrt_failed}, ladder-failed={n_ladder_failed}")
         profiler.report("plan() sub-operation breakdown (no path found)")
+        if diagnostics_out is not None:
+            diagnostics_out.clear()
+            diagnostics_out.update(
+                {
+                    "success": False,
+                    "stage_label": stage_label,
+                    "attempts": max_attempts,
+                    "rrt_failed": n_rrt_failed,
+                    "ladder_failed": n_ladder_failed,
+                }
+            )
         return None
 
 def main():

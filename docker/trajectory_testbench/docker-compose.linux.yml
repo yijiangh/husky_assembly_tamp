@@ -1,0 +1,8 @@
+services:
+  trajectory-testbench:
+    environment:
+      DISPLAY: "${DISPLAY:-:0}"
+      XAUTHORITY: /tmp/.docker.xauth
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ${HOST_XAUTH_FILE}:/tmp/.docker.xauth:ro

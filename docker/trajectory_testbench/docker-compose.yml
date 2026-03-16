@@ -1,0 +1,25 @@
+services:
+  trajectory-testbench:
+    build:
+      context: ../..
+      dockerfile: docker/trajectory_testbench/Dockerfile
+    image: husky-trajectory-testbench:ubuntu22.04
+    container_name: husky-trajectory-testbench
+    user: "${HOST_UID}:${HOST_GID}"
+    working_dir: /workspace/husky-assembly-teleop/external/husky_assembly_tamp
+    environment:
+      HOME: /tmp/husky-home
+      LIBGL_ALWAYS_SOFTWARE: "${LIBGL_ALWAYS_SOFTWARE:-1}"
+      MPLCONFIGDIR: /tmp/matplotlib
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      QT_X11_NO_MITSHM: "1"
+    volumes:
+      - ${HOST_PROJECT_ROOT}:/workspace/husky-assembly-teleop
+    ports:
+      - "5678:5678"
+    shm_size: "1gb"
+    stdin_open: true
+    tty: true
+    init: true
+    command: ["sleep", "infinity"]

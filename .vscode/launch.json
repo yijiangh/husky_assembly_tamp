@@ -1,0 +1,72 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Dual-Arm Planner: Stage 1 (Task-Space)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "husky_assembly_tamp.motion_planner.trajectory_testbench",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "--stage",
+        "1",
+        "--return-task-path"
+      ],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/external/husky_assembly_tamp"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Dual-Arm Planner: Stage 1b (Collision)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "husky_assembly_tamp.motion_planner.trajectory_testbench",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "--stage",
+        "1",
+        "--stage1b-collision",
+        "--return-task-path"
+      ],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/external/husky_assembly_tamp"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Dual-Arm Planner: Stage 2 (IK/Projection)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "husky_assembly_tamp.motion_planner.trajectory_testbench",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "--stage",
+        "2"
+      ],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/external/husky_assembly_tamp"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Dual-Arm Planner: Stage 3 (Full Collision)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "husky_assembly_tamp.motion_planner.trajectory_testbench",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "--stage",
+        "3"
+      ],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/external/husky_assembly_tamp"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    }
+  ]
+}

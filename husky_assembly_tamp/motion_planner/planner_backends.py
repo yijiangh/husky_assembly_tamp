@@ -75,6 +75,7 @@ class BiRRTBackend(PlannerBackend):
             max_time=kwargs.get("max_time", 60),
             max_iterations=kwargs.get("max_iterations", 5000),
             max_attempts=kwargs.get("max_attempts", 10),
+            smooth_iterations=kwargs.get("smooth_iterations", 10),
             use_draw=kwargs.get("use_draw", True),
             verbose=kwargs.get("verbose", True),
             enable_ik=kwargs.get("enable_ik", True),
@@ -88,6 +89,11 @@ class BiRRTBackend(PlannerBackend):
             guide_poses=kwargs.get("guide_poses", None),
             warm_start_path=kwargs.get("warm_start_path", None),
             warm_start_first=kwargs.get("warm_start_first", True),
+            start_bar_pose=kwargs.get("start_bar_pose", None),
+            target_bar_pose=kwargs.get("target_bar_pose", None),
+            random_seed=kwargs.get("random_seed", None),
+            diagnostics_out=kwargs.get("diagnostics_out", None),
+            debug_tree_out=kwargs.get("debug_tree_out", None),
         )
 
 

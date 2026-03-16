@@ -9,6 +9,7 @@ CONTAINER_WORKDIR="/workspace/husky-assembly-teleop/external/husky_assembly_tamp
 HOST_PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 HOST_XAUTH_FILE="${HOST_XAUTH_FILE:-/tmp/husky-trajectory-testbench.xauth}"
 HOST_OS="$(uname -s)"
+HEADLESS="${HUSKY_DOCKER_HEADLESS:-0}"
 
 compose_files() {
     case "$HOST_OS" in
@@ -26,6 +27,10 @@ compose_files() {
 }
 
 prepare_linux_env() {
+    if [ "$HEADLESS" = "1" ]; then
+        return
+    fi
+
     export DISPLAY="${DISPLAY:-:0}"
     export HOST_XAUTH_FILE
 
@@ -42,6 +47,10 @@ prepare_linux_env() {
 }
 
 prepare_mac_env() {
+    if [ "$HEADLESS" = "1" ]; then
+        return
+    fi
+
     export DISPLAY="${DISPLAY:-host.docker.internal:0}"
 
     if [ ! -d /Applications/Utilities/XQuartz.app ] && [ ! -d /Applications/XQuartz.app ]; then
@@ -102,7 +111,10 @@ case "$ACTION" in
         echo "Container is running."
         echo "Shell: $0 shell"
         echo "Run testbench: $0 testbench -- --stage 3"
+        echo "Run Stage 1: $0 stage1"
         echo "Debug on localhost:5678: $0 debug -- --stage 3"
+        echo "Debug Stage 1 on localhost:5678: $0 debug-stage1"
+        echo "Headless example: HUSKY_DOCKER_HEADLESS=1 $0 stage1 -- --no-gui"
         ;;
     down)
         prepare_env
@@ -117,12 +129,24 @@ case "$ACTION" in
         compose exec -w "$CONTAINER_WORKDIR" "$SERVICE" \
             python -m husky_assembly_tamp.motion_planner.trajectory_testbench "$@"
         ;;
+    stage1)
+        ensure_up
+        compose exec -w "$CONTAINER_WORKDIR" "$SERVICE" \
+            python -m husky_assembly_tamp.motion_planner.stage1.minimal_rrt "$@"
+        ;;
     debug)
         ensure_up
         echo "Waiting for a debugger on localhost:5678 ..."
         compose exec -w "$CONTAINER_WORKDIR" "$SERVICE" \
             python -m debugpy --listen 0.0.0.0:5678 --wait-for-client \
             -m husky_assembly_tamp.motion_planner.trajectory_testbench "$@"
+        ;;
+    debug-stage1)
+        ensure_up
+        echo "Waiting for a debugger on localhost:5678 ..."
+        compose exec -w "$CONTAINER_WORKDIR" "$SERVICE" \
+            python -m debugpy --listen 0.0.0.0:5678 --wait-for-client \
+            -m husky_assembly_tamp.motion_planner.stage1.minimal_rrt "$@"
         ;;
     logs)
         prepare_env
@@ -134,7 +158,7 @@ case "$ACTION" in
         compose up -d
         ;;
     *)
-        echo "Usage: $0 [up|down|shell|testbench|debug|logs|rebuild] [-- <trajectory_testbench args>]" >&2
+        echo "Usage: $0 [up|down|shell|testbench|stage1|debug|debug-stage1|logs|rebuild] [-- <module args>]" >&2
         exit 1
         ;;
 esac

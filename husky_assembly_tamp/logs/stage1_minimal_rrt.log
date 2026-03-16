@@ -1,0 +1,57 @@
+[2026-03-16 14:46:01.006] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-03-16 14:46:01.270] INFO     Running minimal Stage 1 RRT.
+[2026-03-16 14:46:01.270] INFO       start pose: [0.7912 0.0902 0.8623]
+[2026-03-16 14:46:01.270] INFO       goal pose:  [ 0.897  -0.0046  0.3443]
+[2026-03-16 14:46:01.270] INFO       floating collision: off
+[2026-03-16 14:46:01.272] INFO     Found Stage 1 pose path with 12 waypoints.
+[2026-03-16 14:53:09.109] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-03-16 16:06:03.755] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-03-16 16:06:05.424] INFO     Running minimal Stage 1 RRT.
+[2026-03-16 16:06:05.425] INFO       start pose: [0.7912 0.0902 0.8623]
+[2026-03-16 16:06:05.425] INFO       goal pose:  [ 0.897  -0.0046  0.3443]
+[2026-03-16 16:06:05.425] INFO       floating collision: off
+[2026-03-16 16:06:07.102] INFO     Found Stage 1 pose path with 33 waypoints.
+[2026-03-16 16:06:07.103] INFO     Visualizing pose path with 33 waypoints.
+[2026-03-16 16:06:34.521] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-03-16 16:06:36.129] INFO     Running minimal Stage 1 RRT.
+[2026-03-16 16:06:36.129] INFO       start pose: [0.7912 0.0902 0.8623]
+[2026-03-16 16:06:36.129] INFO       goal pose:  [ 0.897  -0.0046  0.3443]
+[2026-03-16 16:06:36.129] INFO       floating collision: off
+[2026-03-16 16:06:37.921] INFO     Found Stage 1 pose path with 33 waypoints.
+[2026-03-16 16:06:37.921] INFO     Visualizing pose path with 33 waypoints.
+[2026-03-16 15:08:31.467] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-03-16 15:09:42.950] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-03-16 16:10:19.261] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-03-16 16:10:21.018] WARNING  Stage 1 debug start pose is offset from the FK-consistent bar pose by [-0.5, 0.0, 0.5] in world coordinates. This intentionally makes the start bar pose incompatible with the start robot configuration and must be fixed later.
+[2026-03-16 16:10:21.019] WARNING    FK start pose:      pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-16 16:10:21.019] WARNING    Planning start pose: pos=[0.2912 0.0902 1.3623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-16 16:10:21.205] INFO     Running minimal Stage 1 RRT.
+[2026-03-16 16:10:21.205] INFO       start pose: [0.2912 0.0902 1.3623]
+[2026-03-16 16:10:21.205] INFO       goal pose:  [ 0.897  -0.0046  0.3443]
+[2026-03-16 16:10:21.205] INFO       floating collision: off
+[2026-03-16 16:10:23.143] INFO     Found Stage 1 pose path with 33 waypoints.
+[2026-03-16 16:10:23.143] INFO     Visualizing pose path with 33 waypoints.
+[2026-03-16 16:12:07.516] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-03-16 16:12:09.079] WARNING  Stage 1 debug start pose is offset from the FK-consistent bar pose by [-0.5, 0.0, 0.5] in world coordinates. This intentionally makes the start bar pose incompatible with the start robot configuration and must be fixed later.
+[2026-03-16 16:12:09.080] WARNING    FK start pose:      pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-16 16:12:09.080] WARNING    Planning start pose: pos=[0.2912 0.0902 1.3623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-16 16:12:09.197] INFO     Running minimal Stage 1 RRT.
+[2026-03-16 16:12:09.197] INFO       start pose: [0.2912 0.0902 1.3623]
+[2026-03-16 16:12:09.197] INFO       goal pose:  [ 0.897  -0.0046  0.3443]
+[2026-03-16 16:12:09.197] INFO       floating collision: off
+[2026-03-16 16:12:09.197] INFO       floating collision obstacles: 1 bodies
+[2026-03-16 16:12:10.880] INFO     Found Stage 1 pose path with 33 waypoints.
+[2026-03-16 16:12:10.880] INFO     Visualizing pose path with 33 waypoints.
+[2026-03-16 16:12:20.826] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-03-16 16:12:31.766] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-03-16 16:12:33.301] WARNING  Stage 1 debug start pose is offset from the FK-consistent bar pose by [-0.5, 0.0, 0.5] in world coordinates. This intentionally makes the start bar pose incompatible with the start robot configuration and must be fixed later.
+[2026-03-16 16:12:33.302] WARNING    FK start pose:      pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-16 16:12:33.302] WARNING    Planning start pose: pos=[0.2912 0.0902 1.3623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-16 16:12:33.419] INFO     Running minimal Stage 1 RRT.
+[2026-03-16 16:12:33.419] INFO       start pose: [0.2912 0.0902 1.3623]
+[2026-03-16 16:12:33.420] INFO       goal pose:  [ 0.897  -0.0046  0.3443]
+[2026-03-16 16:12:33.420] INFO       floating collision: on
+[2026-03-16 16:12:33.420] INFO       floating collision obstacles: 1 bodies
+[2026-03-16 16:13:04.347] INFO     Attempt 1/5: no path found.
+[2026-03-16 16:13:10.502] INFO     Found Stage 1 pose path with 59 waypoints.
+[2026-03-16 16:13:10.502] INFO     Visualizing pose path with 59 waypoints.

@@ -197,3 +197,85 @@ If resuming later, read these first:
   - `plan_profile_seed<seed>_<timestamp>.txt`
   - `debug_report_<timestamp>.md`
 - The benchmarking instructions were added to the root `README.md` under `Stage 1 Benchmarking`.
+
+## Session Addendum: Stage 2/3 Joint Continuity Refinement
+
+- Current limitation: the Stage 2/3 RRT is still fundamentally a task-space tree with a single seed-chained IK branch attached to each edge.
+  - In `extend`, the planner only propagates one `current_conf`.
+  - `solve_dual_arm_pose_ik(...)` returns one seed-chained dual-arm IK solution per interpolated pose.
+  - Joint continuity is therefore not optimized during search; it is only measured afterward in trajectory validation.
+- Important conclusion from this: increasing interpolation density inside the planner can help, but it is still only a heuristic because the planner does not compare multiple IK branches.
+- First fix implemented before any ladder-graph work:
+  - add a dense post-plan refinement pass for Stage 2/3 in `husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py`
+  - workflow:
+    1. plan a coarse task-space path as before
+    2. densify that pose path
+    3. re-run seed-chained dual-arm IK along the denser path
+    4. keep the refined result only if it improves continuity / remains feasible
+- New planner CLI knobs:
+  - `--no-refine-after-plan`
+  - `--refine-position-res`
+  - `--refine-rotation-res`
+  - `--refine-max-passes`
+- Default refinement policy:
+  - enabled for Stage 2/3
+  - initial refinement resolution defaults to half of the coarse `position_res` / `rotation_res`
+  - each refinement pass halves the step again
+  - default `refine_max_passes=2`
+- New continuity helper in `minimal_rrt.py`:
+  - `summarize_joint_continuity(...)`
+  - used to compare coarse and refined joint paths by max wrapped joint delta and first violating step
+- Important implementation detail:
+  - the refinement pass must recompute IK along the dense path
+  - simply inserting extra Cartesian waypoints without re-solving IK does not address branch-jump issues
+- Stage 2/3 debug reporting now records refinement behavior in `debug_runner.py`:
+  - whether refinement was attempted
+  - whether the refined path was accepted
+  - coarse vs final max joint delta
+  - refinement status / failure reason
+  - refinement waypoint counts
+- The comparison report now explicitly shows continuity before/after refinement.
+
+## Session Addendum: Observed Refinement Outcomes
+
+- Validated with Docker compare run:
+
+```bash
+python -B -m husky_assembly_tamp.motion_planner.stage1.debug_runner \
+  --compare-stages \
+  --analysis-trials 1 \
+  --analysis-seed-start 0 \
+  --position-res 0.1 \
+  --rotation-res 0.2 \
+  --endpoint-ik-attempts 20 \
+  --max-time 3 \
+  --max-iterations 100 \
+  --max-attempts 1
+```
+
+- Latest clean report bundle after refinement work:
+  - `husky_assembly_tamp/motion_planner/stage1/reports/stage_comparison_report_20260317_101738.md`
+  - support artifacts under `husky_assembly_tamp/motion_planner/stage1/reports/_support`
+- Concrete result for seed `0`:
+  - Stage 2:
+    - coarse path had `29` waypoints
+    - refinement densified it to `69` waypoints
+    - max joint delta improved from `0.6884` to `0.3614 rad`
+    - joint continuity changed from fail to pass
+  - Stage 3:
+    - coarse path remained collision-free but had poor continuity (`1.4064 rad`)
+    - dense re-IK refinement failed with `ik_failure_at_waypoint_11`
+    - planner correctly fell back to the coarse path
+    - Stage 3 therefore still needs a stronger method than local seed-chained refinement
+- Interpretation:
+  - dense post-plan refinement is a worthwhile first fix and already solves at least some Stage 2 continuity failures
+  - Stage 3 demonstrates the limit of this approach under stronger collision/IK constraints
+  - the next principled step, if needed, is still the ladder-graph refinement over multiple IK candidates per capsule / waypoint
+
+## Session Addendum: Report / Artifact State
+
+- Reports directory is kept intentionally clean:
+  - top-level `husky_assembly_tamp/motion_planner/stage1/reports` contains only the latest Markdown reports
+  - all CSV / JSON / PNG / profile dumps live under `_support`
+- Validation images from `path_validation.py` are also routed into `_support` and embedded in the generated reports.
+- Workspace tree plots across Stage 1/2/3 now use fixed shared axis bounds so the views do not shift between stages.

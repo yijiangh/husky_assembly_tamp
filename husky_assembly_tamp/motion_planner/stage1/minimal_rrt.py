@@ -70,6 +70,7 @@ BAR_RADIUS = 0.015
 BAR_LENGTH = 1.0
 BAR_BOX_DIMS = (2.0 * BAR_RADIUS, 2.0 * BAR_RADIUS, BAR_LENGTH)
 STAGE1_DEBUG_START_OFFSET = np.array([-0.5, 0.0, 0.5], dtype=float)
+DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD = 0.2
 
 
 PoseLike = Tuple[np.ndarray, np.ndarray]
@@ -442,6 +443,7 @@ def extend_toward(
     enable_ik: bool = False,
     node_confs: Optional[Dict[int, FullConf]] = None,
     ik_context: Optional[Dict[str, Any]] = None,
+    joint_continuity_threshold_rad: Optional[float] = None,
     profile_out: Optional[Dict[str, Any]] = None,
 ) -> Tuple[TreeNode, bool, str]:
     current = source
@@ -476,6 +478,15 @@ def extend_toward(
                 reached = False
                 stop_reason = "ik_failure"
                 break
+            if joint_continuity_threshold_rad is not None:
+                step_delta = np.abs(
+                    normalize_angles(np.asarray(next_conf, dtype=float) - np.asarray(current_conf, dtype=float))
+                )
+                if float(np.max(step_delta)) > float(joint_continuity_threshold_rad):
+                    reached = False
+                    stop_reason = "continuity"
+                    bump_profile_count(profile_out, "continuity_rejections")
+                    break
             if joint_collision_fn is not None and joint_collision_fn(next_conf):
                 reached = False
                 stop_reason = "collision"
@@ -502,6 +513,202 @@ def extend_toward(
         if next_conf is not None:
             current_conf = next_conf
     return current, reached, stop_reason
+
+
+def summarize_joint_continuity(
+    joint_path: Optional[Sequence[FullConf]],
+    threshold_rad: float = DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
+) -> Dict[str, Any]:
+    summary = {
+        "ok": None,
+        "max_delta_rad": None,
+        "first_bad_step": None,
+        "threshold_rad": float(threshold_rad),
+    }
+    if joint_path is None:
+        return summary
+    normalized_joint_path = [normalize_angles(np.asarray(conf, dtype=float)) for conf in joint_path]
+    if len(normalized_joint_path) < 2:
+        summary["ok"] = True
+        summary["max_delta_rad"] = 0.0
+        return summary
+
+    step_max_deltas = []
+    for prev_conf, next_conf in zip(normalized_joint_path[:-1], normalized_joint_path[1:]):
+        step_delta = np.abs(normalize_angles(np.asarray(next_conf, dtype=float) - np.asarray(prev_conf, dtype=float)))
+        step_max_deltas.append(float(np.max(step_delta)))
+    max_delta = max(step_max_deltas) if step_max_deltas else 0.0
+    first_bad_step = next((idx + 1 for idx, delta in enumerate(step_max_deltas) if delta > threshold_rad), None)
+    summary["ok"] = first_bad_step is None
+    summary["max_delta_rad"] = float(max_delta)
+    summary["first_bad_step"] = first_bad_step
+    return summary
+
+
+def densify_pose_path(
+    path: Sequence[PoseLike],
+    position_res: float,
+    rotation_res: float,
+) -> List[PoseLike]:
+    if not path:
+        return []
+    dense_path: List[PoseLike] = [path[0]]
+    for start_pose, end_pose in zip(path[:-1], path[1:]):
+        segment = list(
+            pp.interpolate_poses(
+                start_pose,
+                end_pose,
+                pos_step_size=max(position_res, 1e-6),
+                ori_step_size=max(rotation_res, 1e-6),
+            )
+        )
+        dense_path.extend(segment[1:])
+    return dense_path
+
+
+def reconstruct_joint_path_for_pose_path(
+    scene: Dict[str, Any],
+    pose_path: Sequence[PoseLike],
+    start_conf: FullConf,
+    joint_collision_fn: Optional[Callable[[FullConf], bool]] = None,
+    joint_continuity_threshold_rad: Optional[float] = None,
+    profile_out: Optional[Dict[str, Any]] = None,
+) -> Tuple[Optional[List[FullConf]], Optional[str]]:
+    if not pose_path:
+        return [], None
+    grasp_bar_from_right = scene["grasp_bar_from_right"]
+    if grasp_bar_from_right is None:
+        return None, "missing_right_grasp"
+
+    current_conf = normalize_angles(np.asarray(start_conf, dtype=float))
+    joint_path = [current_conf]
+    for idx, pose in enumerate(pose_path[1:], start=1):
+        next_conf = solve_dual_arm_pose_ik(
+            robot=scene["robot"],
+            arm_joints=scene["arm_joints"],
+            tool_link_left=scene["tool_link_left"],
+            tool_link_right=scene["tool_link_right"],
+            bar_pose=pose,
+            grasp_bar_from_left=scene["grasp_bar_from_left"],
+            grasp_bar_from_right=grasp_bar_from_right,
+            seed_conf=current_conf,
+            profile_out=profile_out,
+        )
+        if next_conf is None:
+            return None, f"ik_failure_at_waypoint_{idx}"
+        next_conf = normalize_angles(np.asarray(next_conf, dtype=float))
+        if joint_continuity_threshold_rad is not None:
+            step_delta = np.abs(normalize_angles(np.asarray(next_conf, dtype=float) - np.asarray(current_conf, dtype=float)))
+            if float(np.max(step_delta)) > float(joint_continuity_threshold_rad):
+                bump_profile_count(profile_out, "continuity_rejections")
+                return None, f"continuity_at_waypoint_{idx}"
+        if joint_collision_fn is not None:
+            t_collision = time.perf_counter()
+            in_collision = joint_collision_fn(next_conf)
+            add_profile_time(profile_out, "collision_check_time_s", time.perf_counter() - t_collision)
+            if in_collision:
+                bump_profile_count(profile_out, "collision_hits")
+                return None, f"collision_at_waypoint_{idx}"
+        current_conf = next_conf
+        joint_path.append(current_conf)
+    return joint_path, None
+
+
+def refine_pose_path_with_seed_chained_ik(
+    scene: Dict[str, Any],
+    path: Sequence[PoseLike],
+    path_confs: Sequence[FullConf],
+    start_conf: FullConf,
+    base_position_res: float,
+    base_rotation_res: float,
+    refine_max_passes: int,
+    joint_continuity_threshold_rad: Optional[float] = DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
+    joint_collision_fn: Optional[Callable[[FullConf], bool]] = None,
+    profile_out: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    coarse_summary = summarize_joint_continuity(path_confs)
+    result: Dict[str, Any] = {
+        "enabled": True,
+        "attempted": False,
+        "used_refined_path": False,
+        "status": "skipped",
+        "coarse_waypoints": len(path),
+        "final_waypoints": len(path),
+        "coarse_joint_continuity": coarse_summary,
+        "final_joint_continuity": coarse_summary,
+        "passes": [],
+        "passes_run": 0,
+        "path": list(path),
+        "path_confs": [normalize_angles(np.asarray(conf, dtype=float)) for conf in path_confs],
+    }
+    if len(path) < 2 or refine_max_passes <= 0:
+        result["status"] = "disabled"
+        return result
+    if coarse_summary.get("ok"):
+        result["status"] = "already_continuous"
+        return result
+
+    best_path = list(path)
+    best_confs = [normalize_angles(np.asarray(conf, dtype=float)) for conf in path_confs]
+    best_summary = coarse_summary
+    t_refine = time.perf_counter()
+
+    for pass_idx in range(refine_max_passes):
+        pass_position_res = max(base_position_res / (2**pass_idx), 1e-4)
+        pass_rotation_res = max(base_rotation_res / (2**pass_idx), 1e-4)
+        dense_path = densify_pose_path(path, pass_position_res, pass_rotation_res)
+        pass_record: Dict[str, Any] = {
+            "pass_index": pass_idx + 1,
+            "position_res": float(pass_position_res),
+            "rotation_res": float(pass_rotation_res),
+            "waypoints": len(dense_path),
+        }
+        result["attempted"] = True
+        joint_path, failure_reason = reconstruct_joint_path_for_pose_path(
+            scene=scene,
+            pose_path=dense_path,
+            start_conf=start_conf,
+            joint_collision_fn=joint_collision_fn,
+            joint_continuity_threshold_rad=joint_continuity_threshold_rad,
+            profile_out=profile_out,
+        )
+        if joint_path is None:
+            pass_record["status"] = "failed"
+            pass_record["failure_reason"] = failure_reason
+            result["passes"].append(pass_record)
+            result["status"] = f"failed:{failure_reason}"
+            break
+
+        continuity = summarize_joint_continuity(joint_path)
+        pass_record["status"] = "success"
+        pass_record["joint_continuity"] = continuity
+        result["passes"].append(pass_record)
+
+        best_max_delta = best_summary.get("max_delta_rad")
+        candidate_max_delta = continuity.get("max_delta_rad")
+        if candidate_max_delta is not None and (
+            best_max_delta is None or candidate_max_delta <= best_max_delta + 1e-9
+        ):
+            best_path = dense_path
+            best_confs = joint_path
+            best_summary = continuity
+            result["used_refined_path"] = len(dense_path) > len(path)
+            result["status"] = "improved" if not continuity.get("ok") else "continuity_pass"
+        if continuity.get("ok"):
+            break
+
+    add_profile_time(profile_out, "refinement_time_s", time.perf_counter() - t_refine)
+    if profile_out is not None:
+        profile_out["refinement_passes"] = len(result["passes"])
+        profile_out["refinement_waypoints"] = len(best_path)
+        profile_out["refinement_used"] = int(result["used_refined_path"])
+
+    result["path"] = best_path
+    result["path_confs"] = best_confs
+    result["passes_run"] = len(result["passes"])
+    result["final_waypoints"] = len(best_path)
+    result["final_joint_continuity"] = best_summary
+    return result
 
 
 def update_debug_tree(
@@ -545,6 +752,7 @@ def plan_pose_rrt(
     enable_ik: bool = False,
     ik_context: Optional[Dict[str, Any]] = None,
     joint_collision_fn: Optional[Callable[[FullConf], bool]] = None,
+    joint_continuity_threshold_rad: Optional[float] = None,
     use_draw: bool = True,
     debug_tree_out: Optional[Dict] = None,
     profile_out: Optional[Dict[str, Any]] = None,
@@ -617,6 +825,7 @@ def plan_pose_rrt(
                 "ik_calls": 0,
                 "ik_failures": 0,
                 "nodes_with_ik": 0,
+                "continuity_rejections": 0,
             }
         )
 
@@ -711,12 +920,15 @@ def plan_pose_rrt(
                 enable_ik=enable_ik,
                 node_confs=node_confs,
                 ik_context=ik_context,
+                joint_continuity_threshold_rad=joint_continuity_threshold_rad,
                 profile_out=profile_out,
             )
             add_profile_time(profile_out, "extend_tree_time_s", time.perf_counter() - t_extend)
             if not reached:
                 if stop_reason == "ik_failure" and enable_ik and profile_out is not None:
                     profile_out["outcome"] = "extend_ik_failure"
+                elif stop_reason == "continuity" and enable_ik and profile_out is not None:
+                    profile_out["outcome"] = "extend_continuity_failure"
                 elif stop_reason == "collision" and profile_out is not None:
                     profile_out["outcome"] = "extend_collision_failure"
                 continue
@@ -891,6 +1103,11 @@ def run_stage_trial(
     endpoint_ik_attempts: int = 20,
     random_seed: Optional[int] = None,
     enable_collision: bool = True,
+    joint_continuity_threshold_rad: Optional[float] = DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
+    refine_after_plan: bool = True,
+    refine_position_res: Optional[float] = None,
+    refine_rotation_res: Optional[float] = None,
+    refine_max_passes: int = 2,
     lock_renderer_during_search: bool = False,
     debug_tree_out: Optional[Dict] = None,
     planner_profile_out: Optional[Dict[str, Any]] = None,
@@ -966,6 +1183,13 @@ def run_stage_trial(
         logger.info(f"  collision: {'on' if (enable_collision if stage == 1 else enforce_collision) else 'off'}")
         logger.info(f"  position_res: {position_res}")
         logger.info(f"  rotation_res: {rotation_res}")
+        if enable_ik:
+            logger.info(f"  joint continuity threshold: {joint_continuity_threshold_rad}")
+            logger.info(f"  refine after plan: {'on' if refine_after_plan else 'off'}")
+            if refine_after_plan:
+                logger.info(f"  refine position_res: {refine_position_res if refine_position_res is not None else position_res / 2.0}")
+                logger.info(f"  refine rotation_res: {refine_rotation_res if refine_rotation_res is not None else rotation_res / 2.0}")
+                logger.info(f"  refine max passes: {refine_max_passes}")
         logger.info(f"  collision obstacles: {len(scene['collision_obstacles'])} bodies")
         logger.info(f"  lock renderer during search: {'on' if (use_gui and lock_renderer_during_search) else 'off'}")
 
@@ -998,6 +1222,7 @@ def run_stage_trial(
             if enable_ik
             else None,
             joint_collision_fn=joint_collision_fn,
+            joint_continuity_threshold_rad=(joint_continuity_threshold_rad if enable_ik else None),
             use_draw=use_gui,
             debug_tree_out=debug_tree_out,
             profile_out=planner_profile_out,
@@ -1017,6 +1242,55 @@ def run_stage_trial(
                 pp.set_joint_positions(scene["robot"], scene["arm_joints"], path_confs[-1])
         else:
             logger.warning(f"No Stage {stage} pose path found.")
+
+        coarse_path = path
+        coarse_path_confs = path_confs
+        coarse_continuity = summarize_joint_continuity(path_confs) if path_confs is not None else None
+        refinement: Optional[Dict[str, Any]] = None
+        if enable_ik and path is not None and path_confs is not None and start_conf is not None:
+            refinement = {
+                "enabled": bool(refine_after_plan),
+                "attempted": False,
+                "used_refined_path": False,
+                "status": "disabled",
+                "coarse_waypoints": len(path),
+                "final_waypoints": len(path),
+                "coarse_joint_continuity": coarse_continuity,
+                "final_joint_continuity": coarse_continuity,
+                "passes": [],
+            }
+            if refine_after_plan:
+                refinement = refine_pose_path_with_seed_chained_ik(
+                    scene=scene,
+                    path=path,
+                    path_confs=path_confs,
+                    start_conf=start_conf,
+                    base_position_res=(refine_position_res if refine_position_res is not None else max(position_res / 2.0, 1e-4)),
+                    base_rotation_res=(refine_rotation_res if refine_rotation_res is not None else max(rotation_res / 2.0, 1e-4)),
+                    refine_max_passes=refine_max_passes,
+                    joint_continuity_threshold_rad=joint_continuity_threshold_rad,
+                    joint_collision_fn=joint_collision_fn,
+                    profile_out=planner_profile_out,
+                )
+                if refinement.get("used_refined_path"):
+                    path = refinement["path"]
+                    path_confs = refinement["path_confs"]
+                    logger.info(
+                        "Refinement accepted: %s -> %s waypoints, max dq %.4f -> %.4f rad",
+                        refinement.get("coarse_waypoints"),
+                        refinement.get("final_waypoints"),
+                        float((refinement.get("coarse_joint_continuity") or {}).get("max_delta_rad") or 0.0),
+                        float((refinement.get("final_joint_continuity") or {}).get("max_delta_rad") or 0.0),
+                    )
+                    pp.set_pose(scene["bar_body"], path[-1])
+                    pp.set_joint_positions(scene["robot"], scene["arm_joints"], path_confs[-1])
+                else:
+                    logger.info(
+                        "Refinement result: %s (max dq %.4f -> %.4f rad)",
+                        refinement.get("status"),
+                        float((refinement.get("coarse_joint_continuity") or {}).get("max_delta_rad") or 0.0),
+                        float((refinement.get("final_joint_continuity") or {}).get("max_delta_rad") or 0.0),
+                    )
 
         validation_joint_path, validation_joint_path_source, validation_joint_path_reason = build_validation_joint_path(
             scene=scene,
@@ -1038,19 +1312,32 @@ def run_stage_trial(
             grasp_mask_links=STAGE3_GRASP_MASK_LINKS,
         )
         log_validation_summary(validation)
+        refinement_summary = None
+        if refinement is not None:
+            refinement_summary = {k: v for k, v in refinement.items() if k not in {"path", "path_confs"}}
+        path_found = path is not None
+        validated_success = path_found
+        if stage >= 2:
+            validated_success = validated_success and bool(validation.get("joint_continuity_ok"))
+            validated_success = validated_success and bool(validation.get("collision_free"))
 
         return {
             "stage": stage,
             "scene": scene,
             "path": path,
             "path_confs": path_confs,
+            "coarse_path": coarse_path,
+            "coarse_path_confs": coarse_path_confs,
+            "coarse_joint_continuity": coarse_continuity,
+            "refinement": refinement_summary,
             "validation_joint_path": validation_joint_path,
             "validation_joint_path_source": validation_joint_path_source,
             "validation": validation,
             "start_conf": start_conf,
             "goal_conf": goal_conf,
             "runtime_s": runtime_s,
-            "success": path is not None,
+            "path_found": path_found,
+            "success": bool(validated_success),
         }
     except Exception:
         teardown_stage1_scene()
@@ -1216,13 +1503,42 @@ def main() -> None:
     parser.add_argument("--no-gui", action="store_true", help="Run without PyBullet GUI")
     parser.add_argument("--goal-bias", type=float, default=0.1, help="Goal sampling probability")
     parser.add_argument("--dist-metric", choices=["feature", "pose6d"], default="feature", help="Task-space distance metric")
-    parser.add_argument("--position-res", type=float, default=0.1, help="Translation resolution used during pose extension, in meters")
-    parser.add_argument("--rotation-res", type=float, default=0.2, help="Rotation resolution used during pose extension, in radians")
+    parser.add_argument("--position-res", type=float, default=0.01, help="Translation resolution used during pose extension, in meters")
+    parser.add_argument("--rotation-res", type=float, default=0.025, help="Rotation resolution used during pose extension, in radians")
     parser.add_argument("--max-time", type=float, default=30.0, help="Max planning time per attempt")
     parser.add_argument("--max-iterations", type=int, default=2000, help="Max RRT iterations per attempt")
     parser.add_argument("--max-attempts", type=int, default=5, help="Random restarts")
     parser.add_argument("--endpoint-ik-attempts", type=int, default=20, help="Max random seeds used when solving endpoint IK in Stage 2/3")
     parser.add_argument("--random-seed", type=int, default=None, help="Random seed")
+    parser.add_argument(
+        "--joint-continuity-threshold",
+        type=float,
+        default=DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
+        help="Maximum allowed wrapped joint delta between neighboring Stage 2/3 configurations, in radians",
+    )
+    parser.add_argument(
+        "--no-refine-after-plan",
+        action="store_true",
+        help="Disable dense post-plan seed-chained IK refinement for Stage 2/3",
+    )
+    parser.add_argument(
+        "--refine-position-res",
+        type=float,
+        default=None,
+        help="Initial translation resolution used during Stage 2/3 post-plan refinement, in meters",
+    )
+    parser.add_argument(
+        "--refine-rotation-res",
+        type=float,
+        default=None,
+        help="Initial rotation resolution used during Stage 2/3 post-plan refinement, in radians",
+    )
+    parser.add_argument(
+        "--refine-max-passes",
+        type=int,
+        default=2,
+        help="Maximum number of Stage 2/3 post-plan refinement passes; each pass halves the refinement resolution",
+    )
     parser.add_argument(
         "--floating-collision",
         action="store_true",
@@ -1254,6 +1570,11 @@ def main() -> None:
         endpoint_ik_attempts=args.endpoint_ik_attempts,
         random_seed=args.random_seed,
         enable_collision=args.floating_collision,
+        joint_continuity_threshold_rad=args.joint_continuity_threshold,
+        refine_after_plan=not args.no_refine_after_plan,
+        refine_position_res=args.refine_position_res,
+        refine_rotation_res=args.refine_rotation_res,
+        refine_max_passes=args.refine_max_passes,
         lock_renderer_during_search=args.lock_renderer_during_search,
         debug_tree_out=debug_tree_out,
     )

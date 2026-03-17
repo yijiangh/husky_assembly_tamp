@@ -13,8 +13,9 @@ In general, I think we can just do this first coarse resolution to ensure soluti
 
 X Report now: the success rate should include joint continuity. So now it shows it succeeded, but actually the draw continuity failed. 
 
-Benchmark changing pybullet IK to Track IK. 
-
-In general, I think DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD = 0.5 is too large to be tracked nicely on hardware. A reasonable
-  value should be around 0.2. Let's re-run the report to see what would happen, And also figure out what would be the ideal
+X In general, I think DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD = 0.5 is too large to be tracked nicely on hardware. A reasonable  value should be around 0.2. Let's re-run the report to see what would happen, And also figure out what would be the ideal
   position and rotational resolution to achieve this
+
+Do case study on different goal bar poses.
+
+Benchmark changing pybullet IK to Track IK. 

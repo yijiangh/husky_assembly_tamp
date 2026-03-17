@@ -36,7 +36,6 @@ PROFILE_TIME_KEYS = [
     "ik_time_s",
     "goal_test_time_s",
     "extend_tree_time_s",
-    "refinement_time_s",
 ]
 PROFILE_COUNT_KEYS = [
     "attempts",
@@ -48,9 +47,6 @@ PROFILE_COUNT_KEYS = [
     "ik_failures",
     "nodes_with_ik",
     "continuity_rejections",
-    "refinement_passes",
-    "refinement_waypoints",
-    "refinement_used",
 ]
 FAILURE_LABELS = ["task_space_failure", "ik_failure", "continuity_failure", "collision_failure", "success"]
 STAGE_ORDER = [1, 2, 3]
@@ -414,34 +410,6 @@ def summarize_profile_means(records: List[Dict]) -> Dict[str, float]:
     return means
 
 
-def summarize_refinement(records: List[Dict]) -> Dict[str, float]:
-    stage2plus_records = [record for record in records if record.get("refinement") is not None]
-    if not stage2plus_records:
-        return {}
-    passes_run = [float((record.get("refinement") or {}).get("passes_run", 0.0)) for record in stage2plus_records]
-    final_waypoints = [float((record.get("refinement") or {}).get("final_waypoints", 0.0)) for record in stage2plus_records]
-    coarse_dq = [
-        float(((record.get("refinement") or {}).get("coarse_joint_continuity") or {}).get("max_delta_rad") or 0.0)
-        for record in stage2plus_records
-    ]
-    final_dq = [
-        float(((record.get("refinement") or {}).get("final_joint_continuity") or {}).get("max_delta_rad") or 0.0)
-        for record in stage2plus_records
-    ]
-    return {
-        "trials": float(len(stage2plus_records)),
-        "used_count": float(sum(int((record.get("refinement") or {}).get("used_refined_path", False)) for record in stage2plus_records)),
-        "attempted_count": float(sum(int((record.get("refinement") or {}).get("attempted", False)) for record in stage2plus_records)),
-        "continuity_pass_count": float(
-            sum(int(((record.get("refinement") or {}).get("final_joint_continuity") or {}).get("ok", False)) for record in stage2plus_records)
-        ),
-        "avg_passes_run": sum(passes_run) / max(1, len(passes_run)),
-        "avg_final_waypoints": sum(final_waypoints) / max(1, len(final_waypoints)),
-        "avg_coarse_max_dq_rad": sum(coarse_dq) / max(1, len(coarse_dq)),
-        "avg_final_max_dq_rad": sum(final_dq) / max(1, len(final_dq)),
-    }
-
-
 def dominant_failure_label(summary: Dict[str, Any]) -> str:
     failure_counts = {label: summary["counts"].get(label, 0) for label in FAILURE_LABELS if label != "success"}
     if not any(failure_counts.values()):
@@ -489,11 +457,6 @@ def write_markdown_report(
     if stage >= 2:
         lines.append(f"- Endpoint IK attempts: `{args.endpoint_ik_attempts}`")
         lines.append(f"- Joint continuity threshold: `{args.joint_continuity_threshold} rad`")
-        lines.append(f"- Post-plan refinement: `{'off' if args.no_refine_after_plan else 'on'}`")
-        if not args.no_refine_after_plan:
-            lines.append(f"- Initial refine position resolution: `{args.refine_position_res if args.refine_position_res is not None else args.position_res / 2.0} m`")
-            lines.append(f"- Initial refine rotation resolution: `{args.refine_rotation_res if args.refine_rotation_res is not None else args.rotation_res / 2.0} rad`")
-            lines.append(f"- Refine max passes: `{args.refine_max_passes}`")
     lines.append(f"- Collision: `{'on' if collision_enabled(stage, args.floating_collision) else 'off'}`")
     lines.append("")
     lines.append("---")
@@ -526,15 +489,8 @@ def write_markdown_report(
         lines.append(f"- Joint continuity: **{validation_status_label(validation.get('joint_continuity_ok'))}**")
         lines.append(f"- Relative transform consistency: **{validation_status_label(validation.get('relative_transform_ok'))}**")
         lines.append(f"- Joint-path source: `{validation.get('joint_path_source') or 'n/a'}`")
-        refinement = summary.get("refinement_first")
-        if refinement:
-            coarse = refinement.get("coarse_joint_continuity") or {}
-            final = refinement.get("final_joint_continuity") or {}
-            lines.append(f"- Refinement status: `{refinement.get('status')}`")
-            lines.append(
-                f"- Refinement max dq: `{float(coarse.get('max_delta_rad') or 0.0):.4f} -> {float(final.get('max_delta_rad') or 0.0):.4f} rad`"
-            )
-            lines.append(f"- Refinement waypoints: `{refinement.get('coarse_waypoints')} -> {refinement.get('final_waypoints')}`")
+        if stage >= 2:
+            lines.append(f"- Max dq: `{float(validation.get('joint_continuity_max_delta_rad') or 0.0):.4f} rad`")
     else:
         lines.append("Validation plot was not generated.")
     lines.append("")
@@ -584,10 +540,8 @@ def write_markdown_report(
     if stage >= 2:
         lines.append(f"- {stage_label(stage)} avg IK calls: **{summary['profile_means'].get('ik_calls', 0.0):.1f}**")
         lines.append(f"- {stage_label(stage)} avg IK failures: **{summary['profile_means'].get('ik_failures', 0.0):.1f}**")
-        refinement_summary = summary.get("refinement_summary") or {}
-        lines.append(f"- {stage_label(stage)} refinement used in **{int(refinement_summary.get('used_count', 0.0))} / {summary['trials']}** trials")
         lines.append(
-            f"- {stage_label(stage)} avg max dq: **{float(refinement_summary.get('avg_coarse_max_dq_rad', 0.0)):.4f} -> {float(refinement_summary.get('avg_final_max_dq_rad', 0.0)):.4f} rad**"
+            f"- {stage_label(stage)} avg max dq: **{float(summary.get('avg_joint_continuity_max_delta_rad', 0.0)):.4f} rad**"
         )
     if collision_enabled(stage, args.floating_collision):
         lines.append(f"- {stage_label(stage)} avg collision hits: **{summary['profile_means'].get('collision_hits', 0.0):.1f}**")
@@ -618,7 +572,6 @@ def run_stage_analysis(args, stage: int, timestamp: str, outdir: str) -> Dict[st
     counts = {label: 0 for label in FAILURE_LABELS}
     tree_data_first: Optional[Dict] = None
     validation_first: Optional[Dict[str, Any]] = None
-    refinement_first: Optional[Dict[str, Any]] = None
     profile_seed = args.profile_seed if args.profile_seed is not None else args.analysis_seed_start
     support_outdir = support_dir(outdir)
 
@@ -649,10 +602,6 @@ def run_stage_analysis(args, stage: int, timestamp: str, outdir: str) -> Dict[st
                     random_seed=seed,
                     enable_collision=args.floating_collision,
                     joint_continuity_threshold_rad=args.joint_continuity_threshold,
-                    refine_after_plan=not args.no_refine_after_plan,
-                    refine_position_res=args.refine_position_res,
-                    refine_rotation_res=args.refine_rotation_res,
-                    refine_max_passes=args.refine_max_passes,
                     lock_renderer_during_search=args.lock_renderer_during_search,
                     debug_tree_out=debug_tree_out,
                     planner_profile_out=planner_profile,
@@ -675,10 +624,6 @@ def run_stage_analysis(args, stage: int, timestamp: str, outdir: str) -> Dict[st
                     random_seed=seed,
                     enable_collision=args.floating_collision,
                     joint_continuity_threshold_rad=args.joint_continuity_threshold,
-                    refine_after_plan=not args.no_refine_after_plan,
-                    refine_position_res=args.refine_position_res,
-                    refine_rotation_res=args.refine_rotation_res,
-                    refine_max_passes=args.refine_max_passes,
                     lock_renderer_during_search=args.lock_renderer_during_search,
                     debug_tree_out=debug_tree_out,
                     planner_profile_out=planner_profile,
@@ -709,13 +654,14 @@ def run_stage_analysis(args, stage: int, timestamp: str, outdir: str) -> Dict[st
             "category": category,
             "planner_profile": planner_profile,
             "validation": result.get("validation"),
-            "refinement": result.get("refinement"),
         }
-        coarse_continuity = result.get("coarse_joint_continuity") or {}
-        final_continuity = ((result.get("refinement") or {}).get("final_joint_continuity")) or (result.get("validation") or {})
-        record["coarse_joint_continuity_max_delta_rad"] = round(float(coarse_continuity.get("max_delta_rad") or 0.0), 6)
-        record["final_joint_continuity_max_delta_rad"] = round(float(final_continuity.get("max_delta_rad") or final_continuity.get("joint_continuity_max_delta_rad") or 0.0), 6)
-        record["refinement_used"] = int((result.get("refinement") or {}).get("used_refined_path", False))
+        joint_continuity = result.get("joint_continuity") or {}
+        if not joint_continuity:
+            joint_continuity = result.get("validation") or {}
+        record["joint_continuity_max_delta_rad"] = round(
+            float(joint_continuity.get("max_delta_rad") or joint_continuity.get("joint_continuity_max_delta_rad") or 0.0),
+            6,
+        )
         for key in PROFILE_TIME_KEYS + PROFILE_COUNT_KEYS:
             record[key] = round(float(planner_profile.get(key, 0.0)), 6)
         records.append(record)
@@ -723,8 +669,6 @@ def run_stage_analysis(args, stage: int, timestamp: str, outdir: str) -> Dict[st
             tree_data_first = debug_tree_out
         if validation_first is None:
             validation_first = result.get("validation")
-        if refinement_first is None and result.get("refinement") is not None:
-            refinement_first = result.get("refinement")
 
     csv_path = os.path.join(support_outdir, f"failure_analysis_stage{stage}_{timestamp}.csv")
     json_path = os.path.join(support_outdir, f"failure_analysis_stage{stage}_{timestamp}.json")
@@ -738,9 +682,7 @@ def run_stage_analysis(args, stage: int, timestamp: str, outdir: str) -> Dict[st
             "success",
             "runtime_s",
             "category",
-            "coarse_joint_continuity_max_delta_rad",
-            "final_joint_continuity_max_delta_rad",
-            "refinement_used",
+            "joint_continuity_max_delta_rad",
         ] + PROFILE_TIME_KEYS + PROFILE_COUNT_KEYS
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -748,7 +690,7 @@ def run_stage_analysis(args, stage: int, timestamp: str, outdir: str) -> Dict[st
             writer.writerow({k: record.get(k) for k in fieldnames})
 
     profile_means = summarize_profile_means(records)
-    refinement_summary = summarize_refinement(records)
+    joint_dq_values = [float(record.get("joint_continuity_max_delta_rad", 0.0)) for record in records if record.get("path_found", 0)]
     summary = {
         "stage": stage,
         "trials": args.analysis_trials,
@@ -758,10 +700,9 @@ def run_stage_analysis(args, stage: int, timestamp: str, outdir: str) -> Dict[st
         "success_rate": counts["success"] / max(1, args.analysis_trials),
         "path_found_rate": sum(record["path_found"] for record in records) / max(1, len(records)),
         "avg_runtime_s": sum(r["runtime_s"] for r in records) / max(1, len(records)),
+        "avg_joint_continuity_max_delta_rad": (sum(joint_dq_values) / max(1, len(joint_dq_values)) if stage >= 2 else 0.0),
         "profile_means": profile_means,
         "validation_first": validation_first,
-        "refinement_first": refinement_first,
-        "refinement_summary": refinement_summary,
     }
     with open(json_path, "w") as f:
         json.dump({"summary": summary, "records": records}, f, indent=2)
@@ -825,7 +766,6 @@ def run_stage_summary_only(
     counts = {label: 0 for label in FAILURE_LABELS}
     profile_seed = args.profile_seed if args.profile_seed is not None else args.analysis_seed_start
     validation_first: Optional[Dict[str, Any]] = None
-    refinement_first: Optional[Dict[str, Any]] = None
 
     for i in range(args.analysis_trials):
         seed = args.analysis_seed_start + i
@@ -851,10 +791,6 @@ def run_stage_summary_only(
                     random_seed=seed,
                     enable_collision=args.floating_collision,
                     joint_continuity_threshold_rad=args.joint_continuity_threshold,
-                    refine_after_plan=not args.no_refine_after_plan,
-                    refine_position_res=args.refine_position_res,
-                    refine_rotation_res=args.refine_rotation_res,
-                    refine_max_passes=args.refine_max_passes,
                     lock_renderer_during_search=args.lock_renderer_during_search,
                     debug_tree_out=None,
                     planner_profile_out=planner_profile,
@@ -877,10 +813,6 @@ def run_stage_summary_only(
                     random_seed=seed,
                     enable_collision=args.floating_collision,
                     joint_continuity_threshold_rad=args.joint_continuity_threshold,
-                    refine_after_plan=not args.no_refine_after_plan,
-                    refine_position_res=args.refine_position_res,
-                    refine_rotation_res=args.refine_rotation_res,
-                    refine_max_passes=args.refine_max_passes,
                     lock_renderer_during_search=args.lock_renderer_during_search,
                     debug_tree_out=None,
                     planner_profile_out=planner_profile,
@@ -904,24 +836,21 @@ def run_stage_summary_only(
             "category": category,
             "planner_profile": planner_profile,
             "validation": result.get("validation"),
-            "refinement": result.get("refinement"),
         }
-        coarse_continuity = result.get("coarse_joint_continuity") or {}
-        final_continuity = ((result.get("refinement") or {}).get("final_joint_continuity")) or (result.get("validation") or {})
-        record["coarse_joint_continuity_max_delta_rad"] = round(float(coarse_continuity.get("max_delta_rad") or 0.0), 6)
-        record["final_joint_continuity_max_delta_rad"] = round(
-            float(final_continuity.get("max_delta_rad") or final_continuity.get("joint_continuity_max_delta_rad") or 0.0),
+        joint_continuity = result.get("joint_continuity") or {}
+        if not joint_continuity:
+            joint_continuity = result.get("validation") or {}
+        record["joint_continuity_max_delta_rad"] = round(
+            float(joint_continuity.get("max_delta_rad") or joint_continuity.get("joint_continuity_max_delta_rad") or 0.0),
             6,
         )
-        record["refinement_used"] = int((result.get("refinement") or {}).get("used_refined_path", False))
         for key in PROFILE_TIME_KEYS + PROFILE_COUNT_KEYS:
             record[key] = round(float(planner_profile.get(key, 0.0)), 6)
         records.append(record)
         if validation_first is None:
             validation_first = result.get("validation")
-        if refinement_first is None and result.get("refinement") is not None:
-            refinement_first = result.get("refinement")
 
+    joint_dq_values = [float(record.get("joint_continuity_max_delta_rad", 0.0)) for record in records if record.get("path_found", 0)]
     return {
         "stage": stage,
         "records": records,
@@ -932,10 +861,9 @@ def run_stage_summary_only(
             "success_rate": counts["success"] / max(1, args.analysis_trials),
             "path_found_rate": sum(record["path_found"] for record in records) / max(1, len(records)),
             "avg_runtime_s": sum(r["runtime_s"] for r in records) / max(1, len(records)),
+            "avg_joint_continuity_max_delta_rad": (sum(joint_dq_values) / max(1, len(joint_dq_values)) if stage >= 2 else 0.0),
             "profile_means": summarize_profile_means(records),
             "validation_first": validation_first,
-            "refinement_first": refinement_first,
-            "refinement_summary": summarize_refinement(records),
         },
     }
 
@@ -964,11 +892,6 @@ def write_stage_comparison_report(
     lines.append(f"- Rotation resolution: `{args.rotation_res} rad`")
     lines.append(f"- Endpoint IK attempts: `{args.endpoint_ik_attempts}`")
     lines.append(f"- Joint continuity threshold: `{args.joint_continuity_threshold} rad`")
-    lines.append(f"- Post-plan refinement: `{'off' if args.no_refine_after_plan else 'on'}`")
-    if not args.no_refine_after_plan:
-        lines.append(f"- Initial refine position resolution: `{args.refine_position_res if args.refine_position_res is not None else args.position_res / 2.0} m`")
-        lines.append(f"- Initial refine rotation resolution: `{args.refine_rotation_res if args.refine_rotation_res is not None else args.rotation_res / 2.0} rad`")
-        lines.append(f"- Refine max passes: `{args.refine_max_passes}`")
     lines.append("")
     lines.append("---")
     lines.append("")
@@ -1008,14 +931,8 @@ def write_stage_comparison_report(
                     f", relative transform: **{validation_status_label(validation.get('relative_transform_ok'))}**"
                 )
                 lines.append(f"- Joint-path source: `{validation.get('joint_path_source') or 'n/a'}`")
-                refinement = stage_results[stage]["summary"].get("refinement_first")
-                if refinement:
-                    coarse = refinement.get("coarse_joint_continuity") or {}
-                    final = refinement.get("final_joint_continuity") or {}
-                    lines.append(f"- Refinement status: `{refinement.get('status')}`")
-                    lines.append(
-                        f"- Refinement max dq: `{float(coarse.get('max_delta_rad') or 0.0):.4f} -> {float(final.get('max_delta_rad') or 0.0):.4f} rad`"
-                    )
+                if stage >= 2:
+                    lines.append(f"- Max dq: `{float(validation.get('joint_continuity_max_delta_rad') or 0.0):.4f} rad`")
                 lines.append("")
     lines.append("---")
     lines.append("")
@@ -1054,32 +971,16 @@ def write_stage_comparison_report(
     if artifacts.get("planner_breakdown_comparison"):
         lines.append(f"![Planner Breakdown Comparison]({report_relpath(report_path, artifacts['planner_breakdown_comparison'])})")
         lines.append("")
-    lines.append("| Stage | Validated success | Path found | Avg runtime (s) | Avg iterations | Avg nodes | Avg poses checked | Avg IK calls | Avg collision hits | Avg max dq (coarse -> final) |")
+    lines.append("| Stage | Validated success | Path found | Avg runtime (s) | Avg iterations | Avg nodes | Avg poses checked | Avg IK calls | Avg collision hits | Avg max dq |")
     lines.append("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |")
     for stage in stages:
         summary = stage_results[stage]["summary"]
         means = summary["profile_means"]
-        refinement_summary = summary.get("refinement_summary") or {}
-        dq_text = (
-            f"{float(refinement_summary.get('avg_coarse_max_dq_rad', 0.0)):.4f} -> {float(refinement_summary.get('avg_final_max_dq_rad', 0.0)):.4f}"
-            if stage >= 2
-            else "n/a"
-        )
+        dq_text = f"{float(summary.get('avg_joint_continuity_max_delta_rad', 0.0)):.4f}" if stage >= 2 else "n/a"
         lines.append(
             f"| {stage_label(stage)} | {summary['success_rate']:.0%} | {summary['path_found_rate']:.0%} | {summary['avg_runtime_s']:.3f} | "
             f"{means.get('iterations', 0.0):.1f} | {means.get('nodes_created', 0.0):.1f} | "
             f"{means.get('poses_checked', 0.0):.1f} | {means.get('ik_calls', 0.0):.1f} | {means.get('collision_hits', 0.0):.1f} | {dq_text} |"
-        )
-    lines.append("")
-    lines.append("Refinement observations:")
-    lines.append("")
-    for stage in stages:
-        if stage < 2:
-            continue
-        refinement_summary = stage_results[stage]["summary"].get("refinement_summary") or {}
-        lines.append(
-            f"- {stage_label(stage)} refinement used in `{int(refinement_summary.get('used_count', 0.0))} / {stage_results[stage]['summary']['trials']}` trials"
-            f" with avg passes `{float(refinement_summary.get('avg_passes_run', 0.0)):.1f}` and avg final waypoints `{float(refinement_summary.get('avg_final_waypoints', 0.0)):.1f}`."
         )
     lines.append("")
     lines.append("Detailed stage reports:")
@@ -1121,7 +1022,6 @@ def write_resolution_sweep_report(
     lines.append(f"- Dist metric: `{args.dist_metric}`")
     lines.append(f"- Endpoint IK attempts: `{args.endpoint_ik_attempts}`")
     lines.append(f"- Joint continuity threshold: `{args.joint_continuity_threshold} rad`")
-    lines.append(f"- Post-plan refinement: `{'off' if args.no_refine_after_plan else 'on'}`")
     lines.append("")
     if artifacts.get("csv"):
         lines.append(f"CSV: `{report_relpath(report_path, artifacts['csv'])}`")
@@ -1132,18 +1032,17 @@ def write_resolution_sweep_report(
     lines.append("")
     lines.append("## Results")
     lines.append("")
-    lines.append("| Resolution | Stage | Validated success | Path found | Avg runtime (s) | Dominant failure | Avg continuity rejects | Avg max dq (coarse -> final) |")
+    lines.append("| Resolution | Stage | Validated success | Path found | Avg runtime (s) | Dominant failure | Avg continuity rejects | Avg max dq |")
     lines.append("| --- | --- | ---: | ---: | ---: | --- | ---: | --- |")
     for sweep_result in sweep_results:
         label = sweep_result["label"]
         for stage in STAGE_ORDER:
             summary = sweep_result["stage_results"][stage]["summary"]
-            refinement_summary = summary.get("refinement_summary") or {}
             lines.append(
                 f"| {label} | {stage_label(stage)} | {summary['success_rate']:.0%} | {summary['path_found_rate']:.0%} | "
                 f"{summary['avg_runtime_s']:.3f} | {dominant_failure_label(summary)} | "
                 f"{summary['profile_means'].get('continuity_rejections', 0.0):.1f} | "
-                f"{float(refinement_summary.get('avg_coarse_max_dq_rad', 0.0)):.4f} -> {float(refinement_summary.get('avg_final_max_dq_rad', 0.0)):.4f} |"
+                f"{float(summary.get('avg_joint_continuity_max_delta_rad', 0.0)):.4f} |"
             )
     lines.append("")
     lines.append("Interpretation:")
@@ -1203,9 +1102,7 @@ def run_stage_comparison(args) -> None:
             "success",
             "runtime_s",
             "category",
-            "coarse_joint_continuity_max_delta_rad",
-            "final_joint_continuity_max_delta_rad",
-            "refinement_used",
+            "joint_continuity_max_delta_rad",
         ] + PROFILE_TIME_KEYS + PROFILE_COUNT_KEYS
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -1302,9 +1199,7 @@ def run_resolution_sweep(args) -> None:
             "success",
             "runtime_s",
             "category",
-            "coarse_joint_continuity_max_delta_rad",
-            "final_joint_continuity_max_delta_rad",
-            "refinement_used",
+            "joint_continuity_max_delta_rad",
         ] + PROFILE_TIME_KEYS + PROFILE_COUNT_KEYS
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -1359,10 +1254,6 @@ def parse_args():
     parser.add_argument("--endpoint-ik-attempts", type=int, default=20, help="Max random seeds used when solving endpoint IK in Stage 2/3")
     parser.add_argument("--random-seed", type=int, default=None, help="Random seed for one-shot mode")
     parser.add_argument("--joint-continuity-threshold", type=float, default=0.2, help="Maximum allowed wrapped joint delta between neighboring Stage 2/3 configurations, in radians")
-    parser.add_argument("--no-refine-after-plan", action="store_true", help="Disable dense post-plan seed-chained IK refinement for Stage 2/3")
-    parser.add_argument("--refine-position-res", type=float, default=None, help="Initial translation resolution used during Stage 2/3 post-plan refinement, in meters")
-    parser.add_argument("--refine-rotation-res", type=float, default=None, help="Initial rotation resolution used during Stage 2/3 post-plan refinement, in radians")
-    parser.add_argument("--refine-max-passes", type=int, default=2, help="Maximum refinement passes; each pass halves the refinement resolution")
     parser.add_argument(
         "--floating-collision",
         action="store_true",
@@ -1420,10 +1311,6 @@ def main() -> None:
         random_seed=args.random_seed,
         enable_collision=args.floating_collision,
         joint_continuity_threshold_rad=args.joint_continuity_threshold,
-        refine_after_plan=not args.no_refine_after_plan,
-        refine_position_res=args.refine_position_res,
-        refine_rotation_res=args.refine_rotation_res,
-        refine_max_passes=args.refine_max_passes,
         lock_renderer_during_search=args.lock_renderer_during_search,
         debug_tree_out=debug_tree_out,
     )

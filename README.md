@@ -132,8 +132,6 @@ python -m husky_assembly_tamp.motion_planner.stage1.minimal_rrt \
   --max-attempts 5
 ```
 
-Stage 2/3 now run a dense post-plan seed-chained IK refinement pass by default. This resamples the coarse pose path, re-solves IK along the denser path, and keeps the refined result when it improves joint continuity.
-
 Run a single Stage 3 debug session:
 
 ```bash
@@ -230,9 +228,6 @@ Useful options:
 - `--lock-renderer-during-search` to suppress live redraw during tree expansion and only visualize the result afterward
 - `--endpoint-ik-attempts <N>` to increase endpoint seed search for Stage 2/3
 - `--joint-continuity-threshold <rad>` to reject Stage 2/3 edge extensions whose neighboring IK solutions jump too far in joint space
-- `--no-refine-after-plan` to disable Stage 2/3 dense post-plan refinement
-- `--refine-position-res <m>` and `--refine-rotation-res <rad>` to set the initial refinement resolution
-- `--refine-max-passes <N>` to control how many times refinement densifies the path; each pass halves the refinement step
 - `--floating-collision` to enable floating-body collision checks in Stage 1; Stage 3 always enables robot collision checks
 - `--compare-stages` to run Stage 1, Stage 2, and Stage 3 in one batch and emit a cross-stage comparison report
 - `--resolution-sweep "0.05,0.1;0.03,0.07;0.02,0.05"` to run a compact multi-resolution Stage 1/2/3 sweep and emit one summary report

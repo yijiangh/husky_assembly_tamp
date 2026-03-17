@@ -71,12 +71,20 @@ BAR_LENGTH = 1.0
 BAR_BOX_DIMS = (2.0 * BAR_RADIUS, 2.0 * BAR_RADIUS, BAR_LENGTH)
 STAGE1_DEBUG_START_OFFSET = np.array([-0.5, 0.0, 0.5], dtype=float)
 DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD = 0.2
+DEFAULT_USE_ANGLE_NORMALIZATION = True
 
 
 PoseLike = Tuple[np.ndarray, np.ndarray]
 GraspTarget = Tuple[PoseLike, PoseLike]
 ArmConf = np.ndarray
 FullConf = np.ndarray
+
+
+def maybe_normalize_angles(values: Sequence[float] | np.ndarray, use_angle_normalization: bool) -> np.ndarray:
+    arr = np.asarray(values, dtype=float)
+    if use_angle_normalization:
+        return np.asarray(normalize_angles(arr), dtype=float)
+    return arr
 
 
 def load_grasp_targets(json_path: str) -> List[GraspTarget]:
@@ -273,6 +281,7 @@ def solve_single_arm_ik(
     full_seed_conf: FullConf,
     target_tool_pose: PoseLike,
     arm_slice: slice,
+    use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
 ) -> Optional[FullConf]:
     seed_conf = np.asarray(full_seed_conf, dtype=float)
     pp.set_joint_positions(robot, arm_joints, seed_conf)
@@ -290,13 +299,13 @@ def solve_single_arm_ik(
     if result.shape[0] < max(arm_slice.stop, len(seed_conf)):
         return None
     solved_conf = seed_conf.copy()
-    solved_conf[arm_slice] = normalize_angles(result[arm_slice])
+    solved_conf[arm_slice] = maybe_normalize_angles(result[arm_slice], use_angle_normalization)
     pp.set_joint_positions(robot, arm_joints, solved_conf)
     pose_res = pp.get_link_pose(robot, tool_link)
     pose_err = calculate_pose_error(target_tool_pose, pose_res)
     if np.linalg.norm(pose_err) > 1e-4:
         return None
-    return normalize_angles(solved_conf)
+    return maybe_normalize_angles(solved_conf, use_angle_normalization)
 
 
 def validate_dual_arm_bar_pose(
@@ -338,11 +347,12 @@ def solve_dual_arm_pose_ik(
     grasp_bar_from_left: PoseLike,
     grasp_bar_from_right: PoseLike,
     seed_conf: FullConf,
+    use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
     profile_out: Optional[Dict[str, Any]] = None,
 ) -> Optional[FullConf]:
     target_left = pp.multiply(bar_pose, grasp_bar_from_left)
     target_right = pp.multiply(bar_pose, grasp_bar_from_right)
-    seed_conf = normalize_angles(np.asarray(seed_conf, dtype=float))
+    seed_conf = maybe_normalize_angles(seed_conf, use_angle_normalization)
     t0 = time.perf_counter()
     attempts = (
         ("right", "left"),
@@ -361,6 +371,7 @@ def solve_dual_arm_pose_ik(
                     full_seed_conf=conf,
                     target_tool_pose=target_right,
                     arm_slice=slice(6, 12),
+                    use_angle_normalization=use_angle_normalization,
                 )
             else:
                 conf_next = solve_single_arm_ik(
@@ -370,6 +381,7 @@ def solve_dual_arm_pose_ik(
                     full_seed_conf=conf,
                     target_tool_pose=target_left,
                     arm_slice=slice(0, 6),
+                    use_angle_normalization=use_angle_normalization,
                 )
             if conf_next is None:
                 success = False
@@ -388,7 +400,7 @@ def solve_dual_arm_pose_ik(
         ):
             add_profile_time(profile_out, "ik_time_s", time.perf_counter() - t0)
             bump_profile_count(profile_out, "nodes_with_ik")
-            return normalize_angles(conf)
+            return maybe_normalize_angles(conf, use_angle_normalization)
     add_profile_time(profile_out, "ik_time_s", time.perf_counter() - t0)
     return None
 
@@ -404,6 +416,7 @@ def solve_endpoint_dual_arm_ik(
     seed_conf: FullConf,
     rng: np.random.Generator,
     max_attempts: int,
+    use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
     profile_out: Optional[Dict[str, Any]] = None,
 ) -> Optional[FullConf]:
     for attempt in range(max(1, max_attempts)):
@@ -420,6 +433,7 @@ def solve_endpoint_dual_arm_ik(
             grasp_bar_from_left=grasp_bar_from_left,
             grasp_bar_from_right=grasp_bar_from_right,
             seed_conf=attempt_seed,
+            use_angle_normalization=use_angle_normalization,
             profile_out=profile_out,
         )
         if conf is not None:
@@ -444,6 +458,7 @@ def extend_toward(
     node_confs: Optional[Dict[int, FullConf]] = None,
     ik_context: Optional[Dict[str, Any]] = None,
     joint_continuity_threshold_rad: Optional[float] = None,
+    use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
     profile_out: Optional[Dict[str, Any]] = None,
 ) -> Tuple[TreeNode, bool, str]:
     current = source
@@ -472,6 +487,7 @@ def extend_toward(
                 grasp_bar_from_left=ik_context["grasp_bar_from_left"],
                 grasp_bar_from_right=ik_context["grasp_bar_from_right"],
                 seed_conf=current_conf,
+                use_angle_normalization=use_angle_normalization,
                 profile_out=profile_out,
             )
             if next_conf is None:
@@ -480,7 +496,10 @@ def extend_toward(
                 break
             if joint_continuity_threshold_rad is not None:
                 step_delta = np.abs(
-                    normalize_angles(np.asarray(next_conf, dtype=float) - np.asarray(current_conf, dtype=float))
+                    maybe_normalize_angles(
+                        np.asarray(next_conf, dtype=float) - np.asarray(current_conf, dtype=float),
+                        use_angle_normalization,
+                    )
                 )
                 if float(np.max(step_delta)) > float(joint_continuity_threshold_rad):
                     reached = False
@@ -498,6 +517,7 @@ def extend_toward(
             bump_profile_count(profile_out, "collision_hits")
             break
         # this is the version of extension that stops at the first collision of the extend, but still add the valid interp so far into the tree
+        pp.VideoSaver
         node = TreeNode(pose, parent=current)
         nodes.append(node)
         if enable_ik and node_confs is not None and next_conf is not None:
@@ -518,6 +538,7 @@ def extend_toward(
 def summarize_joint_continuity(
     joint_path: Optional[Sequence[FullConf]],
     threshold_rad: float = DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
+    use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
 ) -> Dict[str, Any]:
     summary = {
         "ok": None,
@@ -527,7 +548,7 @@ def summarize_joint_continuity(
     }
     if joint_path is None:
         return summary
-    normalized_joint_path = [normalize_angles(np.asarray(conf, dtype=float)) for conf in joint_path]
+    normalized_joint_path = [maybe_normalize_angles(conf, use_angle_normalization) for conf in joint_path]
     if len(normalized_joint_path) < 2:
         summary["ok"] = True
         summary["max_delta_rad"] = 0.0
@@ -535,7 +556,12 @@ def summarize_joint_continuity(
 
     step_max_deltas = []
     for prev_conf, next_conf in zip(normalized_joint_path[:-1], normalized_joint_path[1:]):
-        step_delta = np.abs(normalize_angles(np.asarray(next_conf, dtype=float) - np.asarray(prev_conf, dtype=float)))
+        step_delta = np.abs(
+            maybe_normalize_angles(
+                np.asarray(next_conf, dtype=float) - np.asarray(prev_conf, dtype=float),
+                use_angle_normalization,
+            )
+        )
         step_max_deltas.append(float(np.max(step_delta)))
     max_delta = max(step_max_deltas) if step_max_deltas else 0.0
     first_bad_step = next((idx + 1 for idx, delta in enumerate(step_max_deltas) if delta > threshold_rad), None)
@@ -545,33 +571,13 @@ def summarize_joint_continuity(
     return summary
 
 
-def densify_pose_path(
-    path: Sequence[PoseLike],
-    position_res: float,
-    rotation_res: float,
-) -> List[PoseLike]:
-    if not path:
-        return []
-    dense_path: List[PoseLike] = [path[0]]
-    for start_pose, end_pose in zip(path[:-1], path[1:]):
-        segment = list(
-            pp.interpolate_poses(
-                start_pose,
-                end_pose,
-                pos_step_size=max(position_res, 1e-6),
-                ori_step_size=max(rotation_res, 1e-6),
-            )
-        )
-        dense_path.extend(segment[1:])
-    return dense_path
-
-
 def reconstruct_joint_path_for_pose_path(
     scene: Dict[str, Any],
     pose_path: Sequence[PoseLike],
     start_conf: FullConf,
     joint_collision_fn: Optional[Callable[[FullConf], bool]] = None,
     joint_continuity_threshold_rad: Optional[float] = None,
+    use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
     profile_out: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Optional[List[FullConf]], Optional[str]]:
     if not pose_path:
@@ -580,7 +586,7 @@ def reconstruct_joint_path_for_pose_path(
     if grasp_bar_from_right is None:
         return None, "missing_right_grasp"
 
-    current_conf = normalize_angles(np.asarray(start_conf, dtype=float))
+    current_conf = maybe_normalize_angles(start_conf, use_angle_normalization)
     joint_path = [current_conf]
     for idx, pose in enumerate(pose_path[1:], start=1):
         next_conf = solve_dual_arm_pose_ik(
@@ -592,13 +598,19 @@ def reconstruct_joint_path_for_pose_path(
             grasp_bar_from_left=scene["grasp_bar_from_left"],
             grasp_bar_from_right=grasp_bar_from_right,
             seed_conf=current_conf,
+            use_angle_normalization=use_angle_normalization,
             profile_out=profile_out,
         )
         if next_conf is None:
             return None, f"ik_failure_at_waypoint_{idx}"
-        next_conf = normalize_angles(np.asarray(next_conf, dtype=float))
+        next_conf = maybe_normalize_angles(next_conf, use_angle_normalization)
         if joint_continuity_threshold_rad is not None:
-            step_delta = np.abs(normalize_angles(np.asarray(next_conf, dtype=float) - np.asarray(current_conf, dtype=float)))
+            step_delta = np.abs(
+                maybe_normalize_angles(
+                    np.asarray(next_conf, dtype=float) - np.asarray(current_conf, dtype=float),
+                    use_angle_normalization,
+                )
+            )
             if float(np.max(step_delta)) > float(joint_continuity_threshold_rad):
                 bump_profile_count(profile_out, "continuity_rejections")
                 return None, f"continuity_at_waypoint_{idx}"
@@ -612,103 +624,6 @@ def reconstruct_joint_path_for_pose_path(
         current_conf = next_conf
         joint_path.append(current_conf)
     return joint_path, None
-
-
-def refine_pose_path_with_seed_chained_ik(
-    scene: Dict[str, Any],
-    path: Sequence[PoseLike],
-    path_confs: Sequence[FullConf],
-    start_conf: FullConf,
-    base_position_res: float,
-    base_rotation_res: float,
-    refine_max_passes: int,
-    joint_continuity_threshold_rad: Optional[float] = DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
-    joint_collision_fn: Optional[Callable[[FullConf], bool]] = None,
-    profile_out: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    coarse_summary = summarize_joint_continuity(path_confs)
-    result: Dict[str, Any] = {
-        "enabled": True,
-        "attempted": False,
-        "used_refined_path": False,
-        "status": "skipped",
-        "coarse_waypoints": len(path),
-        "final_waypoints": len(path),
-        "coarse_joint_continuity": coarse_summary,
-        "final_joint_continuity": coarse_summary,
-        "passes": [],
-        "passes_run": 0,
-        "path": list(path),
-        "path_confs": [normalize_angles(np.asarray(conf, dtype=float)) for conf in path_confs],
-    }
-    if len(path) < 2 or refine_max_passes <= 0:
-        result["status"] = "disabled"
-        return result
-    if coarse_summary.get("ok"):
-        result["status"] = "already_continuous"
-        return result
-
-    best_path = list(path)
-    best_confs = [normalize_angles(np.asarray(conf, dtype=float)) for conf in path_confs]
-    best_summary = coarse_summary
-    t_refine = time.perf_counter()
-
-    for pass_idx in range(refine_max_passes):
-        pass_position_res = max(base_position_res / (2**pass_idx), 1e-4)
-        pass_rotation_res = max(base_rotation_res / (2**pass_idx), 1e-4)
-        dense_path = densify_pose_path(path, pass_position_res, pass_rotation_res)
-        pass_record: Dict[str, Any] = {
-            "pass_index": pass_idx + 1,
-            "position_res": float(pass_position_res),
-            "rotation_res": float(pass_rotation_res),
-            "waypoints": len(dense_path),
-        }
-        result["attempted"] = True
-        joint_path, failure_reason = reconstruct_joint_path_for_pose_path(
-            scene=scene,
-            pose_path=dense_path,
-            start_conf=start_conf,
-            joint_collision_fn=joint_collision_fn,
-            joint_continuity_threshold_rad=joint_continuity_threshold_rad,
-            profile_out=profile_out,
-        )
-        if joint_path is None:
-            pass_record["status"] = "failed"
-            pass_record["failure_reason"] = failure_reason
-            result["passes"].append(pass_record)
-            result["status"] = f"failed:{failure_reason}"
-            break
-
-        continuity = summarize_joint_continuity(joint_path)
-        pass_record["status"] = "success"
-        pass_record["joint_continuity"] = continuity
-        result["passes"].append(pass_record)
-
-        best_max_delta = best_summary.get("max_delta_rad")
-        candidate_max_delta = continuity.get("max_delta_rad")
-        if candidate_max_delta is not None and (
-            best_max_delta is None or candidate_max_delta <= best_max_delta + 1e-9
-        ):
-            best_path = dense_path
-            best_confs = joint_path
-            best_summary = continuity
-            result["used_refined_path"] = len(dense_path) > len(path)
-            result["status"] = "improved" if not continuity.get("ok") else "continuity_pass"
-        if continuity.get("ok"):
-            break
-
-    add_profile_time(profile_out, "refinement_time_s", time.perf_counter() - t_refine)
-    if profile_out is not None:
-        profile_out["refinement_passes"] = len(result["passes"])
-        profile_out["refinement_waypoints"] = len(best_path)
-        profile_out["refinement_used"] = int(result["used_refined_path"])
-
-    result["path"] = best_path
-    result["path_confs"] = best_confs
-    result["passes_run"] = len(result["passes"])
-    result["final_waypoints"] = len(best_path)
-    result["final_joint_continuity"] = best_summary
-    return result
 
 
 def update_debug_tree(
@@ -753,6 +668,7 @@ def plan_pose_rrt(
     ik_context: Optional[Dict[str, Any]] = None,
     joint_collision_fn: Optional[Callable[[FullConf], bool]] = None,
     joint_continuity_threshold_rad: Optional[float] = None,
+    use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
     use_draw: bool = True,
     debug_tree_out: Optional[Dict] = None,
     profile_out: Optional[Dict[str, Any]] = None,
@@ -921,6 +837,7 @@ def plan_pose_rrt(
                 node_confs=node_confs,
                 ik_context=ik_context,
                 joint_continuity_threshold_rad=joint_continuity_threshold_rad,
+                use_angle_normalization=use_angle_normalization,
                 profile_out=profile_out,
             )
             add_profile_time(profile_out, "extend_tree_time_s", time.perf_counter() - t_extend)
@@ -1095,8 +1012,8 @@ def run_stage_trial(
     use_gui: bool = False,
     dist_metric: str = "feature",
     goal_bias: float = 0.1,
-    position_res: float = 0.05,
-    rotation_res: float = 0.1,
+    position_res: float = 0.01,
+    rotation_res: float = 0.025,
     max_time: float = 30.0,
     max_iterations: int = 2000,
     max_attempts: int = 5,
@@ -1104,10 +1021,7 @@ def run_stage_trial(
     random_seed: Optional[int] = None,
     enable_collision: bool = True,
     joint_continuity_threshold_rad: Optional[float] = DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
-    refine_after_plan: bool = True,
-    refine_position_res: Optional[float] = None,
-    refine_rotation_res: Optional[float] = None,
-    refine_max_passes: int = 2,
+    use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
     lock_renderer_during_search: bool = False,
     debug_tree_out: Optional[Dict] = None,
     planner_profile_out: Optional[Dict[str, Any]] = None,
@@ -1123,6 +1037,8 @@ def run_stage_trial(
         goal_conf = None
         joint_collision_fn = None
         if enable_ik:
+            # Stages 2/3 solve dual-arm endpoint IK once before search so the tree
+            # starts from a robot-feasible grasp state instead of only a bar pose.
             grasp_bar_from_right = scene["grasp_bar_from_right"]
             if grasp_bar_from_right is None:
                 raise ValueError(f"Stage {stage} requires both left and right grasp targets.")
@@ -1138,6 +1054,7 @@ def run_stage_trial(
                 seed_conf=scene["start_joint_values"],
                 rng=rng,
                 max_attempts=endpoint_ik_attempts,
+                use_angle_normalization=use_angle_normalization,
                 profile_out=planner_profile_out,
             )
             if start_conf is None:
@@ -1157,6 +1074,7 @@ def run_stage_trial(
                 seed_conf=scene["end_joint_values"],
                 rng=rng,
                 max_attempts=endpoint_ik_attempts,
+                use_angle_normalization=use_angle_normalization,
                 profile_out=planner_profile_out,
             )
             add_profile_time(planner_profile_out, "endpoint_ik_time_s", time.perf_counter() - t_endpoint)
@@ -1185,14 +1103,12 @@ def run_stage_trial(
         logger.info(f"  rotation_res: {rotation_res}")
         if enable_ik:
             logger.info(f"  joint continuity threshold: {joint_continuity_threshold_rad}")
-            logger.info(f"  refine after plan: {'on' if refine_after_plan else 'off'}")
-            if refine_after_plan:
-                logger.info(f"  refine position_res: {refine_position_res if refine_position_res is not None else position_res / 2.0}")
-                logger.info(f"  refine rotation_res: {refine_rotation_res if refine_rotation_res is not None else rotation_res / 2.0}")
-                logger.info(f"  refine max passes: {refine_max_passes}")
+            logger.info(f"  angle normalization: {'on' if use_angle_normalization else 'off'}")
         logger.info(f"  collision obstacles: {len(scene['collision_obstacles'])} bodies")
         logger.info(f"  lock renderer during search: {'on' if (use_gui and lock_renderer_during_search) else 'off'}")
 
+        # The core RRT stays pose-space-first; extra constraints are injected through
+        # the IK and collision callbacks rather than changing the tree structure.
         planning_kwargs = dict(
             robot=scene["robot"],
             bar_body=scene["bar_body"],
@@ -1223,6 +1139,7 @@ def run_stage_trial(
             else None,
             joint_collision_fn=joint_collision_fn,
             joint_continuity_threshold_rad=(joint_continuity_threshold_rad if enable_ik else None),
+            use_angle_normalization=use_angle_normalization,
             use_draw=use_gui,
             debug_tree_out=debug_tree_out,
             profile_out=planner_profile_out,
@@ -1243,55 +1160,14 @@ def run_stage_trial(
         else:
             logger.warning(f"No Stage {stage} pose path found.")
 
-        coarse_path = path
-        coarse_path_confs = path_confs
-        coarse_continuity = summarize_joint_continuity(path_confs) if path_confs is not None else None
-        refinement: Optional[Dict[str, Any]] = None
-        if enable_ik and path is not None and path_confs is not None and start_conf is not None:
-            refinement = {
-                "enabled": bool(refine_after_plan),
-                "attempted": False,
-                "used_refined_path": False,
-                "status": "disabled",
-                "coarse_waypoints": len(path),
-                "final_waypoints": len(path),
-                "coarse_joint_continuity": coarse_continuity,
-                "final_joint_continuity": coarse_continuity,
-                "passes": [],
-            }
-            if refine_after_plan:
-                refinement = refine_pose_path_with_seed_chained_ik(
-                    scene=scene,
-                    path=path,
-                    path_confs=path_confs,
-                    start_conf=start_conf,
-                    base_position_res=(refine_position_res if refine_position_res is not None else max(position_res / 2.0, 1e-4)),
-                    base_rotation_res=(refine_rotation_res if refine_rotation_res is not None else max(rotation_res / 2.0, 1e-4)),
-                    refine_max_passes=refine_max_passes,
-                    joint_continuity_threshold_rad=joint_continuity_threshold_rad,
-                    joint_collision_fn=joint_collision_fn,
-                    profile_out=planner_profile_out,
-                )
-                if refinement.get("used_refined_path"):
-                    path = refinement["path"]
-                    path_confs = refinement["path_confs"]
-                    logger.info(
-                        "Refinement accepted: %s -> %s waypoints, max dq %.4f -> %.4f rad",
-                        refinement.get("coarse_waypoints"),
-                        refinement.get("final_waypoints"),
-                        float((refinement.get("coarse_joint_continuity") or {}).get("max_delta_rad") or 0.0),
-                        float((refinement.get("final_joint_continuity") or {}).get("max_delta_rad") or 0.0),
-                    )
-                    pp.set_pose(scene["bar_body"], path[-1])
-                    pp.set_joint_positions(scene["robot"], scene["arm_joints"], path_confs[-1])
-                else:
-                    logger.info(
-                        "Refinement result: %s (max dq %.4f -> %.4f rad)",
-                        refinement.get("status"),
-                        float((refinement.get("coarse_joint_continuity") or {}).get("max_delta_rad") or 0.0),
-                        float((refinement.get("final_joint_continuity") or {}).get("max_delta_rad") or 0.0),
-                    )
+        coarse_continuity = (
+            summarize_joint_continuity(path_confs, use_angle_normalization=use_angle_normalization)
+            if path_confs is not None
+            else None
+        )
 
+        # Validation can reuse the planner joint path or reconstruct one from the
+        # pose path so Stage 1/2/3 runs all get the same diagnostic output.
         validation_joint_path, validation_joint_path_source, validation_joint_path_reason = build_validation_joint_path(
             scene=scene,
             path=path,
@@ -1299,6 +1175,7 @@ def run_stage_trial(
             start_conf=start_conf,
             endpoint_ik_attempts=endpoint_ik_attempts,
             random_seed=random_seed,
+            use_angle_normalization=use_angle_normalization,
         )
         validation = validate_stage_trajectory(
             stage=stage,
@@ -1310,11 +1187,9 @@ def run_stage_trial(
             urdf_path=HUSKY_DUAL_URDF_PATH,
             srdf_path=HUSKY_DUAL_SRDF_PATH,
             grasp_mask_links=STAGE3_GRASP_MASK_LINKS,
+            use_angle_normalization=use_angle_normalization,
         )
         log_validation_summary(validation)
-        refinement_summary = None
-        if refinement is not None:
-            refinement_summary = {k: v for k, v in refinement.items() if k not in {"path", "path_confs"}}
         path_found = path is not None
         validated_success = path_found
         if stage >= 2:
@@ -1326,10 +1201,7 @@ def run_stage_trial(
             "scene": scene,
             "path": path,
             "path_confs": path_confs,
-            "coarse_path": coarse_path,
-            "coarse_path_confs": coarse_path_confs,
-            "coarse_joint_continuity": coarse_continuity,
-            "refinement": refinement_summary,
+            "joint_continuity": coarse_continuity,
             "validation_joint_path": validation_joint_path,
             "validation_joint_path_source": validation_joint_path_source,
             "validation": validation,
@@ -1363,13 +1235,14 @@ def build_validation_joint_path(
     start_conf: Optional[FullConf],
     endpoint_ik_attempts: int,
     random_seed: Optional[int],
+    use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
 ) -> Tuple[Optional[List[FullConf]], Optional[str], Optional[str]]:
     if path is None:
         return None, None, "no_path"
     if path_confs is not None:
         if len(path_confs) != len(path):
             return None, "planner", "planner_joint_path_length_mismatch"
-        return [normalize_angles(np.asarray(conf, dtype=float)) for conf in path_confs], "planner", None
+        return [maybe_normalize_angles(conf, use_angle_normalization) for conf in path_confs], "planner", None
 
     grasp_bar_from_right = scene["grasp_bar_from_right"]
     if grasp_bar_from_right is None:
@@ -1377,7 +1250,7 @@ def build_validation_joint_path(
 
     rng = np.random.default_rng(random_seed)
     if start_conf is not None:
-        current_conf: Optional[FullConf] = normalize_angles(np.asarray(start_conf, dtype=float))
+        current_conf: Optional[FullConf] = maybe_normalize_angles(start_conf, use_angle_normalization)
     else:
         current_conf = solve_endpoint_dual_arm_ik(
             robot=scene["robot"],
@@ -1390,10 +1263,13 @@ def build_validation_joint_path(
             seed_conf=scene["start_joint_values"],
             rng=rng,
             max_attempts=endpoint_ik_attempts,
+            use_angle_normalization=use_angle_normalization,
         )
     if current_conf is None:
         return None, "reconstructed", "validation_start_ik_failure"
 
+    # When the planner did not retain joint states, replay the pose path with the
+    # same seed-chained IK logic so validation can still inspect robot-side behavior.
     joint_path = [current_conf]
     for idx, pose in enumerate(path[1:], start=1):
         next_conf = solve_dual_arm_pose_ik(
@@ -1405,10 +1281,11 @@ def build_validation_joint_path(
             grasp_bar_from_left=scene["grasp_bar_from_left"],
             grasp_bar_from_right=grasp_bar_from_right,
             seed_conf=current_conf,
+            use_angle_normalization=use_angle_normalization,
         )
         if next_conf is None:
             return None, "reconstructed", f"validation_ik_failure_at_waypoint_{idx}"
-        current_conf = normalize_angles(np.asarray(next_conf, dtype=float))
+        current_conf = maybe_normalize_angles(next_conf, use_angle_normalization)
         joint_path.append(current_conf)
     return joint_path, "reconstructed", None
 
@@ -1514,30 +1391,13 @@ def main() -> None:
         "--joint-continuity-threshold",
         type=float,
         default=DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
-        help="Maximum allowed wrapped joint delta between neighboring Stage 2/3 configurations, in radians",
+        help="Maximum allowed joint delta between neighboring Stage 2/3 configurations, in radians",
     )
     parser.add_argument(
-        "--no-refine-after-plan",
-        action="store_true",
-        help="Disable dense post-plan seed-chained IK refinement for Stage 2/3",
-    )
-    parser.add_argument(
-        "--refine-position-res",
-        type=float,
-        default=None,
-        help="Initial translation resolution used during Stage 2/3 post-plan refinement, in meters",
-    )
-    parser.add_argument(
-        "--refine-rotation-res",
-        type=float,
-        default=None,
-        help="Initial rotation resolution used during Stage 2/3 post-plan refinement, in radians",
-    )
-    parser.add_argument(
-        "--refine-max-passes",
-        type=int,
-        default=2,
-        help="Maximum number of Stage 2/3 post-plan refinement passes; each pass halves the refinement resolution",
+        "--use-angle-normalization",
+        action=argparse.BooleanOptionalAction,
+        default=DEFAULT_USE_ANGLE_NORMALIZATION,
+        help="Wrap joint angles into the principal range before IK propagation and continuity checks",
     )
     parser.add_argument(
         "--floating-collision",
@@ -1571,10 +1431,7 @@ def main() -> None:
         random_seed=args.random_seed,
         enable_collision=args.floating_collision,
         joint_continuity_threshold_rad=args.joint_continuity_threshold,
-        refine_after_plan=not args.no_refine_after_plan,
-        refine_position_res=args.refine_position_res,
-        refine_rotation_res=args.refine_rotation_res,
-        refine_max_passes=args.refine_max_passes,
+        use_angle_normalization=args.use_angle_normalization,
         lock_renderer_during_search=args.lock_renderer_during_search,
         debug_tree_out=debug_tree_out,
     )

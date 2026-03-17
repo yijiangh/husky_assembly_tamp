@@ -87,6 +87,13 @@ def unwrap_joint_path_for_display_deg(joint_path_rad: Sequence[Sequence[float]])
     return np.degrees(np.unwrap(wrapped, axis=0))
 
 
+def maybe_normalize_angles(values: Sequence[float] | np.ndarray, use_angle_normalization: bool) -> np.ndarray:
+    arr = np.asarray(values, dtype=float)
+    if use_angle_normalization:
+        return np.asarray(normalize_angles(arr), dtype=float)
+    return arr
+
+
 def save_validation_plot(
     *,
     out_path: str,
@@ -120,7 +127,15 @@ def save_validation_plot(
     if relative_translation_errors_m:
         xs = np.arange(len(relative_translation_errors_m), dtype=int)
         relative_translation_errors_mm = 1000.0 * np.asarray(relative_translation_errors_m, dtype=float)
-        axes[0].plot(xs, relative_translation_errors_mm, color="#1f77b4", linewidth=1.8)
+        axes[0].plot(
+            xs,
+            relative_translation_errors_mm,
+            color="#1f77b4",
+            linewidth=1.8,
+            marker="o",
+            markersize=3.0,
+            markeredgewidth=0.0,
+        )
         axes[0].set_ylabel("Translation drift (mm)")
         axes[0].set_title("Left-right end-effector relative translation drift")
     else:
@@ -137,6 +152,9 @@ def save_validation_plot(
                 relative_rotation_axis_errors_deg[axis_name],
                 color=color_map[axis_name],
                 linewidth=1.8,
+                marker="o",
+                markersize=3.0,
+                markeredgewidth=0.0,
                 label=f"{axis_name}-axis",
             )
         axes[1].set_ylabel("Axis drift (deg)")
@@ -198,6 +216,7 @@ def validate_stage_trajectory(
     joint_continuity_threshold_rad: float = 0.5,
     relative_translation_threshold_m: float = 1e-3,
     relative_rotation_axis_threshold_deg: float = float(np.degrees(1e-2)),
+    use_angle_normalization: bool = False,
     reports_dir: str = REPORTS_DIR,
 ) -> Dict[str, Any]:
     os.makedirs(reports_dir, exist_ok=True)
@@ -321,8 +340,13 @@ def validate_stage_trajectory(
     collision_keys = ("bar_robot", "robot_self", "robot_static", "bar_static")
     collision_flags = {key: False for key in collision_keys}
 
-    normalized_joint_path = [normalize_angles(np.asarray(conf, dtype=float)) for conf in joint_path]
+    # Validation mirrors the planner's joint-angle wrapping setting so comparisons
+    # remain apples-to-apples when angle normalization is toggled.
+    normalized_joint_path = [maybe_normalize_angles(conf, use_angle_normalization) for conf in joint_path]
     joint_path_deg = unwrap_joint_path_for_display_deg(normalized_joint_path)
+
+    # Replay the full trajectory in PyBullet so each waypoint is checked against the
+    # same collision and end-effector drift diagnostics used in the final report.
     for idx, (pose, conf) in enumerate(zip(path, normalized_joint_path)):
         pp.set_joint_positions(robot, arm_joints, conf)
         pp.set_pose(bar_body, pose)
@@ -359,7 +383,12 @@ def validate_stage_trajectory(
     if len(normalized_joint_path) >= 2:
         step_max_deltas = []
         for prev_conf, next_conf in zip(normalized_joint_path[:-1], normalized_joint_path[1:]):
-            step_delta = np.abs(normalize_angles(np.asarray(next_conf, dtype=float) - np.asarray(prev_conf, dtype=float)))
+            step_delta = np.abs(
+                maybe_normalize_angles(
+                    np.asarray(next_conf, dtype=float) - np.asarray(prev_conf, dtype=float),
+                    use_angle_normalization,
+                )
+            )
             step_max_deltas.append(float(np.max(step_delta)))
         if step_max_deltas:
             max_delta = max(step_max_deltas)

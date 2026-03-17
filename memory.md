@@ -152,6 +152,7 @@ If resuming later, read these first:
 ## Session Addendum: Stage 1 Preferences And Tooling
 
 - Coding style preference: keep `husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py` focused on the core algorithm plus a thin single-run entrypoint. Avoid planner classes when plain functions are sufficient. Prefer Caelan-style functional structure and reuse helpers from `../pybullet_planning` whenever possible.
+- Comment style preference: add short comments ahead of major logic blocks in non-trivial functions so the flow is easier to scan, but avoid noisy line-by-line comments.
 - `minimal_rrt.py` now owns the single-run Stage 1 workflow:
   - direct runnable `main()`
   - scene setup / teardown

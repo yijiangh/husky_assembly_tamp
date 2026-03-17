@@ -1,0 +1,1817 @@
+{
+  "resolution_pairs": [
+    {
+      "label": "pos=0.050m rot=0.100rad",
+      "position_res": 0.05,
+      "rotation_res": 0.1,
+      "stage_summaries": {
+        "1": {
+          "stage": 1,
+          "trials": 1,
+          "counts": {
+            "task_space_failure": 0,
+            "ik_failure": 0,
+            "continuity_failure": 0,
+            "collision_failure": 0,
+            "success": 1
+          },
+          "success_rate": 1.0,
+          "path_found_rate": 1.0,
+          "avg_runtime_s": 0.0152,
+          "profile_means": {
+            "collision_check_time_s": 1.1669981176964939e-06,
+            "endpoint_ik_time_s": 0.0,
+            "feature_time_s": 2.487500023562461e-05,
+            "sample_time_s": 0.00025775099493330345,
+            "nearest_time_s": 0.007882791007432388,
+            "ik_time_s": 0.0,
+            "goal_test_time_s": 0.0005254589996184222,
+            "extend_tree_time_s": 0.006280871999479132,
+            "refinement_time_s": 0.0,
+            "attempts": 1.0,
+            "iterations": 18.0,
+            "nodes_created": 333.0,
+            "poses_checked": 332.0,
+            "collision_hits": 0.0,
+            "ik_calls": 0.0,
+            "ik_failures": 0.0,
+            "nodes_with_ik": 0.0,
+            "continuity_rejections": 0.0,
+            "refinement_passes": 0.0,
+            "refinement_waypoints": 0.0,
+            "refinement_used": 0.0
+          },
+          "validation_first": {
+            "plot_path": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage1_20260317_124835.png",
+            "path_waypoints": 71,
+            "joint_path_waypoints": 0,
+            "joint_path_source": "reconstructed",
+            "joint_path_reason": "validation_ik_failure_at_waypoint_2",
+            "collision_free": null,
+            "collision_breakdown": {
+              "bar_robot": {
+                "count": 0,
+                "first_index": null
+              },
+              "robot_self": {
+                "count": 0,
+                "first_index": null
+              },
+              "robot_static": {
+                "count": 0,
+                "first_index": null
+              },
+              "bar_static": {
+                "count": 0,
+                "first_index": null
+              }
+            },
+            "joint_continuity_ok": null,
+            "joint_continuity_threshold_rad": 0.5,
+            "joint_continuity_max_delta_rad": null,
+            "joint_continuity_first_bad_step": null,
+            "relative_transform_ok": null,
+            "relative_translation_threshold_m": 0.001,
+            "relative_rotation_axis_threshold_deg": 0.5729577951308232,
+            "relative_transform_max_translation_m": null,
+            "relative_transform_max_axis_angle_deg": {
+              "x": null,
+              "y": null,
+              "z": null
+            }
+          },
+          "refinement_first": null,
+          "refinement_summary": {}
+        },
+        "2": {
+          "stage": 2,
+          "trials": 1,
+          "counts": {
+            "task_space_failure": 0,
+            "ik_failure": 0,
+            "continuity_failure": 0,
+            "collision_failure": 1,
+            "success": 0
+          },
+          "success_rate": 0.0,
+          "path_found_rate": 1.0,
+          "avg_runtime_s": 1.0135,
+          "profile_means": {
+            "collision_check_time_s": 1.45800004247576e-06,
+            "endpoint_ik_time_s": 0.0,
+            "feature_time_s": 3.454200123087503e-05,
+            "sample_time_s": 0.000773374005802907,
+            "nearest_time_s": 0.013814998015732272,
+            "ik_time_s": 0.9864402039638662,
+            "goal_test_time_s": 7.80830014264211e-05,
+            "extend_tree_time_s": 0.998478123008681,
+            "refinement_time_s": 0.0,
+            "attempts": 1.0,
+            "iterations": 52.0,
+            "nodes_created": 201.0,
+            "poses_checked": 249.0,
+            "collision_hits": 0.0,
+            "ik_calls": 538.0,
+            "ik_failures": 86.0,
+            "nodes_with_ik": 206.0,
+            "continuity_rejections": 6.0,
+            "refinement_passes": 0.0,
+            "refinement_waypoints": 0.0,
+            "refinement_used": 0.0
+          },
+          "validation_first": {
+            "plot_path": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage2_20260317_124836.png",
+            "path_waypoints": 86,
+            "joint_path_waypoints": 86,
+            "joint_path_source": "planner",
+            "joint_path_reason": null,
+            "collision_free": false,
+            "collision_breakdown": {
+              "bar_robot": {
+                "count": 52,
+                "first_index": 6
+              },
+              "robot_self": {
+                "count": 45,
+                "first_index": 27
+              },
+              "robot_static": {
+                "count": 0,
+                "first_index": null
+              },
+              "bar_static": {
+                "count": 0,
+                "first_index": null
+              }
+            },
+            "joint_continuity_ok": true,
+            "joint_continuity_threshold_rad": 0.5,
+            "joint_continuity_max_delta_rad": 0.41757907939219496,
+            "joint_continuity_first_bad_step": null,
+            "relative_transform_ok": true,
+            "relative_translation_threshold_m": 0.001,
+            "relative_rotation_axis_threshold_deg": 0.5729577951308232,
+            "relative_transform_max_translation_m": 5.1921241787249076e-05,
+            "relative_transform_max_axis_angle_deg": {
+              "x": 0.00018199402402354324,
+              "y": 0.0005655269287102134,
+              "z": 0.0005863255938811586
+            }
+          },
+          "refinement_first": {
+            "enabled": true,
+            "attempted": false,
+            "used_refined_path": false,
+            "status": "already_continuous",
+            "coarse_waypoints": 86,
+            "final_waypoints": 86,
+            "coarse_joint_continuity": {
+              "ok": true,
+              "max_delta_rad": 0.41757907939219496,
+              "first_bad_step": null,
+              "threshold_rad": 0.5
+            },
+            "final_joint_continuity": {
+              "ok": true,
+              "max_delta_rad": 0.41757907939219496,
+              "first_bad_step": null,
+              "threshold_rad": 0.5
+            },
+            "passes": [],
+            "passes_run": 0
+          },
+          "refinement_summary": {
+            "trials": 1.0,
+            "used_count": 0.0,
+            "attempted_count": 0.0,
+            "continuity_pass_count": 1.0,
+            "avg_passes_run": 0.0,
+            "avg_final_waypoints": 86.0,
+            "avg_coarse_max_dq_rad": 0.41757907939219496,
+            "avg_final_max_dq_rad": 0.41757907939219496
+          }
+        },
+        "3": {
+          "stage": 3,
+          "trials": 1,
+          "counts": {
+            "task_space_failure": 0,
+            "ik_failure": 0,
+            "continuity_failure": 0,
+            "collision_failure": 0,
+            "success": 1
+          },
+          "success_rate": 1.0,
+          "path_found_rate": 1.0,
+          "avg_runtime_s": 1.1772,
+          "profile_means": {
+            "collision_check_time_s": 0.0014950000040698797,
+            "endpoint_ik_time_s": 0.0,
+            "feature_time_s": 2.141699951607734e-05,
+            "sample_time_s": 0.0013836280086252373,
+            "nearest_time_s": 0.013317083030415233,
+            "ik_time_s": 1.0440781219804194,
+            "goal_test_time_s": 6.129100074758753e-05,
+            "extend_tree_time_s": 1.160550205007894,
+            "refinement_time_s": 0.0,
+            "attempts": 1.0,
+            "iterations": 93.0,
+            "nodes_created": 122.0,
+            "poses_checked": 212.0,
+            "collision_hits": 29.0,
+            "ik_calls": 477.0,
+            "ik_failures": 112.0,
+            "nodes_with_ik": 156.0,
+            "continuity_rejections": 6.0,
+            "refinement_passes": 0.0,
+            "refinement_waypoints": 0.0,
+            "refinement_used": 0.0
+          },
+          "validation_first": {
+            "plot_path": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage3_20260317_124838.png",
+            "path_waypoints": 60,
+            "joint_path_waypoints": 60,
+            "joint_path_source": "planner",
+            "joint_path_reason": null,
+            "collision_free": true,
+            "collision_breakdown": {
+              "bar_robot": {
+                "count": 0,
+                "first_index": null
+              },
+              "robot_self": {
+                "count": 0,
+                "first_index": null
+              },
+              "robot_static": {
+                "count": 0,
+                "first_index": null
+              },
+              "bar_static": {
+                "count": 0,
+                "first_index": null
+              }
+            },
+            "joint_continuity_ok": true,
+            "joint_continuity_threshold_rad": 0.5,
+            "joint_continuity_max_delta_rad": 0.4078117054300989,
+            "joint_continuity_first_bad_step": null,
+            "relative_transform_ok": true,
+            "relative_translation_threshold_m": 0.001,
+            "relative_rotation_axis_threshold_deg": 0.5729577951308232,
+            "relative_transform_max_translation_m": 3.954209207434169e-05,
+            "relative_transform_max_axis_angle_deg": {
+              "x": 0.0002483380843104523,
+              "y": 0.0009131327676667616,
+              "z": 0.0009399706639865536
+            }
+          },
+          "refinement_first": {
+            "enabled": true,
+            "attempted": false,
+            "used_refined_path": false,
+            "status": "already_continuous",
+            "coarse_waypoints": 60,
+            "final_waypoints": 60,
+            "coarse_joint_continuity": {
+              "ok": true,
+              "max_delta_rad": 0.4078117054300989,
+              "first_bad_step": null,
+              "threshold_rad": 0.5
+            },
+            "final_joint_continuity": {
+              "ok": true,
+              "max_delta_rad": 0.4078117054300989,
+              "first_bad_step": null,
+              "threshold_rad": 0.5
+            },
+            "passes": [],
+            "passes_run": 0
+          },
+          "refinement_summary": {
+            "trials": 1.0,
+            "used_count": 0.0,
+            "attempted_count": 0.0,
+            "continuity_pass_count": 1.0,
+            "avg_passes_run": 0.0,
+            "avg_final_waypoints": 60.0,
+            "avg_coarse_max_dq_rad": 0.4078117054300989,
+            "avg_final_max_dq_rad": 0.4078117054300989
+          }
+        }
+      }
+    },
+    {
+      "label": "pos=0.030m rot=0.070rad",
+      "position_res": 0.03,
+      "rotation_res": 0.07,
+      "stage_summaries": {
+        "1": {
+          "stage": 1,
+          "trials": 1,
+          "counts": {
+            "task_space_failure": 0,
+            "ik_failure": 0,
+            "continuity_failure": 0,
+            "collision_failure": 0,
+            "success": 1
+          },
+          "success_rate": 1.0,
+          "path_found_rate": 1.0,
+          "avg_runtime_s": 0.0209,
+          "profile_means": {
+            "collision_check_time_s": 1.0420008038636297e-06,
+            "endpoint_ik_time_s": 0.0,
+            "feature_time_s": 2.1084000763949007e-05,
+            "sample_time_s": 0.0002714610054681543,
+            "nearest_time_s": 0.011157168002682738,
+            "ik_time_s": 0.0,
+            "goal_test_time_s": 0.0005243310042715166,
+            "extend_tree_time_s": 0.00871487499534851,
+            "refinement_time_s": 0.0,
+            "attempts": 1.0,
+            "iterations": 18.0,
+            "nodes_created": 503.0,
+            "poses_checked": 502.0,
+            "collision_hits": 0.0,
+            "ik_calls": 0.0,
+            "ik_failures": 0.0,
+            "nodes_with_ik": 0.0,
+            "continuity_rejections": 0.0,
+            "refinement_passes": 0.0,
+            "refinement_waypoints": 0.0,
+            "refinement_used": 0.0
+          },
+          "validation_first": {
+            "plot_path": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage1_20260317_124838.png",
+            "path_waypoints": 104,
+            "joint_path_waypoints": 0,
+            "joint_path_source": "reconstructed",
+            "joint_path_reason": "validation_ik_failure_at_waypoint_3",
+            "collision_free": null,
+            "collision_breakdown": {
+              "bar_robot": {
+                "count": 0,
+                "first_index": null
+              },
+              "robot_self": {
+                "count": 0,
+                "first_index": null
+              },
+              "robot_static": {
+                "count": 0,
+                "first_index": null
+              },
+              "bar_static": {
+                "count": 0,
+                "first_index": null
+              }
+            },
+            "joint_continuity_ok": null,
+            "joint_continuity_threshold_rad": 0.5,
+            "joint_continuity_max_delta_rad": null,
+            "joint_continuity_first_bad_step": null,
+            "relative_transform_ok": null,
+            "relative_translation_threshold_m": 0.001,
+            "relative_rotation_axis_threshold_deg": 0.5729577951308232,
+            "relative_transform_max_translation_m": null,
+            "relative_transform_max_axis_angle_deg": {
+              "x": null,
+              "y": null,
+              "z": null
+            }
+          },
+          "refinement_first": null,
+          "refinement_summary": {}
+        },
+        "2": {
+          "stage": 2,
+          "trials": 1,
+          "counts": {
+            "task_space_failure": 0,
+            "ik_failure": 0,
+            "continuity_failure": 0,
+            "collision_failure": 1,
+            "success": 0
+          },
+          "success_rate": 0.0,
+          "path_found_rate": 1.0,
+          "avg_runtime_s": 0.6245,
+          "profile_means": {
+            "collision_check_time_s": 1.0000003385357559e-06,
+            "endpoint_ik_time_s": 0.0,
+            "feature_time_s": 3.045899939024821e-05,
+            "sample_time_s": 0.0003873349924106151,
+            "nearest_time_s": 0.003922165997209959,
+            "ik_time_s": 0.609259038039454,
+            "goal_test_time_s": 5.8000001445179805e-05,
+            "extend_tree_time_s": 0.6198883349934476,
+            "refinement_time_s": 0.0,
+            "attempts": 1.0,
+            "iterations": 18.0,
+            "nodes_created": 193.0,
+            "poses_checked": 208.0,
+            "collision_hits": 0.0,
+            "ik_calls": 431.0,
+            "ik_failures": 30.0,
+            "nodes_with_ik": 193.0,
+            "continuity_rejections": 1.0,
+            "refinement_passes": 0.0,
+            "refinement_waypoints": 0.0,
+            "refinement_used": 0.0
+          },
+          "validation_first": {
+            "plot_path": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage2_20260317_124839.png",
+            "path_waypoints": 83,
+            "joint_path_waypoints": 83,
+            "joint_path_source": "planner",
+            "joint_path_reason": null,
+            "collision_free": false,
+            "collision_breakdown": {
+              "bar_robot": {
+                "count": 46,
+                "first_index": 2
+              },
+              "robot_self": {
+                "count": 39,
+                "first_index": 29
+              },
+              "robot_static": {
+                "count": 0,
+                "first_index": null
+              },
+              "bar_static": {
+                "count": 0,
+                "first_index": null
+              }
+            },
+            "joint_continuity_ok": true,
+            "joint_continuity_threshold_rad": 0.5,
+            "joint_continuity_max_delta_rad": 0.47077544310636377,
+            "joint_continuity_first_bad_step": null,
+            "relative_transform_ok": true,
+            "relative_translation_threshold_m": 0.001,
+            "relative_rotation_axis_threshold_deg": 0.5729577951308232,
+            "relative_transform_max_translation_m": 5.336120595661224e-05,
+            "relative_transform_max_axis_angle_deg": {
+              "x": 0.0028007318015825042,
+              "y": 0.0005933155584127124,
+              "z": 0.002852211269253921
+            }
+          },
+          "refinement_first": {
+            "enabled": true,
+            "attempted": false,
+            "used_refined_path": false,
+            "status": "already_continuous",
+            "coarse_waypoints": 83,
+            "final_waypoints": 83,
+            "coarse_joint_continuity": {
+              "ok": true,
+              "max_delta_rad": 0.47077544310636377,
+              "first_bad_step": null,
+              "threshold_rad": 0.5
+            },
+            "final_joint_continuity": {
+              "ok": true,
+              "max_delta_rad": 0.47077544310636377,
+              "first_bad_step": null,
+              "threshold_rad": 0.5
+            },
+            "passes": [],
+            "passes_run": 0
+          },
+          "refinement_summary": {
+            "trials": 1.0,
+            "used_count": 0.0,
+            "attempted_count": 0.0,
+            "continuity_pass_count": 1.0,
+            "avg_passes_run": 0.0,
+            "avg_final_waypoints": 83.0,
+            "avg_coarse_max_dq_rad": 0.47077544310636377,
+            "avg_final_max_dq_rad": 0.47077544310636377
+          }
+        },
+        "3": {
+          "stage": 3,
+          "trials": 1,
+          "counts": {
+            "task_space_failure": 0,
+            "ik_failure": 0,
+            "continuity_failure": 0,
+            "collision_failure": 1,
+            "success": 0
+          },
+          "success_rate": 0.0,
+          "path_found_rate": 0.0,
+          "avg_runtime_s": 1.214,
+          "profile_means": {
+            "collision_check_time_s": 0.001537624000775395,
+            "endpoint_ik_time_s": 0.0,
+            "feature_time_s": 2.6707999495556578e-05,
+            "sample_time_s": 0.0018333809966861736,
+            "nearest_time_s": 0.01260308600103599,
+            "ik_time_s": 1.1148307210060011,
+            "goal_test_time_s": 0.0,
+            "extend_tree_time_s": 1.1968179239920573,
+            "refinement_time_s": 0.0,
+            "attempts": 1.0,
+            "iterations": 100.0,
+            "nodes_created": 61.0,
+            "poses_checked": 160.0,
+            "collision_hits": 30.0,
+            "ik_calls": 389.0,
+            "ik_failures": 138.0,
+            "nodes_with_ik": 91.0,
+            "continuity_rejections": 1.0,
+            "refinement_passes": 0.0,
+            "refinement_waypoints": 0.0,
+            "refinement_used": 0.0
+          },
+          "validation_first": {
+            "plot_path": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage3_20260317_124841.png",
+            "path_waypoints": 0,
+            "joint_path_waypoints": 0,
+            "joint_path_source": null,
+            "joint_path_reason": "no_path",
+            "collision_free": null,
+            "collision_breakdown": {
+              "bar_robot": {
+                "count": 0,
+                "first_index": null
+              },
+              "robot_self": {
+                "count": 0,
+                "first_index": null
+              },
+              "robot_static": {
+                "count": 0,
+                "first_index": null
+              },
+              "bar_static": {
+                "count": 0,
+                "first_index": null
+              }
+            },
+            "joint_continuity_ok": null,
+            "joint_continuity_threshold_rad": 0.5,
+            "joint_continuity_max_delta_rad": null,
+            "joint_continuity_first_bad_step": null,
+            "relative_transform_ok": null,
+            "relative_translation_threshold_m": 0.001,
+            "relative_rotation_axis_threshold_deg": 0.5729577951308232,
+            "relative_transform_max_translation_m": null,
+            "relative_transform_max_axis_angle_deg": {
+              "x": null,
+              "y": null,
+              "z": null
+            }
+          },
+          "refinement_first": null,
+          "refinement_summary": {}
+        }
+      }
+    },
+    {
+      "label": "pos=0.020m rot=0.050rad",
+      "position_res": 0.02,
+      "rotation_res": 0.05,
+      "stage_summaries": {
+        "1": {
+          "stage": 1,
+          "trials": 1,
+          "counts": {
+            "task_space_failure": 0,
+            "ik_failure": 0,
+            "continuity_failure": 0,
+            "collision_failure": 0,
+            "success": 1
+          },
+          "success_rate": 1.0,
+          "path_found_rate": 1.0,
+          "avg_runtime_s": 0.0316,
+          "profile_means": {
+            "collision_check_time_s": 1.2919990695081651e-06,
+            "endpoint_ik_time_s": 0.0,
+            "feature_time_s": 2.5249999453080818e-05,
+            "sample_time_s": 0.0002729579973674845,
+            "nearest_time_s": 0.016509584991581505,
+            "ik_time_s": 0.0,
+            "goal_test_time_s": 0.0005546709980990272,
+            "extend_tree_time_s": 0.01393754100354272,
+            "refinement_time_s": 0.0,
+            "attempts": 1.0,
+            "iterations": 18.0,
+            "nodes_created": 724.0,
+            "poses_checked": 723.0,
+            "collision_hits": 0.0,
+            "ik_calls": 0.0,
+            "ik_failures": 0.0,
+            "nodes_with_ik": 0.0,
+            "continuity_rejections": 0.0,
+            "refinement_passes": 0.0,
+            "refinement_waypoints": 0.0,
+            "refinement_used": 0.0
+          },
+          "validation_first": {
+            "plot_path": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage1_20260317_124841.png",
+            "path_waypoints": 147,
+            "joint_path_waypoints": 0,
+            "joint_path_source": "reconstructed",
+            "joint_path_reason": "validation_ik_failure_at_waypoint_4",
+            "collision_free": null,
+            "collision_breakdown": {
+              "bar_robot": {
+                "count": 0,
+                "first_index": null
+              },
+              "robot_self": {
+                "count": 0,
+                "first_index": null
+              },
+              "robot_static": {
+                "count": 0,
+                "first_index": null
+              },
+              "bar_static": {
+                "count": 0,
+                "first_index": null
+              }
+            },
+            "joint_continuity_ok": null,
+            "joint_continuity_threshold_rad": 0.5,
+            "joint_continuity_max_delta_rad": null,
+            "joint_continuity_first_bad_step": null,
+            "relative_transform_ok": null,
+            "relative_translation_threshold_m": 0.001,
+            "relative_rotation_axis_threshold_deg": 0.5729577951308232,
+            "relative_transform_max_translation_m": null,
+            "relative_transform_max_axis_angle_deg": {
+              "x": null,
+              "y": null,
+              "z": null
+            }
+          },
+          "refinement_first": null,
+          "refinement_summary": {}
+        },
+        "2": {
+          "stage": 2,
+          "trials": 1,
+          "counts": {
+            "task_space_failure": 0,
+            "ik_failure": 0,
+            "continuity_failure": 0,
+            "collision_failure": 1,
+            "success": 0
+          },
+          "success_rate": 0.0,
+          "path_found_rate": 1.0,
+          "avg_runtime_s": 0.7079,
+          "profile_means": {
+            "collision_check_time_s": 1.2090022210031748e-06,
+            "endpoint_ik_time_s": 0.0,
+            "feature_time_s": 4.141599856666289e-05,
+            "sample_time_s": 0.00033737400008249097,
+            "nearest_time_s": 0.004879040006926516,
+            "ik_time_s": 0.6902298349814373,
+            "goal_test_time_s": 5.983300070511177e-05,
+            "extend_tree_time_s": 0.7023030400050629,
+            "refinement_time_s": 0.0,
+            "attempts": 1.0,
+            "iterations": 18.0,
+            "nodes_created": 231.0,
+            "poses_checked": 246.0,
+            "collision_hits": 0.0,
+            "ik_calls": 508.0,
+            "ik_failures": 32.0,
+            "nodes_with_ik": 230.0,
+            "continuity_rejections": 0.0,
+            "refinement_passes": 0.0,
+            "refinement_waypoints": 0.0,
+            "refinement_used": 0.0
+          },
+          "validation_first": {
+            "plot_path": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage2_20260317_124842.png",
+            "path_waypoints": 118,
+            "joint_path_waypoints": 118,
+            "joint_path_source": "planner",
+            "joint_path_reason": null,
+            "collision_free": false,
+            "collision_breakdown": {
+              "bar_robot": {
+                "count": 66,
+                "first_index": 3
+              },
+              "robot_self": {
+                "count": 57,
+                "first_index": 40
+              },
+              "robot_static": {
+                "count": 0,
+                "first_index": null
+              },
+              "bar_static": {
+                "count": 0,
+                "first_index": null
+              }
+            },
+            "joint_continuity_ok": true,
+            "joint_continuity_threshold_rad": 0.5,
+            "joint_continuity_max_delta_rad": 0.34928584005534,
+            "joint_continuity_first_bad_step": null,
+            "relative_transform_ok": true,
+            "relative_translation_threshold_m": 0.001,
+            "relative_rotation_axis_threshold_deg": 0.5729577951308232,
+            "relative_transform_max_translation_m": 5.013146837320754e-05,
+            "relative_transform_max_axis_angle_deg": {
+              "x": 0.0025600234435699514,
+              "y": 0.0005395086127506706,
+              "z": 0.0026065842256062202
+            }
+          },
+          "refinement_first": {
+            "enabled": true,
+            "attempted": false,
+            "used_refined_path": false,
+            "status": "already_continuous",
+            "coarse_waypoints": 118,
+            "final_waypoints": 118,
+            "coarse_joint_continuity": {
+              "ok": true,
+              "max_delta_rad": 0.34928584005534,
+              "first_bad_step": null,
+              "threshold_rad": 0.5
+            },
+            "final_joint_continuity": {
+              "ok": true,
+              "max_delta_rad": 0.34928584005534,
+              "first_bad_step": null,
+              "threshold_rad": 0.5
+            },
+            "passes": [],
+            "passes_run": 0
+          },
+          "refinement_summary": {
+            "trials": 1.0,
+            "used_count": 0.0,
+            "attempted_count": 0.0,
+            "continuity_pass_count": 1.0,
+            "avg_passes_run": 0.0,
+            "avg_final_waypoints": 118.0,
+            "avg_coarse_max_dq_rad": 0.34928584005534,
+            "avg_final_max_dq_rad": 0.34928584005534
+          }
+        },
+        "3": {
+          "stage": 3,
+          "trials": 1,
+          "counts": {
+            "task_space_failure": 0,
+            "ik_failure": 0,
+            "continuity_failure": 0,
+            "collision_failure": 0,
+            "success": 1
+          },
+          "success_rate": 1.0,
+          "path_found_rate": 1.0,
+          "avg_runtime_s": 1.5329,
+          "profile_means": {
+            "collision_check_time_s": 0.001484541004174389,
+            "endpoint_ik_time_s": 0.0,
+            "feature_time_s": 2.2917000023880973e-05,
+            "sample_time_s": 0.0013443750103760976,
+            "nearest_time_s": 0.03048261699223076,
+            "ik_time_s": 1.239463092013466,
+            "goal_test_time_s": 6.291600220720284e-05,
+            "extend_tree_time_s": 1.4990427490156435,
+            "refinement_time_s": 0.0,
+            "attempts": 1.0,
+            "iterations": 93.0,
+            "nodes_created": 278.0,
+            "poses_checked": 368.0,
+            "collision_hits": 58.0,
+            "ik_calls": 769.0,
+            "ik_failures": 66.0,
+            "nodes_with_ik": 335.0,
+            "continuity_rejections": 0.0,
+            "refinement_passes": 0.0,
+            "refinement_waypoints": 0.0,
+            "refinement_used": 0.0
+          },
+          "validation_first": {
+            "plot_path": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage3_20260317_124844.png",
+            "path_waypoints": 127,
+            "joint_path_waypoints": 127,
+            "joint_path_source": "planner",
+            "joint_path_reason": null,
+            "collision_free": true,
+            "collision_breakdown": {
+              "bar_robot": {
+                "count": 0,
+                "first_index": null
+              },
+              "robot_self": {
+                "count": 0,
+                "first_index": null
+              },
+              "robot_static": {
+                "count": 0,
+                "first_index": null
+              },
+              "bar_static": {
+                "count": 0,
+                "first_index": null
+              }
+            },
+            "joint_continuity_ok": true,
+            "joint_continuity_threshold_rad": 0.5,
+            "joint_continuity_max_delta_rad": 0.284232865079447,
+            "joint_continuity_first_bad_step": null,
+            "relative_transform_ok": true,
+            "relative_translation_threshold_m": 0.001,
+            "relative_rotation_axis_threshold_deg": 0.5729577951308232,
+            "relative_transform_max_translation_m": 6.556878872051175e-05,
+            "relative_transform_max_axis_angle_deg": {
+              "x": 0.000671401645898914,
+              "y": 0.0014214092800139877,
+              "z": 0.0014210412828502773
+            }
+          },
+          "refinement_first": {
+            "enabled": true,
+            "attempted": false,
+            "used_refined_path": false,
+            "status": "already_continuous",
+            "coarse_waypoints": 127,
+            "final_waypoints": 127,
+            "coarse_joint_continuity": {
+              "ok": true,
+              "max_delta_rad": 0.284232865079447,
+              "first_bad_step": null,
+              "threshold_rad": 0.5
+            },
+            "final_joint_continuity": {
+              "ok": true,
+              "max_delta_rad": 0.284232865079447,
+              "first_bad_step": null,
+              "threshold_rad": 0.5
+            },
+            "passes": [],
+            "passes_run": 0
+          },
+          "refinement_summary": {
+            "trials": 1.0,
+            "used_count": 0.0,
+            "attempted_count": 0.0,
+            "continuity_pass_count": 1.0,
+            "avg_passes_run": 0.0,
+            "avg_final_waypoints": 127.0,
+            "avg_coarse_max_dq_rad": 0.284232865079447,
+            "avg_final_max_dq_rad": 0.284232865079447
+          }
+        }
+      }
+    }
+  ],
+  "records": [
+    {
+      "stage": 1,
+      "seed": 0,
+      "position_res": 0.05,
+      "rotation_res": 0.1,
+      "path_found": 1,
+      "success": 1,
+      "runtime_s": 0.0152,
+      "category": "success",
+      "planner_profile": {
+        "attempts": 1,
+        "iterations": 18,
+        "nodes_created": 333,
+        "poses_checked": 332,
+        "collision_hits": 0,
+        "ik_calls": 0,
+        "ik_failures": 0,
+        "nodes_with_ik": 0,
+        "continuity_rejections": 0,
+        "collision_check_time_s": 1.1669981176964939e-06,
+        "feature_time_s": 2.487500023562461e-05,
+        "sample_time_s": 0.00025775099493330345,
+        "nearest_time_s": 0.007882791007432388,
+        "extend_tree_time_s": 0.006280871999479132,
+        "goal_test_time_s": 0.0005254589996184222,
+        "outcome": "success"
+      },
+      "validation": {
+        "plot_path": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage1_20260317_124835.png",
+        "path_waypoints": 71,
+        "joint_path_waypoints": 0,
+        "joint_path_source": "reconstructed",
+        "joint_path_reason": "validation_ik_failure_at_waypoint_2",
+        "collision_free": null,
+        "collision_breakdown": {
+          "bar_robot": {
+            "count": 0,
+            "first_index": null
+          },
+          "robot_self": {
+            "count": 0,
+            "first_index": null
+          },
+          "robot_static": {
+            "count": 0,
+            "first_index": null
+          },
+          "bar_static": {
+            "count": 0,
+            "first_index": null
+          }
+        },
+        "joint_continuity_ok": null,
+        "joint_continuity_threshold_rad": 0.5,
+        "joint_continuity_max_delta_rad": null,
+        "joint_continuity_first_bad_step": null,
+        "relative_transform_ok": null,
+        "relative_translation_threshold_m": 0.001,
+        "relative_rotation_axis_threshold_deg": 0.5729577951308232,
+        "relative_transform_max_translation_m": null,
+        "relative_transform_max_axis_angle_deg": {
+          "x": null,
+          "y": null,
+          "z": null
+        }
+      },
+      "refinement": null,
+      "coarse_joint_continuity_max_delta_rad": 0.0,
+      "final_joint_continuity_max_delta_rad": 0.0,
+      "refinement_used": 0.0,
+      "collision_check_time_s": 1e-06,
+      "endpoint_ik_time_s": 0.0,
+      "feature_time_s": 2.5e-05,
+      "sample_time_s": 0.000258,
+      "nearest_time_s": 0.007883,
+      "ik_time_s": 0.0,
+      "goal_test_time_s": 0.000525,
+      "extend_tree_time_s": 0.006281,
+      "refinement_time_s": 0.0,
+      "attempts": 1.0,
+      "iterations": 18.0,
+      "nodes_created": 333.0,
+      "poses_checked": 332.0,
+      "collision_hits": 0.0,
+      "ik_calls": 0.0,
+      "ik_failures": 0.0,
+      "nodes_with_ik": 0.0,
+      "continuity_rejections": 0.0,
+      "refinement_passes": 0.0,
+      "refinement_waypoints": 0.0,
+      "resolution_label": "pos=0.050m rot=0.100rad"
+    },
+    {
+      "stage": 2,
+      "seed": 0,
+      "position_res": 0.05,
+      "rotation_res": 0.1,
+      "path_found": 1,
+      "success": 0,
+      "runtime_s": 1.0135,
+      "category": "collision_failure",
+      "planner_profile": {
+        "attempts": 1,
+        "iterations": 52,
+        "nodes_created": 201,
+        "poses_checked": 249,
+        "collision_hits": 0,
+        "ik_calls": 538,
+        "ik_failures": 86,
+        "nodes_with_ik": 206,
+        "continuity_rejections": 6,
+        "collision_check_time_s": 1.45800004247576e-06,
+        "feature_time_s": 3.454200123087503e-05,
+        "sample_time_s": 0.000773374005802907,
+        "nearest_time_s": 0.013814998015732272,
+        "ik_time_s": 0.9864402039638662,
+        "extend_tree_time_s": 0.998478123008681,
+        "outcome": "success",
+        "goal_test_time_s": 7.80830014264211e-05
+      },
+      "validation": {
+        "plot_path": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage2_20260317_124836.png",
+        "path_waypoints": 86,
+        "joint_path_waypoints": 86,
+        "joint_path_source": "planner",
+        "joint_path_reason": null,
+        "collision_free": false,
+        "collision_breakdown": {
+          "bar_robot": {
+            "count": 52,
+            "first_index": 6
+          },
+          "robot_self": {
+            "count": 45,
+            "first_index": 27
+          },
+          "robot_static": {
+            "count": 0,
+            "first_index": null
+          },
+          "bar_static": {
+            "count": 0,
+            "first_index": null
+          }
+        },
+        "joint_continuity_ok": true,
+        "joint_continuity_threshold_rad": 0.5,
+        "joint_continuity_max_delta_rad": 0.41757907939219496,
+        "joint_continuity_first_bad_step": null,
+        "relative_transform_ok": true,
+        "relative_translation_threshold_m": 0.001,
+        "relative_rotation_axis_threshold_deg": 0.5729577951308232,
+        "relative_transform_max_translation_m": 5.1921241787249076e-05,
+        "relative_transform_max_axis_angle_deg": {
+          "x": 0.00018199402402354324,
+          "y": 0.0005655269287102134,
+          "z": 0.0005863255938811586
+        }
+      },
+      "refinement": {
+        "enabled": true,
+        "attempted": false,
+        "used_refined_path": false,
+        "status": "already_continuous",
+        "coarse_waypoints": 86,
+        "final_waypoints": 86,
+        "coarse_joint_continuity": {
+          "ok": true,
+          "max_delta_rad": 0.41757907939219496,
+          "first_bad_step": null,
+          "threshold_rad": 0.5
+        },
+        "final_joint_continuity": {
+          "ok": true,
+          "max_delta_rad": 0.41757907939219496,
+          "first_bad_step": null,
+          "threshold_rad": 0.5
+        },
+        "passes": [],
+        "passes_run": 0
+      },
+      "coarse_joint_continuity_max_delta_rad": 0.417579,
+      "final_joint_continuity_max_delta_rad": 0.417579,
+      "refinement_used": 0.0,
+      "collision_check_time_s": 1e-06,
+      "endpoint_ik_time_s": 0.0,
+      "feature_time_s": 3.5e-05,
+      "sample_time_s": 0.000773,
+      "nearest_time_s": 0.013815,
+      "ik_time_s": 0.98644,
+      "goal_test_time_s": 7.8e-05,
+      "extend_tree_time_s": 0.998478,
+      "refinement_time_s": 0.0,
+      "attempts": 1.0,
+      "iterations": 52.0,
+      "nodes_created": 201.0,
+      "poses_checked": 249.0,
+      "collision_hits": 0.0,
+      "ik_calls": 538.0,
+      "ik_failures": 86.0,
+      "nodes_with_ik": 206.0,
+      "continuity_rejections": 6.0,
+      "refinement_passes": 0.0,
+      "refinement_waypoints": 0.0,
+      "resolution_label": "pos=0.050m rot=0.100rad"
+    },
+    {
+      "stage": 3,
+      "seed": 0,
+      "position_res": 0.05,
+      "rotation_res": 0.1,
+      "path_found": 1,
+      "success": 1,
+      "runtime_s": 1.1772,
+      "category": "success",
+      "planner_profile": {
+        "attempts": 1,
+        "iterations": 93,
+        "nodes_created": 122,
+        "poses_checked": 212,
+        "collision_hits": 29,
+        "ik_calls": 477,
+        "ik_failures": 112,
+        "nodes_with_ik": 156,
+        "continuity_rejections": 6,
+        "collision_check_time_s": 0.0014950000040698797,
+        "feature_time_s": 2.141699951607734e-05,
+        "sample_time_s": 0.0013836280086252373,
+        "nearest_time_s": 0.013317083030415233,
+        "ik_time_s": 1.0440781219804194,
+        "extend_tree_time_s": 1.160550205007894,
+        "outcome": "success",
+        "goal_test_time_s": 6.129100074758753e-05
+      },
+      "validation": {
+        "plot_path": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage3_20260317_124838.png",
+        "path_waypoints": 60,
+        "joint_path_waypoints": 60,
+        "joint_path_source": "planner",
+        "joint_path_reason": null,
+        "collision_free": true,
+        "collision_breakdown": {
+          "bar_robot": {
+            "count": 0,
+            "first_index": null
+          },
+          "robot_self": {
+            "count": 0,
+            "first_index": null
+          },
+          "robot_static": {
+            "count": 0,
+            "first_index": null
+          },
+          "bar_static": {
+            "count": 0,
+            "first_index": null
+          }
+        },
+        "joint_continuity_ok": true,
+        "joint_continuity_threshold_rad": 0.5,
+        "joint_continuity_max_delta_rad": 0.4078117054300989,
+        "joint_continuity_first_bad_step": null,
+        "relative_transform_ok": true,
+        "relative_translation_threshold_m": 0.001,
+        "relative_rotation_axis_threshold_deg": 0.5729577951308232,
+        "relative_transform_max_translation_m": 3.954209207434169e-05,
+        "relative_transform_max_axis_angle_deg": {
+          "x": 0.0002483380843104523,
+          "y": 0.0009131327676667616,
+          "z": 0.0009399706639865536
+        }
+      },
+      "refinement": {
+        "enabled": true,
+        "attempted": false,
+        "used_refined_path": false,
+        "status": "already_continuous",
+        "coarse_waypoints": 60,
+        "final_waypoints": 60,
+        "coarse_joint_continuity": {
+          "ok": true,
+          "max_delta_rad": 0.4078117054300989,
+          "first_bad_step": null,
+          "threshold_rad": 0.5
+        },
+        "final_joint_continuity": {
+          "ok": true,
+          "max_delta_rad": 0.4078117054300989,
+          "first_bad_step": null,
+          "threshold_rad": 0.5
+        },
+        "passes": [],
+        "passes_run": 0
+      },
+      "coarse_joint_continuity_max_delta_rad": 0.407812,
+      "final_joint_continuity_max_delta_rad": 0.407812,
+      "refinement_used": 0.0,
+      "collision_check_time_s": 0.001495,
+      "endpoint_ik_time_s": 0.0,
+      "feature_time_s": 2.1e-05,
+      "sample_time_s": 0.001384,
+      "nearest_time_s": 0.013317,
+      "ik_time_s": 1.044078,
+      "goal_test_time_s": 6.1e-05,
+      "extend_tree_time_s": 1.16055,
+      "refinement_time_s": 0.0,
+      "attempts": 1.0,
+      "iterations": 93.0,
+      "nodes_created": 122.0,
+      "poses_checked": 212.0,
+      "collision_hits": 29.0,
+      "ik_calls": 477.0,
+      "ik_failures": 112.0,
+      "nodes_with_ik": 156.0,
+      "continuity_rejections": 6.0,
+      "refinement_passes": 0.0,
+      "refinement_waypoints": 0.0,
+      "resolution_label": "pos=0.050m rot=0.100rad"
+    },
+    {
+      "stage": 1,
+      "seed": 0,
+      "position_res": 0.03,
+      "rotation_res": 0.07,
+      "path_found": 1,
+      "success": 1,
+      "runtime_s": 0.0209,
+      "category": "success",
+      "planner_profile": {
+        "attempts": 1,
+        "iterations": 18,
+        "nodes_created": 503,
+        "poses_checked": 502,
+        "collision_hits": 0,
+        "ik_calls": 0,
+        "ik_failures": 0,
+        "nodes_with_ik": 0,
+        "continuity_rejections": 0,
+        "collision_check_time_s": 1.0420008038636297e-06,
+        "feature_time_s": 2.1084000763949007e-05,
+        "sample_time_s": 0.0002714610054681543,
+        "nearest_time_s": 0.011157168002682738,
+        "extend_tree_time_s": 0.00871487499534851,
+        "goal_test_time_s": 0.0005243310042715166,
+        "outcome": "success"
+      },
+      "validation": {
+        "plot_path": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage1_20260317_124838.png",
+        "path_waypoints": 104,
+        "joint_path_waypoints": 0,
+        "joint_path_source": "reconstructed",
+        "joint_path_reason": "validation_ik_failure_at_waypoint_3",
+        "collision_free": null,
+        "collision_breakdown": {
+          "bar_robot": {
+            "count": 0,
+            "first_index": null
+          },
+          "robot_self": {
+            "count": 0,
+            "first_index": null
+          },
+          "robot_static": {
+            "count": 0,
+            "first_index": null
+          },
+          "bar_static": {
+            "count": 0,
+            "first_index": null
+          }
+        },
+        "joint_continuity_ok": null,
+        "joint_continuity_threshold_rad": 0.5,
+        "joint_continuity_max_delta_rad": null,
+        "joint_continuity_first_bad_step": null,
+        "relative_transform_ok": null,
+        "relative_translation_threshold_m": 0.001,
+        "relative_rotation_axis_threshold_deg": 0.5729577951308232,
+        "relative_transform_max_translation_m": null,
+        "relative_transform_max_axis_angle_deg": {
+          "x": null,
+          "y": null,
+          "z": null
+        }
+      },
+      "refinement": null,
+      "coarse_joint_continuity_max_delta_rad": 0.0,
+      "final_joint_continuity_max_delta_rad": 0.0,
+      "refinement_used": 0.0,
+      "collision_check_time_s": 1e-06,
+      "endpoint_ik_time_s": 0.0,
+      "feature_time_s": 2.1e-05,
+      "sample_time_s": 0.000271,
+      "nearest_time_s": 0.011157,
+      "ik_time_s": 0.0,
+      "goal_test_time_s": 0.000524,
+      "extend_tree_time_s": 0.008715,
+      "refinement_time_s": 0.0,
+      "attempts": 1.0,
+      "iterations": 18.0,
+      "nodes_created": 503.0,
+      "poses_checked": 502.0,
+      "collision_hits": 0.0,
+      "ik_calls": 0.0,
+      "ik_failures": 0.0,
+      "nodes_with_ik": 0.0,
+      "continuity_rejections": 0.0,
+      "refinement_passes": 0.0,
+      "refinement_waypoints": 0.0,
+      "resolution_label": "pos=0.030m rot=0.070rad"
+    },
+    {
+      "stage": 2,
+      "seed": 0,
+      "position_res": 0.03,
+      "rotation_res": 0.07,
+      "path_found": 1,
+      "success": 0,
+      "runtime_s": 0.6245,
+      "category": "collision_failure",
+      "planner_profile": {
+        "attempts": 1,
+        "iterations": 18,
+        "nodes_created": 193,
+        "poses_checked": 208,
+        "collision_hits": 0,
+        "ik_calls": 431,
+        "ik_failures": 30,
+        "nodes_with_ik": 193,
+        "continuity_rejections": 1,
+        "collision_check_time_s": 1.0000003385357559e-06,
+        "feature_time_s": 3.045899939024821e-05,
+        "sample_time_s": 0.0003873349924106151,
+        "nearest_time_s": 0.003922165997209959,
+        "ik_time_s": 0.609259038039454,
+        "extend_tree_time_s": 0.6198883349934476,
+        "outcome": "success",
+        "goal_test_time_s": 5.8000001445179805e-05
+      },
+      "validation": {
+        "plot_path": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage2_20260317_124839.png",
+        "path_waypoints": 83,
+        "joint_path_waypoints": 83,
+        "joint_path_source": "planner",
+        "joint_path_reason": null,
+        "collision_free": false,
+        "collision_breakdown": {
+          "bar_robot": {
+            "count": 46,
+            "first_index": 2
+          },
+          "robot_self": {
+            "count": 39,
+            "first_index": 29
+          },
+          "robot_static": {
+            "count": 0,
+            "first_index": null
+          },
+          "bar_static": {
+            "count": 0,
+            "first_index": null
+          }
+        },
+        "joint_continuity_ok": true,
+        "joint_continuity_threshold_rad": 0.5,
+        "joint_continuity_max_delta_rad": 0.47077544310636377,
+        "joint_continuity_first_bad_step": null,
+        "relative_transform_ok": true,
+        "relative_translation_threshold_m": 0.001,
+        "relative_rotation_axis_threshold_deg": 0.5729577951308232,
+        "relative_transform_max_translation_m": 5.336120595661224e-05,
+        "relative_transform_max_axis_angle_deg": {
+          "x": 0.0028007318015825042,
+          "y": 0.0005933155584127124,
+          "z": 0.002852211269253921
+        }
+      },
+      "refinement": {
+        "enabled": true,
+        "attempted": false,
+        "used_refined_path": false,
+        "status": "already_continuous",
+        "coarse_waypoints": 83,
+        "final_waypoints": 83,
+        "coarse_joint_continuity": {
+          "ok": true,
+          "max_delta_rad": 0.47077544310636377,
+          "first_bad_step": null,
+          "threshold_rad": 0.5
+        },
+        "final_joint_continuity": {
+          "ok": true,
+          "max_delta_rad": 0.47077544310636377,
+          "first_bad_step": null,
+          "threshold_rad": 0.5
+        },
+        "passes": [],
+        "passes_run": 0
+      },
+      "coarse_joint_continuity_max_delta_rad": 0.470775,
+      "final_joint_continuity_max_delta_rad": 0.470775,
+      "refinement_used": 0.0,
+      "collision_check_time_s": 1e-06,
+      "endpoint_ik_time_s": 0.0,
+      "feature_time_s": 3e-05,
+      "sample_time_s": 0.000387,
+      "nearest_time_s": 0.003922,
+      "ik_time_s": 0.609259,
+      "goal_test_time_s": 5.8e-05,
+      "extend_tree_time_s": 0.619888,
+      "refinement_time_s": 0.0,
+      "attempts": 1.0,
+      "iterations": 18.0,
+      "nodes_created": 193.0,
+      "poses_checked": 208.0,
+      "collision_hits": 0.0,
+      "ik_calls": 431.0,
+      "ik_failures": 30.0,
+      "nodes_with_ik": 193.0,
+      "continuity_rejections": 1.0,
+      "refinement_passes": 0.0,
+      "refinement_waypoints": 0.0,
+      "resolution_label": "pos=0.030m rot=0.070rad"
+    },
+    {
+      "stage": 3,
+      "seed": 0,
+      "position_res": 0.03,
+      "rotation_res": 0.07,
+      "path_found": 0,
+      "success": 0,
+      "runtime_s": 1.214,
+      "category": "collision_failure",
+      "planner_profile": {
+        "attempts": 1,
+        "iterations": 100,
+        "nodes_created": 61,
+        "poses_checked": 160,
+        "collision_hits": 30,
+        "ik_calls": 389,
+        "ik_failures": 138,
+        "nodes_with_ik": 91,
+        "continuity_rejections": 1,
+        "collision_check_time_s": 0.001537624000775395,
+        "feature_time_s": 2.6707999495556578e-05,
+        "sample_time_s": 0.0018333809966861736,
+        "nearest_time_s": 0.01260308600103599,
+        "ik_time_s": 1.1148307210060011,
+        "extend_tree_time_s": 1.1968179239920573,
+        "outcome": "task_space_failure"
+      },
+      "validation": {
+        "plot_path": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage3_20260317_124841.png",
+        "path_waypoints": 0,
+        "joint_path_waypoints": 0,
+        "joint_path_source": null,
+        "joint_path_reason": "no_path",
+        "collision_free": null,
+        "collision_breakdown": {
+          "bar_robot": {
+            "count": 0,
+            "first_index": null
+          },
+          "robot_self": {
+            "count": 0,
+            "first_index": null
+          },
+          "robot_static": {
+            "count": 0,
+            "first_index": null
+          },
+          "bar_static": {
+            "count": 0,
+            "first_index": null
+          }
+        },
+        "joint_continuity_ok": null,
+        "joint_continuity_threshold_rad": 0.5,
+        "joint_continuity_max_delta_rad": null,
+        "joint_continuity_first_bad_step": null,
+        "relative_transform_ok": null,
+        "relative_translation_threshold_m": 0.001,
+        "relative_rotation_axis_threshold_deg": 0.5729577951308232,
+        "relative_transform_max_translation_m": null,
+        "relative_transform_max_axis_angle_deg": {
+          "x": null,
+          "y": null,
+          "z": null
+        }
+      },
+      "refinement": null,
+      "coarse_joint_continuity_max_delta_rad": 0.0,
+      "final_joint_continuity_max_delta_rad": 0.0,
+      "refinement_used": 0.0,
+      "collision_check_time_s": 0.001538,
+      "endpoint_ik_time_s": 0.0,
+      "feature_time_s": 2.7e-05,
+      "sample_time_s": 0.001833,
+      "nearest_time_s": 0.012603,
+      "ik_time_s": 1.114831,
+      "goal_test_time_s": 0.0,
+      "extend_tree_time_s": 1.196818,
+      "refinement_time_s": 0.0,
+      "attempts": 1.0,
+      "iterations": 100.0,
+      "nodes_created": 61.0,
+      "poses_checked": 160.0,
+      "collision_hits": 30.0,
+      "ik_calls": 389.0,
+      "ik_failures": 138.0,
+      "nodes_with_ik": 91.0,
+      "continuity_rejections": 1.0,
+      "refinement_passes": 0.0,
+      "refinement_waypoints": 0.0,
+      "resolution_label": "pos=0.030m rot=0.070rad"
+    },
+    {
+      "stage": 1,
+      "seed": 0,
+      "position_res": 0.02,
+      "rotation_res": 0.05,
+      "path_found": 1,
+      "success": 1,
+      "runtime_s": 0.0316,
+      "category": "success",
+      "planner_profile": {
+        "attempts": 1,
+        "iterations": 18,
+        "nodes_created": 724,
+        "poses_checked": 723,
+        "collision_hits": 0,
+        "ik_calls": 0,
+        "ik_failures": 0,
+        "nodes_with_ik": 0,
+        "continuity_rejections": 0,
+        "collision_check_time_s": 1.2919990695081651e-06,
+        "feature_time_s": 2.5249999453080818e-05,
+        "sample_time_s": 0.0002729579973674845,
+        "nearest_time_s": 0.016509584991581505,
+        "extend_tree_time_s": 0.01393754100354272,
+        "goal_test_time_s": 0.0005546709980990272,
+        "outcome": "success"
+      },
+      "validation": {
+        "plot_path": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage1_20260317_124841.png",
+        "path_waypoints": 147,
+        "joint_path_waypoints": 0,
+        "joint_path_source": "reconstructed",
+        "joint_path_reason": "validation_ik_failure_at_waypoint_4",
+        "collision_free": null,
+        "collision_breakdown": {
+          "bar_robot": {
+            "count": 0,
+            "first_index": null
+          },
+          "robot_self": {
+            "count": 0,
+            "first_index": null
+          },
+          "robot_static": {
+            "count": 0,
+            "first_index": null
+          },
+          "bar_static": {
+            "count": 0,
+            "first_index": null
+          }
+        },
+        "joint_continuity_ok": null,
+        "joint_continuity_threshold_rad": 0.5,
+        "joint_continuity_max_delta_rad": null,
+        "joint_continuity_first_bad_step": null,
+        "relative_transform_ok": null,
+        "relative_translation_threshold_m": 0.001,
+        "relative_rotation_axis_threshold_deg": 0.5729577951308232,
+        "relative_transform_max_translation_m": null,
+        "relative_transform_max_axis_angle_deg": {
+          "x": null,
+          "y": null,
+          "z": null
+        }
+      },
+      "refinement": null,
+      "coarse_joint_continuity_max_delta_rad": 0.0,
+      "final_joint_continuity_max_delta_rad": 0.0,
+      "refinement_used": 0.0,
+      "collision_check_time_s": 1e-06,
+      "endpoint_ik_time_s": 0.0,
+      "feature_time_s": 2.5e-05,
+      "sample_time_s": 0.000273,
+      "nearest_time_s": 0.01651,
+      "ik_time_s": 0.0,
+      "goal_test_time_s": 0.000555,
+      "extend_tree_time_s": 0.013938,
+      "refinement_time_s": 0.0,
+      "attempts": 1.0,
+      "iterations": 18.0,
+      "nodes_created": 724.0,
+      "poses_checked": 723.0,
+      "collision_hits": 0.0,
+      "ik_calls": 0.0,
+      "ik_failures": 0.0,
+      "nodes_with_ik": 0.0,
+      "continuity_rejections": 0.0,
+      "refinement_passes": 0.0,
+      "refinement_waypoints": 0.0,
+      "resolution_label": "pos=0.020m rot=0.050rad"
+    },
+    {
+      "stage": 2,
+      "seed": 0,
+      "position_res": 0.02,
+      "rotation_res": 0.05,
+      "path_found": 1,
+      "success": 0,
+      "runtime_s": 0.7079,
+      "category": "collision_failure",
+      "planner_profile": {
+        "attempts": 1,
+        "iterations": 18,
+        "nodes_created": 231,
+        "poses_checked": 246,
+        "collision_hits": 0,
+        "ik_calls": 508,
+        "ik_failures": 32,
+        "nodes_with_ik": 230,
+        "continuity_rejections": 0,
+        "collision_check_time_s": 1.2090022210031748e-06,
+        "feature_time_s": 4.141599856666289e-05,
+        "sample_time_s": 0.00033737400008249097,
+        "nearest_time_s": 0.004879040006926516,
+        "ik_time_s": 0.6902298349814373,
+        "extend_tree_time_s": 0.7023030400050629,
+        "outcome": "success",
+        "goal_test_time_s": 5.983300070511177e-05
+      },
+      "validation": {
+        "plot_path": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage2_20260317_124842.png",
+        "path_waypoints": 118,
+        "joint_path_waypoints": 118,
+        "joint_path_source": "planner",
+        "joint_path_reason": null,
+        "collision_free": false,
+        "collision_breakdown": {
+          "bar_robot": {
+            "count": 66,
+            "first_index": 3
+          },
+          "robot_self": {
+            "count": 57,
+            "first_index": 40
+          },
+          "robot_static": {
+            "count": 0,
+            "first_index": null
+          },
+          "bar_static": {
+            "count": 0,
+            "first_index": null
+          }
+        },
+        "joint_continuity_ok": true,
+        "joint_continuity_threshold_rad": 0.5,
+        "joint_continuity_max_delta_rad": 0.34928584005534,
+        "joint_continuity_first_bad_step": null,
+        "relative_transform_ok": true,
+        "relative_translation_threshold_m": 0.001,
+        "relative_rotation_axis_threshold_deg": 0.5729577951308232,
+        "relative_transform_max_translation_m": 5.013146837320754e-05,
+        "relative_transform_max_axis_angle_deg": {
+          "x": 0.0025600234435699514,
+          "y": 0.0005395086127506706,
+          "z": 0.0026065842256062202
+        }
+      },
+      "refinement": {
+        "enabled": true,
+        "attempted": false,
+        "used_refined_path": false,
+        "status": "already_continuous",
+        "coarse_waypoints": 118,
+        "final_waypoints": 118,
+        "coarse_joint_continuity": {
+          "ok": true,
+          "max_delta_rad": 0.34928584005534,
+          "first_bad_step": null,
+          "threshold_rad": 0.5
+        },
+        "final_joint_continuity": {
+          "ok": true,
+          "max_delta_rad": 0.34928584005534,
+          "first_bad_step": null,
+          "threshold_rad": 0.5
+        },
+        "passes": [],
+        "passes_run": 0
+      },
+      "coarse_joint_continuity_max_delta_rad": 0.349286,
+      "final_joint_continuity_max_delta_rad": 0.349286,
+      "refinement_used": 0.0,
+      "collision_check_time_s": 1e-06,
+      "endpoint_ik_time_s": 0.0,
+      "feature_time_s": 4.1e-05,
+      "sample_time_s": 0.000337,
+      "nearest_time_s": 0.004879,
+      "ik_time_s": 0.69023,
+      "goal_test_time_s": 6e-05,
+      "extend_tree_time_s": 0.702303,
+      "refinement_time_s": 0.0,
+      "attempts": 1.0,
+      "iterations": 18.0,
+      "nodes_created": 231.0,
+      "poses_checked": 246.0,
+      "collision_hits": 0.0,
+      "ik_calls": 508.0,
+      "ik_failures": 32.0,
+      "nodes_with_ik": 230.0,
+      "continuity_rejections": 0.0,
+      "refinement_passes": 0.0,
+      "refinement_waypoints": 0.0,
+      "resolution_label": "pos=0.020m rot=0.050rad"
+    },
+    {
+      "stage": 3,
+      "seed": 0,
+      "position_res": 0.02,
+      "rotation_res": 0.05,
+      "path_found": 1,
+      "success": 1,
+      "runtime_s": 1.5329,
+      "category": "success",
+      "planner_profile": {
+        "attempts": 1,
+        "iterations": 93,
+        "nodes_created": 278,
+        "poses_checked": 368,
+        "collision_hits": 58,
+        "ik_calls": 769,
+        "ik_failures": 66,
+        "nodes_with_ik": 335,
+        "continuity_rejections": 0,
+        "collision_check_time_s": 0.001484541004174389,
+        "feature_time_s": 2.2917000023880973e-05,
+        "sample_time_s": 0.0013443750103760976,
+        "nearest_time_s": 0.03048261699223076,
+        "ik_time_s": 1.239463092013466,
+        "extend_tree_time_s": 1.4990427490156435,
+        "outcome": "success",
+        "goal_test_time_s": 6.291600220720284e-05
+      },
+      "validation": {
+        "plot_path": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage3_20260317_124844.png",
+        "path_waypoints": 127,
+        "joint_path_waypoints": 127,
+        "joint_path_source": "planner",
+        "joint_path_reason": null,
+        "collision_free": true,
+        "collision_breakdown": {
+          "bar_robot": {
+            "count": 0,
+            "first_index": null
+          },
+          "robot_self": {
+            "count": 0,
+            "first_index": null
+          },
+          "robot_static": {
+            "count": 0,
+            "first_index": null
+          },
+          "bar_static": {
+            "count": 0,
+            "first_index": null
+          }
+        },
+        "joint_continuity_ok": true,
+        "joint_continuity_threshold_rad": 0.5,
+        "joint_continuity_max_delta_rad": 0.284232865079447,
+        "joint_continuity_first_bad_step": null,
+        "relative_transform_ok": true,
+        "relative_translation_threshold_m": 0.001,
+        "relative_rotation_axis_threshold_deg": 0.5729577951308232,
+        "relative_transform_max_translation_m": 6.556878872051175e-05,
+        "relative_transform_max_axis_angle_deg": {
+          "x": 0.000671401645898914,
+          "y": 0.0014214092800139877,
+          "z": 0.0014210412828502773
+        }
+      },
+      "refinement": {
+        "enabled": true,
+        "attempted": false,
+        "used_refined_path": false,
+        "status": "already_continuous",
+        "coarse_waypoints": 127,
+        "final_waypoints": 127,
+        "coarse_joint_continuity": {
+          "ok": true,
+          "max_delta_rad": 0.284232865079447,
+          "first_bad_step": null,
+          "threshold_rad": 0.5
+        },
+        "final_joint_continuity": {
+          "ok": true,
+          "max_delta_rad": 0.284232865079447,
+          "first_bad_step": null,
+          "threshold_rad": 0.5
+        },
+        "passes": [],
+        "passes_run": 0
+      },
+      "coarse_joint_continuity_max_delta_rad": 0.284233,
+      "final_joint_continuity_max_delta_rad": 0.284233,
+      "refinement_used": 0.0,
+      "collision_check_time_s": 0.001485,
+      "endpoint_ik_time_s": 0.0,
+      "feature_time_s": 2.3e-05,
+      "sample_time_s": 0.001344,
+      "nearest_time_s": 0.030483,
+      "ik_time_s": 1.239463,
+      "goal_test_time_s": 6.3e-05,
+      "extend_tree_time_s": 1.499043,
+      "refinement_time_s": 0.0,
+      "attempts": 1.0,
+      "iterations": 93.0,
+      "nodes_created": 278.0,
+      "poses_checked": 368.0,
+      "collision_hits": 58.0,
+      "ik_calls": 769.0,
+      "ik_failures": 66.0,
+      "nodes_with_ik": 335.0,
+      "continuity_rejections": 0.0,
+      "refinement_passes": 0.0,
+      "refinement_waypoints": 0.0,
+      "resolution_label": "pos=0.020m rot=0.050rad"
+    }
+  ]
+}

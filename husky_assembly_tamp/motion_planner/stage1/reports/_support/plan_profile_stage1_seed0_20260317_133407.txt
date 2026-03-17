@@ -1,0 +1,40 @@
+Tue Mar 17 13:34:07 2026    /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/plan_profile_stage1_seed0_20260317_133407.prof
+
+         344232 function calls (342198 primitive calls) in 0.337 seconds
+
+   Ordered by: cumulative time
+   List reduced from 1493 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000    0.337    0.337 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:1090(run_stage_trial)
+        1    0.000    0.000    0.170    0.170 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:979(setup_stage1_scene)
+        1    0.000    0.000    0.166    0.166 /workspace/husky-assembly-teleop/external/pybullet_planning/src/pybullet_planning/interfaces/env_manager/simulation.py:201(load_pybullet)
+        1    0.166    0.166    0.166    0.166 {built-in method pybullet.loadURDF}
+        1    0.000    0.000    0.073    0.073 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/path_validation.py:187(validate_stage_trajectory)
+        1    0.000    0.000    0.073    0.073 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/path_validation.py:90(save_validation_plot)
+        1    0.000    0.000    0.059    0.059 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:733(plan_pose_rrt)
+        1    0.000    0.000    0.052    0.052 /opt/venv/lib/python3.10/site-packages/matplotlib/figure.py:3334(savefig)
+        1    0.000    0.000    0.052    0.052 /opt/venv/lib/python3.10/site-packages/matplotlib/backend_bases.py:2049(print_figure)
+        2    0.000    0.000    0.048    0.024 /opt/venv/lib/python3.10/site-packages/matplotlib/backend_bases.py:2040(<lambda>)
+        2    0.000    0.000    0.048    0.024 /opt/venv/lib/python3.10/site-packages/matplotlib/backends/backend_agg.py:434(print_png)
+        2    0.000    0.000    0.048    0.024 /opt/venv/lib/python3.10/site-packages/matplotlib/backends/backend_agg.py:424(_print_pil)
+        1    0.000    0.000    0.039    0.039 /opt/venv/lib/python3.10/site-packages/matplotlib/image.py:1526(imsave)
+        1    0.000    0.000    0.039    0.039 /opt/venv/lib/python3.10/site-packages/PIL/Image.py:2476(save)
+        1    0.000    0.000    0.037    0.037 /opt/venv/lib/python3.10/site-packages/PIL/PngImagePlugin.py:1325(_save)
+        1    0.000    0.000    0.037    0.037 /opt/venv/lib/python3.10/site-packages/PIL/ImageFile.py:641(_save)
+        1    0.000    0.000    0.037    0.037 /opt/venv/lib/python3.10/site-packages/PIL/ImageFile.py:669(_encode_tile)
+        2    0.037    0.018    0.037    0.018 {method 'encode' of 'ImagingEncoder' objects}
+        1    0.000    0.000    0.034    0.034 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:1359(build_validation_joint_path)
+        8    0.000    0.000    0.034    0.004 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:332(solve_dual_arm_pose_ik)
+       17    0.000    0.000    0.032    0.002 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:269(solve_single_arm_ik)
+       18    0.000    0.000    0.031    0.002 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:156(nearest_node)
+      115    0.001    0.000    0.031    0.000 {built-in method builtins.min}
+    13868    0.006    0.000    0.030    0.000 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:168(<lambda>)
+       17    0.030    0.002    0.030    0.002 {built-in method pybullet.calculateInverseKinematics}
+16877/16235    0.004    0.000    0.026    0.000 {built-in method numpy.core._multiarray_umath.implement_array_function}
+       18    0.002    0.000    0.025    0.001 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:430(extend_toward)
+    14005    0.003    0.000    0.024    0.000 <__array_function__ internals>:177(norm)
+     1451    0.004    0.000    0.019    0.000 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:111(pose_to_feature_vec)
+    14005    0.011    0.000    0.018    0.000 /opt/venv/lib/python3.10/site-packages/numpy/linalg/linalg.py:2342(norm)
+
+

@@ -1,0 +1,6 @@
+stage,seed,path_found,success,runtime_s,category,coarse_joint_continuity_max_delta_rad,final_joint_continuity_max_delta_rad,refinement_used,collision_check_time_s,endpoint_ik_time_s,feature_time_s,sample_time_s,nearest_time_s,ik_time_s,goal_test_time_s,extend_tree_time_s,refinement_time_s,attempts,iterations,nodes_created,poses_checked,collision_hits,ik_calls,ik_failures,nodes_with_ik,continuity_rejections,refinement_passes,refinement_waypoints,refinement_used
+2,0,1,0,0.7133,collision_failure,0.349286,0.349286,0.0,1e-06,0.0,2.2e-05,0.000365,0.004787,0.695555,5.5e-05,0.707506,0.0,1.0,18.0,231.0,246.0,0.0,508.0,32.0,230.0,0.0,0.0,0.0,0.0
+2,1,1,1,1.1262,success,0.168661,0.168661,0.0,0.0,0.0,3.4e-05,0.00032,0.005644,1.105756,1.8e-05,1.119947,0.0,1.0,21.0,458.0,477.0,0.0,973.0,40.0,457.0,0.0,0.0,0.0,0.0
+2,2,0,0,3.0186,continuity_failure,0.0,0.0,0.0,0.0,0.0,3.7e-05,0.001116,0.044702,2.942325,3.4e-05,2.972068,0.0,1.0,97.0,803.0,895.0,0.0,1882.0,184.0,803.0,1.0,0.0,0.0,0.0
+2,3,1,0,2.6083,collision_failure,0.408165,0.408165,0.0,0.0,0.0,1.7e-05,0.000922,0.047126,2.531375,8.1e-05,2.559695,0.0,1.0,84.0,854.0,930.0,0.0,1936.0,152.0,854.0,1.0,0.0,0.0,0.0
+2,4,1,0,1.71,collision_failure,0.33922,0.33922,0.0,0.0,0.0,2.8e-05,0.000487,0.014295,1.675341,4.9e-05,1.694819,0.0,1.0,38.0,585.0,618.0,0.0,1270.0,68.0,584.0,0.0,0.0,0.0,0.0

@@ -1,0 +1,40 @@
+Tue Mar 17 13:34:28 2026    /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/plan_profile_stage3_seed0_20260317_133407.prof
+
+         3411744 function calls (3350160 primitive calls) in 2.908 seconds
+
+   Ordered by: cumulative time
+   List reduced from 1913 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000    2.913    2.913 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:1090(run_stage_trial)
+        1    0.000    0.000    2.260    2.260 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:733(plan_pose_rrt)
+       93    0.004    0.000    2.195    0.024 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:430(extend_toward)
+      554    0.002    0.000    1.800    0.003 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:332(solve_dual_arm_pose_ik)
+     1136    0.004    0.000    1.658    0.001 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:269(solve_single_arm_ik)
+     1136    1.514    0.001    1.514    0.001 {built-in method pybullet.calculateInverseKinematics}
+      966    0.027    0.000    0.526    0.001 /workspace/husky-assembly-teleop/external/pybullet_planning/src/pybullet_planning/interfaces/robots/collision.py:469(collision_fn)
+        1    0.001    0.001    0.519    0.519 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/path_validation.py:187(validate_stage_trajectory)
+   312161    0.054    0.000    0.470    0.000 /workspace/husky-assembly-teleop/external/pybullet_planning/src/pybullet_planning/interfaces/robots/collision.py:92(pairwise_link_collision)
+   312161    0.033    0.000    0.406    0.000 /workspace/husky-assembly-teleop/external/pybullet_planning/src/pybullet_planning/interfaces/robots/collision.py:32(pairwise_link_collision_info)
+      520    0.000    0.000    0.376    0.001 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:243(<lambda>)
+   312161    0.373    0.000    0.373    0.000 {built-in method pybullet.getClosestPoints}
+        1    0.000    0.000    0.294    0.294 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/path_validation.py:90(save_validation_plot)
+90694/57565    0.022    0.000    0.190    0.000 {built-in method numpy.core._multiarray_umath.implement_array_function}
+        1    0.000    0.000    0.158    0.158 /opt/venv/lib/python3.10/site-packages/matplotlib/figure.py:3334(savefig)
+        1    0.000    0.000    0.158    0.158 /opt/venv/lib/python3.10/site-packages/matplotlib/backend_bases.py:2049(print_figure)
+     3995    0.007    0.000    0.133    0.000 /workspace/husky-assembly-teleop/external/pybullet_planning/src/pybullet_planning/interfaces/robots/joint.py:89(set_joint_positions)
+      526    0.002    0.000    0.132    0.000 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:302(validate_dual_arm_bar_pose)
+    47940    0.006    0.000    0.125    0.000 /workspace/husky-assembly-teleop/external/pybullet_planning/src/pybullet_planning/interfaces/robots/joint.py:86(set_joint_position)
+    47940    0.119    0.000    0.119    0.000 {built-in method pybullet.resetJointState}
+        2    0.000    0.000    0.112    0.056 /opt/venv/lib/python3.10/site-packages/matplotlib/backend_bases.py:2040(<lambda>)
+        2    0.000    0.000    0.112    0.056 /opt/venv/lib/python3.10/site-packages/matplotlib/backends/backend_agg.py:434(print_png)
+        2    0.000    0.000    0.112    0.056 /opt/venv/lib/python3.10/site-packages/matplotlib/backends/backend_agg.py:424(_print_pil)
+     2634    0.002    0.000    0.111    0.000 /workspace/husky-assembly-teleop/external/pybullet_planning/src/pybullet_planning/interfaces/kinematics/ik_utils.py:40(is_pose_close)
+     6032    0.002    0.000    0.109    0.000 <__array_function__ internals>:177(allclose)
+     6032    0.003    0.000    0.105    0.000 /opt/venv/lib/python3.10/site-packages/numpy/core/numeric.py:2199(allclose)
+        2    0.000    0.000    0.099    0.049 /opt/venv/lib/python3.10/site-packages/matplotlib/artist.py:92(draw_wrapper)
+    606/2    0.001    0.000    0.099    0.049 /opt/venv/lib/python3.10/site-packages/matplotlib/artist.py:53(draw_wrapper)
+        2    0.000    0.000    0.099    0.049 /opt/venv/lib/python3.10/site-packages/matplotlib/figure.py:3237(draw)
+      8/2    0.000    0.000    0.098    0.049 /opt/venv/lib/python3.10/site-packages/matplotlib/image.py:116(_draw_list_compositing_images)
+
+

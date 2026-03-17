@@ -1,0 +1,40 @@
+Tue Mar 17 13:06:01 2026    /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/plan_profile_stage2_seed0_20260317_130558.prof
+
+         1440105 function calls (1399317 primitive calls) in 1.188 seconds
+
+   Ordered by: cumulative time
+   List reduced from 1893 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000    1.191    1.191 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:1090(run_stage_trial)
+        1    0.000    0.000    0.713    0.713 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:733(plan_pose_rrt)
+       18    0.001    0.000    0.707    0.039 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:430(extend_toward)
+      248    0.001    0.000    0.702    0.003 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:332(solve_dual_arm_pose_ik)
+      512    0.002    0.000    0.644    0.001 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:269(solve_single_arm_ik)
+      512    0.580    0.001    0.580    0.001 {built-in method pybullet.calculateInverseKinematics}
+        1    0.001    0.001    0.391    0.391 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/path_validation.py:172(validate_stage_trajectory)
+        1    0.000    0.000    0.280    0.280 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/path_validation.py:83(save_validation_plot)
+        1    0.000    0.000    0.160    0.160 /opt/venv/lib/python3.10/site-packages/matplotlib/figure.py:3334(savefig)
+        1    0.000    0.000    0.160    0.160 /opt/venv/lib/python3.10/site-packages/matplotlib/backend_bases.py:2049(print_figure)
+        2    0.000    0.000    0.111    0.056 /opt/venv/lib/python3.10/site-packages/matplotlib/backend_bases.py:2040(<lambda>)
+        2    0.000    0.000    0.111    0.056 /opt/venv/lib/python3.10/site-packages/matplotlib/backends/backend_agg.py:434(print_png)
+        2    0.000    0.000    0.111    0.056 /opt/venv/lib/python3.10/site-packages/matplotlib/backends/backend_agg.py:424(_print_pil)
+        2    0.000    0.000    0.100    0.050 /opt/venv/lib/python3.10/site-packages/matplotlib/artist.py:92(draw_wrapper)
+    654/2    0.001    0.000    0.100    0.050 /opt/venv/lib/python3.10/site-packages/matplotlib/artist.py:53(draw_wrapper)
+        2    0.000    0.000    0.100    0.050 /opt/venv/lib/python3.10/site-packages/matplotlib/figure.py:3237(draw)
+        1    0.000    0.000    0.100    0.100 /opt/venv/lib/python3.10/site-packages/matplotlib/figure.py:3608(tight_layout)
+        1    0.000    0.000    0.100    0.100 /opt/venv/lib/python3.10/site-packages/matplotlib/layout_engine.py:168(execute)
+        1    0.000    0.000    0.100    0.100 /opt/venv/lib/python3.10/site-packages/matplotlib/_tight_layout.py:194(get_tight_layout_figure)
+        2    0.000    0.000    0.100    0.050 /opt/venv/lib/python3.10/site-packages/matplotlib/_tight_layout.py:20(_auto_adjust_subplotpars)
+      8/2    0.000    0.000    0.100    0.050 /opt/venv/lib/python3.10/site-packages/matplotlib/image.py:116(_draw_list_compositing_images)
+     18/6    0.000    0.000    0.099    0.016 /opt/venv/lib/python3.10/site-packages/matplotlib/artist.py:1395(_get_tightbbox_for_layout_only)
+        6    0.000    0.000    0.099    0.016 /opt/venv/lib/python3.10/site-packages/matplotlib/axes/_base.py:4498(get_tightbbox)
+        6    0.000    0.000    0.096    0.016 /opt/venv/lib/python3.10/site-packages/matplotlib/axes/_base.py:3151(draw)
+       24    0.000    0.000    0.093    0.004 /opt/venv/lib/python3.10/site-packages/matplotlib/axis.py:1337(get_tightbbox)
+      132    0.002    0.000    0.084    0.001 /opt/venv/lib/python3.10/site-packages/matplotlib/axis.py:1276(_update_ticks)
+38210/23219    0.010    0.000    0.081    0.000 {built-in method numpy.core._multiarray_umath.implement_array_function}
+        1    0.000    0.000    0.078    0.078 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:979(setup_stage1_scene)
+        1    0.000    0.000    0.074    0.074 /workspace/husky-assembly-teleop/external/pybullet_planning/src/pybullet_planning/interfaces/env_manager/simulation.py:201(load_pybullet)
+        1    0.074    0.074    0.074    0.074 {built-in method pybullet.loadURDF}
+
+

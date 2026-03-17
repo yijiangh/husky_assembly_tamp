@@ -112,8 +112,9 @@ def save_validation_plot(
 
     if relative_translation_errors_m:
         xs = np.arange(len(relative_translation_errors_m), dtype=int)
-        axes[0].plot(xs, relative_translation_errors_m, color="#1f77b4", linewidth=1.8)
-        axes[0].set_ylabel("Translation drift (m)")
+        relative_translation_errors_mm = 1000.0 * np.asarray(relative_translation_errors_m, dtype=float)
+        axes[0].plot(xs, relative_translation_errors_mm, color="#1f77b4", linewidth=1.8)
+        axes[0].set_ylabel("Translation drift (mm)")
         axes[0].set_title("Left-right end-effector relative translation drift")
     else:
         axes[0].axis("off")

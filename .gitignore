@@ -1,6 +1,8 @@
 # Byte-compiled / optimized / DLL files
 **/__pycache__/
 __pycache__/
+.DS_Store
+**/.DS_Store
 
 z.log.global
 husky_assembly_tamp/husky_assembly_tamp.egg-info
@@ -13,5 +15,3 @@ husky_assembly_tamp/motion_planner/algorithm_description.log
 husky_assembly_tamp/motion_planner/algorithm_description.out
 
 husky_assembly_tamp/motion_planner/missfont.log
-
-husky_assembly_tamp/motion_planner/.DS_Store

@@ -2,68 +2,139 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Dual-Arm Planner: Stage 1 (Task-Space)",
+      "name": "Stage 1: minimal_rrt (GUI, stage 1)",
       "type": "debugpy",
       "request": "launch",
-      "module": "husky_assembly_tamp.motion_planner.trajectory_testbench",
+      "module": "husky_assembly_tamp.motion_planner.stage1.minimal_rrt",
       "cwd": "${workspaceFolder}",
       "args": [
         "--stage",
         "1",
-        "--return-task-path"
+        "--position-res",
+        "0.1",
+        "--rotation-res",
+        "0.2",
+        "--max-time",
+        "30",
+        "--max-iterations",
+        "2000",
+        "--max-attempts",
+        "5"
       ],
       "env": {
-        "PYTHONPATH": "${workspaceFolder}/external/husky_assembly_tamp"
+        "PYTHONPATH": "${workspaceFolder}"
       },
       "console": "integratedTerminal",
       "justMyCode": false
     },
     {
-      "name": "Dual-Arm Planner: Stage 1b (Collision)",
+      "name": "Stage 1: minimal_rrt (Headless, stage 1)",
       "type": "debugpy",
       "request": "launch",
-      "module": "husky_assembly_tamp.motion_planner.trajectory_testbench",
+      "module": "husky_assembly_tamp.motion_planner.stage1.minimal_rrt",
       "cwd": "${workspaceFolder}",
       "args": [
         "--stage",
         "1",
-        "--stage1b-collision",
-        "--return-task-path"
+        "--no-gui",
+        "--position-res",
+        "0.1",
+        "--rotation-res",
+        "0.2",
+        "--max-time",
+        "30",
+        "--max-iterations",
+        "2000",
+        "--max-attempts",
+        "5"
       ],
       "env": {
-        "PYTHONPATH": "${workspaceFolder}/external/husky_assembly_tamp"
+        "PYTHONPATH": "${workspaceFolder}"
       },
       "console": "integratedTerminal",
       "justMyCode": false
     },
     {
-      "name": "Dual-Arm Planner: Stage 2 (IK/Projection)",
+      "name": "Stage 1: minimal_rrt (GUI, stage 2)",
       "type": "debugpy",
       "request": "launch",
-      "module": "husky_assembly_tamp.motion_planner.trajectory_testbench",
+      "module": "husky_assembly_tamp.motion_planner.stage1.minimal_rrt",
       "cwd": "${workspaceFolder}",
       "args": [
         "--stage",
-        "2"
+        "2",
+        "--position-res",
+        "0.1",
+        "--rotation-res",
+        "0.2",
+        "--endpoint-ik-attempts",
+        "20",
+        "--max-time",
+        "30",
+        "--max-iterations",
+        "2000",
+        "--max-attempts",
+        "5"
       ],
       "env": {
-        "PYTHONPATH": "${workspaceFolder}/external/husky_assembly_tamp"
+        "PYTHONPATH": "${workspaceFolder}"
       },
       "console": "integratedTerminal",
       "justMyCode": false
     },
     {
-      "name": "Dual-Arm Planner: Stage 3 (Full Collision)",
+      "name": "Stage 1: debug_runner (GUI, one-shot)",
       "type": "debugpy",
       "request": "launch",
-      "module": "husky_assembly_tamp.motion_planner.trajectory_testbench",
+      "module": "husky_assembly_tamp.motion_planner.stage1.debug_runner",
       "cwd": "${workspaceFolder}",
       "args": [
         "--stage",
-        "3"
+        "1",
+        "--gui",
+        "--position-res",
+        "0.1",
+        "--rotation-res",
+        "0.2",
+        "--max-time",
+        "30",
+        "--max-iterations",
+        "2000",
+        "--max-attempts",
+        "5"
       ],
       "env": {
-        "PYTHONPATH": "${workspaceFolder}/external/husky_assembly_tamp"
+        "PYTHONPATH": "${workspaceFolder}"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Stage 1: debug_runner (Headless analysis x10)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "husky_assembly_tamp.motion_planner.stage1.debug_runner",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "--stage",
+        "1",
+        "--analysis-trials",
+        "10",
+        "--analysis-seed-start",
+        "0",
+        "--position-res",
+        "0.1",
+        "--rotation-res",
+        "0.2",
+        "--max-time",
+        "30",
+        "--max-iterations",
+        "2000",
+        "--max-attempts",
+        "5"
+      ],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
       },
       "console": "integratedTerminal",
       "justMyCode": false

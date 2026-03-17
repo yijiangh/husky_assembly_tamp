@@ -97,7 +97,7 @@ Each run provides:
 - Snakeviz launch attempt for profile browsing
 - saved trajectory JSON in `--traj-dir` as `testbench_<timestamp>_JointTrajectory.json` (joint-space paths only)
 
-## Stage 1 Benchmarking
+## Stage 1/2/3 Benchmarking
 
 For the standalone Stage 1 pose-space planner, use:
 
@@ -111,6 +111,7 @@ Run a single Stage 1 debug session:
 
 ```bash
 python -m husky_assembly_tamp.motion_planner.stage1.minimal_rrt \
+  --stage 1 \
   --position-res 0.1 \
   --rotation-res 0.2 \
   --max-time 30 \
@@ -118,14 +119,57 @@ python -m husky_assembly_tamp.motion_planner.stage1.minimal_rrt \
   --max-attempts 5
 ```
 
-Run the Stage 1 benchmarking batch headlessly:
+Run a single Stage 2 debug session:
+
+```bash
+python -m husky_assembly_tamp.motion_planner.stage1.minimal_rrt \
+  --stage 2 \
+  --position-res 0.1 \
+  --rotation-res 0.2 \
+  --endpoint-ik-attempts 20 \
+  --max-time 30 \
+  --max-iterations 2000 \
+  --max-attempts 5
+```
+
+Run a single Stage 3 debug session:
+
+```bash
+python -m husky_assembly_tamp.motion_planner.stage1.minimal_rrt \
+  --stage 3 \
+  --position-res 0.1 \
+  --rotation-res 0.2 \
+  --endpoint-ik-attempts 20 \
+  --max-time 30 \
+  --max-iterations 2000 \
+  --max-attempts 5
+```
+
+Run the Stage 3 benchmarking batch headlessly:
 
 ```bash
 python -m husky_assembly_tamp.motion_planner.stage1.debug_runner \
+  --stage 3 \
   --analysis-trials 10 \
   --analysis-seed-start 0 \
   --position-res 0.1 \
   --rotation-res 0.2 \
+  --endpoint-ik-attempts 20 \
+  --max-time 30 \
+  --max-iterations 2000 \
+  --max-attempts 5
+```
+
+Run a comparative Stage 1/2/3 benchmarking batch headlessly:
+
+```bash
+python -m husky_assembly_tamp.motion_planner.stage1.debug_runner \
+  --compare-stages \
+  --analysis-trials 10 \
+  --analysis-seed-start 0 \
+  --position-res 0.1 \
+  --rotation-res 0.2 \
+  --endpoint-ik-attempts 20 \
   --max-time 30 \
   --max-iterations 2000 \
   --max-attempts 5
@@ -135,22 +179,39 @@ Outputs are written under:
 
 `husky_assembly_tamp/motion_planner/stage1/reports`
 
+Top-level `reports/` is intended to contain the Markdown reports you actually open first.
+
+All supporting CSV/JSON/PNG/profile artifacts are written under:
+
+`husky_assembly_tamp/motion_planner/stage1/reports/_support`
+
 Expected benchmarking artifacts:
-- `failure_analysis_<timestamp>.csv`
-- `failure_analysis_<timestamp>.json`
-- `failure_distribution_<timestamp>.png`
-- `stage1_success_<timestamp>.png`
-- `runtime_by_seed_<timestamp>.png`
-- `tree_structure_stage1_seed<seed>_<timestamp>.png`
-- `planner_breakdown_<timestamp>.png`
-- `plan_profile_seed<seed>_<timestamp>.prof`
-- `plan_profile_seed<seed>_<timestamp>.txt`
-- `debug_report_<timestamp>.md`
+- `_support/failure_analysis_stage<stage>_<timestamp>.csv`
+- `_support/failure_analysis_stage<stage>_<timestamp>.json`
+- `_support/failure_distribution_stage<stage>_<timestamp>.png`
+- `_support/stage<stage>_success_<timestamp>.png`
+- `_support/runtime_by_seed_stage<stage>_<timestamp>.png`
+- `_support/tree_structure_stage<stage>_seed<seed>_<timestamp>.png`
+- `_support/planner_breakdown_stage<stage>_<timestamp>.png`
+- `_support/trajectory_validation_stage<stage>_<timestamp>.png`
+- `_support/plan_profile_stage<stage>_seed<seed>_<timestamp>.prof`
+- `_support/plan_profile_stage<stage>_seed<seed>_<timestamp>.txt`
+- `debug_report_stage<stage>_<timestamp>.md`
+- `_support/stage_comparison_<timestamp>.csv`
+- `_support/stage_comparison_<timestamp>.json`
+- `_support/failure_distribution_comparison_<timestamp>.png`
+- `_support/success_rate_comparison_<timestamp>.png`
+- `_support/runtime_comparison_<timestamp>.png`
+- `_support/planner_breakdown_comparison_<timestamp>.png`
+- `stage_comparison_report_<timestamp>.md`
 
 Useful options:
 - `--gui` to run the debug runner with PyBullet GUI; headless is the default
+- `--stage 1`, `--stage 2`, or `--stage 3` to choose between task-space only, IK-enabled, and collision-aware planning
 - `--lock-renderer-during-search` to suppress live redraw during tree expansion and only visualize the result afterward
-- `--no-floating-collision` to disable floating-body collision checks
+- `--endpoint-ik-attempts <N>` to increase endpoint seed search for Stage 2/3
+- `--floating-collision` to enable floating-body collision checks in Stage 1; Stage 3 always enables robot collision checks
+- `--compare-stages` to run Stage 1, Stage 2, and Stage 3 in one batch and emit a cross-stage comparison report
 - `--profile-seed <seed>` to choose which analysis seed gets full `cProfile` capture
 
 ## GUI Notes

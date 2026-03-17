@@ -1,0 +1,4 @@
+stage,seed,success,runtime_s,category,collision_check_time_s,endpoint_ik_time_s,feature_time_s,sample_time_s,nearest_time_s,ik_time_s,goal_test_time_s,extend_tree_time_s,attempts,iterations,nodes_created,poses_checked,collision_hits,ik_calls,ik_failures,nodes_with_ik
+1,0,1,0.0092,success,1e-06,0.0,2.7e-05,0.000228,0.004524,0.0,0.000462,0.003515,1.0,18.0,189.0,188.0,0.0,0.0,0.0,0.0
+2,0,1,0.3693,success,1e-06,0.0,3.8e-05,0.000541,0.002457,0.361424,6.3e-05,0.365841,1.0,18.0,73.0,88.0,0.0,192.0,32.0,72.0
+3,0,1,0.4702,success,0.001811,0.0,5.6e-05,0.001074,0.004261,0.394056,4.6e-05,0.462552,1.0,45.0,58.0,101.0,24.0,221.0,40.0,81.0

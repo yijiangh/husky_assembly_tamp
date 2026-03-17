@@ -80,6 +80,13 @@ def get_joint_labels(num_joints: int) -> list[str]:
     return [f"q{i + 1}" for i in range(num_joints)]
 
 
+def unwrap_joint_path_for_display_deg(joint_path_rad: Sequence[Sequence[float]]) -> np.ndarray:
+    wrapped = np.asarray(joint_path_rad, dtype=float)
+    if wrapped.size == 0:
+        return np.empty((0, 0), dtype=float)
+    return np.degrees(np.unwrap(wrapped, axis=0))
+
+
 def save_validation_plot(
     *,
     out_path: str,
@@ -144,10 +151,18 @@ def save_validation_plot(
         xs = np.arange(joint_path_deg.shape[0], dtype=int)
         labels = get_joint_labels(joint_path_deg.shape[1])
         for joint_idx in range(joint_path_deg.shape[1]):
-            axes[2].plot(xs, joint_path_deg[:, joint_idx], linewidth=1.2, label=labels[joint_idx])
+            axes[2].plot(
+                xs,
+                joint_path_deg[:, joint_idx],
+                linewidth=1.2,
+                marker="o",
+                markersize=2.5,
+                markeredgewidth=0.0,
+                label=labels[joint_idx],
+            )
         axes[2].set_ylabel("Joint angle (deg)")
         axes[2].set_xlabel("Waypoint index")
-        axes[2].set_title("Joint value evolution")
+        axes[2].set_title("Joint value evolution (unwrapped for display)")
         axes[2].legend(loc="center left", bbox_to_anchor=(1.01, 0.5), fontsize=8, ncol=1)
     else:
         axes[2].axis("off")
@@ -307,7 +322,7 @@ def validate_stage_trajectory(
     collision_flags = {key: False for key in collision_keys}
 
     normalized_joint_path = [normalize_angles(np.asarray(conf, dtype=float)) for conf in joint_path]
-    joint_path_deg = np.degrees(np.asarray(normalized_joint_path, dtype=float))
+    joint_path_deg = unwrap_joint_path_for_display_deg(normalized_joint_path)
     for idx, (pose, conf) in enumerate(zip(path, normalized_joint_path)):
         pp.set_joint_positions(robot, arm_joints, conf)
         pp.set_pose(bar_body, pose)

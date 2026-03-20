@@ -1,0 +1,40 @@
+Tue Mar 17 14:42:15 2026    /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/plan_profile_stage3_seed0_20260317_144137.prof
+
+         3420534 function calls (3358936 primitive calls) in 3.064 seconds
+
+   Ordered by: cumulative time
+   List reduced from 1912 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000    3.069    3.069 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:1006(run_stage_trial)
+        1    0.001    0.001    2.417    2.417 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:647(plan_pose_rrt)
+       93    0.005    0.000    2.359    0.025 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:444(extend_toward)
+      554    0.003    0.000    1.930    0.003 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:341(solve_dual_arm_pose_ik)
+     1136    0.005    0.000    1.767    0.002 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:277(solve_single_arm_ik)
+     1136    1.600    0.001    1.600    0.001 {built-in method pybullet.calculateInverseKinematics}
+      966    0.031    0.000    0.560    0.001 /workspace/husky-assembly-teleop/external/pybullet_planning/src/pybullet_planning/interfaces/robots/collision.py:469(collision_fn)
+        1    0.002    0.002    0.523    0.523 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/path_validation.py:205(validate_stage_trajectory)
+   312161    0.057    0.000    0.495    0.000 /workspace/husky-assembly-teleop/external/pybullet_planning/src/pybullet_planning/interfaces/robots/collision.py:92(pairwise_link_collision)
+   312161    0.036    0.000    0.427    0.000 /workspace/husky-assembly-teleop/external/pybullet_planning/src/pybullet_planning/interfaces/robots/collision.py:32(pairwise_link_collision_info)
+      520    0.000    0.000    0.397    0.001 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:251(<lambda>)
+   312161    0.392    0.000    0.392    0.000 {built-in method pybullet.getClosestPoints}
+        1    0.000    0.000    0.277    0.277 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/path_validation.py:97(save_validation_plot)
+89820/56691    0.024    0.000    0.210    0.000 {built-in method numpy.core._multiarray_umath.implement_array_function}
+        1    0.000    0.000    0.159    0.159 /opt/venv/lib/python3.10/site-packages/matplotlib/figure.py:3334(savefig)
+        1    0.000    0.000    0.159    0.159 /opt/venv/lib/python3.10/site-packages/matplotlib/backend_bases.py:2049(print_figure)
+      526    0.003    0.000    0.151    0.000 /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/minimal_rrt.py:311(validate_dual_arm_bar_pose)
+     3995    0.010    0.000    0.148    0.000 /workspace/husky-assembly-teleop/external/pybullet_planning/src/pybullet_planning/interfaces/robots/joint.py:89(set_joint_positions)
+    47940    0.007    0.000    0.138    0.000 /workspace/husky-assembly-teleop/external/pybullet_planning/src/pybullet_planning/interfaces/robots/joint.py:86(set_joint_position)
+    47940    0.130    0.000    0.130    0.000 {built-in method pybullet.resetJointState}
+     2634    0.002    0.000    0.126    0.000 /workspace/husky-assembly-teleop/external/pybullet_planning/src/pybullet_planning/interfaces/kinematics/ik_utils.py:40(is_pose_close)
+     6032    0.002    0.000    0.123    0.000 <__array_function__ internals>:177(allclose)
+     6032    0.003    0.000    0.119    0.000 /opt/venv/lib/python3.10/site-packages/numpy/core/numeric.py:2199(allclose)
+        2    0.000    0.000    0.112    0.056 /opt/venv/lib/python3.10/site-packages/matplotlib/backend_bases.py:2040(<lambda>)
+        2    0.000    0.000    0.112    0.056 /opt/venv/lib/python3.10/site-packages/matplotlib/backends/backend_agg.py:434(print_png)
+        2    0.000    0.000    0.112    0.056 /opt/venv/lib/python3.10/site-packages/matplotlib/backends/backend_agg.py:424(_print_pil)
+     6164    0.002    0.000    0.106    0.000 <__array_function__ internals>:177(isclose)
+     6164    0.010    0.000    0.102    0.000 /opt/venv/lib/python3.10/site-packages/numpy/core/numeric.py:2278(isclose)
+        2    0.000    0.000    0.099    0.049 /opt/venv/lib/python3.10/site-packages/matplotlib/artist.py:92(draw_wrapper)
+    606/2    0.001    0.000    0.099    0.049 /opt/venv/lib/python3.10/site-packages/matplotlib/artist.py:53(draw_wrapper)
+
+

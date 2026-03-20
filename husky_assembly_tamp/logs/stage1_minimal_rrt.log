@@ -4109,3 +4109,398 @@
 [2026-03-17 13:34:37.286] INFO     Trajectory collisions: pass
 [2026-03-17 13:34:37.286] INFO     Joint continuity: pass (max dq=0.1919 rad, threshold=0.5000 rad)
 [2026-03-17 13:34:37.286] INFO     End-effector relative transform drift: pass (max pos=0.000094 m, max axis drift xyz=[0.003, 0.003, 0.003] deg)
+[2026-03-17 15:35:42.686] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-03-17 15:35:44.319] WARNING  Stage 1 debug start pose is offset from the FK-consistent bar pose by [-0.5, 0.0, 0.5] in world coordinates. This intentionally makes the start bar pose incompatible with the start robot configuration and must be fixed later.
+[2026-03-17 15:35:44.319] WARNING    FK start pose:      pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 15:35:44.319] WARNING    Planning start pose: pos=[0.2912 0.0902 1.3623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 15:35:44.501] INFO     Running minimal Stage 3 RRT.
+[2026-03-17 15:35:44.501] INFO       start pose: [0.2912 0.0902 1.3623]
+[2026-03-17 15:35:44.501] INFO       goal pose:  [ 0.897  -0.0046  0.3443]
+[2026-03-17 15:35:44.501] INFO       IK: on
+[2026-03-17 15:35:44.501] INFO       collision: on
+[2026-03-17 15:35:44.501] INFO       position_res: 0.01
+[2026-03-17 15:35:44.501] INFO       rotation_res: 0.025
+[2026-03-17 15:35:44.501] INFO       joint continuity threshold: 0.2
+[2026-03-17 15:35:44.501] INFO       angle normalization: off
+[2026-03-17 15:35:44.501] INFO       collision obstacles: 1 bodies
+[2026-03-17 15:35:44.501] INFO       lock renderer during search: on
+[2026-03-17 15:35:51.810] INFO     Found Stage 3 pose path with 316 waypoints.
+[2026-03-17 15:35:56.403] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage3_20260317_153551.png
+[2026-03-17 15:35:56.403] INFO     Trajectory collisions: pass
+[2026-03-17 15:35:56.403] INFO     Joint continuity: pass (max dq=0.1496 rad, threshold=0.5000 rad)
+[2026-03-17 15:35:56.403] INFO     End-effector relative transform drift: pass (max pos=0.000058 m, max axis drift xyz=[0.003, 0.001, 0.003] deg)
+[2026-03-17 15:35:56.403] INFO     Visualizing pose path with 316 waypoints.
+[2026-03-17 15:38:39.407] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-03-17 15:38:41.150] WARNING  Stage 1 debug start pose is offset from the FK-consistent bar pose by [-0.5, 0.0, 0.5] in world coordinates. This intentionally makes the start bar pose incompatible with the start robot configuration and must be fixed later.
+[2026-03-17 15:38:41.150] WARNING    FK start pose:      pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 15:38:41.150] WARNING    Planning start pose: pos=[0.2912 0.0902 1.3623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 15:38:41.327] INFO     Running minimal Stage 3 RRT.
+[2026-03-17 15:38:41.327] INFO       start pose: [0.2912 0.0902 1.3623]
+[2026-03-17 15:38:41.327] INFO       goal pose:  [ 0.897  -0.0046  0.3443]
+[2026-03-17 15:38:41.327] INFO       IK: on
+[2026-03-17 15:38:41.327] INFO       collision: on
+[2026-03-17 15:38:41.327] INFO       position_res: 0.01
+[2026-03-17 15:38:41.327] INFO       rotation_res: 0.025
+[2026-03-17 15:38:41.327] INFO       joint continuity threshold: 0.2
+[2026-03-17 15:38:41.327] INFO       angle normalization: off
+[2026-03-17 15:38:41.327] INFO       collision obstacles: 1 bodies
+[2026-03-17 15:38:41.327] INFO       lock renderer during search: on
+[2026-03-17 15:38:46.092] INFO     Found Stage 3 pose path with 283 waypoints.
+[2026-03-17 15:38:50.322] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage3_20260317_153846.png
+[2026-03-17 15:38:50.322] INFO     Trajectory collisions: pass
+[2026-03-17 15:38:50.322] INFO     Joint continuity: pass (max dq=0.1641 rad, threshold=0.5000 rad)
+[2026-03-17 15:38:50.322] INFO     End-effector relative transform drift: pass (max pos=0.000079 m, max axis drift xyz=[0.002, 0.002, 0.002] deg)
+[2026-03-17 15:38:50.322] INFO     Visualizing pose path with 283 waypoints.
+[2026-03-17 15:39:42.469] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-03-17 15:39:44.159] WARNING  Stage 1 debug start pose is offset from the FK-consistent bar pose by [-0.5, 0.0, 0.5] in world coordinates. This intentionally makes the start bar pose incompatible with the start robot configuration and must be fixed later.
+[2026-03-17 15:39:44.159] WARNING    FK start pose:      pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 15:39:44.159] WARNING    Planning start pose: pos=[0.2912 0.0902 1.3623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 15:39:44.342] INFO     Running minimal Stage 3 RRT.
+[2026-03-17 15:39:44.342] INFO       start pose: [0.2912 0.0902 1.3623]
+[2026-03-17 15:39:44.342] INFO       goal pose:  [ 0.897  -0.0046  0.3443]
+[2026-03-17 15:39:44.342] INFO       IK: on
+[2026-03-17 15:39:44.342] INFO       collision: on
+[2026-03-17 15:39:44.342] INFO       position_res: 0.01
+[2026-03-17 15:39:44.342] INFO       rotation_res: 0.025
+[2026-03-17 15:39:44.342] INFO       joint continuity threshold: 0.2
+[2026-03-17 15:39:44.342] INFO       angle normalization: on
+[2026-03-17 15:39:44.342] INFO       collision obstacles: 1 bodies
+[2026-03-17 15:39:44.342] INFO       lock renderer during search: on
+[2026-03-17 15:39:46.380] INFO     Found Stage 3 pose path with 174 waypoints.
+[2026-03-17 15:39:49.012] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage3_20260317_153946.png
+[2026-03-17 15:39:49.012] INFO     Trajectory collisions: pass
+[2026-03-17 15:39:49.012] INFO     Joint continuity: pass (max dq=0.1392 rad, threshold=0.5000 rad)
+[2026-03-17 15:39:49.012] INFO     End-effector relative transform drift: pass (max pos=0.000046 m, max axis drift xyz=[0.003, 0.003, 0.004] deg)
+[2026-03-17 15:39:49.012] INFO     Visualizing pose path with 174 waypoints.
+[2026-03-17 14:40:48.257] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-03-17 14:41:37.024] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-03-17 14:41:37.211] WARNING  Stage 1 debug start pose is offset from the FK-consistent bar pose by [-0.5, 0.0, 0.5] in world coordinates. This intentionally makes the start bar pose incompatible with the start robot configuration and must be fixed later.
+[2026-03-17 14:41:37.211] WARNING    FK start pose:      pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:41:37.211] WARNING    Planning start pose: pos=[0.2912 0.0902 1.3623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:41:37.212] INFO     Running minimal Stage 1 RRT.
+[2026-03-17 14:41:37.212] INFO       start pose: [0.2912 0.0902 1.3623]
+[2026-03-17 14:41:37.212] INFO       goal pose:  [ 0.897  -0.0046  0.3443]
+[2026-03-17 14:41:37.212] INFO       IK: off
+[2026-03-17 14:41:37.212] INFO       collision: off
+[2026-03-17 14:41:37.213] INFO       position_res: 0.01
+[2026-03-17 14:41:37.213] INFO       rotation_res: 0.025
+[2026-03-17 14:41:37.213] INFO       collision obstacles: 1 bodies
+[2026-03-17 14:41:37.213] INFO       lock renderer during search: off
+[2026-03-17 14:41:37.270] INFO     Found Stage 1 pose path with 292 waypoints.
+[2026-03-17 14:41:37.383] INFO     Saved trajectory validation plot: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage1_20260317_144137.png
+[2026-03-17 14:41:37.383] WARNING  Trajectory validation could not run robot-side checks: validation_ik_failure_at_waypoint_7
+[2026-03-17 14:41:37.480] WARNING  Stage 1 debug start pose is offset from the FK-consistent bar pose by [-0.5, 0.0, 0.5] in world coordinates. This intentionally makes the start bar pose incompatible with the start robot configuration and must be fixed later.
+[2026-03-17 14:41:37.480] WARNING    FK start pose:      pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:41:37.480] WARNING    Planning start pose: pos=[0.2912 0.0902 1.3623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:41:37.481] INFO     Running minimal Stage 1 RRT.
+[2026-03-17 14:41:37.481] INFO       start pose: [0.2912 0.0902 1.3623]
+[2026-03-17 14:41:37.481] INFO       goal pose:  [ 0.897  -0.0046  0.3443]
+[2026-03-17 14:41:37.481] INFO       IK: off
+[2026-03-17 14:41:37.481] INFO       collision: off
+[2026-03-17 14:41:37.481] INFO       position_res: 0.01
+[2026-03-17 14:41:37.481] INFO       rotation_res: 0.025
+[2026-03-17 14:41:37.481] INFO       collision obstacles: 1 bodies
+[2026-03-17 14:41:37.481] INFO       lock renderer during search: off
+[2026-03-17 14:41:37.521] INFO     Found Stage 1 pose path with 280 waypoints.
+[2026-03-17 14:41:38.263] INFO     Saved trajectory validation plot: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage1_20260317_144137.png
+[2026-03-17 14:41:38.263] INFO     Trajectory collisions: pass
+[2026-03-17 14:41:38.263] INFO     Joint continuity: pass (max dq=0.0743 rad, threshold=0.5000 rad)
+[2026-03-17 14:41:38.263] INFO     End-effector relative transform drift: pass (max pos=0.000002 m, max axis drift xyz=[0.000, 0.000, 0.000] deg)
+[2026-03-17 14:41:38.346] WARNING  Stage 1 debug start pose is offset from the FK-consistent bar pose by [-0.5, 0.0, 0.5] in world coordinates. This intentionally makes the start bar pose incompatible with the start robot configuration and must be fixed later.
+[2026-03-17 14:41:38.346] WARNING    FK start pose:      pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:41:38.347] WARNING    Planning start pose: pos=[0.2912 0.0902 1.3623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:41:38.347] INFO     Running minimal Stage 1 RRT.
+[2026-03-17 14:41:38.347] INFO       start pose: [0.2912 0.0902 1.3623]
+[2026-03-17 14:41:38.347] INFO       goal pose:  [ 0.897  -0.0046  0.3443]
+[2026-03-17 14:41:38.347] INFO       IK: off
+[2026-03-17 14:41:38.347] INFO       collision: off
+[2026-03-17 14:41:38.347] INFO       position_res: 0.01
+[2026-03-17 14:41:38.348] INFO       rotation_res: 0.025
+[2026-03-17 14:41:38.348] INFO       collision obstacles: 1 bodies
+[2026-03-17 14:41:38.348] INFO       lock renderer during search: off
+[2026-03-17 14:41:38.351] INFO     Found Stage 1 pose path with 150 waypoints.
+[2026-03-17 14:41:38.559] INFO     Saved trajectory validation plot: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage1_20260317_144138.png
+[2026-03-17 14:41:38.559] WARNING  Trajectory validation could not run robot-side checks: validation_ik_failure_at_waypoint_83
+[2026-03-17 14:41:38.642] WARNING  Stage 1 debug start pose is offset from the FK-consistent bar pose by [-0.5, 0.0, 0.5] in world coordinates. This intentionally makes the start bar pose incompatible with the start robot configuration and must be fixed later.
+[2026-03-17 14:41:38.643] WARNING    FK start pose:      pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:41:38.643] WARNING    Planning start pose: pos=[0.2912 0.0902 1.3623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:41:38.643] INFO     Running minimal Stage 1 RRT.
+[2026-03-17 14:41:38.643] INFO       start pose: [0.2912 0.0902 1.3623]
+[2026-03-17 14:41:38.643] INFO       goal pose:  [ 0.897  -0.0046  0.3443]
+[2026-03-17 14:41:38.643] INFO       IK: off
+[2026-03-17 14:41:38.643] INFO       collision: off
+[2026-03-17 14:41:38.643] INFO       position_res: 0.01
+[2026-03-17 14:41:38.643] INFO       rotation_res: 0.025
+[2026-03-17 14:41:38.644] INFO       collision obstacles: 1 bodies
+[2026-03-17 14:41:38.644] INFO       lock renderer during search: off
+[2026-03-17 14:41:38.645] INFO     Found Stage 1 pose path with 127 waypoints.
+[2026-03-17 14:41:38.810] INFO     Saved trajectory validation plot: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage1_20260317_144138.png
+[2026-03-17 14:41:38.811] WARNING  Trajectory validation could not run robot-side checks: validation_ik_failure_at_waypoint_29
+[2026-03-17 14:41:38.897] WARNING  Stage 1 debug start pose is offset from the FK-consistent bar pose by [-0.5, 0.0, 0.5] in world coordinates. This intentionally makes the start bar pose incompatible with the start robot configuration and must be fixed later.
+[2026-03-17 14:41:38.898] WARNING    FK start pose:      pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:41:38.898] WARNING    Planning start pose: pos=[0.2912 0.0902 1.3623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:41:38.898] INFO     Running minimal Stage 1 RRT.
+[2026-03-17 14:41:38.898] INFO       start pose: [0.2912 0.0902 1.3623]
+[2026-03-17 14:41:38.898] INFO       goal pose:  [ 0.897  -0.0046  0.3443]
+[2026-03-17 14:41:38.898] INFO       IK: off
+[2026-03-17 14:41:38.898] INFO       collision: off
+[2026-03-17 14:41:38.899] INFO       position_res: 0.01
+[2026-03-17 14:41:38.899] INFO       rotation_res: 0.025
+[2026-03-17 14:41:38.899] INFO       collision obstacles: 1 bodies
+[2026-03-17 14:41:38.899] INFO       lock renderer during search: off
+[2026-03-17 14:41:38.989] INFO     Found Stage 1 pose path with 291 waypoints.
+[2026-03-17 14:41:39.095] INFO     Saved trajectory validation plot: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage1_20260317_144139.png
+[2026-03-17 14:41:39.095] WARNING  Trajectory validation could not run robot-side checks: validation_ik_failure_at_waypoint_14
+[2026-03-17 14:41:40.226] WARNING  Stage 1 debug start pose is offset from the FK-consistent bar pose by [-0.5, 0.0, 0.5] in world coordinates. This intentionally makes the start bar pose incompatible with the start robot configuration and must be fixed later.
+[2026-03-17 14:41:40.227] WARNING    FK start pose:      pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:41:40.227] WARNING    Planning start pose: pos=[0.2912 0.0902 1.3623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:41:40.230] INFO     Running minimal Stage 2 RRT.
+[2026-03-17 14:41:40.230] INFO       start pose: [0.2912 0.0902 1.3623]
+[2026-03-17 14:41:40.231] INFO       goal pose:  [ 0.897  -0.0046  0.3443]
+[2026-03-17 14:41:40.231] INFO       IK: on
+[2026-03-17 14:41:40.231] INFO       collision: off
+[2026-03-17 14:41:40.231] INFO       position_res: 0.01
+[2026-03-17 14:41:40.231] INFO       rotation_res: 0.025
+[2026-03-17 14:41:40.231] INFO       joint continuity threshold: 0.2
+[2026-03-17 14:41:40.231] INFO       angle normalization: on
+[2026-03-17 14:41:40.231] INFO       collision obstacles: 1 bodies
+[2026-03-17 14:41:40.231] INFO       lock renderer during search: off
+[2026-03-17 14:41:42.818] INFO     Found Stage 2 pose path with 386 waypoints.
+[2026-03-17 14:41:43.394] INFO     Saved trajectory validation plot: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage2_20260317_144142.png
+[2026-03-17 14:41:43.394] INFO     Trajectory collisions: fail
+[2026-03-17 14:41:43.394] WARNING    bar_robot collisions: 286 hits (first waypoint 6)
+[2026-03-17 14:41:43.394] WARNING    robot_self collisions: 272 hits (first waypoint 7)
+[2026-03-17 14:41:43.394] INFO     Joint continuity: pass (max dq=0.1792 rad, threshold=0.5000 rad)
+[2026-03-17 14:41:43.394] INFO     End-effector relative transform drift: pass (max pos=0.000053 m, max axis drift xyz=[0.002, 0.000, 0.002] deg)
+[2026-03-17 14:41:43.495] WARNING  Stage 1 debug start pose is offset from the FK-consistent bar pose by [-0.5, 0.0, 0.5] in world coordinates. This intentionally makes the start bar pose incompatible with the start robot configuration and must be fixed later.
+[2026-03-17 14:41:43.495] WARNING    FK start pose:      pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:41:43.496] WARNING    Planning start pose: pos=[0.2912 0.0902 1.3623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:41:43.499] INFO     Running minimal Stage 2 RRT.
+[2026-03-17 14:41:43.499] INFO       start pose: [0.2912 0.0902 1.3623]
+[2026-03-17 14:41:43.499] INFO       goal pose:  [ 0.897  -0.0046  0.3443]
+[2026-03-17 14:41:43.499] INFO       IK: on
+[2026-03-17 14:41:43.499] INFO       collision: off
+[2026-03-17 14:41:43.499] INFO       position_res: 0.01
+[2026-03-17 14:41:43.499] INFO       rotation_res: 0.025
+[2026-03-17 14:41:43.500] INFO       joint continuity threshold: 0.2
+[2026-03-17 14:41:43.500] INFO       angle normalization: on
+[2026-03-17 14:41:43.500] INFO       collision obstacles: 1 bodies
+[2026-03-17 14:41:43.500] INFO       lock renderer during search: off
+[2026-03-17 14:41:45.863] INFO     Found Stage 2 pose path with 297 waypoints.
+[2026-03-17 14:41:46.378] INFO     Saved trajectory validation plot: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage2_20260317_144145.png
+[2026-03-17 14:41:46.378] INFO     Trajectory collisions: pass
+[2026-03-17 14:41:46.379] INFO     Joint continuity: pass (max dq=0.0949 rad, threshold=0.5000 rad)
+[2026-03-17 14:41:46.379] INFO     End-effector relative transform drift: pass (max pos=0.000047 m, max axis drift xyz=[0.000, 0.000, 0.000] deg)
+[2026-03-17 14:41:46.502] WARNING  Stage 1 debug start pose is offset from the FK-consistent bar pose by [-0.5, 0.0, 0.5] in world coordinates. This intentionally makes the start bar pose incompatible with the start robot configuration and must be fixed later.
+[2026-03-17 14:41:46.503] WARNING    FK start pose:      pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:41:46.503] WARNING    Planning start pose: pos=[0.2912 0.0902 1.3623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:41:46.508] INFO     Running minimal Stage 2 RRT.
+[2026-03-17 14:41:46.508] INFO       start pose: [0.2912 0.0902 1.3623]
+[2026-03-17 14:41:46.508] INFO       goal pose:  [ 0.897  -0.0046  0.3443]
+[2026-03-17 14:41:46.509] INFO       IK: on
+[2026-03-17 14:41:46.509] INFO       collision: off
+[2026-03-17 14:41:46.509] INFO       position_res: 0.01
+[2026-03-17 14:41:46.509] INFO       rotation_res: 0.025
+[2026-03-17 14:41:46.509] INFO       joint continuity threshold: 0.2
+[2026-03-17 14:41:46.509] INFO       angle normalization: on
+[2026-03-17 14:41:46.509] INFO       collision obstacles: 1 bodies
+[2026-03-17 14:41:46.510] INFO       lock renderer during search: off
+[2026-03-17 14:41:48.785] INFO     Found Stage 2 pose path with 221 waypoints.
+[2026-03-17 14:41:49.136] INFO     Saved trajectory validation plot: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage2_20260317_144148.png
+[2026-03-17 14:41:49.139] INFO     Trajectory collisions: fail
+[2026-03-17 14:41:49.139] WARNING    bar_robot collisions: 25 hits (first waypoint 47)
+[2026-03-17 14:41:49.139] INFO     Joint continuity: pass (max dq=0.1428 rad, threshold=0.5000 rad)
+[2026-03-17 14:41:49.139] INFO     End-effector relative transform drift: pass (max pos=0.000084 m, max axis drift xyz=[0.000, 0.001, 0.001] deg)
+[2026-03-17 14:41:49.223] WARNING  Stage 1 debug start pose is offset from the FK-consistent bar pose by [-0.5, 0.0, 0.5] in world coordinates. This intentionally makes the start bar pose incompatible with the start robot configuration and must be fixed later.
+[2026-03-17 14:41:49.223] WARNING    FK start pose:      pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:41:49.223] WARNING    Planning start pose: pos=[0.2912 0.0902 1.3623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:41:49.226] INFO     Running minimal Stage 2 RRT.
+[2026-03-17 14:41:49.226] INFO       start pose: [0.2912 0.0902 1.3623]
+[2026-03-17 14:41:49.227] INFO       goal pose:  [ 0.897  -0.0046  0.3443]
+[2026-03-17 14:41:49.227] INFO       IK: on
+[2026-03-17 14:41:49.227] INFO       collision: off
+[2026-03-17 14:41:49.227] INFO       position_res: 0.01
+[2026-03-17 14:41:49.227] INFO       rotation_res: 0.025
+[2026-03-17 14:41:49.227] INFO       joint continuity threshold: 0.2
+[2026-03-17 14:41:49.227] INFO       angle normalization: on
+[2026-03-17 14:41:49.227] INFO       collision obstacles: 1 bodies
+[2026-03-17 14:41:49.227] INFO       lock renderer during search: off
+[2026-03-17 14:41:56.790] INFO     Found Stage 2 pose path with 207 waypoints.
+[2026-03-17 14:41:57.146] INFO     Saved trajectory validation plot: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage2_20260317_144156.png
+[2026-03-17 14:41:57.146] INFO     Trajectory collisions: fail
+[2026-03-17 14:41:57.146] WARNING    bar_robot collisions: 66 hits (first waypoint 96)
+[2026-03-17 14:41:57.146] INFO     Joint continuity: pass (max dq=0.1388 rad, threshold=0.5000 rad)
+[2026-03-17 14:41:57.147] INFO     End-effector relative transform drift: pass (max pos=0.000100 m, max axis drift xyz=[0.002, 0.001, 0.002] deg)
+[2026-03-17 14:41:57.244] WARNING  Stage 1 debug start pose is offset from the FK-consistent bar pose by [-0.5, 0.0, 0.5] in world coordinates. This intentionally makes the start bar pose incompatible with the start robot configuration and must be fixed later.
+[2026-03-17 14:41:57.244] WARNING    FK start pose:      pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:41:57.244] WARNING    Planning start pose: pos=[0.2912 0.0902 1.3623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:41:57.248] INFO     Running minimal Stage 2 RRT.
+[2026-03-17 14:41:57.248] INFO       start pose: [0.2912 0.0902 1.3623]
+[2026-03-17 14:41:57.248] INFO       goal pose:  [ 0.897  -0.0046  0.3443]
+[2026-03-17 14:41:57.248] INFO       IK: on
+[2026-03-17 14:41:57.248] INFO       collision: off
+[2026-03-17 14:41:57.248] INFO       position_res: 0.01
+[2026-03-17 14:41:57.249] INFO       rotation_res: 0.025
+[2026-03-17 14:41:57.249] INFO       joint continuity threshold: 0.2
+[2026-03-17 14:41:57.249] INFO       angle normalization: on
+[2026-03-17 14:41:57.249] INFO       collision obstacles: 1 bodies
+[2026-03-17 14:41:57.249] INFO       lock renderer during search: off
+[2026-03-17 14:42:11.233] INFO     Found Stage 2 pose path with 290 waypoints.
+[2026-03-17 14:42:11.662] INFO     Saved trajectory validation plot: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage2_20260317_144211.png
+[2026-03-17 14:42:11.662] INFO     Trajectory collisions: fail
+[2026-03-17 14:42:11.662] WARNING    robot_self collisions: 46 hits (first waypoint 84)
+[2026-03-17 14:42:11.662] INFO     Joint continuity: pass (max dq=0.1777 rad, threshold=0.5000 rad)
+[2026-03-17 14:42:11.662] INFO     End-effector relative transform drift: pass (max pos=0.000097 m, max axis drift xyz=[0.003, 0.003, 0.003] deg)
+[2026-03-17 14:42:12.472] WARNING  Stage 1 debug start pose is offset from the FK-consistent bar pose by [-0.5, 0.0, 0.5] in world coordinates. This intentionally makes the start bar pose incompatible with the start robot configuration and must be fixed later.
+[2026-03-17 14:42:12.473] WARNING    FK start pose:      pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:42:12.473] WARNING    Planning start pose: pos=[0.2912 0.0902 1.3623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:42:12.512] INFO     Running minimal Stage 3 RRT.
+[2026-03-17 14:42:12.513] INFO       start pose: [0.2912 0.0902 1.3623]
+[2026-03-17 14:42:12.513] INFO       goal pose:  [ 0.897  -0.0046  0.3443]
+[2026-03-17 14:42:12.513] INFO       IK: on
+[2026-03-17 14:42:12.513] INFO       collision: on
+[2026-03-17 14:42:12.513] INFO       position_res: 0.01
+[2026-03-17 14:42:12.513] INFO       rotation_res: 0.025
+[2026-03-17 14:42:12.513] INFO       joint continuity threshold: 0.2
+[2026-03-17 14:42:12.513] INFO       angle normalization: on
+[2026-03-17 14:42:12.513] INFO       collision obstacles: 1 bodies
+[2026-03-17 14:42:12.514] INFO       lock renderer during search: off
+[2026-03-17 14:42:14.931] INFO     Found Stage 3 pose path with 223 waypoints.
+[2026-03-17 14:42:15.458] INFO     Saved trajectory validation plot: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage3_20260317_144214.png
+[2026-03-17 14:42:15.458] INFO     Trajectory collisions: pass
+[2026-03-17 14:42:15.458] INFO     Joint continuity: pass (max dq=0.1576 rad, threshold=0.5000 rad)
+[2026-03-17 14:42:15.458] INFO     End-effector relative transform drift: pass (max pos=0.000044 m, max axis drift xyz=[0.000, 0.001, 0.001] deg)
+[2026-03-17 14:42:15.587] WARNING  Stage 1 debug start pose is offset from the FK-consistent bar pose by [-0.5, 0.0, 0.5] in world coordinates. This intentionally makes the start bar pose incompatible with the start robot configuration and must be fixed later.
+[2026-03-17 14:42:15.587] WARNING    FK start pose:      pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:42:15.587] WARNING    Planning start pose: pos=[0.2912 0.0902 1.3623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:42:15.607] INFO     Running minimal Stage 3 RRT.
+[2026-03-17 14:42:15.608] INFO       start pose: [0.2912 0.0902 1.3623]
+[2026-03-17 14:42:15.608] INFO       goal pose:  [ 0.897  -0.0046  0.3443]
+[2026-03-17 14:42:15.608] INFO       IK: on
+[2026-03-17 14:42:15.608] INFO       collision: on
+[2026-03-17 14:42:15.608] INFO       position_res: 0.01
+[2026-03-17 14:42:15.608] INFO       rotation_res: 0.025
+[2026-03-17 14:42:15.608] INFO       joint continuity threshold: 0.2
+[2026-03-17 14:42:15.609] INFO       angle normalization: on
+[2026-03-17 14:42:15.609] INFO       collision obstacles: 1 bodies
+[2026-03-17 14:42:15.609] INFO       lock renderer during search: off
+[2026-03-17 14:42:16.681] INFO     Found Stage 3 pose path with 297 waypoints.
+[2026-03-17 14:42:17.097] INFO     Saved trajectory validation plot: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage3_20260317_144216.png
+[2026-03-17 14:42:17.100] INFO     Trajectory collisions: pass
+[2026-03-17 14:42:17.100] INFO     Joint continuity: pass (max dq=0.0949 rad, threshold=0.5000 rad)
+[2026-03-17 14:42:17.100] INFO     End-effector relative transform drift: pass (max pos=0.000047 m, max axis drift xyz=[0.000, 0.000, 0.000] deg)
+[2026-03-17 14:42:17.188] WARNING  Stage 1 debug start pose is offset from the FK-consistent bar pose by [-0.5, 0.0, 0.5] in world coordinates. This intentionally makes the start bar pose incompatible with the start robot configuration and must be fixed later.
+[2026-03-17 14:42:17.188] WARNING    FK start pose:      pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:42:17.188] WARNING    Planning start pose: pos=[0.2912 0.0902 1.3623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:42:17.208] INFO     Running minimal Stage 3 RRT.
+[2026-03-17 14:42:17.208] INFO       start pose: [0.2912 0.0902 1.3623]
+[2026-03-17 14:42:17.208] INFO       goal pose:  [ 0.897  -0.0046  0.3443]
+[2026-03-17 14:42:17.208] INFO       IK: on
+[2026-03-17 14:42:17.208] INFO       collision: on
+[2026-03-17 14:42:17.209] INFO       position_res: 0.01
+[2026-03-17 14:42:17.209] INFO       rotation_res: 0.025
+[2026-03-17 14:42:17.209] INFO       joint continuity threshold: 0.2
+[2026-03-17 14:42:17.209] INFO       angle normalization: on
+[2026-03-17 14:42:17.209] INFO       collision obstacles: 1 bodies
+[2026-03-17 14:42:17.209] INFO       lock renderer during search: off
+[2026-03-17 14:42:18.659] INFO     Found Stage 3 pose path with 214 waypoints.
+[2026-03-17 14:42:19.117] INFO     Saved trajectory validation plot: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage3_20260317_144218.png
+[2026-03-17 14:42:19.117] INFO     Trajectory collisions: pass
+[2026-03-17 14:42:19.117] INFO     Joint continuity: pass (max dq=0.0687 rad, threshold=0.5000 rad)
+[2026-03-17 14:42:19.117] INFO     End-effector relative transform drift: pass (max pos=0.000006 m, max axis drift xyz=[0.000, 0.000, 0.000] deg)
+[2026-03-17 14:42:19.207] WARNING  Stage 1 debug start pose is offset from the FK-consistent bar pose by [-0.5, 0.0, 0.5] in world coordinates. This intentionally makes the start bar pose incompatible with the start robot configuration and must be fixed later.
+[2026-03-17 14:42:19.208] WARNING    FK start pose:      pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:42:19.208] WARNING    Planning start pose: pos=[0.2912 0.0902 1.3623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:42:19.228] INFO     Running minimal Stage 3 RRT.
+[2026-03-17 14:42:19.228] INFO       start pose: [0.2912 0.0902 1.3623]
+[2026-03-17 14:42:19.229] INFO       goal pose:  [ 0.897  -0.0046  0.3443]
+[2026-03-17 14:42:19.229] INFO       IK: on
+[2026-03-17 14:42:19.229] INFO       collision: on
+[2026-03-17 14:42:19.229] INFO       position_res: 0.01
+[2026-03-17 14:42:19.229] INFO       rotation_res: 0.025
+[2026-03-17 14:42:19.230] INFO       joint continuity threshold: 0.2
+[2026-03-17 14:42:19.230] INFO       angle normalization: on
+[2026-03-17 14:42:19.230] INFO       collision obstacles: 1 bodies
+[2026-03-17 14:42:19.230] INFO       lock renderer during search: off
+[2026-03-17 14:42:22.088] INFO     Found Stage 3 pose path with 201 waypoints.
+[2026-03-17 14:42:22.442] INFO     Saved trajectory validation plot: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage3_20260317_144222.png
+[2026-03-17 14:42:22.445] INFO     Trajectory collisions: pass
+[2026-03-17 14:42:22.445] INFO     Joint continuity: pass (max dq=0.1863 rad, threshold=0.5000 rad)
+[2026-03-17 14:42:22.445] INFO     End-effector relative transform drift: pass (max pos=0.000091 m, max axis drift xyz=[0.002, 0.002, 0.002] deg)
+[2026-03-17 14:42:22.559] WARNING  Stage 1 debug start pose is offset from the FK-consistent bar pose by [-0.5, 0.0, 0.5] in world coordinates. This intentionally makes the start bar pose incompatible with the start robot configuration and must be fixed later.
+[2026-03-17 14:42:22.559] WARNING    FK start pose:      pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:42:22.559] WARNING    Planning start pose: pos=[0.2912 0.0902 1.3623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:42:22.605] INFO     Running minimal Stage 3 RRT.
+[2026-03-17 14:42:22.605] INFO       start pose: [0.2912 0.0902 1.3623]
+[2026-03-17 14:42:22.605] INFO       goal pose:  [ 0.897  -0.0046  0.3443]
+[2026-03-17 14:42:22.605] INFO       IK: on
+[2026-03-17 14:42:22.605] INFO       collision: on
+[2026-03-17 14:42:22.605] INFO       position_res: 0.01
+[2026-03-17 14:42:22.606] INFO       rotation_res: 0.025
+[2026-03-17 14:42:22.606] INFO       joint continuity threshold: 0.2
+[2026-03-17 14:42:22.606] INFO       angle normalization: on
+[2026-03-17 14:42:22.606] INFO       collision obstacles: 1 bodies
+[2026-03-17 14:42:22.606] INFO       lock renderer during search: off
+[2026-03-17 14:42:24.149] INFO     Found Stage 3 pose path with 192 waypoints.
+[2026-03-17 14:42:24.511] INFO     Saved trajectory validation plot: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage3_20260317_144224.png
+[2026-03-17 14:42:24.511] INFO     Trajectory collisions: pass
+[2026-03-17 14:42:24.511] INFO     Joint continuity: pass (max dq=0.1919 rad, threshold=0.5000 rad)
+[2026-03-17 14:42:24.511] INFO     End-effector relative transform drift: pass (max pos=0.000094 m, max axis drift xyz=[0.003, 0.003, 0.003] deg)
+[2026-03-17 15:42:45.353] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-03-17 15:42:47.012] WARNING  Stage 1 debug start pose is offset from the FK-consistent bar pose by [-0.5, 0.0, 0.5] in world coordinates. This intentionally makes the start bar pose incompatible with the start robot configuration and must be fixed later.
+[2026-03-17 15:42:47.012] WARNING    FK start pose:      pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 15:42:47.012] WARNING    Planning start pose: pos=[0.2912 0.0902 1.3623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 15:42:47.194] INFO     Running minimal Stage 3 RRT.
+[2026-03-17 15:42:47.194] INFO       start pose: [0.2912 0.0902 1.3623]
+[2026-03-17 15:42:47.194] INFO       goal pose:  [ 0.897  -0.0046  0.3443]
+[2026-03-17 15:42:47.194] INFO       IK: on
+[2026-03-17 15:42:47.194] INFO       collision: on
+[2026-03-17 15:42:47.194] INFO       position_res: 0.01
+[2026-03-17 15:42:47.194] INFO       rotation_res: 0.025
+[2026-03-17 15:42:47.194] INFO       joint continuity threshold: 0.2
+[2026-03-17 15:42:47.194] INFO       angle normalization: on
+[2026-03-17 15:42:47.194] INFO       collision obstacles: 1 bodies
+[2026-03-17 15:42:47.194] INFO       lock renderer during search: on
+[2026-03-17 15:42:48.862] INFO     Found Stage 3 pose path with 178 waypoints.
+[2026-03-17 15:42:51.586] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage3_20260317_154248.png
+[2026-03-17 15:42:51.586] INFO     Trajectory collisions: pass
+[2026-03-17 15:42:51.586] INFO     Joint continuity: pass (max dq=0.1976 rad, threshold=0.5000 rad)
+[2026-03-17 15:42:51.586] INFO     End-effector relative transform drift: pass (max pos=0.000005 m, max axis drift xyz=[0.000, 0.000, 0.000] deg)
+[2026-03-17 15:42:51.586] INFO     Visualizing pose path with 178 waypoints.
+[2026-03-17 14:52:30.937] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-03-17 14:52:31.150] WARNING  Stage 1 debug start pose is offset from the FK-consistent bar pose by [-0.5, 0.0, 0.5] in world coordinates. This intentionally makes the start bar pose incompatible with the start robot configuration and must be fixed later.
+[2026-03-17 14:52:31.150] WARNING    FK start pose:      pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 14:52:31.151] WARNING    Planning start pose: pos=[0.2912 0.0902 1.3623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 16:01:15.120] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-03-17 16:01:17.655] WARNING  Stage 1 debug start pose is offset from the FK-consistent bar pose by [-0.5, 0.0, 0.5] in world coordinates. This intentionally makes the start bar pose incompatible with the start robot configuration and must be fixed later.
+[2026-03-17 16:01:17.656] WARNING    FK start pose:      pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 16:01:17.656] WARNING    Planning start pose: pos=[0.2912 0.0902 1.3623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 16:02:47.221] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-03-17 16:02:47.637] WARNING  Stage 1 debug start pose is offset from the FK-consistent bar pose by [-0.5, 0.0, 0.5] in world coordinates. This intentionally makes the start bar pose incompatible with the start robot configuration and must be fixed later.
+[2026-03-17 16:02:47.637] WARNING    FK start pose:      pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 16:02:47.637] WARNING    Planning start pose: pos=[0.2912 0.0902 1.3623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 16:03:49.863] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-03-17 16:03:50.300] WARNING  Stage 1 debug start pose is offset from the FK-consistent bar pose by [-0.5, 0.0, 0.5] in world coordinates. This intentionally makes the start bar pose incompatible with the start robot configuration and must be fixed later.
+[2026-03-17 16:03:50.300] WARNING    FK start pose:      pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 16:03:50.300] WARNING    Planning start pose: pos=[0.2912 0.0902 1.3623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 17:30:37.024] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-03-17 17:30:38.663] WARNING  Stage 1 debug start pose is offset from the FK-consistent bar pose by [-0.5, 0.0, 0.5] in world coordinates. This intentionally makes the start bar pose incompatible with the start robot configuration and must be fixed later.
+[2026-03-17 17:30:38.663] WARNING    FK start pose:      pos=[0.7912 0.0902 0.8623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 17:30:38.663] WARNING    Planning start pose: pos=[0.2912 0.0902 1.3623], quat=[ 0.5 -0.5 -0.5 -0.5]
+[2026-03-17 17:30:38.866] INFO     Running minimal Stage 3 RRT.
+[2026-03-17 17:30:38.866] INFO       start pose: [0.2912 0.0902 1.3623]
+[2026-03-17 17:30:38.866] INFO       goal pose:  [ 0.897  -0.0046  0.3443]
+[2026-03-17 17:30:38.866] INFO       IK: on
+[2026-03-17 17:30:38.866] INFO       collision: on
+[2026-03-17 17:30:38.866] INFO       position_res: 0.01
+[2026-03-17 17:30:38.866] INFO       rotation_res: 0.025
+[2026-03-17 17:30:38.866] INFO       joint continuity threshold: 0.2
+[2026-03-17 17:30:38.866] INFO       angle normalization: on
+[2026-03-17 17:30:38.866] INFO       collision obstacles: 1 bodies
+[2026-03-17 17:30:38.866] INFO       lock renderer during search: on
+[2026-03-17 17:30:40.439] INFO     Found Stage 3 pose path with 190 waypoints.
+[2026-03-17 17:30:43.057] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/trajectory_validation_stage3_20260317_173040.png
+[2026-03-17 17:30:43.057] INFO     Trajectory collisions: pass
+[2026-03-17 17:30:43.057] INFO     Joint continuity: pass (max dq=0.1498 rad, threshold=0.5000 rad)
+[2026-03-17 17:30:43.057] INFO     End-effector relative transform drift: pass (max pos=0.000079 m, max axis drift xyz=[0.003, 0.003, 0.004] deg)
+[2026-03-17 17:30:43.057] INFO     Visualizing pose path with 190 waypoints.

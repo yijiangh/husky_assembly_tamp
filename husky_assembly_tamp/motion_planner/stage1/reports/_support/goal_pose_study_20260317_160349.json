@@ -1,0 +1,859 @@
+{
+  "setup": {
+    "start_pose": {
+      "position": [
+        0.2911643981933594,
+        0.0902365893125534,
+        1.3622800707817078
+      ],
+      "quaternion": [
+        0.5000011920928955,
+        -0.4999987483024597,
+        -0.500000536441803,
+        -0.4999995827674866
+      ]
+    },
+    "baseline_goal_pose": {
+      "position": [
+        0.8969594240188599,
+        -0.004562646150588989,
+        0.34434545040130615
+      ],
+      "quaternion": [
+        -0.49999797344207764,
+        0.5000020861625671,
+        0.5000007152557373,
+        0.49999934434890747
+      ]
+    },
+    "candidate_attempts": 12,
+    "accepted_goals": 6,
+    "position_res": 0.01,
+    "rotation_res": 0.025,
+    "joint_continuity_threshold": 0.2,
+    "random_seed": 0
+  },
+  "candidates": [
+    {
+      "candidate_id": 0,
+      "source": "baseline",
+      "tilt_deg": 0.0,
+      "yaw_deg": 0.0,
+      "goal_pose": {
+        "position": [
+          0.8969594240188599,
+          -0.004562646150588989,
+          0.34434545040130615
+        ],
+        "quaternion": [
+          -0.49999797344207764,
+          0.5000020861625671,
+          0.5000007152557373,
+          0.49999934434890747
+        ]
+      },
+      "accepted": true,
+      "reason": "accepted"
+    },
+    {
+      "candidate_id": 1,
+      "source": "sampled",
+      "tilt_deg": 14.554425309821815,
+      "yaw_deg": -5.5251188696671125,
+      "goal_pose": {
+        "position": [
+          0.8043346583273749,
+          -0.13993490820260085,
+          0.49875726517258073
+        ],
+        "quaternion": [
+          -0.41128095984458923,
+          0.45298823714256287,
+          0.531701385974884,
+          0.5856137275695801
+        ]
+      },
+      "accepted": true,
+      "reason": "accepted"
+    },
+    {
+      "candidate_id": 2,
+      "source": "sampled",
+      "tilt_deg": 51.94644520472026,
+      "yaw_deg": 2.5592586184123167,
+      "goal_pose": {
+        "position": [
+          0.9282688049959795,
+          0.007652351459729423,
+          0.7521984185041013
+        ],
+        "quaternion": [
+          -0.23561348021030426,
+          0.22531932592391968,
+          0.6832373142242432,
+          0.653378963470459
+        ]
+      },
+      "accepted": true,
+      "reason": "accepted"
+    },
+    {
+      "candidate_id": 3,
+      "source": "sampled",
+      "tilt_deg": 81.92316728601057,
+      "yaw_deg": -11.934275995916446,
+      "goal_pose": {
+        "position": [
+          0.9512921938046224,
+          -0.135158685065059,
+          0.8228472423421129
+        ],
+        "quaternion": [
+          -0.0443512499332428,
+          0.054705504328012466,
+          0.6282034516334534,
+          0.7748552560806274
+        ]
+      },
+      "accepted": true,
+      "reason": "accepted"
+    },
+    {
+      "candidate_id": 4,
+      "source": "sampled",
+      "tilt_deg": 7.634834309038386,
+      "yaw_deg": 8.716294136397277,
+      "goal_pose": {
+        "position": [
+          0.8944224436636964,
+          -0.06064331680012125,
+          0.40640072182112846
+        ],
+        "quaternion": [
+          -0.4996354281902313,
+          0.42887642979621887,
+          0.5710817575454712,
+          0.4901990592479706
+        ]
+      },
+      "accepted": true,
+      "reason": "accepted"
+    },
+    {
+      "candidate_id": 5,
+      "source": "sampled",
+      "tilt_deg": 20.991188490091204,
+      "yaw_deg": -9.017201364010464,
+      "goal_pose": {
+        "position": [
+          0.9176718186637133,
+          0.03665041709020103,
+          0.5270849280966172
+        ],
+        "quaternion": [
+          -0.36782607436180115,
+          0.4308035969734192,
+          0.5351056456565857,
+          0.6267169117927551
+        ]
+      },
+      "accepted": true,
+      "reason": "accepted"
+    },
+    {
+      "candidate_id": 6,
+      "source": "sampled",
+      "tilt_deg": 67.66135929064215,
+      "yaw_deg": 11.933038458941063,
+      "goal_pose": {
+        "position": [
+          0.9735097849985812,
+          0.047389109504005544,
+          0.7856204979747311
+        ],
+        "quaternion": [
+          -0.15046849846839905,
+          0.12199364602565765,
+          0.762066125869751,
+          0.6178447604179382
+        ]
+      },
+      "accepted": false,
+      "reason": "accepted_but_skipped_limit"
+    },
+    {
+      "candidate_id": 7,
+      "source": "sampled",
+      "tilt_deg": 15.326700958564102,
+      "yaw_deg": -2.6658858245015082,
+      "goal_pose": {
+        "position": [
+          0.8212767949228938,
+          0.05745408910375388,
+          0.47582601844759975
+        ],
+        "quaternion": [
+          -0.41876420378685,
+          0.4387200176715851,
+          0.5489809513092041,
+          0.5751358270645142
+        ]
+      },
+      "accepted": false,
+      "reason": "accepted_but_skipped_limit"
+    },
+    {
+      "candidate_id": 8,
+      "source": "sampled",
+      "tilt_deg": 30.85846564456345,
+      "yaw_deg": -0.33995138803706126,
+      "goal_pose": {
+        "position": [
+          0.9570672342016799,
+          0.11696953831716095,
+          0.5709385633950187
+        ],
+        "quaternion": [
+          -0.34791770577430725,
+          0.34999099373817444,
+          0.6131775379180908,
+          0.6168248653411865
+        ]
+      },
+      "accepted": false,
+      "reason": "accepted_but_skipped_limit"
+    },
+    {
+      "candidate_id": 9,
+      "source": "sampled",
+      "tilt_deg": 73.86048441408211,
+      "yaw_deg": -4.2751346141773885,
+      "goal_pose": {
+        "position": [
+          0.9039334294548053,
+          -0.04994750300859169,
+          0.7757718011049491
+        ],
+        "quaternion": [
+          -0.09549079835414886,
+          0.10289640724658966,
+          0.6735056042671204,
+          0.7257300019264221
+        ]
+      },
+      "accepted": false,
+      "reason": "accepted_but_skipped_limit"
+    },
+    {
+      "candidate_id": 10,
+      "source": "sampled",
+      "tilt_deg": 18.354115280071884,
+      "yaw_deg": -6.548217755198887,
+      "goal_pose": {
+        "position": [
+          0.9091331100623474,
+          -0.12103834994752125,
+          0.5293099324806725
+        ],
+        "quaternion": [
+          -0.38954317569732666,
+          0.43681973218917847,
+          0.5396626591682434,
+          0.6051517724990845
+        ]
+      },
+      "accepted": false,
+      "reason": "accepted_but_skipped_limit"
+    },
+    {
+      "candidate_id": 11,
+      "source": "sampled",
+      "tilt_deg": 47.54844076210392,
+      "yaw_deg": -6.255133368169148,
+      "goal_pose": {
+        "position": [
+          0.9547265855647865,
+          -0.12816359640513458,
+          0.6699888696395561
+        ],
+        "quaternion": [
+          -0.24165397882461548,
+          0.269590824842453,
+          0.6221945285797119,
+          0.6941167712211609
+        ]
+      },
+      "accepted": false,
+      "reason": "accepted_but_skipped_limit"
+    },
+    {
+      "candidate_id": 12,
+      "source": "sampled",
+      "tilt_deg": 59.95922240752969,
+      "yaw_deg": -1.1918552004171126,
+      "goal_pose": {
+        "position": [
+          0.9402977926705728,
+          -0.07998282763233971,
+          0.6990987802944849
+        ],
+        "quaternion": [
+          -0.1813390702009201,
+          0.1851525604724884,
+          0.6758084297180176,
+          0.6900128126144409
+        ]
+      },
+      "accepted": false,
+      "reason": "accepted_but_skipped_limit"
+    }
+  ],
+  "planner_results": [
+    {
+      "candidate_id": 0,
+      "source": "baseline",
+      "tilt_deg": 0.0,
+      "yaw_deg": 0.0,
+      "goal_pose": {
+        "position": [
+          0.8969594240188599,
+          -0.004562646150588989,
+          0.34434545040130615
+        ],
+        "quaternion": [
+          -0.49999797344207764,
+          0.5000020861625671,
+          0.5000007152557373,
+          0.49999934434890747
+        ]
+      },
+      "accepted": true,
+      "reason": "accepted",
+      "planner": {
+        "path_found": true,
+        "success": true,
+        "runtime_s": 1.1932998340016638,
+        "path_waypoints": 169,
+        "planner_profile": {
+          "attempts": 1,
+          "iterations": 21,
+          "nodes_created": 332,
+          "poses_checked": 350,
+          "collision_hits": 3,
+          "ik_calls": 716,
+          "ik_failures": 32,
+          "nodes_with_ik": 334,
+          "continuity_rejections": 0,
+          "collision_check_time_s": 0.0011657089962682221,
+          "feature_time_s": 1.6292000509565696e-05,
+          "sample_time_s": 0.0003978360073233489,
+          "nearest_time_s": 0.00239208399943891,
+          "ik_time_s": 0.9879250350350048,
+          "extend_tree_time_s": 1.1890697100061516,
+          "outcome": "success",
+          "goal_test_time_s": 3.120899782516062e-05
+        },
+        "validation": {
+          "plot_path": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260317_160351.png",
+          "path_waypoints": 169,
+          "joint_path_waypoints": 169,
+          "joint_path_source": "planner",
+          "joint_path_reason": null,
+          "collision_free": true,
+          "collision_breakdown": {
+            "bar_robot": {
+              "count": 0,
+              "first_index": null
+            },
+            "robot_self": {
+              "count": 0,
+              "first_index": null
+            },
+            "robot_static": {
+              "count": 0,
+              "first_index": null
+            },
+            "bar_static": {
+              "count": 0,
+              "first_index": null
+            }
+          },
+          "joint_continuity_ok": true,
+          "joint_continuity_threshold_rad": 0.2,
+          "joint_continuity_max_delta_rad": 0.1475418261036845,
+          "joint_continuity_first_bad_step": null,
+          "relative_transform_ok": true,
+          "relative_translation_threshold_m": 0.001,
+          "relative_rotation_axis_threshold_deg": 0.5729577951308232,
+          "relative_transform_max_translation_m": 5.7361855016909075e-05,
+          "relative_transform_max_axis_angle_deg": {
+            "x": 0.0004667815629951765,
+            "y": 0.0007564945210988527,
+            "z": 0.0008788338011332793
+          }
+        },
+        "artifacts": {
+          "overview_png": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/goal_pose_study_20260317_160349_candidate00_overview.png",
+          "video_mp4": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/goal_pose_study_20260317_160349_candidate00.mp4",
+          "trajectory_json": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/goal_pose_study_20260317_160349_candidate00_JointTrajectory.json",
+          "metadata_json": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/goal_pose_study_20260317_160349_candidate00_metadata.json"
+        }
+      }
+    },
+    {
+      "candidate_id": 1,
+      "source": "sampled",
+      "tilt_deg": 14.554425309821815,
+      "yaw_deg": -5.5251188696671125,
+      "goal_pose": {
+        "position": [
+          0.8043346583273749,
+          -0.13993490820260085,
+          0.49875726517258073
+        ],
+        "quaternion": [
+          -0.41128095984458923,
+          0.45298823714256287,
+          0.531701385974884,
+          0.5856137275695801
+        ]
+      },
+      "accepted": true,
+      "reason": "accepted",
+      "planner": {
+        "path_found": true,
+        "success": true,
+        "runtime_s": 12.871481047997804,
+        "path_waypoints": 299,
+        "planner_profile": {
+          "attempts": 1,
+          "iterations": 559,
+          "nodes_created": 2337,
+          "poses_checked": 2890,
+          "collision_hits": 251,
+          "ik_calls": 6065,
+          "ik_failures": 570,
+          "nodes_with_ik": 2605,
+          "continuity_rejections": 18,
+          "collision_check_time_s": 0.0011730829974112567,
+          "feature_time_s": 1.9874998542945832e-05,
+          "sample_time_s": 0.008228662958572386,
+          "nearest_time_s": 0.7849792499328032,
+          "ik_time_s": 10.48697929199625,
+          "extend_tree_time_s": 12.075400255973364,
+          "outcome": "success",
+          "goal_test_time_s": 6.887499694130383e-05
+        },
+        "validation": {
+          "plot_path": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260317_160407.png",
+          "path_waypoints": 299,
+          "joint_path_waypoints": 299,
+          "joint_path_source": "planner",
+          "joint_path_reason": null,
+          "collision_free": true,
+          "collision_breakdown": {
+            "bar_robot": {
+              "count": 0,
+              "first_index": null
+            },
+            "robot_self": {
+              "count": 0,
+              "first_index": null
+            },
+            "robot_static": {
+              "count": 0,
+              "first_index": null
+            },
+            "bar_static": {
+              "count": 0,
+              "first_index": null
+            }
+          },
+          "joint_continuity_ok": true,
+          "joint_continuity_threshold_rad": 0.2,
+          "joint_continuity_max_delta_rad": 0.1949456741848561,
+          "joint_continuity_first_bad_step": null,
+          "relative_transform_ok": true,
+          "relative_translation_threshold_m": 0.001,
+          "relative_rotation_axis_threshold_deg": 0.5729577951308232,
+          "relative_transform_max_translation_m": 5.0668752668234125e-05,
+          "relative_transform_max_axis_angle_deg": {
+            "x": 0.0006820256829698458,
+            "y": 0.0017766354670834613,
+            "z": 0.0018981511910582563
+          }
+        },
+        "artifacts": {
+          "overview_png": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/goal_pose_study_20260317_160349_candidate01_overview.png",
+          "video_mp4": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/goal_pose_study_20260317_160349_candidate01.mp4",
+          "trajectory_json": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/goal_pose_study_20260317_160349_candidate01_JointTrajectory.json",
+          "metadata_json": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/goal_pose_study_20260317_160349_candidate01_metadata.json"
+        }
+      }
+    },
+    {
+      "candidate_id": 2,
+      "source": "sampled",
+      "tilt_deg": 51.94644520472026,
+      "yaw_deg": 2.5592586184123167,
+      "goal_pose": {
+        "position": [
+          0.9282688049959795,
+          0.007652351459729423,
+          0.7521984185041013
+        ],
+        "quaternion": [
+          -0.23561348021030426,
+          0.22531932592391968,
+          0.6832373142242432,
+          0.653378963470459
+        ]
+      },
+      "accepted": true,
+      "reason": "accepted",
+      "planner": {
+        "path_found": true,
+        "success": true,
+        "runtime_s": 1.005479874998855,
+        "path_waypoints": 183,
+        "planner_profile": {
+          "attempts": 1,
+          "iterations": 13,
+          "nodes_created": 363,
+          "poses_checked": 373,
+          "collision_hits": 6,
+          "ik_calls": 750,
+          "ik_failures": 8,
+          "nodes_with_ik": 369,
+          "continuity_rejections": 1,
+          "collision_check_time_s": 0.0011492490011733025,
+          "feature_time_s": 1.8750000890577212e-05,
+          "sample_time_s": 0.0002541249923524447,
+          "nearest_time_s": 0.002278916010254761,
+          "ik_time_s": 0.7792624989924661,
+          "extend_tree_time_s": 1.0014834180001344,
+          "outcome": "success",
+          "goal_test_time_s": 3.2291998650180176e-05
+        },
+        "validation": {
+          "plot_path": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260317_160412.png",
+          "path_waypoints": 183,
+          "joint_path_waypoints": 183,
+          "joint_path_source": "planner",
+          "joint_path_reason": null,
+          "collision_free": true,
+          "collision_breakdown": {
+            "bar_robot": {
+              "count": 0,
+              "first_index": null
+            },
+            "robot_self": {
+              "count": 0,
+              "first_index": null
+            },
+            "robot_static": {
+              "count": 0,
+              "first_index": null
+            },
+            "bar_static": {
+              "count": 0,
+              "first_index": null
+            }
+          },
+          "joint_continuity_ok": true,
+          "joint_continuity_threshold_rad": 0.2,
+          "joint_continuity_max_delta_rad": 0.10160106613725706,
+          "joint_continuity_first_bad_step": null,
+          "relative_transform_ok": true,
+          "relative_translation_threshold_m": 0.001,
+          "relative_rotation_axis_threshold_deg": 0.5729577951308232,
+          "relative_transform_max_translation_m": 6.5998687944184514e-06,
+          "relative_transform_max_axis_angle_deg": {
+            "x": 0.00033241740234408757,
+            "y": 0.00024113324841864783,
+            "z": 0.0004084430280170354
+          }
+        },
+        "artifacts": {
+          "overview_png": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/goal_pose_study_20260317_160349_candidate02_overview.png",
+          "video_mp4": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/goal_pose_study_20260317_160349_candidate02.mp4",
+          "trajectory_json": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/goal_pose_study_20260317_160349_candidate02_JointTrajectory.json",
+          "metadata_json": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/goal_pose_study_20260317_160349_candidate02_metadata.json"
+        }
+      }
+    },
+    {
+      "candidate_id": 3,
+      "source": "sampled",
+      "tilt_deg": 81.92316728601057,
+      "yaw_deg": -11.934275995916446,
+      "goal_pose": {
+        "position": [
+          0.9512921938046224,
+          -0.135158685065059,
+          0.8228472423421129
+        ],
+        "quaternion": [
+          -0.0443512499332428,
+          0.054705504328012466,
+          0.6282034516334534,
+          0.7748552560806274
+        ]
+      },
+      "accepted": true,
+      "reason": "accepted",
+      "planner": {
+        "path_found": true,
+        "success": true,
+        "runtime_s": 3.363409375997435,
+        "path_waypoints": 165,
+        "planner_profile": {
+          "attempts": 1,
+          "iterations": 156,
+          "nodes_created": 722,
+          "poses_checked": 875,
+          "collision_hits": 79,
+          "ik_calls": 1824,
+          "ik_failures": 148,
+          "nodes_with_ik": 801,
+          "continuity_rejections": 1,
+          "collision_check_time_s": 0.0011722080016625114,
+          "feature_time_s": 2.2542000806424767e-05,
+          "sample_time_s": 0.0023041309832478873,
+          "nearest_time_s": 0.06557487095778924,
+          "ik_time_s": 2.780555699057004,
+          "extend_tree_time_s": 3.2936222910102515,
+          "outcome": "success",
+          "goal_test_time_s": 5.300000339047983e-05
+        },
+        "validation": {
+          "plot_path": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260317_160418.png",
+          "path_waypoints": 165,
+          "joint_path_waypoints": 165,
+          "joint_path_source": "planner",
+          "joint_path_reason": null,
+          "collision_free": true,
+          "collision_breakdown": {
+            "bar_robot": {
+              "count": 0,
+              "first_index": null
+            },
+            "robot_self": {
+              "count": 0,
+              "first_index": null
+            },
+            "robot_static": {
+              "count": 0,
+              "first_index": null
+            },
+            "bar_static": {
+              "count": 0,
+              "first_index": null
+            }
+          },
+          "joint_continuity_ok": true,
+          "joint_continuity_threshold_rad": 0.2,
+          "joint_continuity_max_delta_rad": 0.16509492226906186,
+          "joint_continuity_first_bad_step": null,
+          "relative_transform_ok": true,
+          "relative_translation_threshold_m": 0.001,
+          "relative_rotation_axis_threshold_deg": 0.5729577951308232,
+          "relative_transform_max_translation_m": 5.130745915365359e-05,
+          "relative_transform_max_axis_angle_deg": {
+            "x": 0.0019746191623444633,
+            "y": 0.0021291159938697426,
+            "z": 0.002901203377246375
+          }
+        },
+        "artifacts": {
+          "overview_png": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/goal_pose_study_20260317_160349_candidate03_overview.png",
+          "video_mp4": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/goal_pose_study_20260317_160349_candidate03.mp4",
+          "trajectory_json": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/goal_pose_study_20260317_160349_candidate03_JointTrajectory.json",
+          "metadata_json": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/goal_pose_study_20260317_160349_candidate03_metadata.json"
+        }
+      }
+    },
+    {
+      "candidate_id": 4,
+      "source": "sampled",
+      "tilt_deg": 7.634834309038386,
+      "yaw_deg": 8.716294136397277,
+      "goal_pose": {
+        "position": [
+          0.8944224436636964,
+          -0.06064331680012125,
+          0.40640072182112846
+        ],
+        "quaternion": [
+          -0.4996354281902313,
+          0.42887642979621887,
+          0.5710817575454712,
+          0.4901990592479706
+        ]
+      },
+      "accepted": true,
+      "reason": "accepted",
+      "planner": {
+        "path_found": true,
+        "success": true,
+        "runtime_s": 6.210069627999474,
+        "path_waypoints": 192,
+        "planner_profile": {
+          "attempts": 1,
+          "iterations": 348,
+          "nodes_created": 617,
+          "poses_checked": 963,
+          "collision_hits": 76,
+          "ik_calls": 2192,
+          "ik_failures": 534,
+          "nodes_with_ik": 696,
+          "continuity_rejections": 4,
+          "collision_check_time_s": 0.0012458329983928706,
+          "feature_time_s": 2.6290999812772498e-05,
+          "sample_time_s": 0.006038543961039977,
+          "nearest_time_s": 0.08518487498440663,
+          "ik_time_s": 5.5991996330085385,
+          "extend_tree_time_s": 6.116564871965238,
+          "outcome": "success",
+          "goal_test_time_s": 2.883300112443976e-05
+        },
+        "validation": {
+          "plot_path": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260317_160427.png",
+          "path_waypoints": 192,
+          "joint_path_waypoints": 192,
+          "joint_path_source": "planner",
+          "joint_path_reason": null,
+          "collision_free": true,
+          "collision_breakdown": {
+            "bar_robot": {
+              "count": 0,
+              "first_index": null
+            },
+            "robot_self": {
+              "count": 0,
+              "first_index": null
+            },
+            "robot_static": {
+              "count": 0,
+              "first_index": null
+            },
+            "bar_static": {
+              "count": 0,
+              "first_index": null
+            }
+          },
+          "joint_continuity_ok": true,
+          "joint_continuity_threshold_rad": 0.2,
+          "joint_continuity_max_delta_rad": 0.19351372891206697,
+          "joint_continuity_first_bad_step": null,
+          "relative_transform_ok": true,
+          "relative_translation_threshold_m": 0.001,
+          "relative_rotation_axis_threshold_deg": 0.5729577951308232,
+          "relative_transform_max_translation_m": 6.778030965891787e-05,
+          "relative_transform_max_axis_angle_deg": {
+            "x": 0.002710563659595422,
+            "y": 0.0019276770168897704,
+            "z": 0.0030822331897326165
+          }
+        },
+        "artifacts": {
+          "overview_png": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/goal_pose_study_20260317_160349_candidate04_overview.png",
+          "video_mp4": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/goal_pose_study_20260317_160349_candidate04.mp4",
+          "trajectory_json": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/goal_pose_study_20260317_160349_candidate04_JointTrajectory.json",
+          "metadata_json": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/goal_pose_study_20260317_160349_candidate04_metadata.json"
+        }
+      }
+    },
+    {
+      "candidate_id": 5,
+      "source": "sampled",
+      "tilt_deg": 20.991188490091204,
+      "yaw_deg": -9.017201364010464,
+      "goal_pose": {
+        "position": [
+          0.9176718186637133,
+          0.03665041709020103,
+          0.5270849280966172
+        ],
+        "quaternion": [
+          -0.36782607436180115,
+          0.4308035969734192,
+          0.5351056456565857,
+          0.6267169117927551
+        ]
+      },
+      "accepted": true,
+      "reason": "accepted",
+      "planner": {
+        "path_found": true,
+        "success": true,
+        "runtime_s": 2.040907417998824,
+        "path_waypoints": 161,
+        "planner_profile": {
+          "attempts": 1,
+          "iterations": 14,
+          "nodes_created": 403,
+          "poses_checked": 415,
+          "collision_hits": 7,
+          "ik_calls": 836,
+          "ik_failures": 12,
+          "nodes_with_ik": 409,
+          "continuity_rejections": 0,
+          "collision_check_time_s": 0.0012769169989041984,
+          "feature_time_s": 2.2415999410441145e-05,
+          "sample_time_s": 0.00043033499241573736,
+          "nearest_time_s": 0.004616125999746146,
+          "ik_time_s": 1.444442754964257,
+          "extend_tree_time_s": 2.0341382500009786,
+          "outcome": "success",
+          "goal_test_time_s": 4.329100192990154e-05
+        },
+        "validation": {
+          "plot_path": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260317_160432.png",
+          "path_waypoints": 161,
+          "joint_path_waypoints": 161,
+          "joint_path_source": "planner",
+          "joint_path_reason": null,
+          "collision_free": true,
+          "collision_breakdown": {
+            "bar_robot": {
+              "count": 0,
+              "first_index": null
+            },
+            "robot_self": {
+              "count": 0,
+              "first_index": null
+            },
+            "robot_static": {
+              "count": 0,
+              "first_index": null
+            },
+            "bar_static": {
+              "count": 0,
+              "first_index": null
+            }
+          },
+          "joint_continuity_ok": true,
+          "joint_continuity_threshold_rad": 0.2,
+          "joint_continuity_max_delta_rad": 0.1122686689584147,
+          "joint_continuity_first_bad_step": null,
+          "relative_transform_ok": true,
+          "relative_translation_threshold_m": 0.001,
+          "relative_rotation_axis_threshold_deg": 0.5729577951308232,
+          "relative_transform_max_translation_m": 2.0938650205408997e-06,
+          "relative_transform_max_axis_angle_deg": {
+            "x": 0.00022960162447254113,
+            "y": 0.00020222724160604946,
+            "z": 0.0002744706333924309
+          }
+        },
+        "artifacts": {
+          "overview_png": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/goal_pose_study_20260317_160349_candidate05_overview.png",
+          "video_mp4": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/goal_pose_study_20260317_160349_candidate05.mp4",
+          "trajectory_json": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/goal_pose_study_20260317_160349_candidate05_JointTrajectory.json",
+          "metadata_json": "/workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/goal_pose_study_20260317_160349_candidate05_metadata.json"
+        }
+      }
+    }
+  ]
+}

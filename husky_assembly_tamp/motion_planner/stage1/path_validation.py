@@ -19,6 +19,7 @@ PoseLike = Tuple[np.ndarray, np.ndarray]
 FullConf = np.ndarray
 REPORTS_DIR = os.path.join(os.path.dirname(__file__), "reports")
 AXIS_NAMES = ("x", "y", "z")
+DEFAULT_DENSE_JOINT_VALIDATION_STEP_RAD = float(np.radians(0.1))
 
 
 def get_disabled_collisions_from_link_names(
@@ -94,6 +95,86 @@ def maybe_normalize_angles(values: Sequence[float] | np.ndarray, use_angle_norma
     return arr
 
 
+def refine_joint_path_for_validation(
+    joint_path: Sequence[FullConf],
+    max_joint_step_rad: float,
+    use_angle_normalization: bool,
+) -> Tuple[list[FullConf], list[Dict[str, Any]]]:
+    if len(joint_path) == 0:
+        return [], []
+
+    normalized_joint_path = [maybe_normalize_angles(conf, use_angle_normalization) for conf in joint_path]
+    if len(normalized_joint_path) == 1 or max_joint_step_rad <= 0.0:
+        metadata = [
+            {
+                "dense_waypoint_index": idx,
+                "waypoint_index": idx,
+                "segment_index": max(0, idx - 1),
+                "segment_alpha": 1.0,
+                "path_fraction": 0.0 if len(normalized_joint_path) <= 1 else float(idx) / float(len(normalized_joint_path) - 1),
+            }
+            for idx in range(len(normalized_joint_path))
+        ]
+        return normalized_joint_path, metadata
+
+    dense_path: list[FullConf] = [normalized_joint_path[0]]
+    dense_metadata: list[Dict[str, Any]] = [
+        {
+            "dense_waypoint_index": 0,
+            "waypoint_index": 0,
+            "segment_index": 0,
+            "segment_alpha": 0.0,
+            "path_fraction": 0.0,
+        }
+    ]
+    num_segments = len(normalized_joint_path) - 1
+    for segment_idx, (prev_conf, next_conf) in enumerate(zip(normalized_joint_path[:-1], normalized_joint_path[1:])):
+        delta = maybe_normalize_angles(
+            np.asarray(next_conf, dtype=float) - np.asarray(prev_conf, dtype=float),
+            use_angle_normalization,
+        )
+        num_steps = max(1, int(np.ceil(float(np.max(np.abs(delta))) / float(max_joint_step_rad))))
+        for step_idx in range(1, num_steps + 1):
+            alpha = float(step_idx) / float(num_steps)
+            conf = maybe_normalize_angles(np.asarray(prev_conf, dtype=float) + alpha * delta, use_angle_normalization)
+            dense_path.append(conf)
+            dense_metadata.append(
+                {
+                    "dense_waypoint_index": len(dense_path) - 1,
+                    "waypoint_index": int(round(segment_idx + alpha)),
+                    "segment_index": segment_idx,
+                    "segment_alpha": alpha,
+                    "path_fraction": float(segment_idx + alpha) / float(num_segments),
+                }
+            )
+
+    return dense_path, dense_metadata
+
+
+def compute_relative_transform_drift(
+    robot: int,
+    arm_joints: Sequence[int],
+    tool_link_left: int,
+    tool_link_right: int,
+    joint_path: Sequence[FullConf],
+) -> Tuple[list[float], Dict[str, list[float]]]:
+    translation_errors_m: list[float] = []
+    rotation_axis_errors_deg = {axis_name: [] for axis_name in AXIS_NAMES}
+    base_relative_pose = None
+    for conf in joint_path:
+        pp.set_joint_positions(robot, arm_joints, conf)
+        world_from_left = pp.get_link_pose(robot, tool_link_left)
+        world_from_right = pp.get_link_pose(robot, tool_link_right)
+        relative_pose = pp.multiply(pp.invert(world_from_left), world_from_right)
+        if base_relative_pose is None:
+            base_relative_pose = relative_pose
+        translation_errors_m.append(float(np.linalg.norm(np.asarray(relative_pose[0]) - np.asarray(base_relative_pose[0]))))
+        axis_diffs_deg = rotation_axis_differences_deg(base_relative_pose[1], relative_pose[1])
+        for axis_name in AXIS_NAMES:
+            rotation_axis_errors_deg[axis_name].append(axis_diffs_deg[axis_name])
+    return translation_errors_m, rotation_axis_errors_deg
+
+
 def save_validation_plot(
     *,
     out_path: str,
@@ -106,6 +187,8 @@ def save_validation_plot(
     joint_path_reason: Optional[str],
     relative_translation_errors_m: Sequence[float],
     relative_rotation_axis_errors_deg: Dict[str, Sequence[float]],
+    coarse_relative_translation_errors_m: Optional[Sequence[float]] = None,
+    coarse_relative_rotation_axis_errors_deg: Optional[Dict[str, Sequence[float]]] = None,
     relative_translation_threshold_m: float,
     relative_rotation_axis_threshold_deg: float,
     collision_breakdown: Dict[str, Any],
@@ -115,7 +198,7 @@ def save_validation_plot(
     if plt is None:
         return None
 
-    fig, axes = plt.subplots(3, 1, figsize=(11, 10), sharex=False)
+    fig, axes = plt.subplots(5, 1, figsize=(11, 14), sharex=False)
     title = (
         f"Stage {stage} validation | collisions: {status_label(collision_free)}"
         f" | joint continuity: {status_label(joint_continuity_ok)}"
@@ -124,52 +207,98 @@ def save_validation_plot(
         title += f" (max dq={joint_continuity_max_delta_rad:.3f} rad, thresh={joint_continuity_threshold_rad:.3f})"
     fig.suptitle(title)
 
+    def path_fraction_xs(num_samples: int) -> np.ndarray:
+        if num_samples <= 1:
+            return np.zeros(max(0, num_samples), dtype=float)
+        return np.linspace(0.0, 1.0, num=num_samples)
+
     if relative_translation_errors_m:
-        xs = np.arange(len(relative_translation_errors_m), dtype=int)
+        xs = path_fraction_xs(len(relative_translation_errors_m))
         relative_translation_errors_mm = 1000.0 * np.asarray(relative_translation_errors_m, dtype=float)
         axes[0].plot(
             xs,
             relative_translation_errors_mm,
             color="#1f77b4",
             linewidth=1.8,
-            marker="o",
-            markersize=3.0,
-            markeredgewidth=0.0,
+            label="refined",
         )
         axes[0].set_ylabel("Translation drift (mm)")
-        axes[0].set_title("Left-right end-effector relative translation drift")
+        axes[0].set_title("Left-right end-effector relative translation drift (refined)")
+        axes[0].legend(loc="best")
     else:
         axes[0].axis("off")
         reason = joint_path_reason or "joint path unavailable"
-        axes[0].text(0.5, 0.5, f"No translation drift plot available.\nReason: {reason}", ha="center", va="center", fontsize=11)
+        axes[0].text(0.5, 0.5, f"No refined translation drift plot available.\nReason: {reason}", ha="center", va="center", fontsize=11)
 
-    if relative_rotation_axis_errors_deg.get("x"):
-        xs = np.arange(len(relative_rotation_axis_errors_deg["x"]), dtype=int)
-        color_map = {"x": "#d9534f", "y": "#5cb85c", "z": "#337ab7"}
-        for axis_name in AXIS_NAMES:
-            axes[1].plot(
-                xs,
-                relative_rotation_axis_errors_deg[axis_name],
-                color=color_map[axis_name],
-                linewidth=1.8,
-                marker="o",
-                markersize=3.0,
-                markeredgewidth=0.0,
-                label=f"{axis_name}-axis",
-            )
-        axes[1].set_ylabel("Axis drift (deg)")
-        axes[1].set_title("Left-right end-effector relative rotation drift by axis")
+    if coarse_relative_translation_errors_m:
+        coarse_translation_xs = path_fraction_xs(len(coarse_relative_translation_errors_m))
+        axes[1].plot(
+            coarse_translation_xs,
+            1000.0 * np.asarray(coarse_relative_translation_errors_m, dtype=float),
+            color="#ff7f0e",
+            linewidth=1.6,
+            marker="o",
+            markersize=4.0,
+            markeredgewidth=0.0,
+            label="coarse before refinement",
+        )
+        axes[1].set_ylabel("Translation drift (mm)")
+        axes[1].set_title("Left-right end-effector relative translation drift (coarse before refinement)")
         axes[1].legend(loc="best")
     else:
         axes[1].axis("off")
         reason = joint_path_reason or "joint path unavailable"
-        axes[1].text(0.5, 0.5, f"No rotation drift plot available.\nReason: {reason}", ha="center", va="center", fontsize=11)
+        axes[1].text(0.5, 0.5, f"No coarse translation drift plot available.\nReason: {reason}", ha="center", va="center", fontsize=11)
+
+    color_map = {"x": "#d9534f", "y": "#5cb85c", "z": "#337ab7"}
+    if relative_rotation_axis_errors_deg.get("x"):
+        xs = path_fraction_xs(len(relative_rotation_axis_errors_deg["x"]))
+        for axis_name in AXIS_NAMES:
+            axes[2].plot(
+                xs,
+                relative_rotation_axis_errors_deg[axis_name],
+                color=color_map[axis_name],
+                linewidth=1.8,
+                label=f"{axis_name}-axis",
+            )
+        axes[2].set_ylabel("Axis drift (deg)")
+        axes[2].set_title("Left-right end-effector relative rotation drift by axis (refined)")
+        axes[2].legend(loc="best")
+    else:
+        axes[2].axis("off")
+        reason = joint_path_reason or "joint path unavailable"
+        axes[2].text(0.5, 0.5, f"No refined rotation drift plot available.\nReason: {reason}", ha="center", va="center", fontsize=11)
+
+    if coarse_relative_rotation_axis_errors_deg and coarse_relative_rotation_axis_errors_deg.get("x"):
+        coarse_rotation_xs = path_fraction_xs(len(coarse_relative_rotation_axis_errors_deg["x"]))
+        for axis_name in AXIS_NAMES:
+            axes[3].plot(
+                coarse_rotation_xs,
+                coarse_relative_rotation_axis_errors_deg[axis_name],
+                color=color_map[axis_name],
+                linewidth=1.4,
+                marker="o",
+                markersize=4.0,
+                markeredgewidth=0.0,
+                label=f"{axis_name}-axis",
+            )
+        axes[3].set_ylabel("Axis drift (deg)")
+        axes[3].set_title("Left-right end-effector relative rotation drift by axis (coarse before refinement)")
+        axes[3].legend(loc="best")
+    else:
+        axes[3].axis("off")
+        reason = joint_path_reason or "joint path unavailable"
+        axes[3].text(0.5, 0.5, f"No coarse rotation drift plot available.\nReason: {reason}", ha="center", va="center", fontsize=11)
+
+    for axis in axes[:4]:
+        axis.set_xlim(0.0, 1.0)
+        axis.set_xlabel("Path fraction")
 
     if joint_path_deg is not None and joint_path_deg.size > 0:
         xs = np.arange(joint_path_deg.shape[0], dtype=int)
         labels = get_joint_labels(joint_path_deg.shape[1])
         for joint_idx in range(joint_path_deg.shape[1]):
-            axes[2].plot(
+            axes[4].plot(
                 xs,
                 joint_path_deg[:, joint_idx],
                 linewidth=1.2,
@@ -178,14 +307,14 @@ def save_validation_plot(
                 markeredgewidth=0.0,
                 label=labels[joint_idx],
             )
-        axes[2].set_ylabel("Joint angle (deg)")
-        axes[2].set_xlabel("Waypoint index")
-        axes[2].set_title("Joint value evolution (unwrapped for display)")
-        axes[2].legend(loc="center left", bbox_to_anchor=(1.01, 0.5), fontsize=8, ncol=1)
+        axes[4].set_ylabel("Joint angle (deg)")
+        axes[4].set_xlabel("Waypoint index")
+        axes[4].set_title("Joint value evolution (unwrapped for display)")
+        axes[4].legend(loc="center left", bbox_to_anchor=(1.01, 0.5), fontsize=8, ncol=1)
     else:
-        axes[2].axis("off")
+        axes[4].axis("off")
         reason = joint_path_reason or "joint path unavailable"
-        axes[2].text(0.5, 0.5, f"No joint evolution plot available.\nReason: {reason}", ha="center", va="center", fontsize=11)
+        axes[4].text(0.5, 0.5, f"No joint evolution plot available.\nReason: {reason}", ha="center", va="center", fontsize=11)
 
     details = [
         f"joint path source: {joint_path_source or 'n/a'}",
@@ -213,9 +342,10 @@ def validate_stage_trajectory(
     urdf_path: str,
     srdf_path: str,
     grasp_mask_links: Sequence[str],
-    joint_continuity_threshold_rad: float = 0.5,
+    joint_continuity_threshold_rad: float = 10.0 * np.pi / 180.0,
     relative_translation_threshold_m: float = 1e-3,
     relative_rotation_axis_threshold_deg: float = float(np.degrees(1e-2)),
+    dense_joint_validation_step_rad: float = DEFAULT_DENSE_JOINT_VALIDATION_STEP_RAD,
     use_angle_normalization: bool = False,
     reports_dir: str = REPORTS_DIR,
 ) -> Dict[str, Any]:
@@ -227,15 +357,18 @@ def validate_stage_trajectory(
         "plot_path": None,
         "path_waypoints": 0 if path is None else len(path),
         "joint_path_waypoints": 0 if joint_path is None else len(joint_path),
+        "dense_joint_validation_waypoints": 0,
+        "dense_joint_validation_step_rad": float(dense_joint_validation_step_rad),
         "joint_path_source": joint_path_source,
         "joint_path_reason": joint_path_reason,
         "collision_free": None,
         "collision_breakdown": {
-            "bar_robot": {"count": 0, "first_index": None},
-            "robot_self": {"count": 0, "first_index": None},
-            "robot_static": {"count": 0, "first_index": None},
-            "bar_static": {"count": 0, "first_index": None},
+            "bar_robot": {"count": 0, "first_index": None, "first_dense_index": None},
+            "robot_self": {"count": 0, "first_index": None, "first_dense_index": None},
+            "robot_static": {"count": 0, "first_index": None, "first_dense_index": None},
+            "bar_static": {"count": 0, "first_index": None, "first_dense_index": None},
         },
+        "collision_failures": [],
         "joint_continuity_ok": None,
         "joint_continuity_threshold_rad": float(joint_continuity_threshold_rad),
         "joint_continuity_max_delta_rad": None,
@@ -292,6 +425,7 @@ def validate_stage_trajectory(
     tool_link_left = scene["tool_link_left"]
     tool_link_right = scene["tool_link_right"]
     bar_body = scene["bar_body"]
+    bar_from_left = pp.invert(scene["grasp_bar_from_left"])
     static_obstacles = [body for body in scene["collision_obstacles"] if body != robot]
 
     robot_model = RobotModel.from_urdf_file(urdf_path)
@@ -344,18 +478,49 @@ def validate_stage_trajectory(
     # remain apples-to-apples when angle normalization is toggled.
     normalized_joint_path = [maybe_normalize_angles(conf, use_angle_normalization) for conf in joint_path]
     joint_path_deg = unwrap_joint_path_for_display_deg(normalized_joint_path)
+    coarse_relative_translation_errors_m, coarse_relative_rotation_axis_errors_deg = compute_relative_transform_drift(
+        robot,
+        arm_joints,
+        tool_link_left,
+        tool_link_right,
+        normalized_joint_path,
+    )
+    dense_joint_path, dense_metadata = refine_joint_path_for_validation(
+        normalized_joint_path,
+        dense_joint_validation_step_rad,
+        use_angle_normalization,
+    )
+    result["dense_joint_validation_waypoints"] = len(dense_joint_path)
 
-    # Replay the full trajectory in PyBullet so each waypoint is checked against the
-    # same collision and end-effector drift diagnostics used in the final report.
-    for idx, (pose, conf) in enumerate(zip(path, normalized_joint_path)):
+    # Replay a dense joint-space trajectory for collision and end-effector drift
+    # checks. The bar pose is derived from left-tool FK and the grasp transform.
+    for idx, (conf, sample_meta) in enumerate(zip(dense_joint_path, dense_metadata)):
         pp.set_joint_positions(robot, arm_joints, conf)
-        pp.set_pose(bar_body, pose)
+        world_from_left = pp.get_link_pose(robot, tool_link_left)
+        bar_pose = pp.multiply(world_from_left, bar_from_left)
+        pp.set_pose(bar_body, bar_pose)
 
-        hit_map = {
-            "bar_robot": bool(bar_robot_collision_fn(pose)),
-            "robot_self": bool(robot_self_collision_fn(conf)),
-            "robot_static": bool(robot_static_collision_fn(conf)),
-            "bar_static": bool(bar_static_collision_fn(pose)),
+        collision_fn_map = {
+            "bar_robot": (bar_robot_collision_fn, bar_pose),
+            "robot_self": (robot_self_collision_fn, conf),
+            "robot_static": (robot_static_collision_fn, conf),
+            "bar_static": (bar_static_collision_fn, bar_pose),
+        }
+        hit_map = {key: bool(fn(arg)) for key, (fn, arg) in collision_fn_map.items()}
+        failure_record = {
+            "waypoint_index": sample_meta["waypoint_index"],
+            "dense_waypoint_index": idx,
+            "segment_index": sample_meta["segment_index"],
+            "segment_alpha": sample_meta["segment_alpha"],
+            "path_fraction": sample_meta["path_fraction"],
+            "collision_keys": [],
+            "pose_position": np.asarray(bar_pose[0], dtype=float).tolist(),
+            "pose_quaternion": np.asarray(bar_pose[1], dtype=float).tolist(),
+            "bar_pose": {
+                "position": np.asarray(bar_pose[0], dtype=float).tolist(),
+                "quaternion": np.asarray(bar_pose[1], dtype=float).tolist(),
+            },
+            "joint_values": np.asarray(conf, dtype=float).tolist(),
         }
         for key, hit in hit_map.items():
             if not hit:
@@ -363,9 +528,12 @@ def validate_stage_trajectory(
             collision_flags[key] = True
             result["collision_breakdown"][key]["count"] += 1
             if result["collision_breakdown"][key]["first_index"] is None:
-                result["collision_breakdown"][key]["first_index"] = idx
+                result["collision_breakdown"][key]["first_index"] = sample_meta["waypoint_index"]
+                result["collision_breakdown"][key]["first_dense_index"] = idx
+            failure_record["collision_keys"].append(key)
+        if failure_record["collision_keys"]:
+            result["collision_failures"].append(failure_record)
 
-        world_from_left = pp.get_link_pose(robot, tool_link_left)
         world_from_right = pp.get_link_pose(robot, tool_link_right)
         relative_pose = pp.multiply(pp.invert(world_from_left), world_from_right)
         if base_relative_pose is None:
@@ -376,7 +544,7 @@ def validate_stage_trajectory(
             relative_rotation_axis_errors_deg[axis_name].append(axis_diffs_deg[axis_name])
 
     pp.set_joint_positions(robot, arm_joints, normalized_joint_path[-1])
-    pp.set_pose(bar_body, path[-1])
+    pp.set_pose(bar_body, pp.multiply(pp.get_link_pose(robot, tool_link_left), bar_from_left))
 
     result["collision_free"] = not any(collision_flags.values())
 
@@ -428,6 +596,8 @@ def validate_stage_trajectory(
         joint_path_reason=result["joint_path_reason"],
         relative_translation_errors_m=relative_translation_errors_m,
         relative_rotation_axis_errors_deg=relative_rotation_axis_errors_deg,
+        coarse_relative_translation_errors_m=coarse_relative_translation_errors_m,
+        coarse_relative_rotation_axis_errors_deg=coarse_relative_rotation_axis_errors_deg,
         relative_translation_threshold_m=relative_translation_threshold_m,
         relative_rotation_axis_threshold_deg=relative_rotation_axis_threshold_deg,
         collision_breakdown=result["collision_breakdown"],

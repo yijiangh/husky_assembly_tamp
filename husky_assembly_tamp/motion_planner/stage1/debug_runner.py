@@ -15,10 +15,11 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from husky_assembly_tamp.motion_planner.stage1.minimal_rrt import (
+    DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
     build_default_paths,
     run_stage_trial,
     run_visualization_loop,
-    teardown_stage1_scene,
+    teardown_planning_scene,
 )
 from husky_assembly_tamp.utils.util import setup_logger
 
@@ -629,7 +630,7 @@ def run_stage_analysis(args, stage: int, timestamp: str, outdir: str) -> Dict[st
                     planner_profile_out=planner_profile,
                 )
         finally:
-            teardown_stage1_scene()
+            teardown_planning_scene()
 
         if profiler is not None:
             prof_path = os.path.join(support_outdir, f"plan_profile_stage{stage}_seed{seed}_{timestamp}.prof")
@@ -818,7 +819,7 @@ def run_stage_summary_only(
                     planner_profile_out=planner_profile,
                 )
         finally:
-            teardown_stage1_scene()
+            teardown_planning_scene()
 
         if support_outdir is not None and result.get("validation") is not None:
             result["validation"]["plot_path"] = relocate_artifact_to_support(result["validation"].get("plot_path"), support_outdir)
@@ -1253,7 +1254,12 @@ def parse_args():
     parser.add_argument("--max-attempts", type=int, default=5, help="Random restarts")
     parser.add_argument("--endpoint-ik-attempts", type=int, default=20, help="Max random seeds used when solving endpoint IK in Stage 2/3")
     parser.add_argument("--random-seed", type=int, default=None, help="Random seed for one-shot mode")
-    parser.add_argument("--joint-continuity-threshold", type=float, default=0.2, help="Maximum allowed wrapped joint delta between neighboring Stage 2/3 configurations, in radians")
+    parser.add_argument(
+        "--joint-continuity-threshold",
+        type=float,
+        default=DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
+        help="Maximum allowed wrapped joint delta between neighboring Stage 2/3 configurations, in radians",
+    )
     parser.add_argument(
         "--floating-collision",
         action="store_true",
@@ -1323,9 +1329,11 @@ def main() -> None:
             robot=result["scene"]["robot"],
             arm_joints=result["scene"]["arm_joints"],
             path_confs=result["path_confs"],
+            validation=result.get("validation"),
+            scene=result.get("scene"),
         )
 
-    teardown_stage1_scene()
+    teardown_planning_scene()
 
 
 if __name__ == "__main__":

@@ -2,6 +2,24 @@
 
 Use this file to resume the current refactor without depending on autocompact.
 
+## Focus Memo
+
+- Primary goal right now: understand why the Stage 3 planner fails for the real-state `G3` case.
+- Do not drift into cleanup, naming, refactors, or comfort fixes unless they directly unblock that debugging task.
+- Before making a non-debugging code change, ask: "Does this help explain or fix the Stage 3 `G3` failure?" If not, defer it.
+- When drift starts happening, explicitly redirect back to:
+  - reproduce the `G3` Stage 3 failure
+  - inspect endpoint IK / endpoint collision / first failing planner step
+  - compare diagnosis mode versus full planner behavior
+  - identify the concrete collision pair or planner rejection cause
+- Default workflow for this phase:
+  1. reproduce
+  2. inspect
+  3. isolate discrepancy
+  4. patch only what is necessary
+  5. rerun `G3`
+- If I seem to be spending time polishing code structure instead of debugging `G3`, remind me to stop and return to the failure investigation.
+
 ## Goal
 
 Restart the motion-planning work from the original Stage 1 design intent in `docs/algorithm_description.pdf`, but do it cleanly:

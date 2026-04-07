@@ -1,0 +1,870 @@
+[2026-03-20 14:00:07.637] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 14:01:38.594] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 14:01:41.943] INFO     Target G1 -> success=False runtime=0.000s waypoints=0
+[2026-03-20 14:01:45.164] INFO     Target G2 -> success=False runtime=0.000s waypoints=0
+[2026-03-20 14:01:46.861] INFO     Target G3 -> success=False runtime=0.001s waypoints=0
+[2026-03-20 14:01:48.265] INFO     Target G4 -> success=False runtime=0.000s waypoints=0
+[2026-03-20 14:01:49.451] INFO     Target V1 -> success=False runtime=0.000s waypoints=0
+[2026-03-20 14:01:51.630] INFO     Target V2 -> success=False runtime=0.000s waypoints=0
+[2026-03-20 14:01:53.770] INFO     Target H1 -> success=False runtime=0.000s waypoints=0
+[2026-03-20 14:01:55.306] INFO     Target D1 -> success=False runtime=0.001s waypoints=0
+[2026-03-20 14:01:57.096] INFO     Target V3 -> success=False runtime=0.001s waypoints=0
+[2026-03-20 14:01:57.098] INFO     Saved real-state study report: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260320_140138.md
+[2026-03-20 14:01:57.098] INFO     Saved real-state study JSON: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_140138.json
+[2026-03-20 14:04:09.493] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 14:04:10.929] INFO     Target G1 -> success=False runtime=0.000s waypoints=0
+[2026-03-20 14:04:11.857] INFO     Target G2 -> success=False runtime=0.000s waypoints=0
+[2026-03-20 14:04:12.693] INFO     Target G3 -> success=False runtime=0.001s waypoints=0
+[2026-03-20 14:04:13.646] INFO     Target G4 -> success=False runtime=0.000s waypoints=0
+[2026-03-20 14:04:14.722] INFO     Target V1 -> success=False runtime=0.000s waypoints=0
+[2026-03-20 14:04:15.692] INFO     Target V2 -> success=False runtime=0.000s waypoints=0
+[2026-03-20 14:04:16.667] INFO     Target H1 -> success=False runtime=0.000s waypoints=0
+[2026-03-20 14:04:17.578] INFO     Target D1 -> success=False runtime=0.001s waypoints=0
+[2026-03-20 14:04:18.666] INFO     Target V3 -> success=False runtime=0.001s waypoints=0
+[2026-03-20 14:04:18.667] INFO     Saved real-state study report: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260320_140409.md
+[2026-03-20 14:04:18.667] INFO     Saved real-state study JSON: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_140409.json
+[2026-03-20 14:16:41.029] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 14:16:42.251] INFO     Target G3 -> start_ik_ok=True start_in_collision=True
+[2026-03-20 14:16:42.253] INFO     Saved real-state start-collision report: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_start_collision_report_20260320_141641.md
+[2026-03-20 14:16:42.253] INFO     Saved real-state study JSON: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_141641.json
+[2026-03-20 15:17:46.162] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 15:18:11.872] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 15:18:12.787] INFO     Target G3 -> start_ik_ok=True start_in_collision=True
+[2026-03-20 15:18:12.787] INFO     Saved real-state start-collision report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_start_collision_report_20260320_151812.md
+[2026-03-20 15:18:12.787] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_151812.json
+[2026-03-20 15:18:51.023] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 15:19:32.023] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 14:22:41.051] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 14:22:42.210] INFO     Target G3 -> start_ik_ok=True start_in_collision=False
+[2026-03-20 14:22:42.211] INFO     Saved real-state start-collision report: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_start_collision_report_20260320_142241.md
+[2026-03-20 14:22:42.211] INFO     Saved real-state study JSON: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_142241.json
+[2026-03-20 14:23:57.338] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 14:24:41.744] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 14:24:43.045] INFO     Target G1 -> start_ik_ok=False start_in_collision=None
+[2026-03-20 14:24:43.889] INFO     Target G2 -> start_ik_ok=False start_in_collision=None
+[2026-03-20 14:24:44.540] INFO     Target G3 -> start_ik_ok=True start_in_collision=False
+[2026-03-20 14:24:45.373] INFO     Target G4 -> start_ik_ok=False start_in_collision=None
+[2026-03-20 14:24:46.308] INFO     Target V1 -> start_ik_ok=False start_in_collision=None
+[2026-03-20 14:24:47.164] INFO     Target V2 -> start_ik_ok=False start_in_collision=None
+[2026-03-20 14:24:47.846] INFO     Target H1 -> start_ik_ok=True start_in_collision=False
+[2026-03-20 14:24:48.659] INFO     Target D1 -> start_ik_ok=False start_in_collision=None
+[2026-03-20 14:24:49.322] INFO     Target V3 -> start_ik_ok=True start_in_collision=True
+[2026-03-20 14:24:49.323] INFO     Saved real-state start-collision report: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_start_collision_report_20260320_142441.md
+[2026-03-20 14:24:49.323] INFO     Saved real-state study JSON: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_142441.json
+[2026-03-20 14:31:41.352] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 14:31:42.667] INFO     Target G3 -> success=False runtime=0.000s waypoints=0
+[2026-03-20 14:31:43.459] INFO     Target H1 -> success=False runtime=0.001s waypoints=0
+[2026-03-20 14:31:43.460] INFO     Saved real-state study report: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260320_143141.md
+[2026-03-20 14:31:43.460] INFO     Saved real-state study JSON: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_143141.json
+[2026-03-20 15:32:58.689] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 15:33:01.593] INFO     Target G3 -> success=False runtime=0.100s waypoints=0
+[2026-03-20 15:33:01.593] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260320_153258.md
+[2026-03-20 15:33:01.593] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_153258.json
+[2026-03-20 15:33:26.436] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 15:33:51.966] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 15:33:54.420] INFO     Target G3 -> start_ik_ok=True start_in_collision=False
+[2026-03-20 15:33:54.421] INFO     Saved real-state start-collision report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_start_collision_report_20260320_153352.md
+[2026-03-20 15:33:54.421] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_153352.json
+[2026-03-20 15:49:07.198] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 15:49:32.252] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 15:53:01.145] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 15:53:03.868] INFO     Target G3 -> start_ik_ok=True start_in_collision=False
+[2026-03-20 15:53:03.869] INFO     Saved real-state start-collision report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_start_collision_report_20260320_155301.md
+[2026-03-20 15:53:03.869] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_155301.json
+[2026-03-20 14:56:32.387] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 14:56:33.655] INFO     Target G3 -> start_ik_ok=False goal_ik_ok=False
+[2026-03-20 14:56:33.656] INFO     Saved real-state endpoint-IK report: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260320_145632.md
+[2026-03-20 14:56:33.656] INFO     Saved real-state study JSON: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_145632.json
+[2026-03-20 15:57:32.645] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 15:57:35.446] INFO     Target G3 -> start_ik_ok=True start_in_collision=False
+[2026-03-20 15:57:35.447] INFO     Saved real-state start-collision report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_start_collision_report_20260320_155732.md
+[2026-03-20 15:57:35.447] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_155732.json
+[2026-03-20 15:58:08.920] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 15:58:13.985] INFO     Holding endpoint IK pose in GUI. Press Ctrl-C to exit.
+[2026-03-20 15:58:57.355] INFO     Target G3 -> start_ik_ok=True goal_ik_ok=False
+[2026-03-20 15:58:57.358] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260320_155809.md
+[2026-03-20 15:58:57.358] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_155809.json
+[2026-03-20 15:59:05.824] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 15:08:55.458] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 15:08:57.000] INFO     Target G3 -> start_ik_ok=True goal_ik_ok=False
+[2026-03-20 15:08:57.002] INFO     Saved real-state endpoint-IK report: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260320_150855.md
+[2026-03-20 15:08:57.002] INFO     Saved real-state study JSON: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_150855.json
+[2026-03-20 17:11:50.288] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:12:03.830] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:12:24.849] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:12:29.691] INFO     Holding endpoint IK pose in GUI. Press Ctrl-C to exit.
+[2026-03-20 17:12:41.942] INFO     Target G3 -> start_ik_ok=False goal_ik_ok=True
+[2026-03-20 17:12:41.945] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260320_171225.md
+[2026-03-20 17:12:41.945] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_171225.json
+[2026-03-20 16:16:11.187] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 16:16:12.494] INFO     Target G3 -> start_ik_ok=False goal_ik_ok=True
+[2026-03-20 16:16:12.495] INFO     Saved real-state endpoint-IK report: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260320_161611.md
+[2026-03-20 16:16:12.495] INFO     Saved real-state study JSON: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_161611.json
+[2026-03-20 17:16:55.898] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:17:10.856] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:17:11.852] INFO     Target G3 -> start_ik_ok=False goal_ik_ok=True
+[2026-03-20 17:17:11.852] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260320_171711.md
+[2026-03-20 17:17:11.852] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_171711.json
+[2026-03-20 17:17:16.559] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:17:21.489] INFO     Holding endpoint IK pose in GUI. Press Ctrl-C to exit.
+[2026-03-20 17:17:37.753] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:17:41.195] INFO     Holding endpoint IK pose in GUI. Press Ctrl-C to exit.
+[2026-03-20 17:17:59.593] INFO     Target G3 -> start_ik_ok=True goal_ik_ok=True
+[2026-03-20 17:17:59.593] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260320_171737.md
+[2026-03-20 17:17:59.593] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_171737.json
+[2026-03-20 17:18:20.093] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:18:23.576] INFO     Holding endpoint IK pose in GUI. Press Ctrl-C to exit.
+[2026-03-20 17:18:25.803] INFO     Target G3 -> start_ik_ok=True goal_ik_ok=True
+[2026-03-20 17:18:25.803] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260320_171820.md
+[2026-03-20 17:18:25.804] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_171820.json
+[2026-03-20 17:19:57.377] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:20:00.004] INFO     Target G3 -> success=False runtime=0.066s waypoints=0
+[2026-03-20 17:20:00.005] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260320_171957.md
+[2026-03-20 17:20:00.005] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_171957.json
+[2026-03-20 17:20:23.086] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:21:03.562] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:21:08.395] INFO     Target G3 -> success=False runtime=0.000s waypoints=0
+[2026-03-20 17:21:08.395] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260320_172103.md
+[2026-03-20 17:21:08.395] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_172103.json
+[2026-03-20 17:25:11.814] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:25:16.541] INFO     Holding endpoint IK pose in GUI. Press Ctrl-C to exit.
+[2026-03-20 17:27:44.127] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:27:47.912] INFO     Target G3 -> success=False runtime=0.072s waypoints=0
+[2026-03-20 17:27:47.912] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260320_172744.md
+[2026-03-20 17:27:47.912] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_172744.json
+[2026-03-20 17:28:32.845] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:28:36.563] INFO     Target G3 -> success=False runtime=0.072s waypoints=0
+[2026-03-20 17:28:36.563] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260320_172833.md
+[2026-03-20 17:28:36.563] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_172833.json
+[2026-03-20 17:28:56.999] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:29:00.877] INFO     Target G3 -> success=False runtime=0.072s waypoints=0
+[2026-03-20 17:29:00.877] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260320_172857.md
+[2026-03-20 17:29:00.877] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_172857.json
+[2026-03-20 17:29:29.905] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:29:36.413] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:29:40.145] INFO     Holding endpoint IK pose in GUI. Press Ctrl-C to exit.
+[2026-03-20 17:30:02.372] INFO     Target G3 -> start_ik_ok=True goal_ik_ok=True
+[2026-03-20 17:30:02.372] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260320_172936.md
+[2026-03-20 17:30:02.372] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_172936.json
+[2026-03-20 17:30:15.706] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:30:20.326] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:30:53.148] INFO     Target G3 -> success=False runtime=27.974s waypoints=165
+[2026-03-20 17:30:53.148] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260320_173020.md
+[2026-03-20 17:30:53.148] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_173020.json
+[2026-03-20 17:32:52.766] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:33:00.205] INFO     Target G3 -> success=False runtime=1.485s waypoints=165
+[2026-03-20 17:33:29.549] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260320_173252.md
+[2026-03-20 17:33:29.549] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_173252.json
+[2026-03-20 17:33:37.598] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:33:50.763] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:34:41.718] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:35:14.349] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:35:50.119] INFO     Target G3 -> success=False runtime=30.460s waypoints=98
+[2026-03-20 17:36:41.507] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260320_173514.md
+[2026-03-20 17:36:41.507] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_173514.json
+[2026-03-20 17:37:01.900] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:37:05.690] INFO     Target G3 -> success=False runtime=0.070s waypoints=0
+[2026-03-20 17:37:24.018] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260320_173702.md
+[2026-03-20 17:37:24.018] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_173702.json
+[2026-03-20 17:37:45.608] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:37:51.360] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:37:54.933] INFO     Holding endpoint IK pose in GUI. Press Ctrl-C to exit.
+[2026-03-20 17:38:19.580] INFO     Target G3 -> start_ik_ok=None goal_ik_ok=True
+[2026-03-20 17:38:19.581] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260320_173751.md
+[2026-03-20 17:38:19.581] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_173751.json
+[2026-03-20 17:41:14.424] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:41:18.164] INFO     Holding endpoint IK pose in GUI. Press Ctrl-C to exit.
+[2026-03-20 17:41:22.011] INFO     Target G3 -> start_ik_ok=None goal_ik_ok=True
+[2026-03-20 17:41:22.012] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260320_174114.md
+[2026-03-20 17:41:22.012] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_174114.json
+[2026-03-20 17:42:43.513] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:42:47.048] INFO     Holding endpoint IK pose in GUI. Press Ctrl-C to exit.
+[2026-03-20 17:44:34.399] INFO     Target G3 -> start_ik_ok=None goal_ik_ok=True
+[2026-03-20 17:44:34.399] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260320_174243.md
+[2026-03-20 17:44:34.399] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_174243.json
+[2026-03-20 17:46:17.981] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:46:21.895] INFO     Holding endpoint IK pose in GUI. Press Ctrl-C to exit.
+[2026-03-20 17:46:27.528] INFO     Target G3 -> start_ik_ok=None goal_ik_ok=True
+[2026-03-20 17:46:27.529] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260320_174618.md
+[2026-03-20 17:46:27.529] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_174618.json
+[2026-03-20 17:46:50.346] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:46:54.403] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:46:58.218] INFO     Holding endpoint IK pose in GUI. Press Ctrl-C to exit.
+[2026-03-20 17:46:59.972] INFO     Target G3 -> start_ik_ok=True goal_ik_ok=True
+[2026-03-20 17:46:59.973] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260320_174654.md
+[2026-03-20 17:46:59.973] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_174654.json
+[2026-03-20 17:47:14.583] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-20 17:47:18.289] INFO     Target G3 -> success=False runtime=0.066s waypoints=0
+[2026-03-20 17:47:27.768] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260320_174714.md
+[2026-03-20 17:47:27.768] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260320_174714.json
+[2026-03-23 16:50:21.637] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-23 16:50:28.148] INFO     Target G3 -> success=False runtime=0.000s waypoints=0
+[2026-03-23 16:50:29.916] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260323_165021.md
+[2026-03-23 16:50:29.916] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260323_165021.json
+[2026-03-23 16:51:05.589] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-23 16:51:09.480] INFO     Target G3 -> success=False runtime=0.065s waypoints=0
+[2026-03-23 16:51:54.955] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260323_165105.md
+[2026-03-23 16:51:54.956] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260323_165105.json
+[2026-03-23 16:52:14.283] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-23 16:52:18.443] INFO     Holding endpoint IK pose in GUI. Press Ctrl-C to exit.
+[2026-03-23 16:52:48.905] INFO     Target G3 -> start_ik_ok=True goal_ik_ok=True
+[2026-03-23 16:52:48.906] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260323_165214.md
+[2026-03-23 16:52:48.907] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260323_165214.json
+[2026-03-23 16:53:51.836] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-23 16:53:52.632] INFO     Target G3 -> success=False runtime=0.001s waypoints=0
+[2026-03-23 16:53:52.637] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260323_165351.md
+[2026-03-23 16:53:52.637] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260323_165351.json
+[2026-03-23 16:54:29.010] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-23 16:54:54.362] INFO     Target G3 -> success=False runtime=24.195s waypoints=483
+[2026-03-23 16:54:54.367] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260323_165429.md
+[2026-03-23 16:54:54.367] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260323_165429.json
+[2026-03-23 16:55:02.243] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-23 16:55:41.238] INFO     Target G3 -> success=False runtime=32.115s waypoints=169
+[2026-03-23 16:58:00.468] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-23 16:58:04.734] INFO     Holding endpoint IK pose in GUI. Press Ctrl-C to exit.
+[2026-03-23 16:58:18.133] INFO     Target G3 -> start_ik_ok=True goal_ik_ok=True start_collision_free=True goal_collision_free=False
+[2026-03-23 16:58:18.133] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260323_165800.md
+[2026-03-23 16:58:18.133] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260323_165800.json
+[2026-03-23 17:16:08.092] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-23 17:17:42.846] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-23 17:19:52.748] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-23 17:20:31.093] INFO     Target G3 -> success=False runtime=31.683s waypoints=146
+[2026-03-24 11:18:34.372] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 11:18:40.791] INFO     Target G3 -> success=False runtime=1.372s waypoints=41
+[2026-03-24 11:22:19.721] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 11:22:26.001] INFO     Target G3 -> success=False runtime=1.343s waypoints=41
+[2026-03-24 11:26:13.805] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260324_112219.md
+[2026-03-24 11:26:13.806] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260324_112219.json
+[2026-03-24 11:31:31.753] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 11:31:38.045] INFO     Target G3 -> success=False runtime=1.368s waypoints=41
+[2026-03-24 11:34:20.067] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260324_113131.md
+[2026-03-24 11:34:20.067] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260324_113131.json
+[2026-03-24 11:36:45.161] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 11:36:51.374] INFO     Target G3 -> success=False runtime=1.428s waypoints=41
+[2026-03-24 11:38:41.447] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260324_113645.md
+[2026-03-24 11:38:41.448] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260324_113645.json
+[2026-03-24 11:39:46.523] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 11:39:52.894] INFO     Target G3 -> success=False runtime=1.343s waypoints=41
+[2026-03-24 11:43:13.671] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 11:43:28.607] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 11:43:34.847] INFO     Target G3 -> success=False runtime=1.409s waypoints=41
+[2026-03-24 11:45:31.404] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 11:45:35.528] INFO     Target G3 -> success=False runtime=0.082s waypoints=0
+[2026-03-24 11:45:46.955] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260324_114531.md
+[2026-03-24 11:45:46.955] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260324_114531.json
+[2026-03-24 11:46:27.711] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 11:46:32.053] INFO     Holding endpoint IK pose in GUI. Press Ctrl-C to exit.
+[2026-03-24 11:46:36.749] INFO     Target G3 -> start_ik_ok=True goal_ik_ok=True start_collision_free=True goal_collision_free=False
+[2026-03-24 11:46:36.750] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260324_114627.md
+[2026-03-24 11:46:36.750] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260324_114627.json
+[2026-03-24 11:52:22.415] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 11:52:26.604] INFO     start
+[2026-03-24 11:52:26.605] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.5911645889282227, 0.024959012866020203, 1.0620800256729126), (-6.082927370698599e-07, 0.70710688829422, -0.7071065902709961, 1.7097836462198757e-06)), 'conf': array([ 0.32604974, -1.18943816,  1.85919632,  2.46058011, -0.33111129,
+       -2.34421901,  2.20311398, -1.27825342,  1.90391465,  2.52952434,
+       -2.2011094 ,  2.37268309]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-03-24 11:52:26.674] INFO     start
+[2026-03-24 11:52:26.674] INFO     {'endpoint_name': 'goal', 'bar_pose': ((0.7485154271125793, 0.2889060080051422, 0.34999921917915344), (0.2049083262681961, -0.6767662763595581, 0.2049083262681961, 0.6767662763595581)), 'conf': array([ 1.54452169, -0.6923714 ,  1.35468551, -2.21135818, -0.78112566,
+       -2.18936588,  1.84612414, -0.16278968,  1.79035311, -2.92511106,
+       -2.31289239, -1.77597595]), 'ik_ok': True, 'collision_free': False, 'collision_output': None}
+[2026-03-24 11:52:26.674] INFO     Holding goal endpoint IK pose in GUI at bar xyz=[0.7485, 0.2889, 0.35]. Press Enter to continue.
+[2026-03-24 11:54:01.175] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 11:54:05.374] INFO     start
+[2026-03-24 11:54:05.374] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.5911645889282227, 0.024959012866020203, 1.0620800256729126), (-6.082927370698599e-07, 0.70710688829422, -0.7071065902709961, 1.7097836462198757e-06)), 'conf': array([ 0.32604974, -1.18943816,  1.85919632,  2.46058011, -0.33111129,
+       -2.34421901,  2.20311398, -1.27825342,  1.90391465,  2.52952434,
+       -2.2011094 ,  2.37268309]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-03-24 11:57:01.218] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 11:57:05.315] INFO     start
+[2026-03-24 11:57:05.315] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.5911645889282227, 0.024959012866020203, 1.0620800256729126), (-6.082927370698599e-07, 0.70710688829422, -0.7071065902709961, 1.7097836462198757e-06)), 'conf': array([ 0.32604974, -1.18943816,  1.85919632,  2.46058011, -0.33111129,
+       -2.34421901,  2.20311398, -1.27825342,  1.90391465,  2.52952434,
+       -2.2011094 ,  2.37268309]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-03-24 11:58:29.505] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 11:58:33.783] INFO     start
+[2026-03-24 11:58:33.783] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.5911645889282227, 0.024959012866020203, 1.0620800256729126), (-6.082927370698599e-07, 0.70710688829422, -0.7071065902709961, 1.7097836462198757e-06)), 'conf': array([ 0.32604974, -1.18943816,  1.85919632,  2.46058011, -0.33111129,
+       -2.34421901,  2.20311398, -1.27825342,  1.90391465,  2.52952434,
+       -2.2011094 ,  2.37268309]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-03-24 11:59:19.294] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 11:59:23.513] INFO     start
+[2026-03-24 11:59:23.513] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.5911645889282227, 0.024959012866020203, 1.0620800256729126), (-6.082927370698599e-07, 0.70710688829422, -0.7071065902709961, 1.7097836462198757e-06)), 'conf': array([ 0.32604974, -1.18943816,  1.85919632,  2.46058011, -0.33111129,
+       -2.34421901,  2.20311398, -1.27825342,  1.90391465,  2.52952434,
+       -2.2011094 ,  2.37268309]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-03-24 11:59:42.007] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 11:59:45.983] INFO     start
+[2026-03-24 11:59:45.983] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.5911645889282227, 0.024959012866020203, 1.0620800256729126), (-6.082927370698599e-07, 0.70710688829422, -0.7071065902709961, 1.7097836462198757e-06)), 'conf': array([ 0.32604974, -1.18943816,  1.85919632,  2.46058011, -0.33111129,
+       -2.34421901,  2.20311398, -1.27825342,  1.90391465,  2.52952434,
+       -2.2011094 ,  2.37268309]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-03-24 12:00:53.902] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 12:00:58.059] INFO     start
+[2026-03-24 12:00:58.059] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.5911645889282227, 0.024959012866020203, 1.0620800256729126), (-6.082927370698599e-07, 0.70710688829422, -0.7071065902709961, 1.7097836462198757e-06)), 'conf': array([ 0.32604974, -1.18943816,  1.85919632,  2.46058011, -0.33111129,
+       -2.34421901,  2.20311398, -1.27825342,  1.90391465,  2.52952434,
+       -2.2011094 ,  2.37268309]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-03-24 12:01:08.230] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 12:01:12.893] INFO     start
+[2026-03-24 12:01:12.893] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.5911645889282227, 0.024959012866020203, 1.0620800256729126), (-6.082927370698599e-07, 0.70710688829422, -0.7071065902709961, 1.7097836462198757e-06)), 'conf': array([ 0.32604974, -1.18943816,  1.85919632,  2.46058011, -0.33111129,
+       -2.34421901,  2.20311398, -1.27825342,  1.90391465,  2.52952434,
+       -2.2011094 ,  2.37268309]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-03-24 12:01:20.520] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 12:01:24.634] INFO     start
+[2026-03-24 12:01:24.634] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.5911645889282227, 0.024959012866020203, 1.0620800256729126), (-6.082927370698599e-07, 0.70710688829422, -0.7071065902709961, 1.7097836462198757e-06)), 'conf': array([ 0.32604974, -1.18943816,  1.85919632,  2.46058011, -0.33111129,
+       -2.34421901,  2.20311398, -1.27825342,  1.90391465,  2.52952434,
+       -2.2011094 ,  2.37268309]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-03-24 12:01:54.102] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 12:01:58.121] INFO     start
+[2026-03-24 12:01:58.121] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.5911645889282227, 0.024959012866020203, 1.0620800256729126), (-6.082927370698599e-07, 0.70710688829422, -0.7071065902709961, 1.7097836462198757e-06)), 'conf': array([ 0.32604974, -1.18943816,  1.85919632,  2.46058011, -0.33111129,
+       -2.34421901,  2.20311398, -1.27825342,  1.90391465,  2.52952434,
+       -2.2011094 ,  2.37268309]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-03-24 12:02:06.544] INFO     start
+[2026-03-24 12:02:06.544] INFO     {'endpoint_name': 'goal', 'bar_pose': ((0.7485154271125793, 0.2889060080051422, 0.34999921917915344), (0.2049083262681961, -0.6767662763595581, 0.2049083262681961, 0.6767662763595581)), 'conf': array([ 1.54452169, -0.6923714 ,  1.35468551, -2.21135818, -0.78112566,
+       -2.18936588,  1.84612414, -0.16278968,  1.79035311, -2.92511106,
+       -2.31289239, -1.77597595]), 'ik_ok': True, 'collision_free': False, 'collision_output': None}
+[2026-03-24 12:02:06.544] INFO     Holding goal endpoint IK pose in GUI at bar xyz=[0.7485, 0.2889, 0.35]. Press Enter to continue.
+[2026-03-24 12:02:06.621] INFO     Target G3 -> start_ik_ok=True goal_ik_ok=True start_collision_free=True goal_collision_free=False
+[2026-03-24 12:02:06.625] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260324_120154.md
+[2026-03-24 12:02:06.625] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260324_120154.json
+[2026-03-24 12:06:40.105] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 12:06:46.993] INFO     start
+[2026-03-24 12:06:46.993] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.5911632776260376, 0.432837575674057, 1.0622633695602417), (0.7071068286895752, 5.900559472138411e-07, 1.6858740536918049e-06, 0.7071067094802856)), 'conf': None, 'ik_ok': False, 'collision_free': None, 'collision_output': None}
+[2026-03-24 12:06:47.060] INFO     start
+[2026-03-24 12:06:47.060] INFO     {'endpoint_name': 'goal', 'bar_pose': ((0.9151564240455627, 5.495744579363769e-15, 0.31499922275543213), (0.5, -0.5, -0.5, -0.5)), 'conf': array([ 1.49601261, -0.46495457,  1.13926869, -2.17482751, -0.78318151,
+       -0.09927946,  1.36221159, -0.34233034,  1.09815107, -2.52080151,
+       -2.32700116, -0.28796422]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-03-24 12:06:47.117] INFO     Holding goal endpoint IK pose in GUI at bar xyz=[0.9152, 0.0, 0.315]. Press Enter to continue.
+[2026-03-24 12:06:56.664] INFO     Target G1 -> start_ik_ok=False goal_ik_ok=True start_collision_free=None goal_collision_free=True
+[2026-03-24 12:06:56.665] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260324_120640.md
+[2026-03-24 12:06:56.666] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260324_120640.json
+[2026-03-24 12:13:13.253] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 13:19:10.014] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 13:21:26.778] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 13:21:39.812] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 13:21:46.467] INFO     Target G1 -> success=False runtime=0.000s waypoints=0
+[2026-03-24 13:21:49.127] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260324_132139.md
+[2026-03-24 13:21:49.127] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260324_132139.json
+[2026-03-24 13:22:13.790] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 13:22:21.048] INFO     Target G1 -> success=False runtime=0.000s waypoints=0
+[2026-03-24 13:22:32.235] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260324_132213.md
+[2026-03-24 13:22:32.235] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260324_132213.json
+[2026-03-24 13:23:28.770] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 13:23:45.555] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 13:25:35.372] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 13:27:01.215] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 13:27:06.668] INFO     Target G1 -> success=True runtime=0.547s waypoints=30
+[2026-03-24 13:27:51.822] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 13:27:57.891] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 13:31:18.283] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 13:31:44.891] INFO     Target G2 -> success=True runtime=21.093s waypoints=72
+[2026-03-24 13:32:15.670] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260324_133118.md
+[2026-03-24 13:32:15.670] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260324_133118.json
+[2026-03-24 13:32:19.163] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 13:32:24.488] INFO     Target G3 -> success=False runtime=0.077s waypoints=0
+[2026-03-24 13:34:04.499] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260324_133219.md
+[2026-03-24 13:34:04.499] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260324_133219.json
+[2026-03-24 13:34:26.350] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 16:22:32.236] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 16:22:40.678] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 16:27:13.699] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 16:27:23.256] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 16:28:29.921] INFO     start
+[2026-03-24 16:28:29.921] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.4911637008190155, 0.29551413655281067, 0.8622801303863525), (-1.7041104456438916e-06, 0.7071065902709961, 0.70710688829422, -6.13965937645844e-07)), 'conf': array([-2.09337527, -1.9971266 , -2.44952378,  1.30726403,  2.08749267,
+        0.79010825,  2.73821394,  0.13863662,  0.43853568, -0.55767467,
+        2.73459503,  2.37999238]), 'ik_ok': True, 'collision_free': False, 'collision_output': None}
+[2026-03-24 16:28:33.297] INFO     start
+[2026-03-24 16:28:33.297] INFO     {'endpoint_name': 'goal', 'bar_pose': ((0.7485154271125793, 0.2889060080051422, 0.34999921917915344), (0.2049083262681961, -0.6767662763595581, 0.2049083262681961, 0.6767662763595581)), 'conf': array([ 1.54452169, -0.6923714 ,  1.35468551, -2.21135818, -0.78112566,
+       -2.18936588,  1.84612414, -0.16278968,  1.79035311, -2.92511106,
+       -2.31289239, -1.77597595]), 'ik_ok': True, 'collision_free': False, 'collision_output': None}
+[2026-03-24 16:28:33.297] INFO     Holding goal endpoint IK pose in GUI at bar xyz=[0.7485, 0.2889, 0.35]. Press Enter to continue.
+[2026-03-24 16:28:56.426] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 16:29:00.681] INFO     start
+[2026-03-24 16:29:00.681] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.4911646246910095, 0.024959027767181396, 0.8620800375938416), (-6.504395742013003e-07, 0.70710688829422, -0.7071065902709961, 1.7940773204827565e-06)), 'conf': array([ 0.15607674, -1.14515835,  2.44622597,  1.84251394, -0.16232859,
+       -2.35815562,  1.99815778, -1.27000882,  2.50509876,  1.91653505,
+       -1.99914439,  2.36733061]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-03-24 16:29:16.441] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 16:29:20.640] INFO     start
+[2026-03-24 16:29:20.640] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.4911646246910095, 0.024959072470664978, 0.8621582388877869), (-0.7071186900138855, -1.7642170178078231e-06, 6.381323487403279e-07, 0.7070948481559753)), 'conf': array([ 0.15607672, -1.14515869,  2.44622659,  1.84251628, -0.1623284 ,
+       -2.3581585 ,  1.99815808, -1.27000897,  2.5050986 ,  1.91653556,
+       -1.99914511,  2.3673304 ]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-03-24 16:29:20.707] INFO     start
+[2026-03-24 16:29:20.707] INFO     {'endpoint_name': 'goal', 'bar_pose': ((0.748558759689331, -0.2888409197330475, 0.34999921917915344), (0.6767697334289551, -0.20489689707756042, -0.6767697334289551, -0.20489689707756042)), 'conf': array([ 0.82297571, -0.14137713,  1.52175635, -2.35678481, -1.02216998,
+        1.24511808, -1.58858188, -2.59549201, -0.98717929, -1.12139771,
+        0.79561169,  2.13663288]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-03-24 16:29:20.707] INFO     Holding goal endpoint IK pose in GUI at bar xyz=[0.7486, -0.2888, 0.35]. Press Enter to continue.
+[2026-03-24 16:29:23.257] INFO     Target G4 -> start_ik_ok=True goal_ik_ok=True start_collision_free=True goal_collision_free=True
+[2026-03-24 16:29:23.257] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260324_162916.md
+[2026-03-24 16:29:23.257] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260324_162916.json
+[2026-03-24 16:29:27.496] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 16:29:34.219] INFO     Target G4 -> success=True runtime=1.277s waypoints=60
+[2026-03-24 16:30:19.213] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 16:30:26.368] INFO     Target V1 -> success=False runtime=0.000s waypoints=0
+[2026-03-24 16:30:45.287] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260324_163019.md
+[2026-03-24 16:30:45.288] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260324_163019.json
+[2026-03-24 16:30:52.184] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 16:31:01.793] INFO     Target V1 -> success=True runtime=4.111s waypoints=62
+[2026-03-24 16:31:17.390] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260324_163052.md
+[2026-03-24 16:31:17.390] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260324_163052.json
+[2026-03-24 16:31:20.464] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 16:31:27.041] INFO     Target V2 -> success=False runtime=0.000s waypoints=0
+[2026-03-24 16:31:29.486] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260324_163120.md
+[2026-03-24 16:31:29.486] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260324_163120.json
+[2026-03-24 16:31:34.277] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 16:31:42.567] INFO     Target V2 -> success=True runtime=3.156s waypoints=45
+[2026-03-24 16:31:55.269] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260324_163134.md
+[2026-03-24 16:31:55.269] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260324_163134.json
+[2026-03-24 16:32:03.901] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 16:32:10.067] INFO     Target H1 -> success=False runtime=0.000s waypoints=0
+[2026-03-24 16:32:12.390] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260324_163203.md
+[2026-03-24 16:32:12.390] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260324_163203.json
+[2026-03-24 16:32:18.405] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 16:32:26.901] INFO     Target H1 -> success=True runtime=2.872s waypoints=32
+[2026-03-24 16:32:36.245] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260324_163218.md
+[2026-03-24 16:32:36.245] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260324_163218.json
+[2026-03-24 16:32:44.678] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 16:33:26.420] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 22:00:52.849] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 22:01:02.979] INFO     Target V1 -> success=True runtime=4.254s waypoints=62
+[2026-03-24 22:04:23.478] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 22:04:35.161] INFO     Target V1 -> success=True runtime=4.360s waypoints=62
+[2026-03-24 22:08:32.145] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-03-24 22:08:46.958] INFO     Target V1 -> success=True runtime=5.871s waypoints=177
+[2026-03-24 22:13:17.017] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260324_220832.md
+[2026-03-24 22:13:17.018] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260324_220832.json
+[2026-04-07 10:32:38.458] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 10:32:48.252] INFO     Target V1 -> success=True runtime=4.066s waypoints=62
+[2026-04-07 10:34:04.204] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 10:34:42.339] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 10:34:50.601] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 10:44:39.761] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 10:44:44.078] INFO     start
+[2026-04-07 10:44:44.078] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.4911653995513916, -0.21388515830039978, 1.1622799634933472), (0.5000004768371582, -0.4999995827674866, 0.5000011920928955, 0.4999987483024597)), 'conf': array([ 0.08740912, -1.23972376,  1.71647715,  2.61157525, -0.09173585,
+        0.83891418,  1.99533511, -1.88827813,  1.74888211, -2.99131525,
+       -1.98975895, -0.7721084 ]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-04-07 10:44:44.078] INFO     Holding start endpoint IK pose in GUI at bar xyz=[0.4912, -0.2139, 1.1623]. Press Enter to continue.
+[2026-04-07 11:00:24.115] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 11:00:28.786] INFO     start
+[2026-04-07 11:00:28.786] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.4911656975746155, -0.3097634017467499, 1.1622799634933472), (-0.6767666339874268, 0.2049066722393036, 0.20490898191928864, 0.6767661571502686)), 'conf': array([ 0.08740918, -1.23972402,  1.71647755,  2.61157689, -0.09173573,
+        0.83891253,  1.40132196, -1.34218179,  1.15118489,  1.37045808,
+       -0.86339735,  0.39798866]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-04-07 11:00:28.786] INFO     Holding start endpoint IK pose in GUI at bar xyz=[0.4912, -0.3098, 1.1623]. Press Enter to continue.
+[2026-04-07 11:04:55.750] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 11:05:00.055] INFO     start
+[2026-04-07 11:05:00.055] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.49116504192352295, -0.11236441135406494, 1.1620967388153076), (-0.7071067094802856, -1.728020606606151e-06, 6.322026706584438e-07, 0.7071068286895752)), 'conf': array([ 0.08740912, -1.23972389,  1.71647738,  2.61157607, -0.09173584,
+        0.83891344,  2.3164264 , -1.61496404,  1.83171955,  2.94060032,
+       -2.31249608, -0.76644943]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-04-07 11:05:00.055] INFO     Holding start endpoint IK pose in GUI at bar xyz=[0.4912, -0.1124, 1.1621]. Press Enter to continue.
+[2026-04-07 11:05:02.692] INFO     Target G1 -> start_ik_ok=True goal_ik_ok=None start_collision_free=True goal_collision_free=None
+[2026-04-07 11:05:06.562] INFO     start
+[2026-04-07 11:05:06.562] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.4911652207374573, -0.1583644151687622, 1.1620967388153076), (-0.7071067094802856, -1.728020606606151e-06, 6.322026706584438e-07, 0.7071068286895752)), 'conf': array([ 0.08740912, -1.23972389,  1.71647738,  2.61157607, -0.09173584,
+        0.83891344,  2.39490388, -1.49353936,  1.81935593,  2.83329727,
+       -2.39143192, -0.76457852]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-04-07 11:05:06.562] INFO     Holding start endpoint IK pose in GUI at bar xyz=[0.4912, -0.1584, 1.1621]. Press Enter to continue.
+[2026-04-07 11:05:09.028] INFO     Target G2 -> start_ik_ok=True goal_ik_ok=None start_collision_free=True goal_collision_free=None
+[2026-04-07 11:05:15.947] INFO     start
+[2026-04-07 11:05:15.947] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.4911637008190155, 0.29551413655281067, 1.1622800827026367), (-1.7041104456438916e-06, 0.7071065902709961, 0.70710688829422, -6.13965937645844e-07)), 'conf': None, 'ik_ok': False, 'collision_free': None, 'collision_output': None}
+[2026-04-07 11:05:15.960] INFO     Target G3 -> start_ik_ok=False goal_ik_ok=None start_collision_free=None goal_collision_free=None
+[2026-04-07 11:05:21.778] INFO     start
+[2026-04-07 11:05:21.778] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.4911637008190155, 0.2955141067504883, 1.1622018814086914), (0.7070948481559753, 6.262118859012844e-07, 1.7761379922376364e-06, 0.7071186900138855)), 'conf': None, 'ik_ok': False, 'collision_free': None, 'collision_output': None}
+[2026-04-07 11:05:21.784] INFO     Target G4 -> start_ik_ok=False goal_ik_ok=None start_collision_free=None goal_collision_free=None
+[2026-04-07 11:05:21.786] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260407_110455.md
+[2026-04-07 11:05:21.786] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260407_110455.json
+[2026-04-07 11:05:29.082] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 11:05:36.534] INFO     start
+[2026-04-07 11:05:36.534] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.4911637008190155, 0.29551413655281067, 1.1622800827026367), (-1.7041104456438916e-06, 0.7071065902709961, 0.70710688829422, -6.13965937645844e-07)), 'conf': None, 'ik_ok': False, 'collision_free': None, 'collision_output': None}
+[2026-04-07 11:05:36.544] INFO     Target G3 -> start_ik_ok=False goal_ik_ok=None start_collision_free=None goal_collision_free=None
+[2026-04-07 11:05:36.545] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260407_110529.md
+[2026-04-07 11:05:36.545] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260407_110529.json
+[2026-04-07 11:06:51.642] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 11:06:59.302] INFO     start
+[2026-04-07 11:06:59.302] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.4911637008190155, 0.29551413655281067, 1.1622800827026367), (-1.7041104456438916e-06, 0.7071065902709961, 0.70710688829422, -6.13965937645844e-07)), 'conf': None, 'ik_ok': False, 'collision_free': None, 'collision_output': None}
+[2026-04-07 11:06:59.306] INFO     Target G3 -> start_ik_ok=False goal_ik_ok=None start_collision_free=None goal_collision_free=None
+[2026-04-07 11:06:59.307] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260407_110651.md
+[2026-04-07 11:06:59.307] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260407_110651.json
+[2026-04-07 11:07:47.672] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 11:07:55.025] INFO     start
+[2026-04-07 11:07:55.025] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.4911637008190155, 0.29551413655281067, 1.1622800827026367), (-1.7041104456438916e-06, 0.7071065902709961, 0.70710688829422, -6.13965937645844e-07)), 'conf': None, 'ik_ok': False, 'collision_free': None, 'collision_output': None}
+[2026-04-07 11:08:28.560] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 11:08:36.012] INFO     start
+[2026-04-07 11:08:36.012] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.4911637008190155, 0.29551413655281067, 1.1622800827026367), (-1.7041104456438916e-06, 0.7071065902709961, 0.70710688829422, -6.13965937645844e-07)), 'conf': None, 'ik_ok': False, 'collision_free': None, 'collision_output': None}
+[2026-04-07 11:10:23.669] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 11:10:30.940] INFO     start
+[2026-04-07 11:10:30.940] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.4911637008190155, 0.2955141067504883, 1.1622018814086914), (0.7070948481559753, 6.262118859012844e-07, 1.7761379922376364e-06, 0.7071186900138855)), 'conf': None, 'ik_ok': False, 'collision_free': None, 'collision_output': None}
+[2026-04-07 11:10:42.244] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 11:10:46.498] INFO     start
+[2026-04-07 11:10:46.498] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.4911656975746155, -0.3097634017467499, 1.1622799634933472), (-0.6767666339874268, 0.2049066722393036, 0.20490898191928864, 0.6767661571502686)), 'conf': array([ 0.08740918, -1.23972402,  1.71647755,  2.61157689, -0.09173573,
+        0.83891253,  1.40132196, -1.34218179,  1.15118489,  1.37045808,
+       -0.86339735,  0.39798866]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-04-07 11:10:56.063] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 11:11:03.497] INFO     start
+[2026-04-07 11:11:03.498] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.49116337299346924, 0.38963553309440613, 1.1620967388153076), (-0.6414555311203003, 0.29754775762557983, 0.29754993319511414, 0.6414546966552734)), 'conf': None, 'ik_ok': False, 'collision_free': None, 'collision_output': None}
+[2026-04-07 11:12:07.397] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 11:12:11.629] INFO     start
+[2026-04-07 11:12:11.629] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.4911653995513916, -0.21388515830039978, 1.1622799634933472), (0.5000004768371582, -0.4999995827674866, 0.5000011920928955, 0.4999987483024597)), 'conf': array([ 0.08740912, -1.23972376,  1.71647715,  2.61157525, -0.09173585,
+        0.83891418,  1.99533511, -1.88827813,  1.74888211, -2.99131525,
+       -1.98975895, -0.7721084 ]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-04-07 11:12:23.074] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 11:12:27.273] INFO     start
+[2026-04-07 11:12:27.273] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.4917841851711273, -0.09072208404541016, 1.163059949874878), (-0.4698074460029602, 0.5305051207542419, 0.5298229455947876, 0.46597525477409363)), 'conf': array([ 0.08740919, -1.2397234 ,  1.71647668,  2.61157367, -0.09173609,
+        0.83891588,  2.45024501, -1.47155479,  1.74472237, -3.12895797,
+       -2.56889423, -0.55480208]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-04-07 11:12:36.659] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 11:12:40.878] INFO     start
+[2026-04-07 11:12:40.878] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.49116480350494385, -0.03476335108280182, 1.1622800827026367), (0.2453286498785019, -0.663184642791748, 0.6631854176521301, 0.24532638490200043)), 'conf': array([ 0.08740912, -1.23972411,  1.71647769,  2.61157697, -0.09173592,
+        0.83891235,  2.52647717, -1.20740828,  1.71611705,  2.65425546,
+       -2.52362968, -0.76056801]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-04-07 11:50:00.909] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 11:50:19.520] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 11:50:20.120] INFO     Auto home pose for G1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 11:50:20.326] INFO     start
+[2026-04-07 11:50:20.326] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.49116504192352295, -0.11236444115638733, 1.0620967149734497), (-0.7071065902709961, -1.6858734852576163e-06, 5.900557766835846e-07, 0.70710688829422)), 'conf': array([ 0.10255945, -1.28483695,  1.99852205,  2.3951524 , -0.10789341,
+        0.81837732,  2.14906156, -1.7200842 ,  2.11531318,  2.75933921,
+       -2.14643411, -0.76947784]), 'ik_ok': True, 'collision_free': None, 'collision_output': None}
+[2026-04-07 11:50:20.332] INFO     Target G1 -> start_ik_ok=True goal_ik_ok=None
+[2026-04-07 11:50:20.334] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260407_115019.md
+[2026-04-07 11:50:20.335] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260407_115019.json
+[2026-04-07 11:50:49.068] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 11:50:49.680] INFO     Auto home pose for G1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 11:50:49.902] INFO     Auto home pose for G1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 11:50:50.095] INFO     Target G1 -> success=False runtime=0.002s waypoints=0
+[2026-04-07 11:50:50.102] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260407_115049.md
+[2026-04-07 11:50:50.102] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260407_115049.json
+[2026-04-07 11:53:03.822] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 11:53:04.385] INFO     Auto home pose for G1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 11:53:04.600] INFO     start
+[2026-04-07 11:53:04.600] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.49116504192352295, -0.11236444115638733, 1.0620967149734497), (-0.7071065902709961, -1.6858734852576163e-06, 5.900557766835846e-07, 0.70710688829422)), 'conf': array([ 0.10255945, -1.28483695,  1.99852205,  2.3951524 , -0.10789341,
+        0.81837732,  2.14906156, -1.7200842 ,  2.11531318,  2.75933921,
+       -2.14643411, -0.76947784]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-04-07 11:53:04.605] INFO     Target G1 -> start_ik_ok=True goal_ik_ok=None start_collision_free=True goal_collision_free=None
+[2026-04-07 11:53:04.606] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260407_115303.md
+[2026-04-07 11:53:04.606] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260407_115303.json
+[2026-04-07 11:53:08.624] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 11:53:09.130] INFO     Auto home pose for G1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 11:53:13.030] INFO     start
+[2026-04-07 11:53:13.030] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.49116504192352295, -0.11236444115638733, 1.0620967149734497), (-0.7071065902709961, -1.6858734852576163e-06, 5.900557766835846e-07, 0.70710688829422)), 'conf': array([ 0.10255945, -1.28483695,  1.99852205,  2.3951524 , -0.10789341,
+        0.81837732,  2.14906156, -1.7200842 ,  2.11531318,  2.75933921,
+       -2.14643411, -0.76947784]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-04-07 11:53:15.947] INFO     Holding start endpoint IK pose in GUI at bar xyz=[0.4912, -0.1124, 1.0621]. Press Enter to continue.
+[2026-04-07 11:53:20.483] INFO     Target G1 -> start_ik_ok=True goal_ik_ok=None start_collision_free=True goal_collision_free=None
+[2026-04-07 11:53:20.484] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260407_115308.md
+[2026-04-07 11:53:20.484] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260407_115308.json
+[2026-04-07 11:58:49.070] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 11:58:49.656] INFO     Auto home pose for G3: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 11:58:53.069] INFO     start
+[2026-04-07 11:58:53.069] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.4911637306213379, 0.2955141067504883, 1.0622800588607788), (-1.6619637790427078e-06, 0.7071065902709961, 0.70710688829422, -5.718191005144035e-07)), 'conf': None, 'ik_ok': False, 'collision_free': None, 'collision_output': None}
+[2026-04-07 11:58:53.073] INFO     Target G3 -> start_ik_ok=False goal_ik_ok=None start_collision_free=None goal_collision_free=None
+[2026-04-07 11:58:53.074] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260407_115849.md
+[2026-04-07 11:58:53.074] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260407_115849.json
+[2026-04-07 12:02:56.637] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 12:02:57.227] INFO     Auto home pose for G4: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 12:03:01.224] INFO     start
+[2026-04-07 12:03:01.224] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.4911637306213379, 0.2955140769481659, 1.0622018575668335), (0.7070947885513306, 5.840665266987344e-07, 1.6918443179747555e-06, 0.7071186900138855)), 'conf': None, 'ik_ok': False, 'collision_free': None, 'collision_output': None}
+[2026-04-07 12:03:01.228] INFO     Target G4 -> start_ik_ok=False goal_ik_ok=None start_collision_free=None goal_collision_free=None
+[2026-04-07 12:03:01.230] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260407_120256.md
+[2026-04-07 12:03:01.230] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260407_120256.json
+[2026-04-07 12:03:54.600] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 12:03:55.166] INFO     Auto home pose for G4: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 12:03:59.115] INFO     Auto home pose for G4: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 12:03:59.265] INFO     start
+[2026-04-07 12:03:59.265] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.4911637306213379, 0.2955140769481659, 1.0622018575668335), (0.7070947885513306, 5.840665266987344e-07, 1.6918443179747555e-06, 0.7071186900138855)), 'conf': None, 'ik_ok': False, 'collision_free': None, 'collision_output': None}
+[2026-04-07 12:03:59.270] INFO     Target G4 -> start_ik_ok=False goal_ik_ok=None start_collision_free=None goal_collision_free=None
+[2026-04-07 12:03:59.271] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260407_120354.md
+[2026-04-07 12:03:59.271] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260407_120354.json
+[2026-04-07 12:05:33.282] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 12:05:33.854] INFO     Auto home pose for G4: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 12:05:38.993] INFO     Auto home pose for G4: flip_yaw=3.1416 rad, bar_axis_theta=-0.0349 rad, alignment_score=0.9994
+[2026-04-07 12:05:38.994] INFO     Updated G4 auto home pose after IK validation.
+[2026-04-07 12:05:39.062] INFO     start
+[2026-04-07 12:05:39.062] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.49116456508636475, 0.024959057569503784, 1.062158226966858), (-0.7070109844207764, -0.012342601083219051, -0.012339910492300987, 0.7069871425628662)), 'conf': array([ 0.10431347, -1.25538883,  1.96566782,  2.22341411, -0.13719475,
+       -2.14937099,  2.35111873, -1.38726121,  2.06135488,  2.44910999,
+       -2.32496524,  2.35138758]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-04-07 12:05:39.063] INFO     Holding start endpoint IK pose in GUI at bar xyz=[0.4912, 0.025, 1.0622]. Press Enter to continue.
+[2026-04-07 12:05:49.975] INFO     Target G4 -> start_ik_ok=True goal_ik_ok=None start_collision_free=True goal_collision_free=None
+[2026-04-07 12:05:49.977] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260407_120533.md
+[2026-04-07 12:05:49.977] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260407_120533.json
+[2026-04-07 12:05:53.616] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 12:05:54.129] INFO     Auto home pose for G3: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 12:05:59.275] INFO     Auto home pose for G3: flip_yaw=3.1416 rad, bar_axis_theta=0.0349 rad, alignment_score=0.9994
+[2026-04-07 12:05:59.275] INFO     Updated G3 auto home pose after IK validation.
+[2026-04-07 12:05:59.345] INFO     start
+[2026-04-07 12:05:59.345] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.49116459488868713, 0.024959012866020203, 1.0620800256729126), (0.01234010886400938, 0.7069992423057556, -0.706998884677887, 0.012342420406639576)), 'conf': array([ 0.1042994 , -1.25538161,  1.9656581 ,  2.22335881, -0.13718154,
+       -2.14931276,  2.35112415, -1.3872633 ,  2.06135853,  2.44910719,
+       -2.32497151,  2.35138686]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-04-07 12:05:59.345] INFO     Holding start endpoint IK pose in GUI at bar xyz=[0.4912, 0.025, 1.0621]. Press Enter to continue.
+[2026-04-07 12:06:03.712] INFO     Target G3 -> start_ik_ok=True goal_ik_ok=None start_collision_free=True goal_collision_free=None
+[2026-04-07 12:06:03.712] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260407_120553.md
+[2026-04-07 12:06:03.712] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260407_120553.json
+[2026-04-07 12:06:11.845] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 12:06:12.411] INFO     Auto home pose for V1: flip_yaw=3.1416 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-07 12:06:16.433] INFO     Auto home pose for V1: flip_yaw=0.0000 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-07 12:06:16.434] INFO     Updated V1 auto home pose after IK validation.
+[2026-04-07 12:06:16.508] INFO     start
+[2026-04-07 12:06:16.508] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.4911656379699707, -0.30976343154907227, 1.0622799396514893), (-0.5267615914344788, 0.4717226028442383, 0.47172439098358154, 0.5267601609230042)), 'conf': array([ 0.21238259, -1.40722036,  1.41895655, -0.9504747 , -0.72776079,
+       -1.35047416,  1.10228556, -1.78862268,  1.93215086,  1.97014431,
+       -0.68842531, -0.08172059]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-04-07 12:06:16.508] INFO     Holding start endpoint IK pose in GUI at bar xyz=[0.4912, -0.3098, 1.0623]. Press Enter to continue.
+[2026-04-07 12:06:32.795] INFO     Target V1 -> start_ik_ok=True goal_ik_ok=None start_collision_free=True goal_collision_free=None
+[2026-04-07 12:06:32.798] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260407_120611.md
+[2026-04-07 12:06:32.798] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260407_120611.json
+[2026-04-07 12:06:37.306] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 12:06:37.796] INFO     Auto home pose for V2: flip_yaw=3.1416 rad, bar_axis_theta=0.8378 rad, alignment_score=1.0000
+[2026-04-07 12:06:41.539] INFO     Auto home pose for V2: flip_yaw=3.1416 rad, bar_axis_theta=0.8378 rad, alignment_score=1.0000
+[2026-04-07 12:06:41.618] INFO     start
+[2026-04-07 12:06:41.618] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.491164892911911, -0.06916238367557526, 1.0622633695602417), (0.4649744927883148, -0.5327277183532715, 0.5327292084693909, 0.4649726450443268)), 'conf': array([ 0.32305679, -1.12717136,  2.06051647,  1.57260215, -1.09023096,
+       -1.82935776,  2.24518316, -1.72945891,  1.64721962, -1.82128728,
+       -2.53337859,  0.18574789]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-04-07 12:06:41.619] INFO     Holding start endpoint IK pose in GUI at bar xyz=[0.4912, -0.0692, 1.0623]. Press Enter to continue.
+[2026-04-07 12:06:56.798] INFO     Target V2 -> start_ik_ok=True goal_ik_ok=None start_collision_free=True goal_collision_free=None
+[2026-04-07 12:06:56.799] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260407_120637.md
+[2026-04-07 12:06:56.799] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260407_120637.json
+[2026-04-07 12:07:02.319] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 12:07:02.817] INFO     Auto home pose for H1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 12:07:06.604] INFO     Auto home pose for H1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 12:07:06.680] INFO     start
+[2026-04-07 12:07:06.681] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.4911653399467468, -0.21388518810272217, 1.0622799396514893), (0.5000004768371582, -0.49999964237213135, 0.500001072883606, 0.4999988079071045)), 'conf': array([ 0.10255954, -1.28483735,  1.99852279,  2.39515368, -0.1078935 ,
+        0.81837536,  1.69504267, -2.049635  ,  2.02384452, -3.10723043,
+       -1.69039603, -0.77475207]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-04-07 12:07:06.681] INFO     Holding start endpoint IK pose in GUI at bar xyz=[0.4912, -0.2139, 1.0623]. Press Enter to continue.
+[2026-04-07 12:07:09.155] INFO     Target H1 -> start_ik_ok=True goal_ik_ok=None start_collision_free=True goal_collision_free=None
+[2026-04-07 12:07:09.158] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260407_120702.md
+[2026-04-07 12:07:09.158] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260407_120702.json
+[2026-04-07 12:07:13.067] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 12:07:13.558] INFO     Auto home pose for D1: flip_yaw=3.1416 rad, bar_axis_theta=-0.1047 rad, alignment_score=1.0000
+[2026-04-07 12:07:17.406] INFO     Auto home pose for D1: flip_yaw=0.0000 rad, bar_axis_theta=-0.1047 rad, alignment_score=1.0000
+[2026-04-07 12:07:17.406] INFO     Updated D1 auto home pose after IK validation.
+[2026-04-07 12:07:17.477] INFO     start
+[2026-04-07 12:07:17.477] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.49178415536880493, -0.09072211384773254, 1.06305992603302), (-0.49692803621292114, 0.505190372467041, 0.5047094821929932, 0.49306538701057434)), 'conf': array([ 0.10938177, -1.23109569,  1.94393789,  2.03460598, -0.20383468,
+        1.17601054,  2.31174513, -1.53543147,  2.059054  ,  2.73172884,
+       -2.37206185, -0.70571782]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-04-07 12:07:17.478] INFO     Holding start endpoint IK pose in GUI at bar xyz=[0.4918, -0.0907, 1.0631]. Press Enter to continue.
+[2026-04-07 12:07:29.842] INFO     Target D1 -> start_ik_ok=True goal_ik_ok=None start_collision_free=True goal_collision_free=None
+[2026-04-07 12:07:29.845] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260407_120713.md
+[2026-04-07 12:07:29.845] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260407_120713.json
+[2026-04-07 12:08:12.162] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 12:08:12.736] INFO     Auto home pose for V3: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 12:08:16.475] INFO     Auto home pose for V3: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 12:08:16.545] INFO     start
+[2026-04-07 12:08:16.545] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.49116477370262146, -0.03476336598396301, 1.0622800588607788), (0.2453286051750183, -0.663184642791748, 0.6631854176521301, 0.2453264445066452)), 'conf': array([ 0.10255954, -1.28483717,  1.99852259,  2.39515294, -0.10789359,
+        0.81837599,  2.43256805, -1.23926006,  1.98690933,  2.41183711,
+       -2.43118544, -0.76435866]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-04-07 12:08:16.546] INFO     Holding start endpoint IK pose in GUI at bar xyz=[0.4912, -0.0348, 1.0623]. Press Enter to continue.
+[2026-04-07 12:08:21.078] INFO     Target V3 -> start_ik_ok=True goal_ik_ok=None start_collision_free=True goal_collision_free=None
+[2026-04-07 12:08:21.079] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260407_120812.md
+[2026-04-07 12:08:21.080] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260407_120812.json
+[2026-04-07 12:10:46.801] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 12:10:47.414] INFO     Auto home pose for V1: flip_yaw=3.1416 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-07 12:10:51.481] INFO     Auto home pose for V1: flip_yaw=0.0000 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-07 12:10:51.481] INFO     Updated V1 auto home pose after IK validation.
+[2026-04-07 12:10:51.668] INFO     start
+[2026-04-07 12:10:51.668] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.4911656379699707, -0.30976343154907227, 1.0622799396514893), (-0.5267615914344788, 0.4717226028442383, 0.47172439098358154, 0.5267601609230042)), 'conf': array([ 0.21238259, -1.40722036,  1.41895655, -0.9504747 , -0.72776079,
+       -1.35047416,  1.10228556, -1.78862268,  1.93215086,  1.97014431,
+       -0.68842531, -0.08172059]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-04-07 12:10:51.668] INFO     Holding start endpoint IK pose in GUI at bar xyz=[0.4912, -0.3098, 1.0623]. Press Enter to continue.
+[2026-04-07 12:11:11.754] INFO     Target V1 -> start_ik_ok=True goal_ik_ok=None start_collision_free=True goal_collision_free=None
+[2026-04-07 12:11:11.756] INFO     Saved real-state endpoint-IK report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_endpoint_ik_report_20260407_121046.md
+[2026-04-07 12:11:11.756] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260407_121046.json
+[2026-04-07 12:11:17.800] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 12:11:18.295] INFO     Auto home pose for G1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 12:11:18.502] INFO     Auto home pose for G1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 12:11:19.879] INFO     Target G1 -> success=True runtime=0.964s waypoints=137
+[2026-04-07 12:11:20.389] INFO     Auto home pose for G2: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 12:11:20.517] INFO     Auto home pose for G2: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 12:11:23.395] INFO     Target G2 -> success=True runtime=2.459s waypoints=228
+[2026-04-07 12:11:23.901] INFO     Auto home pose for G3: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 12:11:24.227] INFO     Auto home pose for G3: flip_yaw=3.1416 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 12:11:24.227] INFO     Updated G3 auto home pose after IK validation.
+[2026-04-07 12:11:24.410] INFO     Target G3 -> success=False runtime=0.001s waypoints=0
+[2026-04-07 12:11:24.911] INFO     Auto home pose for G4: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 12:11:25.236] INFO     Auto home pose for G4: flip_yaw=3.1416 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 12:11:25.236] INFO     Updated G4 auto home pose after IK validation.
+[2026-04-07 12:11:25.421] INFO     Target G4 -> success=False runtime=0.001s waypoints=0
+[2026-04-07 12:11:25.920] INFO     Auto home pose for V1: flip_yaw=3.1416 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-07 12:11:26.214] INFO     Auto home pose for V1: flip_yaw=0.0000 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-07 12:11:26.214] INFO     Updated V1 auto home pose after IK validation.
+[2026-04-07 12:11:29.983] INFO     Target V1 -> success=True runtime=3.316s waypoints=256
+[2026-04-07 12:11:30.476] INFO     Auto home pose for V2: flip_yaw=3.1416 rad, bar_axis_theta=0.8378 rad, alignment_score=1.0000
+[2026-04-07 12:11:30.603] INFO     Auto home pose for V2: flip_yaw=3.1416 rad, bar_axis_theta=0.8378 rad, alignment_score=1.0000
+[2026-04-07 12:11:31.582] INFO     Target V2 -> success=True runtime=0.625s waypoints=110
+[2026-04-07 12:11:32.076] INFO     Auto home pose for H1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 12:11:32.201] INFO     Auto home pose for H1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 12:11:33.291] INFO     Target H1 -> success=True runtime=0.778s waypoints=55
+[2026-04-07 12:11:33.779] INFO     Auto home pose for D1: flip_yaw=3.1416 rad, bar_axis_theta=-0.1047 rad, alignment_score=1.0000
+[2026-04-07 12:11:34.043] INFO     Auto home pose for D1: flip_yaw=0.0000 rad, bar_axis_theta=-0.1047 rad, alignment_score=1.0000
+[2026-04-07 12:11:34.044] INFO     Updated D1 auto home pose after IK validation.
+[2026-04-07 12:11:36.844] INFO     Target D1 -> success=True runtime=2.452s waypoints=110
+[2026-04-07 12:11:37.371] INFO     Auto home pose for V3: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 12:11:37.490] INFO     Auto home pose for V3: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 12:14:04.817] INFO     Target V3 -> success=False runtime=147.150s waypoints=0
+[2026-04-07 12:14:04.832] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260407_121117.md
+[2026-04-07 12:14:04.832] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260407_121117.json
+[2026-04-07 13:25:45.508] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 13:25:46.094] INFO     Auto home pose for V1: flip_yaw=3.1416 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-07 13:25:46.321] INFO     Auto home pose for V1: flip_yaw=0.0000 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-07 13:25:46.321] INFO     Updated V1 auto home pose after IK validation.
+[2026-04-07 13:26:00.462] INFO     Target V1 -> success=True runtime=5.591s waypoints=256
+[2026-04-07 13:39:31.611] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 13:39:32.246] INFO     Auto home pose for V1: flip_yaw=3.1416 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-07 13:39:32.632] INFO     Auto home pose for V1: flip_yaw=0.0000 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-07 13:39:32.632] INFO     Updated V1 auto home pose after IK validation.
+[2026-04-07 13:39:36.643] INFO     Target V1 -> success=True runtime=3.536s waypoints=256
+[2026-04-07 13:39:36.649] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260407_133931.md
+[2026-04-07 13:39:36.649] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260407_133931.json
+[2026-04-07 13:39:45.932] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 13:39:46.488] INFO     Auto home pose for G1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 13:39:46.697] INFO     Auto home pose for G1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 13:39:48.051] INFO     Target G1 -> success=True runtime=0.967s waypoints=137
+[2026-04-07 13:39:48.590] INFO     Auto home pose for G2: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 13:39:48.740] INFO     Auto home pose for G2: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 13:39:51.669] INFO     Target G2 -> success=True runtime=2.486s waypoints=228
+[2026-04-07 13:39:52.218] INFO     Auto home pose for G3: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 13:39:52.542] INFO     Auto home pose for G3: flip_yaw=3.1416 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 13:39:52.542] INFO     Updated G3 auto home pose after IK validation.
+[2026-04-07 13:39:52.724] INFO     Target G3 -> success=False runtime=0.000s waypoints=0
+[2026-04-07 13:39:53.269] INFO     Auto home pose for G4: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 13:39:53.596] INFO     Auto home pose for G4: flip_yaw=3.1416 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 13:39:53.596] INFO     Updated G4 auto home pose after IK validation.
+[2026-04-07 13:39:53.779] INFO     Target G4 -> success=False runtime=0.001s waypoints=0
+[2026-04-07 13:39:54.293] INFO     Auto home pose for V1: flip_yaw=3.1416 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-07 13:39:54.602] INFO     Auto home pose for V1: flip_yaw=0.0000 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-07 13:39:54.602] INFO     Updated V1 auto home pose after IK validation.
+[2026-04-07 13:39:58.388] INFO     Target V1 -> success=True runtime=3.295s waypoints=256
+[2026-04-07 13:39:58.922] INFO     Auto home pose for V2: flip_yaw=3.1416 rad, bar_axis_theta=0.8378 rad, alignment_score=1.0000
+[2026-04-07 13:39:59.052] INFO     Auto home pose for V2: flip_yaw=3.1416 rad, bar_axis_theta=0.8378 rad, alignment_score=1.0000
+[2026-04-07 13:40:00.044] INFO     Target V2 -> success=True runtime=0.640s waypoints=110
+[2026-04-07 13:40:00.545] INFO     Auto home pose for H1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 13:40:00.673] INFO     Auto home pose for H1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 13:40:01.784] INFO     Target H1 -> success=True runtime=0.792s waypoints=55
+[2026-04-07 13:40:02.301] INFO     Auto home pose for D1: flip_yaw=3.1416 rad, bar_axis_theta=-0.1047 rad, alignment_score=1.0000
+[2026-04-07 13:40:02.589] INFO     Auto home pose for D1: flip_yaw=0.0000 rad, bar_axis_theta=-0.1047 rad, alignment_score=1.0000
+[2026-04-07 13:40:02.589] INFO     Updated D1 auto home pose after IK validation.
+[2026-04-07 13:40:05.310] INFO     Target D1 -> success=True runtime=2.384s waypoints=110
+[2026-04-07 13:40:05.797] INFO     Auto home pose for V3: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 13:40:05.915] INFO     Auto home pose for V3: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 13:42:31.644] INFO     Target V3 -> success=False runtime=145.569s waypoints=0
+[2026-04-07 13:42:31.655] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260407_133945.md
+[2026-04-07 13:42:31.655] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260407_133945.json
+[2026-04-07 14:05:12.184] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 14:05:12.757] INFO     Auto home pose for V1: flip_yaw=3.1416 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-07 14:05:13.140] INFO     Auto home pose for V1: flip_yaw=0.0000 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-07 14:05:13.140] INFO     Updated V1 auto home pose after IK validation.
+[2026-04-07 14:05:20.424] INFO     Target V1 -> success=True runtime=3.293s waypoints=256
+[2026-04-07 14:05:20.429] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260407_140512.md
+[2026-04-07 14:05:20.429] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260407_140512.json
+[2026-04-07 14:17:42.376] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 14:17:42.954] INFO     Auto home pose for V1: flip_yaw=3.1416 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-07 14:17:43.341] INFO     Auto home pose for V1: flip_yaw=0.0000 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-07 14:17:43.341] INFO     Updated V1 auto home pose after IK validation.
+[2026-04-07 14:17:54.651] INFO     Saved target V1 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V1_20260407_141742_trajectory.json
+[2026-04-07 14:17:54.652] INFO     Target V1 -> success=True runtime=5.559s waypoints=387
+[2026-04-07 14:17:54.658] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260407_141742.md
+[2026-04-07 14:17:54.658] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260407_141742.json
+[2026-04-07 14:28:51.962] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 14:28:52.602] INFO     Auto home pose for V1: flip_yaw=3.1416 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-07 14:28:52.999] INFO     Auto home pose for V1: flip_yaw=0.0000 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-07 14:28:52.999] INFO     Updated V1 auto home pose after IK validation.
+[2026-04-07 14:29:05.436] INFO     Saved target V1 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V1_20260407_142851_trajectory.json
+[2026-04-07 14:29:05.436] INFO     Target V1 -> success=True runtime=5.399s waypoints=387
+[2026-04-07 14:29:05.446] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260407_142851.md
+[2026-04-07 14:29:05.446] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260407_142851.json
+[2026-04-07 14:30:44.423] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 14:30:44.975] INFO     Auto home pose for G1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 14:30:45.190] INFO     Auto home pose for G1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 14:30:48.074] INFO     Saved target G1 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_G1_20260407_143044_trajectory.json
+[2026-04-07 14:30:48.901] WARNING  Skipping trajectory video capture because writing /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_G1_20260407_143044_trajectory.mp4 failed: Could not find a backend to open `/Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_G1_20260407_143044_trajectory.mp4`` with iomode `w?`.
+Based on the extension, the following plugins might add capable backends:
+  FFMPEG:  pip install imageio[ffmpeg]
+  pyav:  pip install imageio[pyav]
+[2026-04-07 14:30:48.901] INFO     Target G1 -> success=True runtime=0.992s waypoints=137
+[2026-04-07 14:30:49.493] INFO     Auto home pose for G2: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 14:30:49.624] INFO     Auto home pose for G2: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 14:30:54.333] INFO     Saved target G2 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_G2_20260407_143044_trajectory.json
+[2026-04-07 14:30:54.336] WARNING  Skipping trajectory video capture because writing /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_G2_20260407_143044_trajectory.mp4 failed: Could not find a backend to open `/Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_G2_20260407_143044_trajectory.mp4`` with iomode `w?`.
+Based on the extension, the following plugins might add capable backends:
+  FFMPEG:  pip install imageio[ffmpeg]
+  pyav:  pip install imageio[pyav]
+[2026-04-07 14:30:54.336] INFO     Target G2 -> success=True runtime=2.500s waypoints=228
+[2026-04-07 14:30:54.853] INFO     Auto home pose for G3: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 14:30:55.224] INFO     Auto home pose for G3: flip_yaw=3.1416 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 14:30:55.224] INFO     Updated G3 auto home pose after IK validation.
+[2026-04-07 14:30:55.424] INFO     Target G3 -> success=False runtime=0.001s waypoints=0
+[2026-04-07 14:30:55.971] INFO     Auto home pose for G4: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 14:30:56.321] INFO     Auto home pose for G4: flip_yaw=3.1416 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 14:30:56.321] INFO     Updated G4 auto home pose after IK validation.
+[2026-04-07 14:30:56.522] INFO     Target G4 -> success=False runtime=0.001s waypoints=0
+[2026-04-07 14:30:57.025] INFO     Auto home pose for V1: flip_yaw=3.1416 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-07 14:30:57.327] INFO     Auto home pose for V1: flip_yaw=0.0000 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-07 14:30:57.327] INFO     Updated V1 auto home pose after IK validation.
+[2026-04-07 14:31:08.612] INFO     Saved target V1 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V1_20260407_143044_trajectory.json
+[2026-04-07 14:31:08.615] WARNING  Skipping trajectory video capture because writing /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V1_20260407_143044_trajectory.mp4 failed: Could not find a backend to open `/Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V1_20260407_143044_trajectory.mp4`` with iomode `w?`.
+Based on the extension, the following plugins might add capable backends:
+  FFMPEG:  pip install imageio[ffmpeg]
+  pyav:  pip install imageio[pyav]
+[2026-04-07 14:31:08.615] INFO     Target V1 -> success=True runtime=5.411s waypoints=387
+[2026-04-07 14:31:09.145] INFO     Auto home pose for V2: flip_yaw=3.1416 rad, bar_axis_theta=0.8378 rad, alignment_score=1.0000
+[2026-04-07 14:31:09.278] INFO     Auto home pose for V2: flip_yaw=3.1416 rad, bar_axis_theta=0.8378 rad, alignment_score=1.0000
+[2026-04-07 14:31:11.984] INFO     Saved target V2 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V2_20260407_143044_trajectory.json
+[2026-04-07 14:31:11.987] WARNING  Skipping trajectory video capture because writing /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V2_20260407_143044_trajectory.mp4 failed: Could not find a backend to open `/Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V2_20260407_143044_trajectory.mp4`` with iomode `w?`.
+Based on the extension, the following plugins might add capable backends:
+  FFMPEG:  pip install imageio[ffmpeg]
+  pyav:  pip install imageio[pyav]
+[2026-04-07 14:31:11.987] INFO     Target V2 -> success=True runtime=0.658s waypoints=110
+[2026-04-07 14:31:12.931] INFO     Auto home pose for H1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 14:31:13.063] INFO     Auto home pose for H1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 14:31:15.244] INFO     Saved target H1 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_H1_20260407_143044_trajectory.json
+[2026-04-07 14:31:15.247] WARNING  Skipping trajectory video capture because writing /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_H1_20260407_143044_trajectory.mp4 failed: Could not find a backend to open `/Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_H1_20260407_143044_trajectory.mp4`` with iomode `w?`.
+Based on the extension, the following plugins might add capable backends:
+  FFMPEG:  pip install imageio[ffmpeg]
+  pyav:  pip install imageio[pyav]
+[2026-04-07 14:31:15.247] INFO     Target H1 -> success=True runtime=0.798s waypoints=55
+[2026-04-07 14:31:15.873] INFO     Auto home pose for D1: flip_yaw=3.1416 rad, bar_axis_theta=-0.1047 rad, alignment_score=1.0000
+[2026-04-07 14:31:16.144] INFO     Auto home pose for D1: flip_yaw=0.0000 rad, bar_axis_theta=-0.1047 rad, alignment_score=1.0000
+[2026-04-07 14:31:16.144] INFO     Updated D1 auto home pose after IK validation.
+[2026-04-07 14:31:21.001] INFO     Saved target D1 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_D1_20260407_143044_trajectory.json
+[2026-04-07 14:31:21.003] WARNING  Skipping trajectory video capture because writing /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_D1_20260407_143044_trajectory.mp4 failed: Could not find a backend to open `/Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_D1_20260407_143044_trajectory.mp4`` with iomode `w?`.
+Based on the extension, the following plugins might add capable backends:
+  FFMPEG:  pip install imageio[ffmpeg]
+  pyav:  pip install imageio[pyav]
+[2026-04-07 14:31:21.004] INFO     Target D1 -> success=True runtime=2.494s waypoints=110
+[2026-04-07 14:31:21.542] INFO     Auto home pose for V3: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 14:31:21.664] INFO     Auto home pose for V3: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 14:33:45.887] INFO     Target V3 -> success=False runtime=144.041s waypoints=0
+[2026-04-07 14:33:45.899] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260407_143044.md
+[2026-04-07 14:33:45.899] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260407_143044.json
+[2026-04-07 16:52:45.966] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 16:53:56.192] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 16:53:56.786] INFO     Auto home pose for G1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 16:53:57.011] INFO     Auto home pose for G1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 16:53:59.809] INFO     Saved target G1 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_G1_20260407_165356_trajectory.json
+[2026-04-07 16:54:03.142] INFO     Saved target G1 trajectory video: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_G1_20260407_165356_trajectory.mp4
+[2026-04-07 16:54:03.142] INFO     Target G1 -> success=True runtime=0.949s waypoints=137
+[2026-04-07 16:54:03.679] INFO     Auto home pose for G2: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 16:54:03.804] INFO     Auto home pose for G2: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 16:54:08.499] INFO     Saved target G2 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_G2_20260407_165356_trajectory.json
+[2026-04-07 16:54:12.505] INFO     Saved target G2 trajectory video: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_G2_20260407_165356_trajectory.mp4
+[2026-04-07 16:54:12.505] INFO     Target G2 -> success=True runtime=2.468s waypoints=228
+[2026-04-07 16:54:13.067] INFO     Auto home pose for G3: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 16:54:13.866] INFO     Auto home pose for G3: flip_yaw=3.1416 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 16:54:13.866] INFO     Updated G3 auto home pose after IK validation.
+[2026-04-07 16:54:14.132] INFO     Target G3 -> success=False runtime=0.001s waypoints=0
+[2026-04-07 16:54:14.779] INFO     Auto home pose for G4: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 16:54:15.114] INFO     Auto home pose for G4: flip_yaw=3.1416 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 16:54:15.114] INFO     Updated G4 auto home pose after IK validation.
+[2026-04-07 16:54:15.326] INFO     Target G4 -> success=False runtime=0.001s waypoints=0
+[2026-04-07 16:54:15.889] INFO     Auto home pose for V1: flip_yaw=3.1416 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-07 16:54:16.489] INFO     Auto home pose for V1: flip_yaw=0.0000 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-07 16:54:16.489] INFO     Updated V1 auto home pose after IK validation.
+[2026-04-07 16:54:28.089] INFO     Saved target V1 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V1_20260407_165356_trajectory.json
+[2026-04-07 16:54:34.934] INFO     Saved target V1 trajectory video: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V1_20260407_165356_trajectory.mp4
+[2026-04-07 16:54:34.934] INFO     Target V1 -> success=True runtime=5.304s waypoints=387
+[2026-04-07 16:54:35.470] INFO     Auto home pose for V2: flip_yaw=3.1416 rad, bar_axis_theta=0.8378 rad, alignment_score=1.0000
+[2026-04-07 16:54:35.602] INFO     Auto home pose for V2: flip_yaw=3.1416 rad, bar_axis_theta=0.8378 rad, alignment_score=1.0000
+[2026-04-07 16:54:37.914] INFO     Saved target V2 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V2_20260407_165356_trajectory.json
+[2026-04-07 16:54:39.957] INFO     Saved target V2 trajectory video: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V2_20260407_165356_trajectory.mp4
+[2026-04-07 16:54:39.957] INFO     Target V2 -> success=True runtime=0.756s waypoints=110
+[2026-04-07 16:54:40.520] INFO     Auto home pose for H1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 16:54:40.657] INFO     Auto home pose for H1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 16:54:42.523] INFO     Saved target H1 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_H1_20260407_165356_trajectory.json
+[2026-04-07 16:54:43.539] INFO     Saved target H1 trajectory video: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_H1_20260407_165356_trajectory.mp4
+[2026-04-07 16:54:43.540] INFO     Target H1 -> success=True runtime=0.781s waypoints=55
+[2026-04-07 16:54:44.087] INFO     Auto home pose for D1: flip_yaw=3.1416 rad, bar_axis_theta=-0.1047 rad, alignment_score=1.0000
+[2026-04-07 16:54:44.360] INFO     Auto home pose for D1: flip_yaw=0.0000 rad, bar_axis_theta=-0.1047 rad, alignment_score=1.0000
+[2026-04-07 16:54:44.360] INFO     Updated D1 auto home pose after IK validation.
+[2026-04-07 16:54:49.283] INFO     Saved target D1 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_D1_20260407_165356_trajectory.json
+[2026-04-07 16:54:51.220] INFO     Saved target D1 trajectory video: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_D1_20260407_165356_trajectory.mp4
+[2026-04-07 16:54:51.220] INFO     Target D1 -> success=True runtime=2.486s waypoints=110
+[2026-04-07 16:54:51.753] INFO     Auto home pose for V3: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 16:54:51.873] INFO     Auto home pose for V3: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000

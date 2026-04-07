@@ -15,8 +15,8 @@ import pybullet_planning as pp
 from husky_assembly_tamp.motion_planner.stage1.minimal_rrt import (
     TOOL_LINK_LEFT,
     build_default_paths,
-    setup_stage1_scene,
-    teardown_stage1_scene,
+    setup_planning_scene,
+    teardown_planning_scene,
 )
 from husky_assembly_tamp.motion_planner.stage1.trajectory_io import load_joint_trajectory_as_path
 
@@ -33,6 +33,28 @@ def load_metadata(json_path: Optional[str]) -> Optional[Dict[str, Any]]:
 
 def dict_to_pose(data: Dict[str, Sequence[float]]) -> PoseLike:
     return (np.asarray(data["position"], dtype=float), np.asarray(data["quaternion"], dtype=float))
+
+
+def metadata_to_scene_spec(metadata: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not metadata or not metadata.get("scene_spec"):
+        return None
+    raw_spec = dict(metadata["scene_spec"])
+    scene_spec: Dict[str, Any] = dict(raw_spec)
+    for key in ("mobile_base_from_tool0_left_home", "world_from_bar_start", "world_from_bar_goal"):
+        if key in scene_spec:
+            scene_spec[key] = dict_to_pose(scene_spec[key])
+    for key in ("start_joint_values", "end_joint_values"):
+        if key in scene_spec:
+            scene_spec[key] = np.asarray(scene_spec[key], dtype=float)
+    if "grasp_targets" in scene_spec:
+        scene_spec["grasp_targets"] = [
+            (dict_to_pose(bar_pose), dict_to_pose(tool_pose))
+            for bar_pose, tool_pose in scene_spec["grasp_targets"]
+        ]
+    for built_bar in scene_spec.get("built_bars", []):
+        if "pose" in built_bar:
+            built_bar["pose"] = dict_to_pose(built_bar["pose"])
+    return scene_spec
 
 
 def reconstruct_bar_path(scene: Dict[str, Any], joint_path: Sequence[np.ndarray]) -> List[PoseLike]:
@@ -69,7 +91,7 @@ def parse_args():
     default_grasp_json, default_start_state, default_end_state = build_default_paths()
     parser = argparse.ArgumentParser(description="Replay an exported Stage 3 JointTrajectory with a waypoint slider")
     parser.add_argument("--trajectory-json", type=str, required=True, help="Path to exported JointTrajectory JSON")
-    parser.add_argument("--metadata-json", type=str, default=None, help="Optional sidecar metadata JSON from goal_pose_study.py")
+    parser.add_argument("--metadata-json", type=str, default=None, help="Optional sidecar metadata JSON with start/goal and pose path")
     parser.add_argument("--grasp-json", type=str, default=default_grasp_json, help="Path to grasp JSON file")
     parser.add_argument("--start-state", type=str, default=default_start_state, help="Path to start RobotCellState JSON")
     parser.add_argument("--end-state", type=str, default=default_end_state, help="Path to baseline end RobotCellState JSON")
@@ -79,7 +101,13 @@ def parse_args():
 def main() -> None:
     args = parse_args()
     metadata = load_metadata(args.metadata_json)
-    scene = setup_stage1_scene(args.grasp_json, args.start_state, args.end_state, use_gui=True)
+    scene = setup_planning_scene(
+        args.grasp_json,
+        args.start_state,
+        args.end_state,
+        use_gui=True,
+        scene_spec=metadata_to_scene_spec(metadata),
+    )
     try:
         joint_path = load_joint_trajectory_as_path(args.trajectory_json)
         pose_path: Optional[List[PoseLike]] = None
@@ -103,7 +131,7 @@ def main() -> None:
         pp.set_pose(scene["bar_body"], pose_path[0])
         run_slider_loop(scene, joint_path, pose_path)
     finally:
-        teardown_stage1_scene()
+        teardown_planning_scene()
 
 
 if __name__ == "__main__":

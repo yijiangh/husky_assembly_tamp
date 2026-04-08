@@ -33,6 +33,7 @@ from husky_assembly_tamp.motion_planner.stage1.minimal_rrt import (
     solve_endpoint_dual_arm_ik,
     teardown_planning_scene,
 )
+from husky_assembly_tamp.motion_planner.stage1.path_validation import import_matplotlib_pyplot
 from husky_assembly_tamp.motion_planner.stage1.path_validation import DEFAULT_DENSE_JOINT_VALIDATION_STEP_RAD
 from husky_assembly_tamp.motion_planner.stage1.trajectory_io import save_path_as_joint_trajectory
 from husky_assembly_tamp.utils.params import DATA_DIR
@@ -84,6 +85,74 @@ def to_jsonable(value):
     if isinstance(value, list):
         return [to_jsonable(item) for item in value]
     return value
+
+
+def save_smoothing_comparison_plot(
+    *,
+    out_path: str,
+    target_name: str,
+    path_before_smoothing: Sequence[Any],
+    path_after_smoothing: Sequence[Any],
+    smoothing_profile: Optional[Dict[str, Any]],
+) -> Optional[str]:
+    if not path_before_smoothing or not path_after_smoothing:
+        return None
+    plt = import_matplotlib_pyplot()
+    if plt is None:
+        return None
+
+    before_xyz = np.asarray([np.asarray(pose[0], dtype=float) for pose in path_before_smoothing], dtype=float)
+    after_xyz = np.asarray([np.asarray(pose[0], dtype=float) for pose in path_after_smoothing], dtype=float)
+
+    fig = plt.figure(figsize=(8.5, 6.5))
+    ax = fig.add_subplot(111, projection="3d")
+    ax.plot(
+        before_xyz[:, 0],
+        before_xyz[:, 1],
+        before_xyz[:, 2],
+        color="#ff7f0e",
+        linewidth=1.8,
+        alpha=0.85,
+        label=f"before smoothing ({len(path_before_smoothing)} wp)",
+    )
+    ax.plot(
+        after_xyz[:, 0],
+        after_xyz[:, 1],
+        after_xyz[:, 2],
+        color="#1f77b4",
+        linewidth=2.2,
+        alpha=0.95,
+        label=f"after smoothing ({len(path_after_smoothing)} wp)",
+    )
+    ax.scatter(before_xyz[0, 0], before_xyz[0, 1], before_xyz[0, 2], color="#2ca02c", s=36, label="start")
+    ax.scatter(after_xyz[-1, 0], after_xyz[-1, 1], after_xyz[-1, 2], color="#d62728", s=36, label="goal")
+    ax.set_xlabel("x (m)")
+    ax.set_ylabel("y (m)")
+    ax.set_zlabel("z (m)")
+    ax.set_title(target_name)
+    cost_before = None if smoothing_profile is None else smoothing_profile.get("cost_before")
+    cost_after = None if smoothing_profile is None else smoothing_profile.get("cost_after")
+    subtitle = "Cost before: n/a | Cost after: n/a"
+    if cost_before is not None and cost_after is not None:
+        subtitle = f"Cost before: {float(cost_before):.4f} | Cost after: {float(cost_after):.4f}"
+    fig.suptitle("Bar path before and after smoothing", fontsize=13)
+    fig.text(0.5, 0.93, subtitle, ha="center", va="top", fontsize=10)
+    ax.legend(loc="best")
+
+    all_xyz = np.vstack([before_xyz, after_xyz])
+    mins = np.min(all_xyz, axis=0)
+    maxs = np.max(all_xyz, axis=0)
+    center = 0.5 * (mins + maxs)
+    radius = 0.5 * float(np.max(maxs - mins))
+    radius = max(radius, 0.05)
+    ax.set_xlim(center[0] - radius, center[0] + radius)
+    ax.set_ylim(center[1] - radius, center[1] + radius)
+    ax.set_zlim(center[2] - radius, center[2] + radius)
+
+    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.90))
+    fig.savefig(out_path, dpi=180)
+    plt.close(fig)
+    return out_path
 
 
 def save_replay_bundle(
@@ -327,6 +396,9 @@ def summarize_result(target_name: str, spec: Dict[str, Any], result: Dict[str, A
         "path_found": bool(result.get("path_found", result.get("path") is not None)),
         "success": bool(result["success"]),
         "runtime_s": float(result.get("runtime_s", 0.0)),
+        "planning_time_s": float(result.get("planning_time_s", 0.0)),
+        "smoothing_time_s": float(result.get("smoothing_time_s", 0.0)),
+        "validation_time_s": float(result.get("validation_time_s", 0.0)),
         "waypoints": int(len(result["path"])) if result["path"] is not None else 0,
         "max_dq_rad": continuity.get("max_delta_rad"),
         "joint_continuity_ok": validation.get("joint_continuity_ok"),
@@ -337,6 +409,7 @@ def summarize_result(target_name: str, spec: Dict[str, Any], result: Dict[str, A
         "trajectory_json": result.get("trajectory_json"),
         "trajectory_metadata_json": result.get("trajectory_metadata_json"),
         "replay_command": result.get("replay_command"),
+        "smoothing_plot": result.get("smoothing_plot"),
     }
 
 
@@ -379,8 +452,8 @@ def write_report(report_path: str, json_relpath: str, args, common_start: Dict[s
     lines.append("")
     lines.append("## Results")
     lines.append("")
-    lines.append("| Target | Bar body | Bar dims (m) | Goal xyz (m) | Path found | Validated success | Runtime (s) | Waypoints | Max dq (rad) | Collision-free | Failure reason | Validation plot | Video MP4 | Replay command |")
-    lines.append("| --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | --- | --- | --- | --- | --- |")
+    lines.append("| Target | Bar body | Bar dims (m) | Goal xyz (m) | Path found | Validated success | Planning time (s) | Smoothing time (s) | Validation time (s) | Waypoints | Max dq (rad) | Collision-free | Failure reason | Validation plot | Video MP4 | Replay command |")
+    lines.append("| --- | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | --- |")
     for item in summaries:
         validation_plot = item["validation_plot"]
         validation_label = os.path.relpath(validation_plot, reports_dir()) if validation_plot else "-"
@@ -403,7 +476,10 @@ def write_report(report_path: str, json_relpath: str, args, common_start: Dict[s
             f"`{np.round(item['goal_position'], 4).tolist()}` | "
             f"{'PASS' if item['path_found'] else 'FAIL'} | "
             f"{'PASS' if item['success'] else 'FAIL'} | "
-            f"{item['runtime_s']:.3f} | {item['waypoints']} | "
+            f"{item['planning_time_s']:.3f} | "
+            f"{item['smoothing_time_s']:.3f} | "
+            f"{item['validation_time_s']:.3f} | "
+            f"{item['waypoints']} | "
             f"{max_dq_text} | "
             f"{'PASS' if item['collision_free'] else 'FAIL'} | "
             f"{item['collision_reason'] or '-'} | "
@@ -412,6 +488,28 @@ def write_report(report_path: str, json_relpath: str, args, common_start: Dict[s
             f"{replay_cell} |"
         )
     lines.append("")
+    validation_plot_items = [item for item in summaries if item.get("validation_plot")]
+    if validation_plot_items:
+        lines.append("## Validation Plots")
+        lines.append("")
+        for item in validation_plot_items:
+            validation_plot = item["validation_plot"]
+            validation_label = os.path.relpath(validation_plot, reports_dir())
+            lines.append(f"### {item['target_name']}")
+            lines.append("")
+            lines.append(f"![Validation plot for {item['target_name']}]({validation_label})")
+            lines.append("")
+    smoothing_plot_items = [item for item in summaries if item.get("smoothing_plot")]
+    if smoothing_plot_items:
+        lines.append("## Smoothing Plots")
+        lines.append("")
+        for item in smoothing_plot_items:
+            smoothing_plot = item["smoothing_plot"]
+            smoothing_label = os.path.relpath(smoothing_plot, reports_dir())
+            lines.append(f"### {item['target_name']}")
+            lines.append("")
+            lines.append(f"![Smoothing comparison for {item['target_name']}]({smoothing_label})")
+            lines.append("")
     successes = sum(1 for item in summaries if item["success"])
     lines.append(f"Validated Stage {args.stage} success: `{successes} / {len(summaries)}` targets.")
     lines.append("")
@@ -807,7 +905,7 @@ def parse_args() -> argparse.Namespace:
         default=True,
         help="When GUI is enabled, open the slider-based path viewer after planning each target",
     )
-    parser.add_argument("--position-res", type=float, default=0.01, help="Pose interpolation step in meters")
+    parser.add_argument("--position-res", type=float, default=0.005, help="Pose interpolation step in meters")
     parser.add_argument("--rotation-res", type=float, default=0.025, help="Pose interpolation step in radians")
     parser.add_argument("--endpoint-ik-attempts", type=int, default=20, help="Endpoint IK retry budget")
     parser.add_argument(
@@ -864,7 +962,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Diagnose endpoint IK; in Stage 3 this also reports collision-free status and collision pairs",
     )
-    parser.add_argument("--video-frame-step", type=int, default=2, help="Record every Nth waypoint into batch trajectory videos")
+    parser.add_argument("--video-frame-step", type=int, default=1, help="Record every Nth waypoint into batch trajectory videos")
     parser.add_argument("--video-frame-sleep", type=float, default=0.02, help="Replay frame interval used to derive batch video FPS")
     args = parser.parse_args()
     args.batch_targets_mode = not targets_flag_provided
@@ -952,6 +1050,20 @@ def main() -> None:
                 swap_grasps=args.swap_grasps,
             )
             summary = summarize_result(target_name, spec, result)
+            if result.get("path_before_smoothing") is not None and result.get("path") is not None:
+                smoothing_plot_path = save_smoothing_comparison_plot(
+                    out_path=os.path.join(
+                        support_dir(),
+                        f"real_state_study_stage{args.stage}_{target_name}_{timestamp}_smoothing.png",
+                    ),
+                    target_name=target_name,
+                    path_before_smoothing=result["path_before_smoothing"],
+                    path_after_smoothing=result["path"],
+                    smoothing_profile=result.get("smoothing"),
+                )
+                summary["smoothing_plot"] = smoothing_plot_path
+                if smoothing_plot_path is not None:
+                    logger.info("Saved target %s smoothing comparison plot: %s", target_name, smoothing_plot_path)
             if result.get("path") is not None and result.get("path_confs") is not None:
                 trajectory_json_path = os.path.join(
                     support_dir(),
@@ -981,8 +1093,7 @@ def main() -> None:
                 summary["replay_command"] = replay_command
                 logger.info("Saved target %s replay trajectory: %s", target_name, trajectory_json_path)
             if (
-                args.batch_targets_mode
-                and not args.gui
+                not args.gui
                 and result.get("path") is not None
                 and result.get("path_confs") is not None
             ):

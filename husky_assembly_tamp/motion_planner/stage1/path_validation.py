@@ -179,6 +179,10 @@ def save_validation_plot(
     *,
     out_path: str,
     stage: int,
+    target_label: Optional[str],
+    position_res: Optional[float],
+    rotation_res: Optional[float],
+    dense_joint_validation_step_rad: float,
     collision_free: Optional[bool],
     joint_continuity_ok: Optional[bool],
     joint_continuity_max_delta_rad: Optional[float],
@@ -193,12 +197,13 @@ def save_validation_plot(
     relative_rotation_axis_threshold_deg: float,
     collision_breakdown: Dict[str, Any],
     joint_path_deg: Optional[np.ndarray],
+    original_joint_path_deg: Optional[np.ndarray] = None,
 ) -> Optional[str]:
     plt = import_matplotlib_pyplot()
     if plt is None:
         return None
 
-    fig, axes = plt.subplots(5, 1, figsize=(11, 14), sharex=False)
+    fig, axes = plt.subplots(6, 1, figsize=(11, 17), sharex=False)
     title = (
         f"Stage {stage} validation | collisions: {status_label(collision_free)}"
         f" | joint continuity: {status_label(joint_continuity_ok)}"
@@ -206,24 +211,51 @@ def save_validation_plot(
     if joint_continuity_max_delta_rad is not None:
         title += f" (max dq={joint_continuity_max_delta_rad:.3f} rad, thresh={joint_continuity_threshold_rad:.3f})"
     fig.suptitle(title)
+    subtitle_parts = []
+    if target_label:
+        subtitle_parts.append(f"target: {target_label}")
+    if position_res is not None:
+        subtitle_parts.append(f"position res: {position_res:g}")
+    if rotation_res is not None:
+        subtitle_parts.append(f"rotation res: {rotation_res:g}")
+    subtitle_parts.append(
+        f"dense joint validation step: {dense_joint_validation_step_rad:.6f} rad "
+        f"({np.degrees(dense_joint_validation_step_rad):.3f} deg)"
+    )
+    fig.text(0.5, 0.955, " | ".join(subtitle_parts), ha="center", va="top", fontsize=9)
 
     def path_fraction_xs(num_samples: int) -> np.ndarray:
         if num_samples <= 1:
             return np.zeros(max(0, num_samples), dtype=float)
         return np.linspace(0.0, 1.0, num=num_samples)
 
+    def set_shared_nonnegative_ylim(axis_pair, value_sequences: Sequence[Sequence[float]]) -> None:
+        values = [np.asarray(seq, dtype=float).reshape(-1) for seq in value_sequences if len(seq) > 0]
+        if not values:
+            return
+        max_value = float(max(np.max(values_arr) for values_arr in values))
+        upper = max(max_value * 1.05, 1e-9)
+        for axis in axis_pair:
+            axis.set_ylim(0.0, upper)
+
+    refined_translation_mm = 1000.0 * np.asarray(relative_translation_errors_m, dtype=float)
+    coarse_translation_mm = (
+        1000.0 * np.asarray(coarse_relative_translation_errors_m, dtype=float)
+        if coarse_relative_translation_errors_m
+        else np.asarray([], dtype=float)
+    )
+
     if relative_translation_errors_m:
         xs = path_fraction_xs(len(relative_translation_errors_m))
-        relative_translation_errors_mm = 1000.0 * np.asarray(relative_translation_errors_m, dtype=float)
         axes[0].plot(
             xs,
-            relative_translation_errors_mm,
+            refined_translation_mm,
             color="#1f77b4",
             linewidth=1.8,
             label="refined",
         )
         axes[0].set_ylabel("Translation drift (mm)")
-        axes[0].set_title("Left-right end-effector relative translation drift (refined)")
+        axes[0].set_title("Left-right end-effector relative translation drift (refined smoothed path)")
         axes[0].legend(loc="best")
     else:
         axes[0].axis("off")
@@ -234,7 +266,7 @@ def save_validation_plot(
         coarse_translation_xs = path_fraction_xs(len(coarse_relative_translation_errors_m))
         axes[1].plot(
             coarse_translation_xs,
-            1000.0 * np.asarray(coarse_relative_translation_errors_m, dtype=float),
+            coarse_translation_mm,
             color="#ff7f0e",
             linewidth=1.6,
             marker="o",
@@ -243,14 +275,26 @@ def save_validation_plot(
             label="coarse before refinement",
         )
         axes[1].set_ylabel("Translation drift (mm)")
-        axes[1].set_title("Left-right end-effector relative translation drift (coarse before refinement)")
+        axes[1].set_title("Left-right end-effector relative translation drift (smoothed path before refinement)")
         axes[1].legend(loc="best")
     else:
         axes[1].axis("off")
         reason = joint_path_reason or "joint path unavailable"
         axes[1].text(0.5, 0.5, f"No coarse translation drift plot available.\nReason: {reason}", ha="center", va="center", fontsize=11)
 
+    set_shared_nonnegative_ylim((axes[0], axes[1]), (refined_translation_mm, coarse_translation_mm))
+
     color_map = {"x": "#d9534f", "y": "#5cb85c", "z": "#337ab7"}
+    refined_rotation_values = [
+        np.asarray(relative_rotation_axis_errors_deg[axis_name], dtype=float)
+        for axis_name in AXIS_NAMES
+        if relative_rotation_axis_errors_deg.get(axis_name)
+    ]
+    coarse_rotation_values = [
+        np.asarray(coarse_relative_rotation_axis_errors_deg[axis_name], dtype=float)
+        for axis_name in AXIS_NAMES
+        if coarse_relative_rotation_axis_errors_deg and coarse_relative_rotation_axis_errors_deg.get(axis_name)
+    ]
     if relative_rotation_axis_errors_deg.get("x"):
         xs = path_fraction_xs(len(relative_rotation_axis_errors_deg["x"]))
         for axis_name in AXIS_NAMES:
@@ -262,7 +306,7 @@ def save_validation_plot(
                 label=f"{axis_name}-axis",
             )
         axes[2].set_ylabel("Axis drift (deg)")
-        axes[2].set_title("Left-right end-effector relative rotation drift by axis (refined)")
+        axes[2].set_title("Left-right end-effector relative rotation drift by axis (refined smoothed path)")
         axes[2].legend(loc="best")
     else:
         axes[2].axis("off")
@@ -283,12 +327,14 @@ def save_validation_plot(
                 label=f"{axis_name}-axis",
             )
         axes[3].set_ylabel("Axis drift (deg)")
-        axes[3].set_title("Left-right end-effector relative rotation drift by axis (coarse before refinement)")
+        axes[3].set_title("Left-right end-effector relative rotation drift by axis (smoothed path before refinement)")
         axes[3].legend(loc="best")
     else:
         axes[3].axis("off")
         reason = joint_path_reason or "joint path unavailable"
         axes[3].text(0.5, 0.5, f"No coarse rotation drift plot available.\nReason: {reason}", ha="center", va="center", fontsize=11)
+
+    set_shared_nonnegative_ylim((axes[2], axes[3]), [*refined_rotation_values, *coarse_rotation_values])
 
     for axis in axes[:4]:
         axis.set_xlim(0.0, 1.0)
@@ -309,12 +355,33 @@ def save_validation_plot(
             )
         axes[4].set_ylabel("Joint angle (deg)")
         axes[4].set_xlabel("Waypoint index")
-        axes[4].set_title("Joint value evolution (unwrapped for display)")
+        axes[4].set_title("Joint value evolution on smoothed path (unwrapped for display)")
         axes[4].legend(loc="center left", bbox_to_anchor=(1.01, 0.5), fontsize=8, ncol=1)
     else:
         axes[4].axis("off")
         reason = joint_path_reason or "joint path unavailable"
         axes[4].text(0.5, 0.5, f"No joint evolution plot available.\nReason: {reason}", ha="center", va="center", fontsize=11)
+
+    if original_joint_path_deg is not None and original_joint_path_deg.size > 0:
+        xs = np.arange(original_joint_path_deg.shape[0], dtype=int)
+        labels = get_joint_labels(original_joint_path_deg.shape[1])
+        for joint_idx in range(original_joint_path_deg.shape[1]):
+            axes[5].plot(
+                xs,
+                original_joint_path_deg[:, joint_idx],
+                linewidth=1.2,
+                marker="o",
+                markersize=2.5,
+                markeredgewidth=0.0,
+                label=labels[joint_idx],
+            )
+        axes[5].set_ylabel("Joint angle (deg)")
+        axes[5].set_xlabel("Waypoint index")
+        axes[5].set_title("Joint value evolution on original unsmoothed path (unwrapped for display)")
+        axes[5].legend(loc="center left", bbox_to_anchor=(1.01, 0.5), fontsize=8, ncol=1)
+    else:
+        axes[5].axis("off")
+        axes[5].text(0.5, 0.5, "No original unsmoothed joint path available.", ha="center", va="center", fontsize=11)
 
     details = [
         f"joint path source: {joint_path_source or 'n/a'}",
@@ -325,7 +392,7 @@ def save_validation_plot(
     ]
     fig.text(0.02, 0.02, " | ".join(details), fontsize=9)
 
-    fig.tight_layout(rect=(0.0, 0.04, 0.86, 0.95))
+    fig.tight_layout(rect=(0.0, 0.04, 0.86, 0.93))
     fig.savefig(out_path, dpi=180)
     plt.close(fig)
     return out_path
@@ -346,6 +413,10 @@ def validate_stage_trajectory(
     relative_translation_threshold_m: float = 1e-3,
     relative_rotation_axis_threshold_deg: float = float(np.degrees(1e-2)),
     dense_joint_validation_step_rad: float = DEFAULT_DENSE_JOINT_VALIDATION_STEP_RAD,
+    target_label: Optional[str] = None,
+    position_res: Optional[float] = None,
+    rotation_res: Optional[float] = None,
+    original_joint_path: Optional[Sequence[FullConf]] = None,
     use_angle_normalization: bool = False,
     reports_dir: str = REPORTS_DIR,
 ) -> Dict[str, Any]:
@@ -385,6 +456,10 @@ def validate_stage_trajectory(
         result["plot_path"] = save_validation_plot(
             out_path=out_path,
             stage=stage,
+            target_label=target_label,
+            position_res=position_res,
+            rotation_res=rotation_res,
+            dense_joint_validation_step_rad=dense_joint_validation_step_rad,
             collision_free=None,
             joint_continuity_ok=None,
             joint_continuity_max_delta_rad=None,
@@ -397,6 +472,7 @@ def validate_stage_trajectory(
             relative_rotation_axis_threshold_deg=relative_rotation_axis_threshold_deg,
             collision_breakdown=result["collision_breakdown"],
             joint_path_deg=None,
+            original_joint_path_deg=None,
         )
         return result
 
@@ -405,6 +481,10 @@ def validate_stage_trajectory(
         result["plot_path"] = save_validation_plot(
             out_path=out_path,
             stage=stage,
+            target_label=target_label,
+            position_res=position_res,
+            rotation_res=rotation_res,
+            dense_joint_validation_step_rad=dense_joint_validation_step_rad,
             collision_free=None,
             joint_continuity_ok=None,
             joint_continuity_max_delta_rad=None,
@@ -417,6 +497,7 @@ def validate_stage_trajectory(
             relative_rotation_axis_threshold_deg=relative_rotation_axis_threshold_deg,
             collision_breakdown=result["collision_breakdown"],
             joint_path_deg=None,
+            original_joint_path_deg=None,
         )
         return result
 
@@ -478,6 +559,12 @@ def validate_stage_trajectory(
     # remain apples-to-apples when angle normalization is toggled.
     normalized_joint_path = [maybe_normalize_angles(conf, use_angle_normalization) for conf in joint_path]
     joint_path_deg = unwrap_joint_path_for_display_deg(normalized_joint_path)
+    original_joint_path_deg = None
+    if original_joint_path is not None:
+        normalized_original_joint_path = [
+            maybe_normalize_angles(conf, use_angle_normalization) for conf in original_joint_path
+        ]
+        original_joint_path_deg = unwrap_joint_path_for_display_deg(normalized_original_joint_path)
     coarse_relative_translation_errors_m, coarse_relative_rotation_axis_errors_deg = compute_relative_transform_drift(
         robot,
         arm_joints,
@@ -588,6 +675,10 @@ def validate_stage_trajectory(
     result["plot_path"] = save_validation_plot(
         out_path=out_path,
         stage=stage,
+        target_label=target_label,
+        position_res=position_res,
+        rotation_res=rotation_res,
+        dense_joint_validation_step_rad=dense_joint_validation_step_rad,
         collision_free=result["collision_free"],
         joint_continuity_ok=result["joint_continuity_ok"],
         joint_continuity_max_delta_rad=result["joint_continuity_max_delta_rad"],
@@ -602,5 +693,6 @@ def validate_stage_trajectory(
         relative_rotation_axis_threshold_deg=relative_rotation_axis_threshold_deg,
         collision_breakdown=result["collision_breakdown"],
         joint_path_deg=joint_path_deg,
+        original_joint_path_deg=original_joint_path_deg,
     )
     return result

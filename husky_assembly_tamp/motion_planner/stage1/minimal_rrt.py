@@ -486,6 +486,59 @@ def pose_distance(pose1: PoseLike, pose2: PoseLike, dist_metric: str, feature_po
     return float(np.linalg.norm(np.array([dx[0], dx[1], dx[2], rot_dist], dtype=float)))
 
 
+def _pose_path_cost(path_poses: Sequence[PoseLike], dist_metric: str, feature_points: Sequence[np.ndarray]) -> float:
+    if len(path_poses) < 2:
+        return 0.0
+    return float(
+        sum(
+            pose_distance(path_poses[idx], path_poses[idx + 1], dist_metric, feature_points)
+            for idx in range(len(path_poses) - 1)
+        )
+    )
+
+
+def _pose_path_inflection_indices(
+    path_poses: Sequence[PoseLike],
+    feature_points: Sequence[np.ndarray],
+    tolerance: float = 1e-3,
+) -> List[int]:
+    """Return dense-path indices that act like geometric control points."""
+    if not path_poses:
+        return []
+    if len(path_poses) <= 2:
+        return list(range(len(path_poses)))
+    feature_vecs = [pose_to_feature_vec(pose, feature_points) for pose in path_poses]
+    if any(vec is None for vec in feature_vecs):
+        return list(range(len(path_poses)))
+
+    indices = [0]
+    anchor_idx = 0
+    last_direction: Optional[np.ndarray] = None
+    for idx in range(1, len(feature_vecs)):
+        anchor_vec = np.asarray(feature_vecs[anchor_idx], dtype=float)
+        current_vec = np.asarray(feature_vecs[idx], dtype=float)
+        delta = current_vec - anchor_vec
+        delta_norm = float(np.linalg.norm(delta))
+        if delta_norm <= tolerance:
+            continue
+        direction = delta / delta_norm
+        if last_direction is None:
+            last_direction = direction
+            continue
+        if float(np.linalg.norm(direction - last_direction)) > tolerance:
+            waypoint_idx = idx - 1
+            if waypoint_idx > indices[-1]:
+                indices.append(waypoint_idx)
+            anchor_idx = waypoint_idx
+            anchor_vec = np.asarray(feature_vecs[anchor_idx], dtype=float)
+            delta = current_vec - anchor_vec
+            delta_norm = float(np.linalg.norm(delta))
+            last_direction = None if delta_norm <= tolerance else (delta / delta_norm)
+    if indices[-1] != len(path_poses) - 1:
+        indices.append(len(path_poses) - 1)
+    return indices
+
+
 def sample_pose(
     robot: int,
     goal_pose: PoseLike,
@@ -974,6 +1027,121 @@ def reconstruct_joint_path_for_pose_path(
     return joint_path, None
 
 
+def smooth_dual_arm_pose_path(
+    path_poses: Sequence[PoseLike],
+    path_confs: Optional[Sequence[FullConf]],
+    *,
+    scene: Dict[str, Any],
+    pose_collision_fn: Optional[Callable[[PoseLike], bool]] = None,
+    joint_collision_fn: Optional[Callable[[FullConf], bool]] = None,
+    dist_metric: str = "feature",
+    feature_points: Optional[Sequence[np.ndarray]] = None,
+    position_res: float = 0.05,
+    rotation_res: float = 0.1,
+    joint_continuity_threshold_rad: Optional[float] = None,
+    use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
+    max_smooth_iterations: int = 100,
+    max_time: float = 10.0,
+    min_cost_improvement: float = 0.0,
+    inflection_tolerance: float = 1e-3,
+    random_seed: Optional[int] = None,
+    profile_out: Optional[Dict[str, Any]] = None,
+) -> Tuple[List[PoseLike], Optional[List[FullConf]]]:
+    feature_points = list(feature_points) if feature_points is not None else get_bar_feature_points()
+    current_poses = list(path_poses)
+    current_confs = None if path_confs is None else [np.asarray(conf, dtype=float) for conf in path_confs]
+    if current_confs is not None and len(current_confs) != len(current_poses):
+        raise ValueError("Pose and joint path lengths must match for smoothing.")
+
+    current_cost = _pose_path_cost(current_poses, dist_metric, feature_points)
+    if profile_out is not None:
+        profile_out.clear()
+        profile_out.update(
+            {
+                "cost_before": float(current_cost),
+                "cost_after": float(current_cost),
+                "waypoints_before": len(current_poses),
+                "waypoints_after": len(current_poses),
+                "shortcut_attempts": 0,
+                "cost_rejections": 0,
+                "ik_failures": 0,
+                "continuity_rejections": 0,
+                "collision_rejections": 0,
+                "accepts": 0,
+                "smooth_time_s": 0.0,
+            }
+        )
+    if len(current_poses) < 3 or max_smooth_iterations <= 0 or max_time <= 0.0:
+        return current_poses, current_confs
+
+    rng = np.random.default_rng(random_seed)
+    start_time = time.perf_counter()
+    inflection_indices = _pose_path_inflection_indices(current_poses, feature_points, inflection_tolerance)
+    for _ in range(max_smooth_iterations):
+        if (time.perf_counter() - start_time) >= max_time:
+            break
+        if len(inflection_indices) < 3:
+            break
+
+        bump_profile_count(profile_out, "shortcut_attempts")
+        ii = int(rng.integers(0, len(inflection_indices) - 2))
+        jj = int(rng.integers(ii + 2, len(inflection_indices)))
+        i = int(inflection_indices[ii])
+        j = int(inflection_indices[jj])
+        shortcut = list(
+            pp.interpolate_poses(
+                current_poses[i],
+                current_poses[j],
+                pos_step_size=max(position_res, 1e-6),
+                ori_step_size=max(rotation_res, 1e-6),
+            )
+        )
+        candidate_poses = list(current_poses[:i]) + shortcut + list(current_poses[j + 1 :])
+        new_cost = _pose_path_cost(candidate_poses, dist_metric, feature_points)
+        if (current_cost - new_cost) <= min_cost_improvement:
+            bump_profile_count(profile_out, "cost_rejections")
+            continue
+
+        if pose_collision_fn is not None and any(pose_collision_fn(pose) for pose in shortcut[1:-1]):
+            bump_profile_count(profile_out, "collision_rejections")
+            continue
+
+        candidate_confs = None
+        if current_confs is not None:
+            candidate_suffix, failure_reason = reconstruct_joint_path_for_pose_path(
+                scene=scene,
+                pose_path=candidate_poses[i:],
+                start_conf=current_confs[i],
+                joint_collision_fn=joint_collision_fn,
+                joint_continuity_threshold_rad=joint_continuity_threshold_rad,
+                use_angle_normalization=use_angle_normalization,
+                profile_out=profile_out,
+            )
+            if candidate_suffix is None:
+                if failure_reason and failure_reason.startswith("ik_failure"):
+                    bump_profile_count(profile_out, "ik_failures")
+                elif failure_reason and failure_reason.startswith("continuity"):
+                    bump_profile_count(profile_out, "continuity_rejections")
+                elif failure_reason and failure_reason.startswith("collision"):
+                    bump_profile_count(profile_out, "collision_rejections")
+                continue
+            candidate_confs = list(current_confs[:i]) + list(candidate_suffix)
+            if len(candidate_confs) != len(candidate_poses):
+                raise RuntimeError("Smoothed pose and joint path lengths diverged.")
+
+        current_poses = candidate_poses
+        current_confs = candidate_confs
+        current_cost = new_cost
+        inflection_indices = _pose_path_inflection_indices(current_poses, feature_points, inflection_tolerance)
+        bump_profile_count(profile_out, "accepts")
+
+    if profile_out is not None:
+        profile_out["cost_after"] = float(current_cost)
+        profile_out["waypoints_after"] = len(current_poses)
+        profile_out["smooth_time_s"] = float(time.perf_counter() - start_time)
+    return current_poses, current_confs
+
+
 def update_debug_tree(
     debug_tree_out: Optional[Dict],
     success: bool,
@@ -1413,6 +1581,7 @@ def setup_planning_scene(
         "ghost_start": ghost_start,
         "ghost_goal": ghost_goal,
         "world_from_bar_grasp": world_from_bar_grasp,
+        "bar_label": bar_label,
         "world_from_bar_start": world_from_bar_start,
         "world_from_bar_goal": world_from_bar_goal,
         "mobile_base_from_tool0_left_home": (
@@ -1462,6 +1631,10 @@ def run_stage_trial(
     endpoint_ik_attempts: int = 20,
     random_seed: Optional[int] = None,
     enable_collision: bool = True,
+    enable_smoothing: bool = True,
+    smooth_max_iterations: int = 100,
+    smooth_max_time: float = 10.0,
+    smooth_min_cost_improvement: float = 0.0,
     joint_continuity_threshold_rad: Optional[float] = DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
     use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
     lock_renderer_during_search: bool = False,
@@ -1488,6 +1661,8 @@ def run_stage_trial(
             "scene": scene,
             "path": None,
             "path_confs": None,
+            "path_before_smoothing": None,
+            "path_confs_before_smoothing": None,
             "joint_continuity": None,
             "validation_joint_path": None,
             "validation_joint_path_source": None,
@@ -1499,16 +1674,21 @@ def run_stage_trial(
             },
             "start_conf": None,
             "goal_conf": None,
+            "planning_time_s": 0.0,
+            "smoothing_time_s": 0.0,
+            "validation_time_s": 0.0,
             "runtime_s": 0.0,
             "path_found": False,
             "success": False,
             "failure_reason": failure_reason,
+            "smoothing": None,
         }
 
     try:
         enable_ik = stage >= 2
         enforce_collision = stage >= 3
         rng = np.random.default_rng(random_seed)
+        smooth_profile: Optional[Dict[str, Any]] = None
         start_conf = None
         goal_conf = None
         joint_collision_fn = None
@@ -1622,11 +1802,57 @@ def run_stage_trial(
             profile_out=planner_profile_out,
         )
         t0 = time.perf_counter()
+        planning_time_s = 0.0
+        smoothing_time_s = 0.0
+        validation_time_s = 0.0
+        t_plan = time.perf_counter()
         if use_gui and lock_renderer_during_search:
             with pp.LockRenderer():
                 path, path_confs = plan_pose_rrt(**planning_kwargs)
         else:
             path, path_confs = plan_pose_rrt(**planning_kwargs)
+        planning_time_s = time.perf_counter() - t_plan
+
+        path_before_smoothing = None if path is None else list(path)
+        path_confs_before_smoothing = None if path_confs is None else [np.asarray(conf, dtype=float) for conf in path_confs]
+        if path is not None and enable_smoothing:
+            smooth_profile = {}
+            smooth_pose_collision_fn = (
+                get_pose_collision_fn(scene["bar_body"], scene["collision_obstacles"], True)
+                if (stage == 1 and enable_collision)
+                else None
+            )
+            t_smooth = time.perf_counter()
+            path, path_confs = smooth_dual_arm_pose_path(
+                path_poses=path,
+                path_confs=path_confs,
+                scene=scene,
+                pose_collision_fn=smooth_pose_collision_fn,
+                joint_collision_fn=joint_collision_fn,
+                dist_metric=dist_metric,
+                feature_points=scene["feature_points"],
+                position_res=position_res,
+                rotation_res=rotation_res,
+                joint_continuity_threshold_rad=(joint_continuity_threshold_rad if enable_ik else None),
+                use_angle_normalization=use_angle_normalization,
+                max_smooth_iterations=smooth_max_iterations,
+                max_time=smooth_max_time,
+                min_cost_improvement=smooth_min_cost_improvement,
+                random_seed=random_seed,
+                profile_out=smooth_profile,
+            )
+            smoothing_time_s = time.perf_counter() - t_smooth
+            if planner_profile_out is not None:
+                planner_profile_out["smoothing"] = smooth_profile
+            logger.info(
+                "Smoothing: cost %.4f -> %.4f, waypoints %d -> %d, accepts %d/%d",
+                float(smooth_profile.get("cost_before", 0.0)),
+                float(smooth_profile.get("cost_after", 0.0)),
+                int(smooth_profile.get("waypoints_before", 0)),
+                int(smooth_profile.get("waypoints_after", 0)),
+                int(smooth_profile.get("accepts", 0)),
+                int(smooth_profile.get("shortcut_attempts", 0)),
+            )
         runtime_s = time.perf_counter() - t0
 
         if path is not None:
@@ -1677,16 +1903,22 @@ def run_stage_trial(
             scene=scene,
             path=path,
             joint_path=validation_joint_path,
+            original_joint_path=path_confs_before_smoothing,
             joint_path_source=validation_joint_path_source,
             joint_path_reason=validation_joint_path_reason,
             urdf_path=HUSKY_DUAL_URDF_PATH,
             srdf_path=HUSKY_DUAL_SRDF_PATH,
             grasp_mask_links=STAGE3_GRASP_MASK_LINKS,
+            target_label=scene.get("bar_label"),
+            position_res=position_res,
+            rotation_res=rotation_res,
             use_angle_normalization=use_angle_normalization,
         )
         if validation_reports_dir is not None:
             validation_kwargs["reports_dir"] = validation_reports_dir
+        t_validation = time.perf_counter()
         validation = validate_stage_trajectory(**validation_kwargs)
+        validation_time_s = time.perf_counter() - t_validation
         log_validation_summary(validation)
         path_found = path is not None
         validated_success = path_found
@@ -1699,15 +1931,21 @@ def run_stage_trial(
             "scene": scene,
             "path": path,
             "path_confs": path_confs,
+            "path_before_smoothing": path_before_smoothing,
+            "path_confs_before_smoothing": path_confs_before_smoothing,
             "joint_continuity": coarse_continuity,
             "validation_joint_path": validation_joint_path,
             "validation_joint_path_source": validation_joint_path_source,
             "validation": validation,
             "start_conf": start_conf,
             "goal_conf": goal_conf,
+            "planning_time_s": planning_time_s,
+            "smoothing_time_s": smoothing_time_s,
+            "validation_time_s": validation_time_s,
             "runtime_s": runtime_s,
             "path_found": path_found,
             "success": bool(validated_success),
+            "smoothing": smooth_profile,
         }
     except Exception:
         teardown_planning_scene()
@@ -1937,6 +2175,20 @@ def main() -> None:
     parser.add_argument("--endpoint-ik-attempts", type=int, default=20, help="Max random seeds used when solving endpoint IK in Stage 2/3")
     parser.add_argument("--random-seed", type=int, default=None, help="Random seed")
     parser.add_argument(
+        "--smoothing",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Run dual-arm-aware shortcut smoothing on the planned path (use --no-smoothing to disable)",
+    )
+    parser.add_argument("--smooth-iterations", type=int, default=100, help="Max shortcut iterations for path smoothing")
+    parser.add_argument("--smooth-max-time", type=float, default=10.0, help="Max wall time (s) for path smoothing")
+    parser.add_argument(
+        "--smooth-min-improvement",
+        type=float,
+        default=0.0,
+        help="Minimum pose-path cost improvement required to accept a smoothing shortcut",
+    )
+    parser.add_argument(
         "--joint-continuity-threshold",
         type=float,
         default=DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
@@ -1979,6 +2231,10 @@ def main() -> None:
         endpoint_ik_attempts=args.endpoint_ik_attempts,
         random_seed=args.random_seed,
         enable_collision=args.floating_collision,
+        enable_smoothing=args.smoothing,
+        smooth_max_iterations=args.smooth_iterations,
+        smooth_max_time=args.smooth_max_time,
+        smooth_min_cost_improvement=args.smooth_min_improvement,
         joint_continuity_threshold_rad=args.joint_continuity_threshold,
         use_angle_normalization=args.use_angle_normalization,
         lock_renderer_during_search=args.lock_renderer_during_search,

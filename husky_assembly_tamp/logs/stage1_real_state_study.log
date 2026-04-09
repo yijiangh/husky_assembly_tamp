@@ -868,3 +868,178 @@ Based on the extension, the following plugins might add capable backends:
 [2026-04-07 16:54:51.220] INFO     Target D1 -> success=True runtime=2.486s waypoints=110
 [2026-04-07 16:54:51.753] INFO     Auto home pose for V3: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
 [2026-04-07 16:54:51.873] INFO     Auto home pose for V3: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 16:57:16.142] INFO     Target V3 -> success=False runtime=144.071s waypoints=0
+[2026-04-07 16:57:16.157] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260407_165356.md
+[2026-04-07 16:57:16.157] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260407_165356.json
+[2026-04-07 17:01:05.888] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-07 17:01:06.449] INFO     Auto home pose for G1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 17:01:06.671] INFO     Auto home pose for G1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 17:01:11.654] INFO     Saved target G1 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_G1_20260407_170105_trajectory.json
+[2026-04-07 17:01:22.249] INFO     Saved target G1 trajectory video: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_G1_20260407_170105_trajectory.mp4
+[2026-04-07 17:01:22.250] INFO     Target G1 -> success=True runtime=2.130s waypoints=310
+[2026-04-07 17:01:22.786] INFO     Auto home pose for G2: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 17:01:22.916] INFO     Auto home pose for G2: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 17:01:29.007] INFO     Saved target G2 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_G2_20260407_170105_trajectory.json
+[2026-04-07 17:01:39.065] INFO     Saved target G2 trajectory video: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_G2_20260407_170105_trajectory.mp4
+[2026-04-07 17:01:39.065] INFO     Target G2 -> success=True runtime=3.843s waypoints=294
+[2026-04-07 17:01:39.592] INFO     Auto home pose for G3: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 17:01:39.926] INFO     Auto home pose for G3: flip_yaw=3.1416 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 17:01:39.926] INFO     Updated G3 auto home pose after IK validation.
+[2026-04-07 17:01:40.132] INFO     Target G3 -> success=False runtime=0.001s waypoints=0
+[2026-04-07 17:01:40.643] INFO     Auto home pose for G4: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 17:01:40.999] INFO     Auto home pose for G4: flip_yaw=3.1416 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 17:01:40.999] INFO     Updated G4 auto home pose after IK validation.
+[2026-04-07 17:01:41.206] INFO     Target G4 -> success=False runtime=0.001s waypoints=0
+[2026-04-07 17:01:41.731] INFO     Auto home pose for V1: flip_yaw=3.1416 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-07 17:01:42.035] INFO     Auto home pose for V1: flip_yaw=0.0000 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-07 17:01:42.035] INFO     Updated V1 auto home pose after IK validation.
+[2026-04-07 17:01:54.257] INFO     Saved target V1 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V1_20260407_170105_trajectory.json
+[2026-04-07 17:02:07.190] INFO     Saved target V1 trajectory video: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V1_20260407_170105_trajectory.mp4
+[2026-04-07 17:02:07.190] INFO     Target V1 -> success=True runtime=5.891s waypoints=377
+[2026-04-07 17:02:07.741] INFO     Auto home pose for V2: flip_yaw=3.1416 rad, bar_axis_theta=0.8378 rad, alignment_score=1.0000
+[2026-04-07 17:02:07.877] INFO     Auto home pose for V2: flip_yaw=3.1416 rad, bar_axis_theta=0.8378 rad, alignment_score=1.0000
+[2026-04-07 17:02:10.304] INFO     Saved target V2 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V2_20260407_170105_trajectory.json
+[2026-04-07 17:02:16.250] INFO     Saved target V2 trajectory video: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V2_20260407_170105_trajectory.mp4
+[2026-04-07 17:02:16.251] INFO     Target V2 -> success=True runtime=0.890s waypoints=172
+[2026-04-07 17:02:16.821] INFO     Auto home pose for H1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 17:02:16.952] INFO     Auto home pose for H1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 17:02:19.204] INFO     Saved target H1 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_H1_20260407_170105_trajectory.json
+[2026-04-07 17:02:23.025] INFO     Saved target H1 trajectory video: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_H1_20260407_170105_trajectory.mp4
+[2026-04-07 17:02:23.026] INFO     Target H1 -> success=True runtime=1.152s waypoints=108
+[2026-04-07 17:02:23.587] INFO     Auto home pose for D1: flip_yaw=3.1416 rad, bar_axis_theta=-0.1047 rad, alignment_score=1.0000
+[2026-04-07 17:02:23.857] INFO     Auto home pose for D1: flip_yaw=0.0000 rad, bar_axis_theta=-0.1047 rad, alignment_score=1.0000
+[2026-04-07 17:02:23.857] INFO     Updated D1 auto home pose after IK validation.
+[2026-04-07 17:02:29.540] INFO     Saved target D1 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_D1_20260407_170105_trajectory.json
+[2026-04-07 17:02:39.236] INFO     Saved target D1 trajectory video: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_D1_20260407_170105_trajectory.mp4
+[2026-04-07 17:02:39.236] INFO     Target D1 -> success=True runtime=3.001s waypoints=283
+[2026-04-07 17:02:39.805] INFO     Auto home pose for V3: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 17:02:39.929] INFO     Auto home pose for V3: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-07 17:05:10.466] INFO     Target V3 -> success=False runtime=150.360s waypoints=0
+[2026-04-07 17:05:10.487] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260407_170105.md
+[2026-04-07 17:05:10.487] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260407_170105.json
+[2026-04-08 14:19:34.622] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-08 14:19:35.288] INFO     Auto home pose for V1: flip_yaw=3.1416 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-08 14:19:35.728] INFO     Auto home pose for V1: flip_yaw=0.0000 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-08 14:19:35.728] INFO     Updated V1 auto home pose after IK validation.
+[2026-04-08 14:19:54.541] INFO     Saved target V1 smoothing comparison plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V1_20260408_141934_smoothing.png
+[2026-04-08 14:19:54.570] INFO     Saved target V1 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V1_20260408_141934_trajectory.json
+[2026-04-08 14:19:54.570] INFO     Target V1 -> success=True runtime=16.875s waypoints=262
+[2026-04-08 14:19:54.576] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260408_141934.md
+[2026-04-08 14:19:54.576] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260408_141934.json
+[2026-04-08 14:28:01.925] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-08 14:28:02.521] INFO     Auto home pose for V1: flip_yaw=3.1416 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-08 14:28:02.935] INFO     Auto home pose for V1: flip_yaw=0.0000 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-08 14:28:02.935] INFO     Updated V1 auto home pose after IK validation.
+[2026-04-08 14:28:21.035] INFO     Saved target V1 smoothing comparison plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V1_20260408_142801_smoothing.png
+[2026-04-08 14:28:21.064] INFO     Saved target V1 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V1_20260408_142801_trajectory.json
+[2026-04-08 14:28:21.064] INFO     Target V1 -> success=True runtime=16.168s waypoints=262
+[2026-04-08 14:28:21.070] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260408_142801.md
+[2026-04-08 14:28:21.071] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260408_142801.json
+[2026-04-08 14:29:33.427] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-08 14:29:34.049] INFO     Auto home pose for V1: flip_yaw=3.1416 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-08 14:29:34.462] INFO     Auto home pose for V1: flip_yaw=0.0000 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-08 14:29:34.462] INFO     Updated V1 auto home pose after IK validation.
+[2026-04-08 14:29:52.366] INFO     Saved target V1 smoothing comparison plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V1_20260408_142933_smoothing.png
+[2026-04-08 14:29:52.396] INFO     Saved target V1 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V1_20260408_142933_trajectory.json
+[2026-04-08 14:30:02.026] INFO     Saved target V1 trajectory video: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V1_20260408_142933_trajectory.mp4
+[2026-04-08 14:30:02.026] INFO     Target V1 -> success=True runtime=15.970s waypoints=262
+[2026-04-08 14:30:02.036] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260408_142933.md
+[2026-04-08 14:30:02.036] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260408_142933.json
+[2026-04-08 14:30:19.187] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-08 14:30:19.806] INFO     Auto home pose for V1: flip_yaw=3.1416 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-08 14:30:20.215] INFO     Auto home pose for V1: flip_yaw=0.0000 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-08 14:30:20.215] INFO     Updated V1 auto home pose after IK validation.
+[2026-04-08 14:30:38.257] INFO     Saved target V1 smoothing comparison plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V1_20260408_143019_smoothing.png
+[2026-04-08 14:30:38.283] INFO     Saved target V1 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V1_20260408_143019_trajectory.json
+[2026-04-08 14:30:44.039] INFO     Saved target V1 trajectory video: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V1_20260408_143019_trajectory.mp4
+[2026-04-08 14:30:44.039] INFO     Target V1 -> success=True runtime=16.117s waypoints=151
+[2026-04-08 14:30:44.048] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260408_143019.md
+[2026-04-08 14:30:44.048] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260408_143019.json
+[2026-04-08 14:38:47.300] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-08 14:38:47.954] INFO     Auto home pose for V1: flip_yaw=3.1416 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-08 14:38:48.517] INFO     Auto home pose for V1: flip_yaw=0.0000 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-08 14:38:48.518] INFO     Updated V1 auto home pose after IK validation.
+[2026-04-08 14:39:06.761] INFO     Saved target V1 smoothing comparison plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V1_20260408_143847_smoothing.png
+[2026-04-08 14:39:06.808] INFO     Saved target V1 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V1_20260408_143847_trajectory.json
+[2026-04-08 14:39:16.533] INFO     Saved target V1 trajectory video: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V1_20260408_143847_trajectory.mp4
+[2026-04-08 14:39:16.533] INFO     Target V1 -> success=True runtime=16.202s waypoints=262
+[2026-04-08 14:39:16.541] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260408_143847.md
+[2026-04-08 14:39:16.541] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260408_143847.json
+[2026-04-08 14:40:07.871] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-08 14:40:08.487] INFO     Auto home pose for G1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-08 14:40:08.740] INFO     Auto home pose for G1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-08 14:40:23.867] INFO     Saved target G1 smoothing comparison plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_G1_20260408_144007_smoothing.png
+[2026-04-08 14:40:23.905] INFO     Saved target G1 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_G1_20260408_144007_trajectory.json
+[2026-04-08 14:40:34.421] INFO     Saved target G1 trajectory video: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_G1_20260408_144007_trajectory.mp4
+[2026-04-08 14:40:34.421] INFO     Target G1 -> success=True runtime=13.094s waypoints=253
+[2026-04-08 14:40:35.085] INFO     Auto home pose for G2: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-08 14:40:35.273] INFO     Auto home pose for G2: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-08 14:40:52.025] INFO     Saved target G2 smoothing comparison plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_G2_20260408_144007_smoothing.png
+[2026-04-08 14:40:52.051] INFO     Saved target G2 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_G2_20260408_144007_trajectory.json
+[2026-04-08 14:41:02.476] INFO     Saved target G2 trajectory video: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_G2_20260408_144007_trajectory.mp4
+[2026-04-08 14:41:02.476] INFO     Target G2 -> success=True runtime=14.828s waypoints=280
+[2026-04-08 14:41:03.059] INFO     Auto home pose for G3: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-08 14:41:03.394] INFO     Auto home pose for G3: flip_yaw=3.1416 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-08 14:41:03.394] INFO     Updated G3 auto home pose after IK validation.
+[2026-04-08 14:41:03.613] INFO     Target G3 -> success=False runtime=0.001s waypoints=0
+[2026-04-08 14:41:04.186] INFO     Auto home pose for G4: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-08 14:41:04.526] INFO     Auto home pose for G4: flip_yaw=3.1416 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-08 14:41:04.526] INFO     Updated G4 auto home pose after IK validation.
+[2026-04-08 14:41:04.760] INFO     Target G4 -> success=False runtime=0.001s waypoints=0
+[2026-04-08 14:41:05.319] INFO     Auto home pose for V1: flip_yaw=3.1416 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-08 14:41:05.621] INFO     Auto home pose for V1: flip_yaw=0.0000 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-08 14:41:05.621] INFO     Updated V1 auto home pose after IK validation.
+[2026-04-08 14:41:23.118] INFO     Saved target V1 smoothing comparison plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V1_20260408_144007_smoothing.png
+[2026-04-08 14:41:23.145] INFO     Saved target V1 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V1_20260408_144007_trajectory.json
+[2026-04-08 14:41:32.159] INFO     Saved target V1 trajectory video: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V1_20260408_144007_trajectory.mp4
+[2026-04-08 14:41:32.160] INFO     Target V1 -> success=True runtime=15.635s waypoints=262
+[2026-04-08 14:41:32.718] INFO     Auto home pose for V2: flip_yaw=3.1416 rad, bar_axis_theta=0.8378 rad, alignment_score=1.0000
+[2026-04-08 14:41:32.854] INFO     Auto home pose for V2: flip_yaw=3.1416 rad, bar_axis_theta=0.8378 rad, alignment_score=1.0000
+[2026-04-08 14:41:42.443] INFO     Saved target V2 smoothing comparison plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V2_20260408_144007_smoothing.png
+[2026-04-08 14:41:42.461] INFO     Saved target V2 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V2_20260408_144007_trajectory.json
+[2026-04-08 14:41:46.512] INFO     Saved target V2 trajectory video: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V2_20260408_144007_trajectory.mp4
+[2026-04-08 14:41:46.512] INFO     Target V2 -> success=True runtime=8.197s waypoints=108
+[2026-04-08 14:41:47.066] INFO     Auto home pose for H1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-08 14:41:47.220] INFO     Auto home pose for H1: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-08 14:41:51.182] INFO     Saved target H1 smoothing comparison plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_H1_20260408_144007_smoothing.png
+[2026-04-08 14:41:51.206] INFO     Saved target H1 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_H1_20260408_144007_trajectory.json
+[2026-04-08 14:41:54.543] INFO     Saved target H1 trajectory video: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_H1_20260408_144007_trajectory.mp4
+[2026-04-08 14:41:54.543] INFO     Target H1 -> success=True runtime=2.825s waypoints=94
+[2026-04-08 14:41:55.599] INFO     Auto home pose for D1: flip_yaw=3.1416 rad, bar_axis_theta=-0.1047 rad, alignment_score=1.0000
+[2026-04-08 14:41:55.895] INFO     Auto home pose for D1: flip_yaw=0.0000 rad, bar_axis_theta=-0.1047 rad, alignment_score=1.0000
+[2026-04-08 14:41:55.895] INFO     Updated D1 auto home pose after IK validation.
+[2026-04-08 14:42:07.059] INFO     Saved target D1 smoothing comparison plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_D1_20260408_144007_smoothing.png
+[2026-04-08 14:42:07.111] INFO     Saved target D1 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_D1_20260408_144007_trajectory.json
+[2026-04-08 14:42:11.534] INFO     Saved target D1 trajectory video: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_D1_20260408_144007_trajectory.mp4
+[2026-04-08 14:42:11.535] INFO     Target D1 -> success=True runtime=9.428s waypoints=103
+[2026-04-08 14:42:12.169] INFO     Auto home pose for V3: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-08 14:42:12.301] INFO     Auto home pose for V3: flip_yaw=0.0000 rad, bar_axis_theta=0.0000 rad, alignment_score=1.0000
+[2026-04-08 14:44:42.750] INFO     Target V3 -> success=False runtime=150.202s waypoints=0
+[2026-04-08 14:44:42.766] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260408_144007.md
+[2026-04-08 14:44:42.766] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260408_144007.json
+[2026-04-09 09:37:33.798] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-09 09:37:36.286] INFO     Auto home pose for V1: flip_yaw=3.1416 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-09 09:37:36.717] INFO     Auto home pose for V1: flip_yaw=0.0000 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-09 09:37:36.717] INFO     Updated V1 auto home pose after IK validation.
+[2026-04-09 09:40:16.506] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-09 09:40:19.048] INFO     Auto home pose for V1: flip_yaw=3.1416 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-09 09:40:26.901] INFO     Auto home pose for V1: flip_yaw=0.0000 rad, bar_axis_theta=0.8727 rad, alignment_score=1.0000
+[2026-04-09 09:40:26.901] INFO     Updated V1 auto home pose after IK validation.
+[2026-04-09 09:40:27.116] INFO     start
+[2026-04-09 09:40:27.116] INFO     {'endpoint_name': 'start', 'bar_pose': ((0.4911656379699707, -0.30976343154907227, 1.0622799396514893), (-0.5267615914344788, 0.4717226028442383, 0.47172439098358154, 0.5267601609230042)), 'conf': array([ 0.21238259, -1.40722036,  1.41895655, -0.9504747 , -0.72776079,
+       -1.35047416,  1.10228556, -1.78862268,  1.93215086,  1.97014431,
+       -0.68842531, -0.08172059]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-04-09 09:40:27.190] INFO     start
+[2026-04-09 09:40:27.190] INFO     {'endpoint_name': 'goal', 'bar_pose': ((0.7457419037818909, 0.32912176847457886, 0.77499920129776), (0.7071067690849304, -0.7071067690849304, 3.401695168782907e-16, -6.637730280719778e-16)), 'conf': array([-0.73502238, -2.39293441, -1.75275175, -0.68170348,  0.63971946,
+        0.64874017,  2.29972963, -0.26967894,  0.93991508,  2.99161576,
+       -1.67793082, -2.11978011]), 'ik_ok': True, 'collision_free': True, 'collision_output': None}
+[2026-04-09 09:40:27.190] INFO     Holding goal endpoint IK pose in GUI at bar xyz=[0.7457, 0.3291, 0.775]. Press Enter to continue.
+[2026-04-09 09:41:16.191] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_real_state_study.log
+[2026-04-09 09:41:19.073] INFO     Auto home pose for V2: flip_yaw=3.1416 rad, bar_axis_theta=0.8378 rad, alignment_score=1.0000
+[2026-04-09 09:41:19.340] INFO     Auto home pose for V2: flip_yaw=3.1416 rad, bar_axis_theta=0.8378 rad, alignment_score=1.0000
+[2026-04-09 09:41:29.236] INFO     Saved target V2 smoothing comparison plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V2_20260409_094116_smoothing.png
+[2026-04-09 09:41:29.329] INFO     Saved target V2 replay trajectory: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V2_20260409_094116_trajectory.json
+[2026-04-09 09:41:33.359] INFO     Saved target V2 trajectory video: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_stage3_V2_20260409_094116_trajectory.mp4
+[2026-04-09 09:41:33.359] INFO     Target V2 -> success=True runtime=8.332s waypoints=108
+[2026-04-09 09:41:33.367] INFO     Saved real-state study report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/real_state_study_report_20260409_094116.md
+[2026-04-09 09:41:33.367] INFO     Saved real-state study JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/real_state_study_20260409_094116.json

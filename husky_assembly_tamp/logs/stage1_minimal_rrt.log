@@ -6868,3 +6868,442 @@
 [2026-04-07 16:54:51.997] INFO       angle normalization: on
 [2026-04-07 16:54:51.997] INFO       collision obstacles: 1 bodies
 [2026-04-07 16:54:51.997] INFO       lock renderer during search: off
+[2026-04-07 16:55:17.461] INFO     Attempt 1/5: no path found.
+[2026-04-07 16:55:47.632] INFO     Attempt 2/5: no path found.
+[2026-04-07 16:56:17.707] INFO     Attempt 3/5: no path found.
+[2026-04-07 16:56:46.051] INFO     Attempt 4/5: no path found.
+[2026-04-07 16:57:16.064] INFO     Attempt 5/5: no path found.
+[2026-04-07 16:57:16.067] WARNING  No Stage 3 pose path found.
+[2026-04-07 16:57:16.142] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260407_165716.png
+[2026-04-07 16:57:16.142] WARNING  Trajectory validation could not run robot-side checks: planner_joint_path_unavailable
+[2026-04-07 17:01:05.888] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-04-07 17:01:06.815] INFO     Running minimal Stage 3 RRT.
+[2026-04-07 17:01:06.815] INFO       start pose: [ 0.4912 -0.1124  1.0621]
+[2026-04-07 17:01:06.815] INFO       goal pose:  [0.9152 0.     0.315 ]
+[2026-04-07 17:01:06.815] INFO       IK: on
+[2026-04-07 17:01:06.815] INFO       collision: on
+[2026-04-07 17:01:06.815] INFO       position_res: 0.005
+[2026-04-07 17:01:06.815] INFO       rotation_res: 0.025
+[2026-04-07 17:01:06.815] INFO       joint continuity threshold: 0.17453292519943295
+[2026-04-07 17:01:06.815] INFO       angle normalization: on
+[2026-04-07 17:01:06.815] INFO       collision obstacles: 1 bodies
+[2026-04-07 17:01:06.815] INFO       lock renderer during search: off
+[2026-04-07 17:01:08.945] INFO     Found Stage 3 pose path with 310 waypoints.
+[2026-04-07 17:01:11.627] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260407_170108.png
+[2026-04-07 17:01:11.627] INFO     Trajectory collisions: pass
+[2026-04-07 17:01:11.627] INFO     Joint continuity: pass (max dq=0.1160 rad, threshold=0.1745 rad)
+[2026-04-07 17:01:11.627] INFO     End-effector relative transform drift: pass (max pos=0.000213 m, max axis drift xyz=[0.011, 0.032, 0.033] deg)
+[2026-04-07 17:01:23.044] INFO     Running minimal Stage 3 RRT.
+[2026-04-07 17:01:23.044] INFO       start pose: [ 0.4912 -0.1584  1.0621]
+[2026-04-07 17:01:23.045] INFO       goal pose:  [0.6152 0.05   0.315 ]
+[2026-04-07 17:01:23.045] INFO       IK: on
+[2026-04-07 17:01:23.045] INFO       collision: on
+[2026-04-07 17:01:23.045] INFO       position_res: 0.005
+[2026-04-07 17:01:23.045] INFO       rotation_res: 0.025
+[2026-04-07 17:01:23.045] INFO       joint continuity threshold: 0.17453292519943295
+[2026-04-07 17:01:23.045] INFO       angle normalization: on
+[2026-04-07 17:01:23.045] INFO       collision obstacles: 1 bodies
+[2026-04-07 17:01:23.045] INFO       lock renderer during search: off
+[2026-04-07 17:01:26.888] INFO     Found Stage 3 pose path with 294 waypoints.
+[2026-04-07 17:01:28.984] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260407_170126.png
+[2026-04-07 17:01:28.984] INFO     Trajectory collisions: pass
+[2026-04-07 17:01:28.984] INFO     Joint continuity: pass (max dq=0.0904 rad, threshold=0.1745 rad)
+[2026-04-07 17:01:28.984] INFO     End-effector relative transform drift: pass (max pos=0.000116 m, max axis drift xyz=[0.025, 0.006, 0.024] deg)
+[2026-04-07 17:01:40.075] INFO     Running minimal Stage 3 RRT.
+[2026-04-07 17:01:40.076] INFO       start pose: [0.4912 0.025  1.0621]
+[2026-04-07 17:01:40.076] INFO       goal pose:  [0.7485 0.2889 0.35  ]
+[2026-04-07 17:01:40.076] INFO       IK: on
+[2026-04-07 17:01:40.076] INFO       collision: on
+[2026-04-07 17:01:40.076] INFO       position_res: 0.005
+[2026-04-07 17:01:40.076] INFO       rotation_res: 0.025
+[2026-04-07 17:01:40.076] INFO       joint continuity threshold: 0.17453292519943295
+[2026-04-07 17:01:40.076] INFO       angle normalization: on
+[2026-04-07 17:01:40.076] INFO       collision obstacles: 1 bodies
+[2026-04-07 17:01:40.076] INFO       lock renderer during search: off
+[2026-04-07 17:01:40.076] WARNING  Start configuration is in collision.
+[2026-04-07 17:01:40.076] WARNING  No Stage 3 pose path found.
+[2026-04-07 17:01:40.132] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260407_170140.png
+[2026-04-07 17:01:40.132] WARNING  Trajectory validation could not run robot-side checks: planner_joint_path_unavailable
+[2026-04-07 17:01:41.150] INFO     Running minimal Stage 3 RRT.
+[2026-04-07 17:01:41.150] INFO       start pose: [0.4912 0.025  1.0622]
+[2026-04-07 17:01:41.150] INFO       goal pose:  [ 0.7486 -0.2888  0.35  ]
+[2026-04-07 17:01:41.150] INFO       IK: on
+[2026-04-07 17:01:41.151] INFO       collision: on
+[2026-04-07 17:01:41.151] INFO       position_res: 0.005
+[2026-04-07 17:01:41.151] INFO       rotation_res: 0.025
+[2026-04-07 17:01:41.151] INFO       joint continuity threshold: 0.17453292519943295
+[2026-04-07 17:01:41.151] INFO       angle normalization: on
+[2026-04-07 17:01:41.151] INFO       collision obstacles: 1 bodies
+[2026-04-07 17:01:41.151] INFO       lock renderer during search: off
+[2026-04-07 17:01:41.151] WARNING  Start configuration is in collision.
+[2026-04-07 17:01:41.151] WARNING  No Stage 3 pose path found.
+[2026-04-07 17:01:41.206] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260407_170141.png
+[2026-04-07 17:01:41.206] WARNING  Trajectory validation could not run robot-side checks: planner_joint_path_unavailable
+[2026-04-07 17:01:42.179] INFO     Running minimal Stage 3 RRT.
+[2026-04-07 17:01:42.179] INFO       start pose: [ 0.4912 -0.3098  1.0623]
+[2026-04-07 17:01:42.179] INFO       goal pose:  [0.7457 0.3291 0.775 ]
+[2026-04-07 17:01:42.179] INFO       IK: on
+[2026-04-07 17:01:42.179] INFO       collision: on
+[2026-04-07 17:01:42.179] INFO       position_res: 0.005
+[2026-04-07 17:01:42.179] INFO       rotation_res: 0.025
+[2026-04-07 17:01:42.179] INFO       joint continuity threshold: 0.17453292519943295
+[2026-04-07 17:01:42.179] INFO       angle normalization: on
+[2026-04-07 17:01:42.179] INFO       collision obstacles: 1 bodies
+[2026-04-07 17:01:42.179] INFO       lock renderer during search: off
+[2026-04-07 17:01:48.070] INFO     Found Stage 3 pose path with 377 waypoints.
+[2026-04-07 17:01:54.225] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260407_170148.png
+[2026-04-07 17:01:54.225] INFO     Trajectory collisions: pass
+[2026-04-07 17:01:54.225] INFO     Joint continuity: pass (max dq=0.1415 rad, threshold=0.1745 rad)
+[2026-04-07 17:01:54.225] INFO     End-effector relative transform drift: pass (max pos=0.000882 m, max axis drift xyz=[0.032, 0.042, 0.036] deg)
+[2026-04-07 17:02:08.003] INFO     Running minimal Stage 3 RRT.
+[2026-04-07 17:02:08.004] INFO       start pose: [ 0.4912 -0.0692  1.0623]
+[2026-04-07 17:02:08.004] INFO       goal pose:  [ 0.7457 -0.3291  0.675 ]
+[2026-04-07 17:02:08.004] INFO       IK: on
+[2026-04-07 17:02:08.004] INFO       collision: on
+[2026-04-07 17:02:08.004] INFO       position_res: 0.005
+[2026-04-07 17:02:08.004] INFO       rotation_res: 0.025
+[2026-04-07 17:02:08.004] INFO       joint continuity threshold: 0.17453292519943295
+[2026-04-07 17:02:08.004] INFO       angle normalization: on
+[2026-04-07 17:02:08.004] INFO       collision obstacles: 1 bodies
+[2026-04-07 17:02:08.004] INFO       lock renderer during search: off
+[2026-04-07 17:02:08.894] INFO     Found Stage 3 pose path with 172 waypoints.
+[2026-04-07 17:02:10.281] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260407_170208.png
+[2026-04-07 17:02:10.281] INFO     Trajectory collisions: pass
+[2026-04-07 17:02:10.281] INFO     Joint continuity: pass (max dq=0.0228 rad, threshold=0.1745 rad)
+[2026-04-07 17:02:10.281] INFO     End-effector relative transform drift: pass (max pos=0.000034 m, max axis drift xyz=[0.003, 0.003, 0.004] deg)
+[2026-04-07 17:02:17.079] INFO     Running minimal Stage 3 RRT.
+[2026-04-07 17:02:17.079] INFO       start pose: [ 0.4912 -0.2139  1.0623]
+[2026-04-07 17:02:17.079] INFO       goal pose:  [ 0.7107 -0.      0.715 ]
+[2026-04-07 17:02:17.079] INFO       IK: on
+[2026-04-07 17:02:17.079] INFO       collision: on
+[2026-04-07 17:02:17.079] INFO       position_res: 0.005
+[2026-04-07 17:02:17.079] INFO       rotation_res: 0.025
+[2026-04-07 17:02:17.079] INFO       joint continuity threshold: 0.17453292519943295
+[2026-04-07 17:02:17.079] INFO       angle normalization: on
+[2026-04-07 17:02:17.079] INFO       collision obstacles: 1 bodies
+[2026-04-07 17:02:17.079] INFO       lock renderer during search: off
+[2026-04-07 17:02:18.232] INFO     Found Stage 3 pose path with 108 waypoints.
+[2026-04-07 17:02:19.186] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260407_170218.png
+[2026-04-07 17:02:19.186] INFO     Trajectory collisions: pass
+[2026-04-07 17:02:19.186] INFO     Joint continuity: pass (max dq=0.0822 rad, threshold=0.1745 rad)
+[2026-04-07 17:02:19.186] INFO     End-effector relative transform drift: pass (max pos=0.000141 m, max axis drift xyz=[0.005, 0.005, 0.005] deg)
+[2026-04-07 17:02:23.974] INFO     Running minimal Stage 3 RRT.
+[2026-04-07 17:02:23.974] INFO       start pose: [ 0.4918 -0.0907  1.0631]
+[2026-04-07 17:02:23.974] INFO       goal pose:  [ 0.6928 -0.1884  0.6083]
+[2026-04-07 17:02:23.974] INFO       IK: on
+[2026-04-07 17:02:23.974] INFO       collision: on
+[2026-04-07 17:02:23.974] INFO       position_res: 0.005
+[2026-04-07 17:02:23.974] INFO       rotation_res: 0.025
+[2026-04-07 17:02:23.974] INFO       joint continuity threshold: 0.17453292519943295
+[2026-04-07 17:02:23.974] INFO       angle normalization: on
+[2026-04-07 17:02:23.974] INFO       collision obstacles: 1 bodies
+[2026-04-07 17:02:23.974] INFO       lock renderer during search: off
+[2026-04-07 17:02:26.975] INFO     Found Stage 3 pose path with 283 waypoints.
+[2026-04-07 17:02:29.520] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260407_170226.png
+[2026-04-07 17:02:29.520] INFO     Trajectory collisions: pass
+[2026-04-07 17:02:29.520] INFO     Joint continuity: pass (max dq=0.0482 rad, threshold=0.1745 rad)
+[2026-04-07 17:02:29.520] INFO     End-effector relative transform drift: pass (max pos=0.000069 m, max axis drift xyz=[0.004, 0.004, 0.003] deg)
+[2026-04-07 17:02:40.049] INFO     Running minimal Stage 3 RRT.
+[2026-04-07 17:02:40.049] INFO       start pose: [ 0.4912 -0.0348  1.0623]
+[2026-04-07 17:02:40.049] INFO       goal pose:  [0.7457 0.283  1.015 ]
+[2026-04-07 17:02:40.049] INFO       IK: on
+[2026-04-07 17:02:40.049] INFO       collision: on
+[2026-04-07 17:02:40.049] INFO       position_res: 0.005
+[2026-04-07 17:02:40.049] INFO       rotation_res: 0.025
+[2026-04-07 17:02:40.049] INFO       joint continuity threshold: 0.17453292519943295
+[2026-04-07 17:02:40.049] INFO       angle normalization: on
+[2026-04-07 17:02:40.049] INFO       collision obstacles: 1 bodies
+[2026-04-07 17:02:40.049] INFO       lock renderer during search: off
+[2026-04-07 17:03:10.059] INFO     Attempt 1/5: no path found.
+[2026-04-07 17:03:40.208] INFO     Attempt 2/5: no path found.
+[2026-04-07 17:04:10.310] INFO     Attempt 3/5: no path found.
+[2026-04-07 17:04:40.375] INFO     Attempt 4/5: no path found.
+[2026-04-07 17:05:10.405] INFO     Attempt 5/5: no path found.
+[2026-04-07 17:05:10.409] WARNING  No Stage 3 pose path found.
+[2026-04-07 17:05:10.466] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260407_170510.png
+[2026-04-07 17:05:10.466] WARNING  Trajectory validation could not run robot-side checks: planner_joint_path_unavailable
+[2026-04-08 13:52:11.023] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-04-08 13:52:33.261] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-04-08 14:19:34.622] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-04-08 14:19:35.896] INFO     Running minimal Stage 3 RRT.
+[2026-04-08 14:19:35.896] INFO       start pose: [ 0.4912 -0.3098  1.0623]
+[2026-04-08 14:19:35.896] INFO       goal pose:  [0.7457 0.3291 0.775 ]
+[2026-04-08 14:19:35.896] INFO       IK: on
+[2026-04-08 14:19:35.896] INFO       collision: on
+[2026-04-08 14:19:35.896] INFO       position_res: 0.005
+[2026-04-08 14:19:35.896] INFO       rotation_res: 0.025
+[2026-04-08 14:19:35.896] INFO       joint continuity threshold: 0.17453292519943295
+[2026-04-08 14:19:35.896] INFO       angle normalization: on
+[2026-04-08 14:19:35.896] INFO       collision obstacles: 1 bodies
+[2026-04-08 14:19:35.896] INFO       lock renderer during search: off
+[2026-04-08 14:19:52.771] INFO     Smoothing: cost 7.0507 -> 3.0640, waypoints 377 -> 262, accepts 64/89
+[2026-04-08 14:19:52.771] INFO     Found Stage 3 pose path with 262 waypoints.
+[2026-04-08 14:19:54.465] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260408_141952.png
+[2026-04-08 14:19:54.465] INFO     Trajectory collisions: pass
+[2026-04-08 14:19:54.465] INFO     Joint continuity: pass (max dq=0.0347 rad, threshold=0.1745 rad)
+[2026-04-08 14:19:54.465] INFO     End-effector relative transform drift: pass (max pos=0.000025 m, max axis drift xyz=[0.003, 0.005, 0.005] deg)
+[2026-04-08 14:20:45.342] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-04-08 14:28:01.925] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-04-08 14:28:03.101] INFO     Running minimal Stage 3 RRT.
+[2026-04-08 14:28:03.101] INFO       start pose: [ 0.4912 -0.3098  1.0623]
+[2026-04-08 14:28:03.101] INFO       goal pose:  [0.7457 0.3291 0.775 ]
+[2026-04-08 14:28:03.101] INFO       IK: on
+[2026-04-08 14:28:03.101] INFO       collision: on
+[2026-04-08 14:28:03.101] INFO       position_res: 0.005
+[2026-04-08 14:28:03.101] INFO       rotation_res: 0.025
+[2026-04-08 14:28:03.101] INFO       joint continuity threshold: 0.17453292519943295
+[2026-04-08 14:28:03.101] INFO       angle normalization: on
+[2026-04-08 14:28:03.101] INFO       collision obstacles: 1 bodies
+[2026-04-08 14:28:03.101] INFO       lock renderer during search: off
+[2026-04-08 14:28:19.269] INFO     Smoothing: cost 7.0507 -> 3.0640, waypoints 377 -> 262, accepts 66/91
+[2026-04-08 14:28:19.270] INFO     Found Stage 3 pose path with 262 waypoints.
+[2026-04-08 14:28:20.968] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260408_142819.png
+[2026-04-08 14:28:20.968] INFO     Trajectory collisions: pass
+[2026-04-08 14:28:20.968] INFO     Joint continuity: pass (max dq=0.0347 rad, threshold=0.1745 rad)
+[2026-04-08 14:28:20.968] INFO     End-effector relative transform drift: pass (max pos=0.000025 m, max axis drift xyz=[0.003, 0.005, 0.005] deg)
+[2026-04-08 14:29:33.427] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-04-08 14:29:34.618] INFO     Running minimal Stage 3 RRT.
+[2026-04-08 14:29:34.618] INFO       start pose: [ 0.4912 -0.3098  1.0623]
+[2026-04-08 14:29:34.618] INFO       goal pose:  [0.7457 0.3291 0.775 ]
+[2026-04-08 14:29:34.618] INFO       IK: on
+[2026-04-08 14:29:34.618] INFO       collision: on
+[2026-04-08 14:29:34.618] INFO       position_res: 0.005
+[2026-04-08 14:29:34.618] INFO       rotation_res: 0.025
+[2026-04-08 14:29:34.618] INFO       joint continuity threshold: 0.17453292519943295
+[2026-04-08 14:29:34.618] INFO       angle normalization: on
+[2026-04-08 14:29:34.618] INFO       collision obstacles: 1 bodies
+[2026-04-08 14:29:34.618] INFO       lock renderer during search: off
+[2026-04-08 14:29:50.588] INFO     Smoothing: cost 7.0507 -> 3.0640, waypoints 377 -> 262, accepts 65/90
+[2026-04-08 14:29:50.588] INFO     Found Stage 3 pose path with 262 waypoints.
+[2026-04-08 14:29:52.298] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260408_142950.png
+[2026-04-08 14:29:52.298] INFO     Trajectory collisions: pass
+[2026-04-08 14:29:52.298] INFO     Joint continuity: pass (max dq=0.0347 rad, threshold=0.1745 rad)
+[2026-04-08 14:29:52.298] INFO     End-effector relative transform drift: pass (max pos=0.000025 m, max axis drift xyz=[0.003, 0.005, 0.005] deg)
+[2026-04-08 14:30:19.186] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-04-08 14:30:20.364] INFO     Running minimal Stage 3 RRT.
+[2026-04-08 14:30:20.364] INFO       start pose: [ 0.4912 -0.3098  1.0623]
+[2026-04-08 14:30:20.364] INFO       goal pose:  [0.7457 0.3291 0.775 ]
+[2026-04-08 14:30:20.364] INFO       IK: on
+[2026-04-08 14:30:20.364] INFO       collision: on
+[2026-04-08 14:30:20.364] INFO       position_res: 0.005
+[2026-04-08 14:30:20.364] INFO       rotation_res: 0.025
+[2026-04-08 14:30:20.365] INFO       joint continuity threshold: 0.17453292519943295
+[2026-04-08 14:30:20.365] INFO       angle normalization: on
+[2026-04-08 14:30:20.365] INFO       collision obstacles: 1 bodies
+[2026-04-08 14:30:20.365] INFO       lock renderer during search: off
+[2026-04-08 14:30:36.481] INFO     Smoothing: cost 7.0507 -> 3.0641, waypoints 377 -> 151, accepts 60/85
+[2026-04-08 14:30:36.481] INFO     Found Stage 3 pose path with 151 waypoints.
+[2026-04-08 14:30:38.188] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260408_143036.png
+[2026-04-08 14:30:38.188] INFO     Trajectory collisions: pass
+[2026-04-08 14:30:38.188] INFO     Joint continuity: pass (max dq=0.0347 rad, threshold=0.1745 rad)
+[2026-04-08 14:30:38.189] INFO     End-effector relative transform drift: pass (max pos=0.000025 m, max axis drift xyz=[0.003, 0.005, 0.005] deg)
+[2026-04-08 14:38:47.299] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-04-08 14:38:48.722] INFO     Running minimal Stage 3 RRT.
+[2026-04-08 14:38:48.722] INFO       start pose: [ 0.4912 -0.3098  1.0623]
+[2026-04-08 14:38:48.722] INFO       goal pose:  [0.7457 0.3291 0.775 ]
+[2026-04-08 14:38:48.722] INFO       IK: on
+[2026-04-08 14:38:48.722] INFO       collision: on
+[2026-04-08 14:38:48.722] INFO       position_res: 0.005
+[2026-04-08 14:38:48.722] INFO       rotation_res: 0.025
+[2026-04-08 14:38:48.722] INFO       joint continuity threshold: 0.17453292519943295
+[2026-04-08 14:38:48.722] INFO       angle normalization: on
+[2026-04-08 14:38:48.722] INFO       collision obstacles: 1 bodies
+[2026-04-08 14:38:48.722] INFO       lock renderer during search: off
+[2026-04-08 14:39:04.924] INFO     Smoothing: cost 7.0507 -> 3.0640, waypoints 377 -> 262, accepts 66/91
+[2026-04-08 14:39:04.924] INFO     Found Stage 3 pose path with 262 waypoints.
+[2026-04-08 14:39:06.683] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260408_143904.png
+[2026-04-08 14:39:06.683] INFO     Trajectory collisions: pass
+[2026-04-08 14:39:06.683] INFO     Joint continuity: pass (max dq=0.0347 rad, threshold=0.1745 rad)
+[2026-04-08 14:39:06.683] INFO     End-effector relative transform drift: pass (max pos=0.000025 m, max axis drift xyz=[0.003, 0.005, 0.005] deg)
+[2026-04-08 14:40:07.870] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-04-08 14:40:08.937] INFO     Running minimal Stage 3 RRT.
+[2026-04-08 14:40:08.937] INFO       start pose: [ 0.4912 -0.1124  1.0621]
+[2026-04-08 14:40:08.937] INFO       goal pose:  [0.9152 0.     0.315 ]
+[2026-04-08 14:40:08.937] INFO       IK: on
+[2026-04-08 14:40:08.937] INFO       collision: on
+[2026-04-08 14:40:08.937] INFO       position_res: 0.005
+[2026-04-08 14:40:08.937] INFO       rotation_res: 0.025
+[2026-04-08 14:40:08.937] INFO       joint continuity threshold: 0.17453292519943295
+[2026-04-08 14:40:08.937] INFO       angle normalization: on
+[2026-04-08 14:40:08.937] INFO       collision obstacles: 1 bodies
+[2026-04-08 14:40:08.937] INFO       lock renderer during search: off
+[2026-04-08 14:40:22.031] INFO     Smoothing: cost 6.6312 -> 2.4512, waypoints 310 -> 253, accepts 37/54
+[2026-04-08 14:40:22.031] INFO     Found Stage 3 pose path with 253 waypoints.
+[2026-04-08 14:40:23.786] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260408_144022.png
+[2026-04-08 14:40:23.786] INFO     Trajectory collisions: pass
+[2026-04-08 14:40:23.786] INFO     Joint continuity: pass (max dq=0.0601 rad, threshold=0.1745 rad)
+[2026-04-08 14:40:23.786] INFO     End-effector relative transform drift: pass (max pos=0.000047 m, max axis drift xyz=[0.002, 0.003, 0.003] deg)
+[2026-04-08 14:40:35.443] INFO     Running minimal Stage 3 RRT.
+[2026-04-08 14:40:35.443] INFO       start pose: [ 0.4912 -0.1584  1.0621]
+[2026-04-08 14:40:35.443] INFO       goal pose:  [0.6152 0.05   0.315 ]
+[2026-04-08 14:40:35.443] INFO       IK: on
+[2026-04-08 14:40:35.443] INFO       collision: on
+[2026-04-08 14:40:35.443] INFO       position_res: 0.005
+[2026-04-08 14:40:35.443] INFO       rotation_res: 0.025
+[2026-04-08 14:40:35.444] INFO       joint continuity threshold: 0.17453292519943295
+[2026-04-08 14:40:35.444] INFO       angle normalization: on
+[2026-04-08 14:40:35.444] INFO       collision obstacles: 1 bodies
+[2026-04-08 14:40:35.444] INFO       lock renderer during search: off
+[2026-04-08 14:40:50.271] INFO     Smoothing: cost 3.0193 -> 2.3270, waypoints 294 -> 280, accepts 20/29
+[2026-04-08 14:40:50.272] INFO     Found Stage 3 pose path with 280 waypoints.
+[2026-04-08 14:40:51.956] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260408_144050.png
+[2026-04-08 14:40:51.956] INFO     Trajectory collisions: pass
+[2026-04-08 14:40:51.956] INFO     Joint continuity: pass (max dq=0.0661 rad, threshold=0.1745 rad)
+[2026-04-08 14:40:51.956] INFO     End-effector relative transform drift: pass (max pos=0.000065 m, max axis drift xyz=[0.003, 0.004, 0.005] deg)
+[2026-04-08 14:41:03.544] INFO     Running minimal Stage 3 RRT.
+[2026-04-08 14:41:03.544] INFO       start pose: [0.4912 0.025  1.0621]
+[2026-04-08 14:41:03.544] INFO       goal pose:  [0.7485 0.2889 0.35  ]
+[2026-04-08 14:41:03.544] INFO       IK: on
+[2026-04-08 14:41:03.544] INFO       collision: on
+[2026-04-08 14:41:03.544] INFO       position_res: 0.005
+[2026-04-08 14:41:03.544] INFO       rotation_res: 0.025
+[2026-04-08 14:41:03.544] INFO       joint continuity threshold: 0.17453292519943295
+[2026-04-08 14:41:03.544] INFO       angle normalization: on
+[2026-04-08 14:41:03.544] INFO       collision obstacles: 1 bodies
+[2026-04-08 14:41:03.544] INFO       lock renderer during search: off
+[2026-04-08 14:41:03.545] WARNING  Start configuration is in collision.
+[2026-04-08 14:41:03.545] WARNING  No Stage 3 pose path found.
+[2026-04-08 14:41:03.612] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260408_144103.png
+[2026-04-08 14:41:03.612] WARNING  Trajectory validation could not run robot-side checks: planner_joint_path_unavailable
+[2026-04-08 14:41:04.694] INFO     Running minimal Stage 3 RRT.
+[2026-04-08 14:41:04.694] INFO       start pose: [0.4912 0.025  1.0622]
+[2026-04-08 14:41:04.695] INFO       goal pose:  [ 0.7486 -0.2888  0.35  ]
+[2026-04-08 14:41:04.695] INFO       IK: on
+[2026-04-08 14:41:04.695] INFO       collision: on
+[2026-04-08 14:41:04.695] INFO       position_res: 0.005
+[2026-04-08 14:41:04.695] INFO       rotation_res: 0.025
+[2026-04-08 14:41:04.695] INFO       joint continuity threshold: 0.17453292519943295
+[2026-04-08 14:41:04.695] INFO       angle normalization: on
+[2026-04-08 14:41:04.695] INFO       collision obstacles: 1 bodies
+[2026-04-08 14:41:04.695] INFO       lock renderer during search: off
+[2026-04-08 14:41:04.695] WARNING  Start configuration is in collision.
+[2026-04-08 14:41:04.695] WARNING  No Stage 3 pose path found.
+[2026-04-08 14:41:04.760] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260408_144104.png
+[2026-04-08 14:41:04.760] WARNING  Trajectory validation could not run robot-side checks: planner_joint_path_unavailable
+[2026-04-08 14:41:05.766] INFO     Running minimal Stage 3 RRT.
+[2026-04-08 14:41:05.766] INFO       start pose: [ 0.4912 -0.3098  1.0623]
+[2026-04-08 14:41:05.766] INFO       goal pose:  [0.7457 0.3291 0.775 ]
+[2026-04-08 14:41:05.766] INFO       IK: on
+[2026-04-08 14:41:05.766] INFO       collision: on
+[2026-04-08 14:41:05.766] INFO       position_res: 0.005
+[2026-04-08 14:41:05.766] INFO       rotation_res: 0.025
+[2026-04-08 14:41:05.766] INFO       joint continuity threshold: 0.17453292519943295
+[2026-04-08 14:41:05.766] INFO       angle normalization: on
+[2026-04-08 14:41:05.766] INFO       collision obstacles: 1 bodies
+[2026-04-08 14:41:05.766] INFO       lock renderer during search: off
+[2026-04-08 14:41:21.401] INFO     Smoothing: cost 7.0507 -> 3.0640, waypoints 377 -> 262, accepts 65/90
+[2026-04-08 14:41:21.401] INFO     Found Stage 3 pose path with 262 waypoints.
+[2026-04-08 14:41:23.056] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260408_144121.png
+[2026-04-08 14:41:23.056] INFO     Trajectory collisions: pass
+[2026-04-08 14:41:23.056] INFO     Joint continuity: pass (max dq=0.0347 rad, threshold=0.1745 rad)
+[2026-04-08 14:41:23.056] INFO     End-effector relative transform drift: pass (max pos=0.000025 m, max axis drift xyz=[0.003, 0.005, 0.005] deg)
+[2026-04-08 14:41:32.987] INFO     Running minimal Stage 3 RRT.
+[2026-04-08 14:41:32.987] INFO       start pose: [ 0.4912 -0.0692  1.0623]
+[2026-04-08 14:41:32.987] INFO       goal pose:  [ 0.7457 -0.3291  0.675 ]
+[2026-04-08 14:41:32.987] INFO       IK: on
+[2026-04-08 14:41:32.987] INFO       collision: on
+[2026-04-08 14:41:32.987] INFO       position_res: 0.005
+[2026-04-08 14:41:32.987] INFO       rotation_res: 0.025
+[2026-04-08 14:41:32.987] INFO       joint continuity threshold: 0.17453292519943295
+[2026-04-08 14:41:32.987] INFO       angle normalization: on
+[2026-04-08 14:41:32.987] INFO       collision obstacles: 1 bodies
+[2026-04-08 14:41:32.987] INFO       lock renderer during search: off
+[2026-04-08 14:41:41.184] INFO     Smoothing: cost 3.2303 -> 2.3289, waypoints 172 -> 108, accepts 75/100
+[2026-04-08 14:41:41.184] INFO     Found Stage 3 pose path with 108 waypoints.
+[2026-04-08 14:41:42.378] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260408_144141.png
+[2026-04-08 14:41:42.378] INFO     Trajectory collisions: pass
+[2026-04-08 14:41:42.378] INFO     Joint continuity: pass (max dq=0.0394 rad, threshold=0.1745 rad)
+[2026-04-08 14:41:42.378] INFO     End-effector relative transform drift: pass (max pos=0.000030 m, max axis drift xyz=[0.003, 0.009, 0.009] deg)
+[2026-04-08 14:41:47.396] INFO     Running minimal Stage 3 RRT.
+[2026-04-08 14:41:47.396] INFO       start pose: [ 0.4912 -0.2139  1.0623]
+[2026-04-08 14:41:47.396] INFO       goal pose:  [ 0.7107 -0.      0.715 ]
+[2026-04-08 14:41:47.396] INFO       IK: on
+[2026-04-08 14:41:47.397] INFO       collision: on
+[2026-04-08 14:41:47.397] INFO       position_res: 0.005
+[2026-04-08 14:41:47.397] INFO       rotation_res: 0.025
+[2026-04-08 14:41:47.397] INFO       joint continuity threshold: 0.17453292519943295
+[2026-04-08 14:41:47.397] INFO       angle normalization: on
+[2026-04-08 14:41:47.397] INFO       collision obstacles: 1 bodies
+[2026-04-08 14:41:47.397] INFO       lock renderer during search: off
+[2026-04-08 14:41:50.222] INFO     Smoothing: cost 1.6210 -> 1.3102, waypoints 108 -> 94, accepts 11/11
+[2026-04-08 14:41:50.222] INFO     Found Stage 3 pose path with 94 waypoints.
+[2026-04-08 14:41:51.115] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260408_144150.png
+[2026-04-08 14:41:51.115] INFO     Trajectory collisions: pass
+[2026-04-08 14:41:51.115] INFO     Joint continuity: pass (max dq=0.0154 rad, threshold=0.1745 rad)
+[2026-04-08 14:41:51.115] INFO     End-effector relative transform drift: pass (max pos=0.000006 m, max axis drift xyz=[0.000, 0.000, 0.001] deg)
+[2026-04-08 14:41:56.021] INFO     Running minimal Stage 3 RRT.
+[2026-04-08 14:41:56.022] INFO       start pose: [ 0.4918 -0.0907  1.0631]
+[2026-04-08 14:41:56.022] INFO       goal pose:  [ 0.6928 -0.1884  0.6083]
+[2026-04-08 14:41:56.022] INFO       IK: on
+[2026-04-08 14:41:56.022] INFO       collision: on
+[2026-04-08 14:41:56.022] INFO       position_res: 0.005
+[2026-04-08 14:41:56.022] INFO       rotation_res: 0.025
+[2026-04-08 14:41:56.022] INFO       joint continuity threshold: 0.17453292519943295
+[2026-04-08 14:41:56.022] INFO       angle normalization: on
+[2026-04-08 14:41:56.022] INFO       collision obstacles: 1 bodies
+[2026-04-08 14:41:56.022] INFO       lock renderer during search: off
+[2026-04-08 14:42:05.450] INFO     Smoothing: cost 4.3850 -> 1.5085, waypoints 283 -> 103, accepts 65/100
+[2026-04-08 14:42:05.450] INFO     Found Stage 3 pose path with 103 waypoints.
+[2026-04-08 14:42:06.976] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260408_144205.png
+[2026-04-08 14:42:06.976] INFO     Trajectory collisions: pass
+[2026-04-08 14:42:06.976] INFO     Joint continuity: pass (max dq=0.0190 rad, threshold=0.1745 rad)
+[2026-04-08 14:42:06.976] INFO     End-effector relative transform drift: pass (max pos=0.000017 m, max axis drift xyz=[0.000, 0.000, 0.001] deg)
+[2026-04-08 14:42:12.444] INFO     Running minimal Stage 3 RRT.
+[2026-04-08 14:42:12.444] INFO       start pose: [ 0.4912 -0.0348  1.0623]
+[2026-04-08 14:42:12.444] INFO       goal pose:  [0.7457 0.283  1.015 ]
+[2026-04-08 14:42:12.444] INFO       IK: on
+[2026-04-08 14:42:12.444] INFO       collision: on
+[2026-04-08 14:42:12.444] INFO       position_res: 0.005
+[2026-04-08 14:42:12.444] INFO       rotation_res: 0.025
+[2026-04-08 14:42:12.444] INFO       joint continuity threshold: 0.17453292519943295
+[2026-04-08 14:42:12.444] INFO       angle normalization: on
+[2026-04-08 14:42:12.444] INFO       collision obstacles: 1 bodies
+[2026-04-08 14:42:12.444] INFO       lock renderer during search: off
+[2026-04-08 14:42:42.504] INFO     Attempt 1/5: no path found.
+[2026-04-08 14:43:12.514] INFO     Attempt 2/5: no path found.
+[2026-04-08 14:43:42.534] INFO     Attempt 3/5: no path found.
+[2026-04-08 14:44:12.551] INFO     Attempt 4/5: no path found.
+[2026-04-08 14:44:42.640] INFO     Attempt 5/5: no path found.
+[2026-04-08 14:44:42.646] WARNING  No Stage 3 pose path found.
+[2026-04-08 14:44:42.749] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260408_144442.png
+[2026-04-08 14:44:42.749] WARNING  Trajectory validation could not run robot-side checks: planner_joint_path_unavailable
+[2026-04-09 09:37:33.798] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-04-09 09:37:36.911] INFO     Running minimal Stage 3 RRT.
+[2026-04-09 09:37:36.911] INFO       start pose: [ 0.4912 -0.3098  1.0623]
+[2026-04-09 09:37:36.911] INFO       goal pose:  [0.7457 0.3291 0.775 ]
+[2026-04-09 09:37:36.911] INFO       IK: on
+[2026-04-09 09:37:36.911] INFO       collision: on
+[2026-04-09 09:37:36.911] INFO       position_res: 0.005
+[2026-04-09 09:37:36.911] INFO       rotation_res: 0.025
+[2026-04-09 09:37:36.911] INFO       joint continuity threshold: 0.17453292519943295
+[2026-04-09 09:37:36.911] INFO       angle normalization: on
+[2026-04-09 09:37:36.911] INFO       collision obstacles: 5 bodies
+[2026-04-09 09:37:36.912] INFO       lock renderer during search: off
+[2026-04-09 09:38:06.923] INFO     Attempt 1/5: no path found.
+[2026-04-09 09:38:36.961] INFO     Attempt 2/5: no path found.
+[2026-04-09 09:39:07.005] INFO     Attempt 3/5: no path found.
+[2026-04-09 09:39:37.014] INFO     Attempt 4/5: no path found.
+[2026-04-09 09:40:16.505] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-04-09 09:41:16.190] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-04-09 09:41:18.591] INFO     Skipping built-bar import for V1-G1 because pose files are unavailable.
+[2026-04-09 09:41:18.591] INFO     Skipping built-bar import for V1-G2 because pose files are unavailable.
+[2026-04-09 09:41:19.537] INFO     Running minimal Stage 3 RRT.
+[2026-04-09 09:41:19.537] INFO       start pose: [ 0.4912 -0.0692  1.0623]
+[2026-04-09 09:41:19.537] INFO       goal pose:  [ 0.7457 -0.3291  0.675 ]
+[2026-04-09 09:41:19.537] INFO       IK: on
+[2026-04-09 09:41:19.537] INFO       collision: on
+[2026-04-09 09:41:19.537] INFO       position_res: 0.005
+[2026-04-09 09:41:19.537] INFO       rotation_res: 0.025
+[2026-04-09 09:41:19.537] INFO       joint continuity threshold: 0.17453292519943295
+[2026-04-09 09:41:19.537] INFO       angle normalization: on
+[2026-04-09 09:41:19.537] INFO       collision obstacles: 6 bodies
+[2026-04-09 09:41:19.537] INFO       lock renderer during search: off
+[2026-04-09 09:41:27.869] INFO     Smoothing: cost 3.2303 -> 2.3289, waypoints 172 -> 108, accepts 75/100
+[2026-04-09 09:41:27.869] INFO     Found Stage 3 pose path with 108 waypoints.
+[2026-04-09 09:41:29.165] INFO     Saved trajectory validation plot: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/trajectory_validation_stage3_20260409_094127.png
+[2026-04-09 09:41:29.165] INFO     Trajectory collisions: pass
+[2026-04-09 09:41:29.165] INFO     Joint continuity: pass (max dq=0.0394 rad, threshold=0.1745 rad)
+[2026-04-09 09:41:29.165] INFO     End-effector relative transform drift: pass (max pos=0.000030 m, max axis drift xyz=[0.003, 0.009, 0.009] deg)
+[2026-04-09 10:54:13.413] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-04-09 10:54:18.579] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log
+[2026-04-09 10:54:30.944] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_minimal_rrt.log

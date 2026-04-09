@@ -2,6 +2,7 @@
 
 Major
 - [x] Do smoothing as Caelan suggested
+- [] check if built bar collision is working
 - [] Add tool collision geo, handle ACM properly
 - [] Hardware test with mockups on both end-factors
 - [] Hardware test with real tools and bars

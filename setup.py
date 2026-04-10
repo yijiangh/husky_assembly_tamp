@@ -9,11 +9,19 @@ setup(
     python_requires=">=3.8",
     install_requires=[
         "numpy",
-        # Add other dependencies as needed
+        "pybullet",
+        "pybullet_planning==0.6.1",
+        "compas>=2.0",
+        "compas_fab @ git+https://github.com/compas-dev/compas_fab.git@wip_process",
+        "compas_robots>=0.5",
+        "matplotlib",
     ],
     extras_require={
         "dev": [
             "pytest",
+        ],
+        "video": [
+            "imageio[ffmpeg]",
         ],
     },
     zip_safe=False,

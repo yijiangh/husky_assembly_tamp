@@ -964,6 +964,18 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--video-frame-step", type=int, default=1, help="Record every Nth waypoint into batch trajectory videos")
     parser.add_argument("--video-frame-sleep", type=float, default=0.02, help="Replay frame interval used to derive batch video FPS")
+    parser.add_argument(
+        "--planner",
+        choices=["dual-arm-constrained", "single-arm-free", "dual-arm-free"],
+        default="dual-arm-constrained",
+        help="Planning mode",
+    )
+    parser.add_argument(
+        "--active-arm",
+        choices=["left", "right"],
+        default="left",
+        help="Which arm to plan for in single-arm-free mode",
+    )
     args = parser.parse_args()
     args.batch_targets_mode = not targets_flag_provided
     return args
@@ -1026,29 +1038,56 @@ def main() -> None:
                 start_context,
             )
             scene_spec = build_scene_spec_from_start_context(common_start, spec, start_context)
-            stage_runner = {
-                1: run_stage1_trial,
-                2: run_stage2_trial,
-                3: run_stage3_trial,
-            }[args.stage]
-            result = stage_runner(
-                grasp_json=spec["grasp_json"],
-                start_state_json=args.start_state,
-                end_state_json=spec["state_json"],
-                use_gui=args.gui,
-                position_res=args.position_res,
-                rotation_res=args.rotation_res,
-                endpoint_ik_attempts=args.endpoint_ik_attempts,
-                joint_continuity_threshold_rad=args.joint_continuity_threshold,
-                max_time=args.max_time,
-                max_iterations=args.max_iterations,
-                max_attempts=args.max_attempts,
-                random_seed=args.random_seed,
-                lock_renderer_during_search=args.lock_renderer_during_search,
-                scene_spec=scene_spec,
-                validation_reports_dir=support_dir(),
-                swap_grasps=args.swap_grasps,
-            )
+            if args.planner == "dual-arm-constrained":
+                stage_runner = {
+                    1: run_stage1_trial,
+                    2: run_stage2_trial,
+                    3: run_stage3_trial,
+                }[args.stage]
+                result = stage_runner(
+                    grasp_json=spec["grasp_json"],
+                    start_state_json=args.start_state,
+                    end_state_json=spec["state_json"],
+                    use_gui=args.gui,
+                    position_res=args.position_res,
+                    rotation_res=args.rotation_res,
+                    endpoint_ik_attempts=args.endpoint_ik_attempts,
+                    joint_continuity_threshold_rad=args.joint_continuity_threshold,
+                    max_time=args.max_time,
+                    max_iterations=args.max_iterations,
+                    max_attempts=args.max_attempts,
+                    random_seed=args.random_seed,
+                    lock_renderer_during_search=args.lock_renderer_during_search,
+                    scene_spec=scene_spec,
+                    validation_reports_dir=support_dir(),
+                    swap_grasps=args.swap_grasps,
+                )
+            else:
+                from husky_assembly_tamp.motion_planner.stage1.free_space_rrt import run_free_space_trial
+
+                result = run_free_space_trial(
+                    planner_mode=args.planner,
+                    active_arm=args.active_arm,
+                    grasp_json=spec["grasp_json"],
+                    start_state_json=args.start_state,
+                    end_state_json=spec["state_json"],
+                    use_gui=args.gui,
+                    max_time=args.max_time,
+                    max_iterations=args.max_iterations,
+                    max_attempts=args.max_attempts,
+                    joint_resolution=args.position_res,
+                    enable_smoothing=True,
+                    smooth_iterations=100,
+                    random_seed=args.random_seed,
+                    lock_renderer_during_search=args.lock_renderer_during_search,
+                    scene_spec=scene_spec,
+                    validation_reports_dir=support_dir(),
+                    swap_grasps=args.swap_grasps,
+                    joint_continuity_threshold_rad=args.joint_continuity_threshold,
+                    use_angle_normalization=True,
+                    enable_collision=True,
+                    include_built_bars=args.include_built_bars,
+                )
             summary = summarize_result(target_name, spec, result)
             if result.get("path_before_smoothing") is not None and result.get("path") is not None:
                 smoothing_plot_path = save_smoothing_comparison_plot(

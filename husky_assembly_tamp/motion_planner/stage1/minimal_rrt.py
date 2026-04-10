@@ -1917,7 +1917,11 @@ def run_stage_trial(
         if validation_reports_dir is not None:
             validation_kwargs["reports_dir"] = validation_reports_dir
         t_validation = time.perf_counter()
-        validation = validate_stage_trajectory(**validation_kwargs)
+        if use_gui:
+            with pp.LockRenderer():
+                validation = validate_stage_trajectory(**validation_kwargs)
+        else:
+            validation = validate_stage_trajectory(**validation_kwargs)
         validation_time_s = time.perf_counter() - t_validation
         log_validation_summary(validation)
         path_found = path is not None
@@ -2048,6 +2052,7 @@ def run_visualization_loop(
     last_replay_mode_value = 0.0
     last_replay_idx_value = 0.0
     joint_collision_checker = None
+    bar_pose_source = (validation or {}).get("bar_pose_source") or (scene or {}).get("bar_pose_source", "left_grasp")
     if collision_failures:
         logger.info(
             "Validation captured %d collision-failing waypoints. Enable 'Collision Replay Mode' to inspect them.",
@@ -2061,7 +2066,7 @@ def run_visualization_loop(
             0.0,
             physicsClientId=cid,
         )
-        if scene is not None:
+        if scene is not None and bar_pose_source == "left_grasp":
             joint_collision_checker = get_joint_collision_fn(
                 robot=scene["robot"],
                 arm_joints=scene["arm_joints"],
@@ -2210,37 +2215,76 @@ def main() -> None:
         action="store_true",
         help="Lock the PyBullet renderer while the tree is being expanded, then show the result afterward",
     )
+    parser.add_argument(
+        "--planner",
+        choices=["dual-arm-constrained", "single-arm-free", "dual-arm-free"],
+        default="dual-arm-constrained",
+        help=(
+            "Planning mode: dual-arm-constrained (default, pose-space RRT "
+            "maintaining bar grasp), single-arm-free (6-DOF joint-space BiRRT "
+            "for one arm), dual-arm-free (12-DOF joint-space BiRRT for both arms)"
+        ),
+    )
+    parser.add_argument(
+        "--active-arm",
+        choices=["left", "right"],
+        default="left",
+        help="Which arm to plan for in single-arm-free mode (default: left)",
+    )
     parser.set_defaults(floating_collision=False, lock_renderer_during_search=True)
     args = parser.parse_args()
 
     use_gui = not args.no_gui
-    debug_tree_out: Dict = {}
-    result = run_stage_trial(
-        stage=args.stage,
-        grasp_json=args.grasp_json,
-        start_state_json=args.start_state,
-        end_state_json=args.end_state,
-        use_gui=use_gui,
-        dist_metric=args.dist_metric,
-        goal_bias=args.goal_bias,
-        position_res=args.position_res,
-        rotation_res=args.rotation_res,
-        max_time=args.max_time,
-        max_iterations=args.max_iterations,
-        max_attempts=args.max_attempts,
-        endpoint_ik_attempts=args.endpoint_ik_attempts,
-        random_seed=args.random_seed,
-        enable_collision=args.floating_collision,
-        enable_smoothing=args.smoothing,
-        smooth_max_iterations=args.smooth_iterations,
-        smooth_max_time=args.smooth_max_time,
-        smooth_min_cost_improvement=args.smooth_min_improvement,
-        joint_continuity_threshold_rad=args.joint_continuity_threshold,
-        use_angle_normalization=args.use_angle_normalization,
-        lock_renderer_during_search=args.lock_renderer_during_search,
-        swap_grasps=args.swap_grasps,
-        debug_tree_out=debug_tree_out,
-    )
+    if args.planner == "dual-arm-constrained":
+        debug_tree_out: Dict = {}
+        result = run_stage_trial(
+            stage=args.stage,
+            grasp_json=args.grasp_json,
+            start_state_json=args.start_state,
+            end_state_json=args.end_state,
+            use_gui=use_gui,
+            dist_metric=args.dist_metric,
+            goal_bias=args.goal_bias,
+            position_res=args.position_res,
+            rotation_res=args.rotation_res,
+            max_time=args.max_time,
+            max_iterations=args.max_iterations,
+            max_attempts=args.max_attempts,
+            endpoint_ik_attempts=args.endpoint_ik_attempts,
+            random_seed=args.random_seed,
+            enable_collision=args.floating_collision,
+            enable_smoothing=args.smoothing,
+            smooth_max_iterations=args.smooth_iterations,
+            smooth_max_time=args.smooth_max_time,
+            smooth_min_cost_improvement=args.smooth_min_improvement,
+            joint_continuity_threshold_rad=args.joint_continuity_threshold,
+            use_angle_normalization=args.use_angle_normalization,
+            lock_renderer_during_search=args.lock_renderer_during_search,
+            swap_grasps=args.swap_grasps,
+            debug_tree_out=debug_tree_out,
+        )
+    else:
+        from husky_assembly_tamp.motion_planner.stage1.free_space_rrt import run_free_space_trial
+
+        result = run_free_space_trial(
+            planner_mode=args.planner,
+            active_arm=args.active_arm,
+            grasp_json=args.grasp_json,
+            start_state_json=args.start_state,
+            end_state_json=args.end_state,
+            use_gui=use_gui,
+            max_time=args.max_time,
+            max_iterations=args.max_iterations,
+            max_attempts=args.max_attempts,
+            enable_smoothing=args.smoothing,
+            smooth_iterations=args.smooth_iterations,
+            random_seed=args.random_seed,
+            lock_renderer_during_search=args.lock_renderer_during_search,
+            swap_grasps=args.swap_grasps,
+            joint_continuity_threshold_rad=args.joint_continuity_threshold,
+            use_angle_normalization=args.use_angle_normalization,
+            enable_collision=args.floating_collision,
+        )
 
     if use_gui:
         run_visualization_loop(

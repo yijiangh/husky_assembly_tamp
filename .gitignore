@@ -19,3 +19,9 @@ husky_assembly_tamp/motion_planner/missfont.log
 husky_assembly_tamp/motion_planner/stage1/reports/
 
 temp/*
+
+husky_assembly_tamp/logs/stage1_minimal_rrt.log
+
+husky_assembly_tamp/logs/stage1_path_validation.log
+
+husky_assembly_tamp/logs/stage1_real_state_study.log

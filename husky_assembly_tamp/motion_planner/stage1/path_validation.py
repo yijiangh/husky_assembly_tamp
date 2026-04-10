@@ -419,7 +419,12 @@ def validate_stage_trajectory(
     original_joint_path: Optional[Sequence[FullConf]] = None,
     use_angle_normalization: bool = False,
     reports_dir: str = REPORTS_DIR,
+    skip_relative_transform: bool = False,
+    bar_pose_source: str = "left_grasp",
 ) -> Dict[str, Any]:
+    if bar_pose_source not in {"left_grasp", "path"}:
+        raise ValueError(f"Unsupported bar_pose_source: {bar_pose_source!r}")
+
     os.makedirs(reports_dir, exist_ok=True)
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     out_path = os.path.join(reports_dir, f"trajectory_validation_stage{stage}_{timestamp}.png")
@@ -449,6 +454,7 @@ def validate_stage_trajectory(
         "relative_rotation_axis_threshold_deg": float(relative_rotation_axis_threshold_deg),
         "relative_transform_max_translation_m": None,
         "relative_transform_max_axis_angle_deg": {axis_name: None for axis_name in AXIS_NAMES},
+        "bar_pose_source": bar_pose_source,
     }
 
     if not path:
@@ -565,13 +571,17 @@ def validate_stage_trajectory(
             maybe_normalize_angles(conf, use_angle_normalization) for conf in original_joint_path
         ]
         original_joint_path_deg = unwrap_joint_path_for_display_deg(normalized_original_joint_path)
-    coarse_relative_translation_errors_m, coarse_relative_rotation_axis_errors_deg = compute_relative_transform_drift(
-        robot,
-        arm_joints,
-        tool_link_left,
-        tool_link_right,
-        normalized_joint_path,
-    )
+    if skip_relative_transform:
+        coarse_relative_translation_errors_m = []
+        coarse_relative_rotation_axis_errors_deg = {axis_name: [] for axis_name in AXIS_NAMES}
+    else:
+        coarse_relative_translation_errors_m, coarse_relative_rotation_axis_errors_deg = compute_relative_transform_drift(
+            robot,
+            arm_joints,
+            tool_link_left,
+            tool_link_right,
+            normalized_joint_path,
+        )
     dense_joint_path, dense_metadata = refine_joint_path_for_validation(
         normalized_joint_path,
         dense_joint_validation_step_rad,
@@ -580,11 +590,15 @@ def validate_stage_trajectory(
     result["dense_joint_validation_waypoints"] = len(dense_joint_path)
 
     # Replay a dense joint-space trajectory for collision and end-effector drift
-    # checks. The bar pose is derived from left-tool FK and the grasp transform.
+    # checks. Constrained planning derives the bar pose from left-tool FK and the
+    # grasp transform; free-space planning supplies a static bar pose path.
     for idx, (conf, sample_meta) in enumerate(zip(dense_joint_path, dense_metadata)):
         pp.set_joint_positions(robot, arm_joints, conf)
         world_from_left = pp.get_link_pose(robot, tool_link_left)
-        bar_pose = pp.multiply(world_from_left, bar_from_left)
+        if bar_pose_source == "path":
+            bar_pose = path[sample_meta["waypoint_index"]]
+        else:
+            bar_pose = pp.multiply(world_from_left, bar_from_left)
         pp.set_pose(bar_body, bar_pose)
 
         collision_fn_map = {
@@ -621,17 +635,21 @@ def validate_stage_trajectory(
         if failure_record["collision_keys"]:
             result["collision_failures"].append(failure_record)
 
-        world_from_right = pp.get_link_pose(robot, tool_link_right)
-        relative_pose = pp.multiply(pp.invert(world_from_left), world_from_right)
-        if base_relative_pose is None:
-            base_relative_pose = relative_pose
-        relative_translation_errors_m.append(float(np.linalg.norm(np.asarray(relative_pose[0]) - np.asarray(base_relative_pose[0]))))
-        axis_diffs_deg = rotation_axis_differences_deg(base_relative_pose[1], relative_pose[1])
-        for axis_name in AXIS_NAMES:
-            relative_rotation_axis_errors_deg[axis_name].append(axis_diffs_deg[axis_name])
+        if not skip_relative_transform:
+            world_from_right = pp.get_link_pose(robot, tool_link_right)
+            relative_pose = pp.multiply(pp.invert(world_from_left), world_from_right)
+            if base_relative_pose is None:
+                base_relative_pose = relative_pose
+            relative_translation_errors_m.append(float(np.linalg.norm(np.asarray(relative_pose[0]) - np.asarray(base_relative_pose[0]))))
+            axis_diffs_deg = rotation_axis_differences_deg(base_relative_pose[1], relative_pose[1])
+            for axis_name in AXIS_NAMES:
+                relative_rotation_axis_errors_deg[axis_name].append(axis_diffs_deg[axis_name])
 
     pp.set_joint_positions(robot, arm_joints, normalized_joint_path[-1])
-    pp.set_pose(bar_body, pp.multiply(pp.get_link_pose(robot, tool_link_left), bar_from_left))
+    if bar_pose_source == "path":
+        pp.set_pose(bar_body, path[-1])
+    else:
+        pp.set_pose(bar_body, pp.multiply(pp.get_link_pose(robot, tool_link_left), bar_from_left))
 
     result["collision_free"] = not any(collision_flags.values())
 

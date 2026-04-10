@@ -1,7 +1,7 @@
 # Reminders: 
 
 Major
-- [x] Do smoothing as Caelan suggested
+- [] fix free space planner, the path returned has huge jumps
 - [] check if built bar collision is working
 - [] Add tool collision geo, handle ACM properly
 - [] Hardware test with mockups on both end-factors
@@ -11,6 +11,9 @@ Major
 Minor
 - [] If we use the analytical ik from [ur-analytic-ik](https://github.com/Victorlouisdg/ur-analytic-ik?tab=readme-ov-file), remember to use the factory calibrated model
 - [] self collision is not handled correctly, arm and base
+
+Done:
+- [x] Do smoothing as Caelan suggested
 
 # Prompt
 X Now the stage 1, 2, 3 all work pretty nicely, but the only caveat is that the joint continuity is not considered. In some of the paths, I can see that the robot can flip its joint dramatically between two neighboring configurations. For example, look at the attached image.  I don't think you can resolve it in the RRT algorithm because, by nature, it's doing warm start per capsule? But correct me if you think I am wrong. If this happens, there are two solutions:

@@ -1,0 +1,70 @@
+[2026-03-16 16:52:32.260] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_debug_runner.log
+[2026-03-16 16:55:39.761] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_debug_runner.log
+[2026-03-16 16:56:06.201] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_debug_runner.log
+[2026-03-16 16:56:12.348] INFO     Log file: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_debug_runner.log
+[2026-03-16 16:56:16.236] INFO     Saved analysis CSV: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/failure_analysis_20260316_165612.csv
+[2026-03-16 16:56:16.236] INFO     Saved analysis JSON: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/failure_analysis_20260316_165612.json
+[2026-03-16 16:56:16.236] INFO     Saved debug report: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/debug_report_20260316_165612.md
+[2026-03-16 16:56:16.236] INFO     Saved profile dump: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/plan_profile_seed0_20260316_165612.prof
+[2026-03-16 16:56:16.236] INFO     Saved profile text: /Users/huangyijiang/Code/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/plan_profile_seed0_20260316_165612.txt
+[2026-03-17 09:34:57.995] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_debug_runner.log
+[2026-03-17 09:35:00.550] INFO     Saved comparison CSV: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/stage_comparison_20260317_093457.csv
+[2026-03-17 09:35:00.550] INFO     Saved comparison JSON: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/stage_comparison_20260317_093457.json
+[2026-03-17 09:35:00.551] INFO     Saved comparison report: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/stage_comparison_report_20260317_093457.md
+[2026-03-17 09:49:34.887] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_debug_runner.log
+[2026-03-17 09:49:37.895] INFO     Saved comparison CSV: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/stage_comparison_20260317_094934.csv
+[2026-03-17 09:49:37.895] INFO     Saved comparison JSON: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/stage_comparison_20260317_094934.json
+[2026-03-17 09:49:37.895] INFO     Saved comparison report: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/stage_comparison_report_20260317_094934.md
+[2026-03-17 09:53:01.163] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_debug_runner.log
+[2026-03-17 09:53:41.532] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_debug_runner.log
+[2026-03-17 09:53:45.390] INFO     Saved comparison CSV: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/stage_comparison_20260317_095341.csv
+[2026-03-17 09:53:45.390] INFO     Saved comparison JSON: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/stage_comparison_20260317_095341.json
+[2026-03-17 09:53:45.390] INFO     Saved comparison report: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/stage_comparison_report_20260317_095341.md
+[2026-03-17 10:00:21.074] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_debug_runner.log
+[2026-03-17 10:00:25.502] INFO     Saved comparison CSV: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/stage_comparison_20260317_100021.csv
+[2026-03-17 10:00:25.502] INFO     Saved comparison JSON: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/stage_comparison_20260317_100021.json
+[2026-03-17 10:00:25.502] INFO     Saved comparison report: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/stage_comparison_report_20260317_100021.md
+[2026-03-17 10:16:57.844] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_debug_runner.log
+[2026-03-17 10:17:38.841] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_debug_runner.log
+[2026-03-17 10:17:43.061] INFO     Saved comparison CSV: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/stage_comparison_20260317_101738.csv
+[2026-03-17 10:17:43.061] INFO     Saved comparison JSON: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/stage_comparison_20260317_101738.json
+[2026-03-17 10:17:43.061] INFO     Saved comparison report: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/stage_comparison_report_20260317_101738.md
+[2026-03-17 12:35:57.642] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_debug_runner.log
+[2026-03-17 12:36:02.111] INFO     Saved comparison CSV: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/stage_comparison_20260317_123557.csv
+[2026-03-17 12:36:02.111] INFO     Saved comparison JSON: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/stage_comparison_20260317_123557.json
+[2026-03-17 12:36:02.112] INFO     Saved comparison report: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/stage_comparison_report_20260317_123557.md
+[2026-03-17 12:48:35.078] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_debug_runner.log
+[2026-03-17 12:48:35.080] INFO     Running resolution sweep point pos=0.050m rot=0.100rad
+[2026-03-17 12:48:38.583] INFO     Running resolution sweep point pos=0.030m rot=0.070rad
+[2026-03-17 12:48:41.302] INFO     Running resolution sweep point pos=0.020m rot=0.050rad
+[2026-03-17 12:48:44.847] INFO     Saved resolution sweep CSV: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/resolution_sweep_20260317_124835.csv
+[2026-03-17 12:48:44.847] INFO     Saved resolution sweep JSON: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/resolution_sweep_20260317_124835.json
+[2026-03-17 12:48:44.847] INFO     Saved resolution sweep report: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/resolution_sweep_report_20260317_124835.md
+[2026-03-17 12:55:11.544] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_debug_runner.log
+[2026-03-17 12:55:11.545] INFO     Running resolution sweep point pos=0.050m rot=0.100rad
+[2026-03-17 12:55:27.123] INFO     Running resolution sweep point pos=0.030m rot=0.070rad
+[2026-03-17 12:55:45.127] INFO     Running resolution sweep point pos=0.020m rot=0.050rad
+[2026-03-17 12:56:06.146] INFO     Saved resolution sweep CSV: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/resolution_sweep_20260317_125511.csv
+[2026-03-17 12:56:06.146] INFO     Saved resolution sweep JSON: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/resolution_sweep_20260317_125511.json
+[2026-03-17 12:56:06.146] INFO     Saved resolution sweep report: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/resolution_sweep_report_20260317_125511.md
+[2026-03-17 13:05:58.469] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_debug_runner.log
+[2026-03-17 13:06:21.500] INFO     Saved comparison CSV: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/stage_comparison_20260317_130558.csv
+[2026-03-17 13:06:21.501] INFO     Saved comparison JSON: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/stage_comparison_20260317_130558.json
+[2026-03-17 13:06:21.501] INFO     Saved comparison report: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/stage_comparison_report_20260317_130558.md
+[2026-03-17 13:31:54.708] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_debug_runner.log
+[2026-03-17 13:31:54.710] INFO     Running resolution sweep point pos=0.050m rot=0.100rad
+[2026-03-17 13:32:06.397] INFO     Running resolution sweep point pos=0.030m rot=0.070rad
+[2026-03-17 13:32:24.285] INFO     Running resolution sweep point pos=0.020m rot=0.050rad
+[2026-03-17 13:32:43.300] INFO     Running resolution sweep point pos=0.015m rot=0.040rad
+[2026-03-17 13:33:07.626] INFO     Running resolution sweep point pos=0.010m rot=0.025rad
+[2026-03-17 13:33:35.584] INFO     Saved resolution sweep CSV: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/resolution_sweep_20260317_133154.csv
+[2026-03-17 13:33:35.585] INFO     Saved resolution sweep JSON: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/resolution_sweep_20260317_133154.json
+[2026-03-17 13:33:35.585] INFO     Saved resolution sweep report: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/resolution_sweep_report_20260317_133154.md
+[2026-03-17 13:34:07.348] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_debug_runner.log
+[2026-03-17 13:34:39.874] INFO     Saved comparison CSV: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/stage_comparison_20260317_133407.csv
+[2026-03-17 13:34:39.875] INFO     Saved comparison JSON: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/stage_comparison_20260317_133407.json
+[2026-03-17 13:34:39.875] INFO     Saved comparison report: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/stage_comparison_report_20260317_133407.md
+[2026-03-17 14:41:37.025] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_debug_runner.log
+[2026-03-17 14:42:27.400] INFO     Saved comparison CSV: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/stage_comparison_20260317_144137.csv
+[2026-03-17 14:42:27.403] INFO     Saved comparison JSON: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/stage_comparison_20260317_144137.json
+[2026-03-17 14:42:27.403] INFO     Saved comparison report: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/stage_comparison_report_20260317_144137.md

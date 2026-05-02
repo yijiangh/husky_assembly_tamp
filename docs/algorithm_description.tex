@@ -1,0 +1,1039 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath, amssymb}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{parskip}
+
+% --- Algorithmic customization ---
+\algrenewcommand\algorithmicrequire{\textbf{Input:}}
+\algrenewcommand\algorithmicensure{\textbf{Output:}}
+\newcommand{\algorithmicbreak}{\textbf{break}}
+\newcommand{\Break}{\State \algorithmicbreak}
+\newcommand{\Continue}{\State \textbf{continue}}
+\algnewcommand\algorithmicforeach{\textbf{for each}}
+\algdef{S}[FOR]{ForEach}[1]{\algorithmicforeach\ #1\ \algorithmicdo}
+\newcommand{\chg}[1]{\textcolor{blue}{#1}}
+\newcommand{\AlgTarget}[1]{\hypertarget{#1}{}}
+\newcommand{\AlgLink}[2]{\hyperlink{#1}{#2}}
+
+\title{\textbf{Capsule-Based RRT-Connect for Dual-Arm Constrained Motion Planning}\\[0.4em]
+\large Algorithm Reference}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section*{Versioned Additions (Log-Linked)}
+
+This section is synchronized with \texttt{docs/DUAL\_ARM\_PLANNER\_CHANGELOG.md}.
+Use the changelog as the index; use this document for mathematical/pseudocode details.
+
+\subsection*{v0.1 -- 2026-03-07}
+\textbf{Tag:} \emph{Hierarchical Cartesian Dual-Arm Planner Baseline}
+
+\paragraph{Stage hierarchy.}
+Planner modes are explicitly separated by
+\((\texttt{enable\_ik},\texttt{enable\_collision})\):
+\[
+\text{Stage 1}: (0,0),\quad
+\text{Stage 1b}: (0,1),\quad
+\text{Stage 2}: (1,0),\quad
+\text{Stage 3}: (1,1).
+\]
+This isolates bottlenecks across task-space connectivity, IK feasibility, and collision feasibility.
+
+\paragraph{Distance metric update.}
+Default nearest-neighbor metric is now feature-point based:
+\[
+\mathcal{D}_{feature}(T_1,T_2)=\|\Phi(T_2)-\Phi(T_1)\|_2,
+\]
+where $\Phi(T)$ stacks world positions of selected bar feature points.
+Legacy \texttt{pose6d} remains available.
+
+\paragraph{Guided sampling + warm start.}
+Sampling now mixes goal/guide/uniform components with probabilities
+$\{p_g, p_u, 1-p_g-p_u\}$. In Stage 3, a Stage-2 path can seed guide poses and
+warm-start smoothing/interpolation before full Stage-3 RRT.
+
+\paragraph{Fast path and ladder fallback.}
+After a task-space connection, planner first attempts projection chaining along the capsule pose chain:
+\[
+\mathbf{q}_{k} = \Pi\big(\mathrm{IK}_R(T_k T_R^{bar},\mathbf{q}_{k-1,R}),\,\mathbf{q}_{k-1,L}\big).
+\]
+If this fails, planner uses two-pass rung expansion and ladder shortest-path search.
+
+\noindent\textbf{Practical interpretation (why both exist):}
+\begin{itemize}
+  \item \textbf{Fast path} is an optimistic shortcut: once RRT connects in task space, try to recover the full
+        12-DOF joint trajectory directly by marching waypoint-to-waypoint with seed-chained IK and projection.
+        If every step succeeds (and collisions pass in Stage 3), return immediately.
+  \item \textbf{Ladder fallback} is the robust backup: if any fast-path step fails (IK, projection, or collision),
+        expand each waypoint into multiple IK candidates (ladder rungs), build inter-rung edges by joint continuity,
+        and solve for the best feasible chain.
+  \item \textbf{Why this hybrid is faster:} easy/smooth cases avoid ladder-graph cost entirely; hard cases still
+        remain solvable through combinatorial ladder search.
+\end{itemize}
+
+\paragraph{Performance changes.}
+\begin{itemize}
+  \item KD-tree nearest-neighbor for feature vectors in tree extension.
+  \item IK expansion cache keyed by pose/expansion parameters.
+  \item Collision cache keyed by quantized joint configuration.
+  \item Capsule-path decimation before ladder expansion.
+  \item Two-pass ladder expansion (small pass, then full pass if needed).
+  \item Dynamic-programming shortest-path ladder solver (default).
+\end{itemize}
+
+\noindent\textbf{Implementation pointers (current code):}
+\begin{itemize}
+  \item KD-tree nearest-neighbor: \texttt{trajectory\_dual\_cart\_constrained\_solver.py:183--196}
+  \item IK expansion cache: \texttt{trajectory\_dual\_cart\_constrained\_solver.py:1658--1670}
+  \item Collision cache: \texttt{trajectory\_dual\_cart\_constrained\_solver.py:1416--1422}
+  \item Capsule-path decimation: \texttt{trajectory\_dual\_cart\_constrained\_solver.py:1446--1457}
+  \item Two-pass ladder expansion: \texttt{trajectory\_dual\_cart\_constrained\_solver.py:1707--1743}
+  \item DP shortest-path ladder solver: \texttt{trajectory\_dual\_cart\_constrained\_solver.py:353--444}
+\end{itemize}
+
+\paragraph{Profiling and failure attribution.}
+Internal profiler now reports operation-level timing.
+Failure counters distinguish:
+\begin{itemize}
+  \item RRT task-space failure (no tree connection),
+  \item ladder failure (connected in task-space but no feasible joint chain).
+\end{itemize}
+
+\section*{Overview}
+
+Rather than planning directly in the full 12-DOF joint space, this planner operates in
+\textbf{6D task space} (the SE(3) pose of a grasped bar object), while switching behavior by stage:
+\[
+\text{Stage 1}: (\neg\texttt{enable\_ik},\neg\texttt{enable\_collision}),\;
+\text{Stage 1b}: (\neg\texttt{enable\_ik},\texttt{enable\_collision}),\;
+\text{Stage 2}: (\texttt{enable\_ik},\neg\texttt{enable\_collision}),\;
+\text{Stage 3}: (\texttt{enable\_ik},\texttt{enable\_collision}).
+\]
+A \emph{Capsule} node stores a bar pose and an optional list of dual-arm IK configurations.
+RRT-Connect grows two trees of Capsules in task space; after connection, the planner first attempts
+projection-chain recovery (fast path), then falls back to ladder expansion + graph search only when needed.
+
+\noindent\textbf{Key notation:}
+\begin{itemize}
+  \item $\mathbf{q} \in \mathbb{R}^{12}$: concatenated joint configuration $[\mathbf{q}_L \mid \mathbf{q}_R]$.
+  \item $T_{A}^{B}$: rigid transform of frame $A$ expressed in frame $B$.
+  \item $\mathcal{C} = (\mathbf{p},\,Q,\,\mathcal{Q},\,\pi)$: a Capsule with bar position $\mathbf{p}$,
+        quaternion $Q$, config list $\mathcal{Q}$, and parent pointer $\pi$.
+  \item $\text{FK}(\cdot)$, $\text{IK}(\cdot)$: forward/inverse kinematics.
+  \item $d(\mathbf{q}_1, \mathbf{q}_2) = \|\Delta\boldsymbol{\theta}(\mathbf{q}_1,\mathbf{q}_2)\|_2$: joint-space distance with angle wrapping.
+\end{itemize}
+\textbf{Highlight convention:} \chg{blue lines denote additions/changes in the current implementation.}
+
+% ============================================================
+\section*{Algorithm 1 -- Top-Level Planner}
+\noindent\textit{Purpose: orchestrate staged planning, warm-start shortcuts, and final post-processing.}
+% ============================================================
+\AlgTarget{alg:plan}
+\begin{algorithm}[H]
+\caption{\textsc{Plan}($\mathbf{q}_{\text{start}},\, \mathbf{q}_{\text{goal}},\,\texttt{stage}$)}
+\begin{algorithmic}[1]
+\Require Start/goal configs, stage flags, runtime knobs (\texttt{max\_time}, \texttt{max\_iterations}, \texttt{max\_attempts})
+\Ensure  Joint-space path $\Pi$ or \textsc{Failure}
+
+\Statex \textit{--- Step 1: Initialize global bar$\leftarrow$right transform ---}
+\State Set robot to $\mathbf{q}_{\text{goal}}$
+\State $T_{\text{bar}}^{W} \gets \text{FK}_{\text{bar}}(\mathbf{q}_{\text{goal}})$
+\State $T_{R}^{\text{bar}} \gets \bigl(T_{\text{bar}}^{W}\bigr)^{-1} \cdot T_{R}^{W}$
+\quad\Comment{fixed offset: bar frame $\to$ right tool}
+
+\Statex \textit{--- Step 2: Compute start and goal bar poses ---}
+\State $T_{\text{bar},s}^{W} \gets T_{R,s}^{W} \cdot \bigl(T_{R}^{\text{bar}}\bigr)^{-1}$
+\State $T_{\text{bar},g}^{W} \gets T_{R,g}^{W} \cdot \bigl(T_{R}^{\text{bar}}\bigr)^{-1}$
+
+\State \chg{$(\texttt{enable\_ik},\texttt{enable\_collision}) \gets \textsc{DecodeStage}(\texttt{stage})$}
+\If{$\texttt{enable\_ik}$}
+  \State \chg{$\mathcal{Q}_s \gets \AlgLink{alg:create_valid_confs}{\textsc{CreateValidConfs}}(T_{\text{bar},s}^{W}, T_{R}^{\text{bar}}, \delta=\texttt{start\_goal\_delta})$}
+  \State \chg{$\mathcal{Q}_g \gets \AlgLink{alg:create_valid_confs}{\textsc{CreateValidConfs}}(T_{\text{bar},g}^{W}, T_{R}^{\text{bar}}, \delta=\texttt{start\_goal\_delta})$}
+\Else
+  \State \chg{$\mathcal{Q}_s \gets [\mathbf{q}_{\text{start}}],\; \mathcal{Q}_g \gets [\mathbf{q}_{\text{goal}}]$}
+\EndIf
+
+\Statex \textit{--- Step 4: Build start and goal Capsules ---}
+\State $\mathcal{C}_s \gets \textsc{Capsule}\!\left(T_{\text{bar},s}^{W},\, \mathcal{Q}_s\right)$
+\State $\mathcal{C}_g \gets \textsc{Capsule}\!\left(T_{\text{bar},g}^{W},\, \mathcal{Q}_g\right)$
+\State \chg{\textsc{AttachFeatureVec}$(\mathcal{C}_s)$;\; \textsc{AttachFeatureVec}$(\mathcal{C}_g)$}
+
+\State \chg{$\Pi_{\text{warm}} \gets \varnothing,\; \mathcal{G}_{\text{guide}} \gets \varnothing$}
+\If{$\texttt{stage}=3$}
+  \State \chg{$\Pi_{\text{warm}} \gets \textsc{PlanStage2Seed}(\mathbf{q}_{\text{start}}, \mathbf{q}_{\text{goal}})$}
+  \State \chg{$\mathcal{G}_{\text{guide}} \gets \textsc{GuidePosesFromPath}(\Pi_{\text{warm}})$}
+\EndIf
+
+\For{$a=1$ \textbf{to} \texttt{max\_attempts}}
+  \If{$\texttt{enable\_collision} \land (\Pi_{\text{warm}} \neq \varnothing) \land \texttt{warm\_start\_first}$}
+    \State \chg{$\Pi \gets \AlgLink{alg:smooth_and_interpolate}{\textsc{SmoothAndInterpolate}}(\Pi_{\text{warm}})$}
+    \If{$\Pi \neq \varnothing$} \Return $\Pi$ \EndIf
+  \EndIf
+
+  \State \chg{$\Pi \gets \AlgLink{alg:rrt_connect_capsule}{\textsc{RRTConnectCapsule}}(\mathcal{C}_s,\mathcal{C}_g,\texttt{enable\_ik},\texttt{enable\_collision},\mathcal{G}_{\text{guide}})$}
+  \If{$\Pi = \varnothing$} \Continue \EndIf
+
+  \If{$\neg\texttt{enable\_ik}$}
+    \State \chg{\textbf{if} \texttt{return\_task\_path} \textbf{then return} raw task-space poses}
+    \Continue
+  \EndIf
+
+  \State $\Pi \gets \AlgLink{alg:joint_space_smooth}{\textsc{JointSpaceSmooth}}\!\left(\Pi,\, \AlgLink{alg:cspace_extend_projection}{\textsc{CSpaceExtendWithProjection}}\right)$
+  \State $\Pi \gets \textsc{Interpolate}\!\left(\Pi,\, \AlgLink{alg:cspace_extend_projection}{\textsc{CSpaceExtendWithProjection}}\right)$
+  \If{$\Pi \neq \varnothing$} \Return $\Pi$ \EndIf
+\EndFor
+\State \Return \textsc{Failure}
+\end{algorithmic}
+\end{algorithm}
+
+% ============================================================
+\section*{Algorithm 2 -- RRT-Connect in Capsule Space}
+\noindent\textit{Purpose: connect start/goal in task space and recover a feasible joint path via fast path or ladder fallback.}
+\noindent\textit{What ``merge'' means here:} a successful BiRRT connection only means that the forward and backward trees have met in \emph{bar-pose space}. It does \emph{not} mean that the IK branch carried by the forward tree is already compatible with the IK branch carried by the backward tree. The planner therefore treats the merged capsule chain as a task-space candidate only, then tries to recover a single consistent joint-space chain with \AlgLink{alg:try_project_chain}{\textsc{TryProjectChain}}. If that fails, it expands each rung to multiple IK candidates with \AlgLink{alg:expand_cart_path_ladder_graph}{\textsc{ExpandCartPathLadderGraph}} and resolves branch incompatibility through \AlgLink{alg:ladder_graph_search}{\textsc{LadderGraphSearch}}.
+% ============================================================
+\AlgTarget{alg:rrt_connect_capsule}
+\begin{algorithm}[H]
+\caption{\textsc{RRTConnectCapsule}($\mathcal{C}_s,\, \mathcal{C}_g$)}
+\begin{algorithmic}[1]
+\Require Start/goal capsules, stage flags, draw/profiler handles
+\Ensure  Ordered joint-config sequence or $\varnothing$
+
+\State $\mathcal{T}_1 \gets \{\mathcal{C}_s\}$;\quad $\mathcal{T}_2 \gets \{\mathcal{C}_g\}$
+
+\For{$k = 1$ \textbf{to} $N_{\max}$}
+
+  \Statex \quad\textit{--- Swap: grow from the smaller tree ---}
+  \If{$|\mathcal{T}_1| > |\mathcal{T}_2|$} \textbf{swap}$(\mathcal{T}_1, \mathcal{T}_2)$ \EndIf
+
+  \Statex \quad\textit{--- Sample (goal/guide/uniform mixture) ---}
+  \State \chg{$\mathcal{C}_{\text{rand}} \gets \textsc{SampleMixed}()$}
+
+  \Statex \quad\textit{--- Extend $\mathcal{T}_1$ toward $\mathcal{C}_{\text{rand}}$ ---}
+  \State $\mathcal{C}_{\text{new}},\,\mathcal{T}_1 \gets \AlgLink{alg:cart_extend_toward}{\textsc{CartExtendToward}}(\mathcal{T}_1,\, \mathcal{C}_{\text{rand}},\texttt{enable\_ik})$
+
+  \Statex \quad\textit{--- Attempt to connect $\mathcal{T}_2$ to $\mathcal{C}_{\text{new}}$ ---}
+  \State $\mathcal{C}_{\text{last}},\,\text{success},\,\mathcal{T}_2 \gets \AlgLink{alg:cart_extend_toward}{\textsc{CartExtendToward}}(\mathcal{T}_2,\, \mathcal{C}_{\text{new}},\texttt{enable\_ik})$
+
+  \If{success}
+
+    \Statex \quad\quad\textit{--- Reconstruct raw capsule path ---}
+    \State $\Pi_1 \gets \textsc{Retrace}(\mathcal{C}_{\text{new}})$;\quad
+           $\Pi_2 \gets \textsc{Retrace}(\mathcal{C}_{\text{last}})$
+    \State $\Pi_c \gets \Pi_1 \,\|\, \text{reverse}(\Pi_2)$
+    \State $\Pi_c \gets \AlgLink{alg:deduplicate}{\textsc{Deduplicate}}(\Pi_c)$
+    \quad\Comment{remove duplicate bar poses}
+
+    \If{$\neg\texttt{enable\_ik}$}
+      \State \chg{\textbf{if} \texttt{return\_task\_path} \textbf{then return} \textsc{CheckCapsulePath}$(\Pi_c)$}
+      \Continue
+    \EndIf
+
+    \State \chg{$\Pi_c \gets \AlgLink{alg:decimate_capsule_path}{\textsc{DecimateCapsulePath}}(\Pi_c)$}
+    \State \chg{$\Pi_{\text{fast}} \gets \AlgLink{alg:try_project_chain}{\textsc{TryProjectChain}}(\Pi_c,\texttt{enable\_collision})$}
+    \If{$\Pi_{\text{fast}} \neq \varnothing$} \Return $\Pi_{\text{fast}}$ \EndIf
+
+    \If{\chg{all rungs in $\Pi_c$ already expanded}} \Continue \EndIf
+
+    \State \chg{$\hat{\Pi}_c \gets \AlgLink{alg:expand_cart_path_ladder_graph}{\textsc{ExpandCartPathLadderGraph}}(\Pi_c)$}
+    \State \chg{$\text{results} \gets \AlgLink{alg:ladder_graph_search}{\textsc{LadderGraphSearch}}(\hat{\Pi}_c,\texttt{mode})$}
+    \If{$\text{results} = \varnothing$} \Continue \EndIf
+
+    \State \Return \chg{best result from ladder search}
+
+  \EndIf
+\EndFor
+\State \Return $\varnothing$
+\end{algorithmic}
+\end{algorithm}
+
+% ============================================================
+\section*{Algorithm 2a -- Deduplicate Capsule Path}
+\noindent\textit{Purpose: remove repeated bar poses while preserving a valid parent chain.}
+% ============================================================
+\AlgTarget{alg:deduplicate}
+\begin{algorithm}[H]
+\caption{\textsc{Deduplicate}($\Pi_c$)}
+\begin{algorithmic}[1]
+\Require Raw capsule sequence $\Pi_c=[\mathcal{C}_0,\ldots,\mathcal{C}_m]$
+\Ensure  Pose-unique capsule sequence $\Pi_u$
+
+\State $\Pi_u \gets [\,]$;\quad $\mathcal{S}_{seen} \gets \emptyset$;\quad $\pi \gets \varnothing$
+\ForEach{$\mathcal{C} \in \Pi_c$}
+  \State \chg{$k \gets \textsc{PoseKey}(\mathcal{C}.\text{pose},\texttt{round\_decimals})$}
+  \If{$k \in \mathcal{S}_{seen}$}
+    \Continue
+  \EndIf
+  \State $\mathcal{S}_{seen} \gets \mathcal{S}_{seen} \cup \{k\}$
+  \State \chg{$\hat{\mathcal{C}} \gets \textsc{DeepCopy}(\mathcal{C})$}
+  \State \chg{$\hat{\mathcal{C}}.\text{parent} \gets \pi$}
+  \State \chg{$\hat{\mathcal{C}}.\_origin \gets \mathcal{C}$}
+  \State Append $\hat{\mathcal{C}}$ to $\Pi_u$
+  \State $\pi \gets \hat{\mathcal{C}}$
+\EndFor
+\State \Return $\Pi_u$
+\end{algorithmic}
+\end{algorithm}
+
+% ============================================================
+\section*{Algorithm 2b -- Decimate Capsule Path}
+\noindent\textit{Purpose: reduce redundant waypoints before expensive ladder expansion.}
+% ============================================================
+\AlgTarget{alg:decimate_capsule_path}
+\begin{algorithm}[H]
+\caption{\textsc{DecimateCapsulePath}($\Pi_u,\,\tau_p,\,\tau_\theta$)}
+\begin{algorithmic}[1]
+\Require Deduplicated sequence $\Pi_u$, position threshold $\tau_p$, orientation threshold $\tau_\theta$
+\Ensure  Reduced sequence $\Pi_d$
+
+\If{$|\Pi_u| \le 2$}
+  \State \Return $\Pi_u$
+\EndIf
+\State $\Pi_d \gets [\Pi_u[0]]$
+\For{$i=1$ \textbf{to} $|\Pi_u|-2$}
+  \State $\mathcal{C}_{prev} \gets \Pi_d[-1]$;\quad $\mathcal{C}_{cur} \gets \Pi_u[i]$;\quad $\mathcal{C}_{next} \gets \Pi_u[i+1]$
+  \State \chg{$\Delta p \gets \|\mathbf{p}_{next}-\mathbf{p}_{prev}\|_2$}
+  \State \chg{$\Delta \theta \gets \angle(Q_{next},Q_{prev})$}
+  \If{\chg{$\Delta p < \tau_p$ and $\Delta\theta < \tau_\theta$}}
+    \State \chg{\textbf{skip} $\mathcal{C}_{cur}$}
+  \Else
+    \State Append $\mathcal{C}_{cur}$ to $\Pi_d$
+  \EndIf
+\EndFor
+\State Append $\Pi_u[-1]$ to $\Pi_d$
+\State \Return $\Pi_d$
+\end{algorithmic}
+\end{algorithm}
+
+% ============================================================
+\section*{Algorithm 2c -- Fast Projection Chain Recovery}
+\noindent\textit{Purpose: attempt direct seed-chained IK+projection recovery without building a full ladder graph.}
+% ============================================================
+\AlgTarget{alg:try_project_chain}
+\begin{algorithm}[H]
+\caption{\textsc{TryProjectChain}($\Pi_d,\,\texttt{enable\_collision}$)}
+\begin{algorithmic}[1]
+\Require Decimated capsule path $\Pi_d$, collision flag
+\Ensure  Joint path $\Pi_q$ or $\varnothing$
+
+\If{$\Pi_d=\varnothing$ or $\Pi_d[0].\mathcal{Q}=\varnothing$}
+  \State \Return $\varnothing$
+\EndIf
+\State $\mathbf{q}_{prev} \gets \Pi_d[0].\mathcal{Q}[0]$;\quad $\Pi_q \gets [\mathbf{q}_{prev}]$
+\State $\mathbf{q}_{R,seed} \gets \mathbf{q}_{prev}[6:]$;\quad $\mathbf{q}_{L,seed} \gets \mathbf{q}_{prev}[:6]$
+\ForEach{$\mathcal{C} \in \Pi_d[1:]$}
+  \State \chg{$T^W_R \gets \mathcal{C}.\text{pose} \cdot T_R^{\text{bar}}$}
+  \State \chg{$\mathbf{q}_R \gets \text{IK}_R(T^W_R,\mathbf{q}_{R,seed})$}
+  \If{$\mathbf{q}_R=\varnothing$}
+    \State \Return $\varnothing$
+  \EndIf
+  \State $\mathbf{q} \gets \textsc{Project}(\mathbf{q}_R,\mathbf{q}_{L,seed})$
+  \If{$\mathbf{q}=\varnothing$}
+    \State \Return $\varnothing$
+  \EndIf
+  \If{$\texttt{enable\_collision}$ and $\textsc{InCollision}(\mathbf{q})$}
+    \State \Return $\varnothing$
+  \EndIf
+  \State Append $\mathbf{q}$ to $\Pi_q$
+  \State $\mathbf{q}_{R,seed}\gets \mathbf{q}[6:]$;\quad $\mathbf{q}_{L,seed}\gets \mathbf{q}[:6]$
+\EndFor
+\State \Return $\Pi_q$
+\end{algorithmic}
+\end{algorithm}
+
+% ============================================================
+\section*{Algorithm 3 -- Extend Toward a Target Capsule}
+\noindent\textit{Purpose: grow one tree branch toward a target capsule with stage-aware IK/collision behavior.}
+% ============================================================
+\AlgTarget{alg:cart_extend_toward}
+\begin{algorithm}[H]
+\caption{\textsc{CartExtendToward}($\mathcal{T},\, \mathcal{C}_{\text{target}},\,\texttt{enable\_ik}$)}
+\begin{algorithmic}[1]
+\Require Tree $\mathcal{T}$, target capsule $\mathcal{C}_{\text{target}}$
+\Ensure  Last added capsule $\mathcal{C}_{\text{last}}$, success flag, updated $\mathcal{T}$
+
+\State \chg{$\mathcal{C}_{\text{near}} \gets \AlgLink{alg:nearest_node}{\textsc{NearestNode}}(\mathcal{T},\mathcal{C}_{\text{target}})$}
+\State \chg{\quad\textit{(KD-tree on feature vectors when available; fallback to linear scan)}}
+
+\State Waypoints $\gets \textsc{CartLinearInterp}(\mathcal{C}_{\text{near}},\, \mathcal{C}_{\text{target}})$
+\quad\Comment{SLERP + linear position, Alg.~5}
+
+\State $\mathcal{C}_{\text{prev}} \gets \mathcal{C}_{\text{near}}$;\quad $\text{all\_safe} \gets \texttt{True}$
+
+\ForEach{pose $T^W_{\text{bar}}$ in Waypoints}
+  \If{$\texttt{enable\_ik}$}
+    \State $T^W_R \gets T^W_{\text{bar}} \cdot T_R^{\text{bar}}$
+    \State $\mathbf{q}_R \gets \text{IK}_R\!\left(T^W_R,\; \text{seed} = \mathcal{C}_{\text{prev}}.\mathcal{Q}[0][6:]\right)$
+    \If{$\mathbf{q}_R \neq \varnothing$}
+      \State $\mathbf{q} \gets \AlgLink{alg:project}{\textsc{Project}}\!\left(\mathbf{q}_R,\; \mathcal{C}_{\text{prev}}.\mathcal{Q}[0][:6]\right)$
+    \Else
+      \State $\mathbf{q} \gets \varnothing$
+    \EndIf
+    \If{$\mathbf{q} = \varnothing$ or $\textsc{InCollision}(\mathbf{q})$}
+      \State $\text{all\_safe} \gets \texttt{False}$;\quad \Break
+    \EndIf
+    \State $\mathcal{C}_{\text{new}} \gets \textsc{Capsule}\!\left(T^W_{\text{bar}},\,[\mathbf{q}],\,\text{parent}=\mathcal{C}_{\text{prev}}\right)$
+  \Else
+    \State \chg{$\mathcal{C}_{\text{new}} \gets \textsc{Capsule}(T^W_{\text{bar}},\text{config}=\varnothing,\text{parent}=\mathcal{C}_{\text{prev}})$}
+  \EndIf
+  \State $\mathcal{T} \gets \mathcal{T} \cup \{\mathcal{C}_{\text{new}}\}$;\quad $\mathcal{C}_{\text{prev}} \gets \mathcal{C}_{\text{new}}$
+\EndFor
+\State \Return $\mathcal{C}_{\text{prev}},\; \text{all\_safe},\; \mathcal{T}$
+\end{algorithmic}
+\end{algorithm}
+
+% ============================================================
+\section*{Algorithm 3a -- Nearest Node Selection (NearestNode)}
+\noindent\textit{Purpose: choose nearest tree node using KD-tree acceleration when feature vectors are available.}
+% ============================================================
+\AlgTarget{alg:nearest_node}
+\begin{algorithm}[H]
+\caption{\textsc{NearestNode}($\mathcal{T},\,\mathcal{C}_{\text{target}}$)}
+\begin{algorithmic}[1]
+\Require Tree $\mathcal{T}$ of capsules, target capsule $\mathcal{C}_{\text{target}}$
+\Ensure  Nearest capsule $\mathcal{C}_{\text{near}} \in \mathcal{T}$
+
+\State \chg{$\mathbf{v}_t \gets \textsc{FeatureVec}(\mathcal{C}_{\text{target}})$}
+\If{\chg{$\mathbf{v}_t \neq \varnothing$ and all nodes in $\mathcal{T}$ have valid feature vectors}}
+  \State \chg{Build matrix $V \gets [\mathbf{v}_1,\ldots,\mathbf{v}_{|\mathcal{T}|}]^\top$}
+  \State \chg{$\mathcal{K} \gets \textsc{KDTree}(V)$}
+  \State \chg{$i^\star \gets \mathcal{K}.\textsc{QueryNearest}(\mathbf{v}_t)$}
+  \State \Return \chg{$\mathcal{T}[i^\star]$}
+\Else
+  \State \chg{$\mathcal{C}_{\text{near}} \gets \arg\min_{\mathcal{C}\in\mathcal{T}} \|\AlgLink{alg:cart_dist}{\textsc{CartDist}}(\mathcal{C},\mathcal{C}_{\text{target}})\|_2$}
+  \State \Return $\mathcal{C}_{\text{near}}$
+\EndIf
+\end{algorithmic}
+\end{algorithm}
+
+% ============================================================
+\section*{Algorithm 4 -- Dual-Arm Constraint Projection}
+\noindent\textit{Purpose: recover full dual-arm configuration from right-arm state under rigid relative-pose constraint.}
+% ============================================================
+\AlgTarget{alg:project}
+\begin{algorithm}[H]
+\caption{\textsc{Project}($\mathbf{q}_R,\, \mathbf{q}_{L,\text{seed}}$)}
+\begin{algorithmic}[1]
+\Require Right-arm config $\mathbf{q}_R \in \mathbb{R}^6$, left-arm seed $\mathbf{q}_{L,\text{seed}} \in \mathbb{R}^6$
+\Ensure  Full 12-DOF config $\mathbf{q}$ or $\varnothing$
+
+\State $T_R^W \gets \text{FK}_R(\mathbf{q}_R)$
+\State $T_L^W \gets T_R^W \cdot \bigl(T_L^R\bigr)$
+\quad\Comment{$T_L^R$ is the precomputed rigid offset (constant)}
+\State $\mathbf{q}_L \gets \text{IK}_L\!\left(T_L^W,\; \text{seed} = \mathbf{q}_{L,\text{seed}}\right)$
+\If{$\mathbf{q}_L = \varnothing$}
+  \State \Return $\varnothing$
+\EndIf
+\State \Return $[\mathbf{q}_L \mid \mathbf{q}_R]$
+\end{algorithmic}
+\end{algorithm}
+
+% ============================================================
+\section*{Algorithm 5 -- Cartesian Linear Interpolation (SLERP)}
+\noindent\textit{Purpose: generate pose waypoints with linear position interpolation and shortest-arc quaternion SLERP.}
+% ============================================================
+\AlgTarget{alg:cart_linear_interp}
+\begin{algorithm}[H]
+\caption{\textsc{CartLinearInterp}($\mathcal{C}_1,\, \mathcal{C}_2$)}
+\begin{algorithmic}[1]
+\Require Capsules $\mathcal{C}_1$, $\mathcal{C}_2$ with poses $(\mathbf{p}_1, Q_1)$ and $(\mathbf{p}_2, Q_2)$
+\Ensure  Sequence of waypoint poses
+
+\State $\Delta p \gets \|\mathbf{p}_2 - \mathbf{p}_1\|$;\quad $\Delta\theta \gets \angle(Q_1, Q_2)$
+\State $N \gets \left\lceil \max\!\left(\Delta p\,/\,r_p,\;\Delta\theta\,/\,r_\theta\right) \right\rceil$
+\quad\Comment{$r_p{=}5$cm, $r_\theta{=}0.1$\,rad}
+
+\If{$Q_1 \cdot Q_2 < 0$} $Q_2 \gets -Q_2$ \EndIf
+\quad\Comment{ensure shortest-arc SLERP}
+
+\State Waypoints $\gets [\,]$
+\For{$i = 0$ \textbf{to} $N$}
+  \State $t \gets i/N$
+  \State $\mathbf{p}(t) \gets (1-t)\,\mathbf{p}_1 + t\,\mathbf{p}_2$
+  \State $Q(t) \gets \text{Slerp}(Q_1, Q_2, t)$
+  \State Waypoints $\gets$ Waypoints $\cup\; \{(\mathbf{p}(t), Q(t))\}$
+\EndFor
+\State \Return Waypoints
+\end{algorithmic}
+\end{algorithm}
+
+% ============================================================
+\section*{Algorithm 6 -- Ladder Graph Construction (ExpandCartPathLadderGraph)}
+\noindent\textit{Purpose: expand capsule rungs to multi-IK sets and build inter-rung connectivity for graph search.}
+% ============================================================
+\AlgTarget{alg:expand_cart_path_ladder_graph}
+\begin{algorithm}[H]
+\caption{\textsc{ExpandCartPathLadderGraph}($\Pi_c$)}
+\begin{algorithmic}[1]
+\Require Deduplicated capsule sequence $\Pi_c = [\mathcal{C}_0, \ldots, \mathcal{C}_n]$
+\Ensure  Expanded ladder graph $\hat{\Pi}_c$ with inter-rung connectivity
+
+\State \chg{\textit{--- Pass 1 (small): cheap expansion where missing ---}}
+\ForEach{capsule $\mathcal{C}_i$ in $\Pi_c$}
+  \If{$|\mathcal{C}_i.\mathcal{Q}| \leq 1$}
+    \State \chg{$\mathcal{C}_i.\mathcal{Q} \gets \AlgLink{alg:expand_single}{\textsc{ExpandSingle}}(\mathcal{C}_i,\delta=\min(\texttt{ladder\_expand\_delta},\pi/6),\texttt{attempts}=\texttt{small})$}
+  \EndIf
+  \State Append $\mathcal{C}_i$ to $\hat{\Pi}_c$
+\EndFor
+\State Build connections across adjacent rungs
+\If{\chg{at least one inter-rung edge exists}} \Return $\hat{\Pi}_c$ \EndIf
+
+\State \chg{\textit{--- Pass 2 (full): retry only unresolved rungs ---}}
+\ForEach{capsule $\mathcal{C}_i$ in $\hat{\Pi}_c$}
+  \If{$|\mathcal{C}_i.\mathcal{Q}| \leq 1$}
+    \State \chg{$\mathcal{C}_i.\mathcal{Q} \gets \AlgLink{alg:expand_single}{\textsc{ExpandSingle}}(\mathcal{C}_i,\delta=\texttt{ladder\_expand\_delta},\texttt{attempts}=\texttt{full})$}
+  \EndIf
+\EndFor
+\State Rebuild inter-rung connection map
+\State \Return $\hat{\Pi}_c$
+\end{algorithmic}
+\end{algorithm}
+
+% ============================================================
+\section*{Algorithm 6a -- Single-Rung Expansion (ExpandSingle)}
+\noindent\textit{Purpose: expand one rung with cache-aware multi-IK generation.}
+% ============================================================
+\AlgTarget{alg:expand_single}
+\begin{algorithm}[H]
+\caption{\textsc{ExpandSingle}($\mathcal{C},\,\delta,\,\texttt{max\_attempts}$)}
+\begin{algorithmic}[1]
+\Require Capsule $\mathcal{C}$ with pose $T^W_{\text{bar}}$, expansion sweep $\delta$, attempt budget
+\Ensure  Expanded capsule $\hat{\mathcal{C}}$ with multi-IK rung configs
+
+\State \chg{$k \gets (\textsc{PoseKey}(T^W_{\text{bar}}),\, \delta,\, \texttt{max\_attempts})$}
+\If{\chg{$k \in \texttt{ik\_cache}$}}
+  \State \chg{$\mathcal{Q} \gets \texttt{ik\_cache}[k]$}
+\Else
+  \State \chg{$\mathcal{Q} \gets \AlgLink{alg:create_valid_confs}{\textsc{CreateValidConfs}}(\text{IK}_R,\;T^W_{\text{bar}},\;T_R^{\text{bar}},\;\delta,\;\texttt{max\_attempts},\;\texttt{collision\_fn})$}
+  \State \chg{$\texttt{ik\_cache}[k] \gets \mathcal{Q}$}
+\EndIf
+\State \Return \chg{$\textsc{Capsule}(T^W_{\text{bar}},\,\mathcal{Q},\,\text{parent}=\varnothing)$}
+\end{algorithmic}
+\end{algorithm}
+
+% ============================================================
+\section*{Algorithm 6b -- Multi-IK Generation (CreateValidConfs)}
+\noindent\textit{Purpose: generate diverse feasible dual-arm configurations around a bar pose via yaw perturbation + projection.}
+% ============================================================
+\AlgTarget{alg:create_valid_confs}
+\begin{algorithm}[H]
+\caption{\textsc{CreateValidConfs}($\text{IK}_R,\,T^W_{\text{bar}},\,T_R^{\text{bar}},\,\delta,\,\texttt{max\_attempts}$)}
+\begin{algorithmic}[1]
+\Require Right-arm IK handle, bar pose, bar$\rightarrow$right transform, yaw sweep $\delta$, attempt count
+\Ensure  Unique feasible 12-DOF configuration set $\mathcal{Q}$ or $\varnothing$
+
+\State $\mathcal{Q}_{raw} \gets [\,]$
+\State \chg{$\Theta \gets \textsc{Linspace}(0,\delta,\texttt{max\_attempts})$}
+\ForEach{$\theta \in \Theta$}
+  \State \chg{$\mathbf{q}^{seed}_R \gets \textsc{Uniform}([-\pi,\pi]^6)$}
+  \State \chg{$\Delta T \gets \textsc{Pose}(\text{yaw}=\theta)$}
+  \State \chg{$\tilde{T}^W_{\text{bar}} \gets T^W_{\text{bar}} \cdot \Delta T$}
+  \State \chg{$T^W_R \gets \tilde{T}^W_{\text{bar}} \cdot T_R^{\text{bar}}$}
+  \State \chg{$\mathbf{q}_R \gets \text{IK}_R(T^W_R,\mathbf{q}^{seed}_R)$}
+  \If{$\mathbf{q}_R \neq \varnothing$}
+    \State \chg{$\mathbf{q}_R \gets \textsc{NormalizeToPi}(\mathbf{q}_R)$}
+    \State \chg{$\mathcal{Q}_{proj} \gets \textsc{ProjectMultiple}(\mathbf{q}_R,\texttt{max\_attempts},\texttt{collision\_fn})$}
+    \If{$\mathcal{Q}_{proj} \neq \varnothing$}
+      \State Append all elements of $\mathcal{Q}_{proj}$ to $\mathcal{Q}_{raw}$
+      \If{\chg{\texttt{immediate} is True}}
+        \State \chg{\Return first element in $\mathcal{Q}_{proj}$}
+      \EndIf
+    \EndIf
+  \EndIf
+\EndFor
+
+\State \chg{$\mathcal{Q} \gets \textsc{DeduplicateByAllClose}(\mathcal{Q}_{raw},\texttt{atol}=10^{-2})$}
+\If{$|\mathcal{Q}| = 0$}
+  \State \Return $\varnothing$
+\EndIf
+\State \Return $\mathcal{Q}$
+\end{algorithmic}
+\end{algorithm}
+
+% ============================================================
+\section*{Algorithm 7 -- Ladder Graph Search (LadderGraphSearch)}
+\noindent\textit{Purpose: solve the expanded ladder either by shortest-path mode or full DFS enumeration mode.}
+% ============================================================
+\AlgTarget{alg:ladder_graph_search}
+\begin{algorithm}[H]
+\caption{\textsc{LadderGraphSearch}($\hat{\Pi}_c,\,\texttt{mode}$)}
+\begin{algorithmic}[1]
+\Require Expanded ladder $\hat{\Pi}_c = [\mathcal{C}_0, \ldots, \mathcal{C}_n]$ with connection maps
+\Ensure  Feasible joint-config path candidates
+
+\State Build adjacency $E_\ell$: for each rung-pair $(\ell, \ell{+}1)$,
+       $E_\ell[j] \gets \{k \mid k \in \mathcal{C}_{\ell+1}.\text{connection},\; j \in \mathcal{C}_{\ell+1}.\text{connection}[k]\}$
+
+\If{\chg{$\texttt{mode}=\texttt{shortest}$}}
+  \State \chg{\Return \textsc{DPShortestPath}$(\hat{\Pi}_c)$}
+\Else
+  \State \chg{\Return \textsc{EnumerateAllPathsDFS}$(\hat{\Pi}_c)$}
+\EndIf
+\end{algorithmic}
+\end{algorithm}
+
+% ============================================================
+\section*{Algorithm 8 -- Warm-Start Shortcut (SmoothAndInterpolate)}
+\noindent\textit{Purpose: cheaply validate and refine a Stage-2 seed path before full Stage-3 search.}
+% ============================================================
+\AlgTarget{alg:smooth_and_interpolate}
+\begin{algorithm}[H]
+\caption{\textsc{SmoothAndInterpolate}($\Pi_{\text{warm}}$)}
+\begin{algorithmic}[1]
+\Require Warm-start joint path $\Pi_{\text{warm}}$
+\Ensure  Collision-feasible refined path or $\varnothing$
+
+\If{$\Pi_{\text{warm}} = \varnothing$ or $|\Pi_{\text{warm}}| < 2$}
+  \State \Return $\varnothing$
+\EndIf
+\State \chg{$\Pi_s \gets \textsc{SmoothWithCollision}(\Pi_{\text{warm}},\,\AlgLink{alg:cspace_extend_projection}{\textsc{CSpaceExtendWithProjection}},\,\texttt{max\_iters})$}
+\State \chg{$\Pi_r \gets \textsc{Interpolate}(\Pi_s,\,\AlgLink{alg:cspace_extend_projection}{\textsc{CSpaceExtendWithProjection}})$}
+\If{$\Pi_r \neq \varnothing$ and $|\Pi_r| > 1$}
+  \State \Return $\Pi_r$
+\EndIf
+\State \Return $\varnothing$
+\end{algorithmic}
+\end{algorithm}
+
+% ============================================================
+\section*{Algorithm 9 -- Joint-Space Smoothing}
+\noindent\textit{Purpose: shorten a feasible path with collision-safe random shortcutting.}
+% ============================================================
+\AlgTarget{alg:joint_space_smooth}
+\begin{algorithm}[H]
+\caption{\textsc{JointSpaceSmooth}($\Pi,\, \textsc{ExtendFn},\, N_{\text{iter}}$)}
+\begin{algorithmic}[1]
+\Require Joint-config path $\Pi$, extension function, iteration count $N_{\text{iter}}$
+\Ensure  Shorter path (collision-feasible shortcutting)
+
+\For{$\_ = 1$ \textbf{to} $N_{\text{iter}}$}
+  \State $(i, j) \gets$ two random indices from $\{0,\ldots,|\Pi|-1\}$ with $j - i > 1$
+  \State segment $\gets \AlgLink{alg:cspace_extend_projection}{\textsc{CSpaceExtendWithProjection}}(\Pi[i],\, \Pi[j])$
+  \If{\chg{segment is valid and all intermediate states pass collision}}
+    \State $\Pi \gets \Pi[:i] \;\|\; \text{segment} \;\|\; \Pi[j:]$
+  \EndIf
+\EndFor
+\State \Return $\Pi$
+\end{algorithmic}
+\end{algorithm}
+
+% ============================================================
+\section*{Algorithm 10 -- C-Space Extension via Projection}
+\noindent\textit{Purpose: interpolate right-arm motion while re-projecting left-arm states to preserve the dual-arm constraint.}
+% ============================================================
+\AlgTarget{alg:cspace_extend_projection}
+\begin{algorithm}[H]
+\caption{\textsc{CSpaceExtendWithProjection}($\mathbf{q}_1,\, \mathbf{q}_2$)}
+\begin{algorithmic}[1]
+\Require Start config $\mathbf{q}_1$, end config $\mathbf{q}_2$
+\Ensure  Sequence of 12-DOF configs interpolating right arm, re-projecting left arm
+
+\State $\Delta\boldsymbol{\theta}_R \gets \text{AngleDist}(\mathbf{q}_1[6:],\; \mathbf{q}_2[6:])$
+\State $N \gets \max\!\left(1,\;\left\lceil \|\Delta\boldsymbol{\theta}_R / r_{\text{joint}}\|_2 \right\rceil\right)$
+\quad\Comment{$r_{\text{joint}} = 5^\circ$ per joint}
+
+\State $\mathbf{q}_{\text{prev}} \gets \mathbf{q}_1$
+
+\For{$i = 0$ \textbf{to} $N$}
+  \State $t \gets i/N$
+  \State $\mathbf{q}_R^{(i)} \gets \text{normalize}\!\left(\mathbf{q}_1[6:] + t\,\Delta\boldsymbol{\theta}_R\right)$
+  \State $\mathbf{q}^{(i)} \gets \AlgLink{alg:project}{\textsc{Project}}\!\left(\mathbf{q}_R^{(i)},\; \mathbf{q}_{\text{prev}}[:6]\right)$
+  \If{$\mathbf{q}^{(i)} \neq \varnothing$}
+    \State \textbf{yield} $\mathbf{q}^{(i)}$;\quad $\mathbf{q}_{\text{prev}} \gets \mathbf{q}^{(i)}$
+  \Else
+    \State \textbf{yield} $\varnothing$;\quad \Break
+  \EndIf
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+
+% ============================================================
+\section*{Algorithm 11 -- Task-Space Distance}
+\noindent\textit{Purpose: compute nearest-neighbor distance features in either feature or pose6d metric mode.}
+% ============================================================
+\AlgTarget{alg:cart_dist}
+\begin{algorithm}[H]
+\caption{\textsc{CartDist}($\mathcal{C}_1,\, \mathcal{C}_2,\,\texttt{metric}$)}
+\begin{algorithmic}[1]
+\Require Two Capsules with poses $(R_1, \mathbf{p}_1)$ and $(R_2, \mathbf{p}_2)$
+\Ensure  Distance feature vector used by nearest-neighbor query
+
+\If{\chg{$\texttt{metric}=\texttt{feature}$}}
+  \State \chg{$\Phi_1 \gets$ stacked world points of local bar feature set under $\mathcal{C}_1.\text{pose}$}
+  \State \chg{$\Phi_2 \gets$ stacked world points of local bar feature set under $\mathcal{C}_2.\text{pose}$}
+  \State \chg{\Return $[\|\Phi_2-\Phi_1\|_2]$}
+\Else
+  \State $\Delta\mathbf{p} \gets \mathbf{p}_2 - \mathbf{p}_1$
+  \State $\alpha_x \gets \angle(R_1[:,0],\; R_2[:,0])$
+  \State $\alpha_y \gets \angle(R_1[:,1],\; R_2[:,1])$
+  \State $\alpha_z \gets \angle(R_1[:,2],\; R_2[:,2])$
+  \State \Return $[\Delta p_x,\; \Delta p_y,\; \Delta p_z,\; \alpha_x,\; \alpha_y,\; \alpha_z]$
+\EndIf
+\end{algorithmic}
+\end{algorithm}
+
+% ============================================================
+\section*{Algorithm 11a -- Feature-Point Construction for Feature Distance}
+\noindent\textit{Purpose: build stable local bar feature points from AABB corners for feature-metric comparisons.}
+% ============================================================
+\AlgTarget{alg:compute_bar_feature_points}
+\begin{algorithm}[H]
+\caption{\textsc{ComputeBarFeaturePoints}($\texttt{target\_bar}$)}
+\begin{algorithmic}[1]
+\Require Bar body handle in PyBullet
+\Ensure  Local-frame feature-point set $\mathcal{P}_{local}$ or $\varnothing$
+
+\State \chg{$T^W_{\text{bar}} \gets \textsc{GetPose}(\texttt{target\_bar})$}
+\State \chg{$[\mathbf{a}_{min}, \mathbf{a}_{max}] \gets \textsc{GetAABB}(\texttt{target\_bar})$}
+\If{\chg{$\mathbf{a}_{min}=\varnothing$ or $\mathbf{a}_{max}=\varnothing$}}
+  \State \Return $\varnothing$
+\EndIf
+\State \chg{Construct 4 world AABB corner points:}
+\State \chg{$\mathbf{c}_1=[a_x^{-},a_y^{-},a_z^{-}],\;
+            \mathbf{c}_2=[a_x^{-},a_y^{+},a_z^{+}],\;
+            \mathbf{c}_3=[a_x^{+},a_y^{-},a_z^{+}],\;
+            \mathbf{c}_4=[a_x^{+},a_y^{+},a_z^{-}]$}
+\State \chg{$T^{\text{bar}}_{W} \gets (T^W_{\text{bar}})^{-1}$}
+\State $\mathcal{P}_{local} \gets [\,]$
+\ForEach{$\mathbf{c}_i \in \{\mathbf{c}_1,\mathbf{c}_2,\mathbf{c}_3,\mathbf{c}_4\}$}
+  \State \chg{$\mathbf{p}^{local}_i \gets T^{\text{bar}}_{W}\,\mathbf{c}_i$}
+  \State $\mathcal{P}_{local}.\text{append}(\mathbf{p}^{local}_i)$
+\EndFor
+\State \Return $\mathcal{P}_{local}$
+\end{algorithmic}
+\end{algorithm}
+
+% ============================================================
+\section*{Design Rationale}
+% ============================================================
+
+\begin{center}
+\begin{tabular}{lp{9cm}}
+\toprule
+\textbf{Design Choice} & \textbf{Rationale} \\
+\midrule
+Plan in task space (bar pose SE(3)) &
+  Avoids the combinatorial explosion of 12-DOF joint sampling while
+  naturally encoding the object-centric constraint. \\[4pt]
+Multiple IK seeds per Capsule rung &
+  Captures all kinematic branches at each Cartesian waypoint, enabling the
+  ladder graph to find a globally smooth joint trajectory. \\[4pt]
+Lazy rung expansion &
+  Full multi-seed IK is deferred until a topologically promising path is
+  found by RRT-Connect, avoiding wasted computation on discarded branches. \\[4pt]
+Ladder graph + DFS search &
+  Decouples geometric path topology (found by RRT) from optimal
+  joint-config selection (found by graph search), making each sub-problem
+  tractable independently. \\[4pt]
+Rigid constraint via projection &
+  The left arm is never sampled independently; it is always solved from the
+  right arm pose, guaranteeing the grasp constraint is satisfied at every
+  configuration in the tree. \\[4pt]
+C-space shortcut smoothing &
+  Post-RRT shortcutting in joint space (interpolated via right-arm linear
+  interpolation + left-arm re-projection) reduces path length without
+  breaking the dual-arm constraint. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% ============================================================
+\newpage
+\section*{Original Design Intent}
+% ============================================================
+
+This section records the original design sketch from which the implementation was
+derived.  It serves as the reference baseline for the gap analysis that follows.
+
+\subsection*{Core Planner Components}
+
+\paragraph{Sample.}
+Draw a random 6-DOF bar pose with respect to the robot base frame.
+\emph{Do not} solve IK at sampling time — the sampled Capsule carries only a pose,
+no joint configuration.  IK is deferred to the extend step, where a good seed is
+available from the preceding tree node.
+
+\paragraph{Extend.}
+Cartesian-interpolate between two bar poses.
+The first waypoint is assumed to already carry a valid IK solution (inherited from the
+nearest tree node); use that configuration to warm-start the IK solver for the next
+waypoint (iterative, seed-chained IK).
+If any waypoint fails IK, stop extending and return only the partial path of waypoints
+for which a valid joint configuration was found.
+
+\paragraph{Collision.}
+Because each Capsule carries exactly one IK solution, collision checking reduces to:
+set the robot to that joint configuration and test for self-collision and
+environment collision.
+This check is entirely local to the Capsule — it has \emph{no} dependence on the
+Capsule's parent node in the tree.
+
+\paragraph{Distance.}
+Measure the pose difference between two bar Cartesian poses.
+A direct weighted sum of position and orientation can be awkward to tune because
+the two quantities have different units (metres vs.\ radians).
+An easier alternative, inspired by practice in reinforcement learning, is to pick a
+small set of \emph{feature points} on the object (e.g.\ the corners of a bounding box),
+compute their world-frame positions for each pose, and use the sum of squared
+Euclidean distances.  This yields a purely metric (metres-only) distance with no unit
+mismatch.
+
+\subsection*{Ladder Graph (Post-RRT Joint-Space Selection)}
+
+Once the task-space RRT-Connect finds an initial path (a sequence of bar poses), the
+joint-continuity problem is addressed in a second phase:
+\begin{enumerate}
+  \item \textbf{Expand} each Capsule rung on the path to its full set of IK solutions
+        (multiple IK seeds / delta-angle sweep of the bar pose).
+  \item \textbf{Build} a ladder graph: nodes are IK solutions at each rung;
+        edges connect solutions on adjacent rungs that are within a joint-distance
+        threshold.
+  \item \textbf{Search} the ladder graph (e.g.\ DFS or shortest-path) for the
+        minimum-cost joint-continuous sequence.
+\end{enumerate}
+
+Because the ladder graph is built only for the single extracted path, the number of
+IK evaluations is much smaller than if multi-IK were computed for every RRT node.
+
+\subsection*{Staged Development Order}
+
+\begin{enumerate}
+  \item \textbf{Stage 1 — Floating-bar RRT.}
+        Disable IK computation (Capsules carry no joint config) and disable collision
+        checking (collision function always returns \texttt{False}, or checks only
+        static bar-vs-obstacle collisions at a fixed robot configuration).
+        Expected result: a correct RRT planner operating purely in task space.
+        Verify by plotting the RRT tree in the workspace and confirming it fills the
+        reachable region.
+
+  \item \textbf{Stage 2 — IK on, collision off.}
+        Enable IK computation in the extend function; the planner now builds a path
+        in which every waypoint has a valid dual-arm joint configuration.
+        Collision checking remains disabled.
+        Verify by inspecting the tree's joint configurations and checking that the
+        dual-arm constraint is satisfied at each node.
+
+  \item \textbf{Stage 3 — IK on, collision on.}
+        Enable full self-collision and environment-collision checking.
+        Compare planning success rates and tree shapes across stages.
+\end{enumerate}
+
+\subsection*{Observability and Debugging Goals}
+
+\begin{itemize}
+  \item \textbf{Workspace tree visualisation.}
+        Plot the RRT tree's Cartesian bar poses in the pybullet scene at each stage
+        so the spatial exploration pattern is visible.
+  \item \textbf{Failure distribution analysis.}
+        Run random restarts with a fixed per-attempt time budget and distinct random
+        seeds.  Record, for each attempt, whether the failure occurred at the
+        task-space level (RRT did not connect), IK level (no valid config found), or
+        collision level (all paths are blocked).  Visualise the failure distribution
+        across attempts to identify the dominant bottleneck.
+  \item \textbf{Per-stage comparison.}
+        The three development stages are specifically designed so that differences in
+        tree structure and planning success rate between stages directly reveal the
+        contribution of each constraint (IK reachability, collision avoidance) to
+        overall planning difficulty.
+\end{itemize}
+
+% ============================================================
+\newpage
+\section*{Gap Analysis: Design Intent vs.\ Zihao's Implementation}
+% ============================================================
+
+This section compares the original design sketch against the current implementation,
+identifies deviations, and discusses implications for performance and debuggability.
+
+% ------ Deviation 1 ------
+\subsection*{Deviation 1 — Sampling: Matches (minor note)}
+
+\textbf{Intent:} Do not solve IK at sample time; samples are pure pose draws.\\
+\textbf{Implementation:} \texttt{plan()} passes \texttt{enable\_ik=False} to
+\texttt{\_get\_sample\_fn}, so sampled Capsules always have \texttt{config=[]}.
+\textbf{Status: \checkmark~correct.}
+
+\noindent\textbf{Minor gap:} The \texttt{enable\_ik} default is \texttt{True}, making it
+easy to accidentally re-enable IK during sampling. There is no single top-level flag
+that cleanly selects among the three intended development stages.
+
+% ------ Deviation 2 ------
+\subsection*{Deviation 2 — Extend / Partial Path: Matches but Fragile}
+
+\textbf{Intent:} On IK failure mid-extension, return the partial Cartesian path that
+has valid IK solutions and stop.\\
+\textbf{Implementation:} \texttt{\_get\_extend\_fn} yields an empty Capsule
+(\texttt{config=[]}) at the failure point, then breaks.
+\texttt{extend\_towards\_capsule} uses \texttt{takewhile(not collision\_fn, extend)},
+and since \texttt{collision\_fn} returns \texttt{True} for any empty-config Capsule,
+the takewhile automatically stops before the failure. \textbf{Status: \checkmark~correct outcome.}
+
+\noindent\textbf{Risk:} The mechanism is \emph{implicit}: the collision function doubles as a
+``no-IK sentinel.'' Any future change to collision semantics could break partial-path
+logic silently, with no type or assertion to catch it.
+
+% ------ Deviation 3 ------
+\subsection*{Deviation 3 — Collision Check: Matches \checkmark}
+
+\textbf{Intent:} Collision check uses only the single IK config stored in the Capsule;
+no dependence on the parent node.\\
+\textbf{Implementation:} \texttt{collision\_fn(c.config[0])} — full self-collision
+plus environment check, parent-independent. \textbf{Status: \checkmark~correct.}
+
+\noindent\textbf{Note:} The floating-body collision mode (check bar pose directly, set robot
+to a fixed config) is present but commented out.  Stage~1 of development was
+attempted but not exposed as a clean toggle.
+
+% ------ Deviation 4 ------
+\subsection*{Deviation 4 — Distance Metric: Partial Deviation}
+
+\textbf{Intent:} Pose difference between bar Cartesian poses.
+The bounding-box / feature-point alternative (sum of 3-D distances of object corners)
+was proposed as an easier-to-tune option.\\
+\textbf{Implementation:} A 6-D vector
+$[\Delta p_x,\Delta p_y,\Delta p_z,\alpha_x,\alpha_y,\alpha_z]$ whose $\ell_2$ norm
+is used for nearest-neighbour queries. \textbf{Status: \texttimes~feature-point variant not implemented.}
+
+\noindent\textbf{Performance impact:} Position (metres) and rotation (radians) are mixed with
+equal weight, so the nearest-neighbour heuristic is biased in a workspace-size-dependent
+way. When the reachable workspace is small ($<$1\,m), rotation terms dominate; when it
+is large, translation dominates. Bounding-box feature points would give a purely metric
+(metres-only) distance that is easier to reason about and tune.
+
+% ------ Deviation 5 ------
+\subsection*{Deviation 5 — Staged Development / Debug Flags: Missing}
+
+\textbf{Intent:} Three cleanly switchable stages accessible via a single top-level flag:
+\begin{enumerate}
+  \item Floating-bar RRT (no IK, no collision).
+  \item IK on, collision off.
+  \item IK on, collision on.
+\end{enumerate}
+
+\textbf{Implementation:} \texttt{enable\_ik} exists per-function, but there is no global
+\texttt{enable\_collision} flag, no documented stage enumeration, and the floating-body
+collision path is commented out.  \textbf{Status: \texttimes~missing.}
+
+\noindent\textbf{Impact on debugging:} When planning fails it is impossible to isolate
+whether the failure is at the \emph{task-space} level (RRT cannot connect two bar poses),
+the \emph{IK} level (poses are reachable but no valid joint config exists), or the
+\emph{collision} level (a valid path exists in free space but is collision-blocked).
+Without staged flags, each of these hypotheses requires code changes rather than a flag flip.
+
+% ------ Deviation 6 ------
+\subsection*{Deviation 6 — Failure Distribution Logging: Missing}
+
+\textbf{Intent:} For each random restart, log where failure occurred and visualise the
+distribution across attempts.\\
+\textbf{Implementation:} The \texttt{max\_attempts} outer loop silently \texttt{continue}s
+on failure with no attribution (RRT vs.\ ladder-graph) and no seed tracking.
+\textbf{Status: \texttimes~missing.}
+
+% ------ Deviation 7 ------
+\subsection*{Deviation 7 — Ladder Expansion Uses \texttt{delta=0.0}: Bug}
+
+\textbf{Intent:} After finding a path, expand each rung to \emph{all} possible IK
+solutions to give the ladder-graph search the widest choice.\\
+\textbf{Implementation:} \texttt{expand()} calls
+\texttt{create\_valid\_confs(delta=0.0, max\_attempts=20)}.  With \texttt{delta=0},
+\texttt{np.linspace(0,\,0,\,20)} produces 20 identical zero-rotation perturbations,
+so the IK solver is called 20 times on the \emph{same} bar pose.
+\textbf{Status: \texttimes~effective bug (unintentional no-op delta sweep).}
+
+\noindent\textbf{Performance impact:} Rungs receive very few distinct IK configurations
+(the IK solver may not converge to different branches from the same seed/pose), so
+inter-rung edges are sparse and the DFS frequently finds zero feasible paths even when
+joint-continuous paths exist. This causes the planner to discard good task-space paths
+and restart RRT unnecessarily. Changing to \texttt{delta=}\,$\pi/4$ or similar would
+explore the IK manifold properly.
+
+% ------ Deviation 8 ------
+\subsection*{Deviation 8 — Capsule Struct is Dual-Purpose}
+
+\textbf{Intent:} During planning, each Capsule holds one IK solution (tree node);
+multi-solution expansion happens only on the extracted path (ladder rung).\\
+\textbf{Implementation:} The same \texttt{Capsule} class serves both roles.
+The \texttt{parent} pointer means \emph{tree connectivity} during RRT and
+\emph{rung adjacency} during ladder search.  The only distinction is the
+``fast-skip'' check \texttt{len(config) > 1} inside \texttt{rrt\_connect\_capsule}.
+\textbf{Status: \textasciitilde~works but confusing.}
+
+\noindent\textbf{Impact:} Accidental mutation of a tree-node Capsule's config during the
+expand phase can corrupt the tree.  Separate \texttt{TreeNode} and
+\texttt{LadderRung} types would make each role explicit and eliminate the fast-skip hack.
+
+% ------ Deviation 9 ------
+\subsection*{Deviation 9 — Ladder Search Inside the RRT Loop}
+
+\textbf{Intent:} Two clearly separated phases: (1) RRT finds a path, (2) ladder graph
+is expanded and searched.\\
+\textbf{Implementation:} \texttt{expand\_path} and \texttt{configs\_capsule} run
+\emph{inside} the RRT iteration loop on every connection event, before any path is
+confirmed to be the best one.  If the DFS fails, the loop restarts RRT.
+\textbf{Status: \textasciitilde~functional but expensive and hard to profile.}
+
+\noindent\textbf{Impact:} Each RRT connection event pays the full multi-IK expansion
+cost. Profiling cannot easily separate ``time in RRT'' from ``time in ladder search.''
+The two-phase separation in the original design was meant to keep these costs visible
+and individually tunable.
+
+% ------ Summary table ------
+\subsection*{Summary}
+
+\begin{center}
+\begin{tabular}{p{5.5cm} c c p{4.5cm}}
+\toprule
+\textbf{Aspect} & \textbf{Intent} & \textbf{Status} & \textbf{Key risk} \\
+\midrule
+No IK at sample time & \checkmark & \checkmark & Easy to regress (default=True) \\
+Partial extend path  & \checkmark & \checkmark & Implicit via collision sentinel \\
+Parent-independent collision & \checkmark & \checkmark & — \\
+Pose-based distance (unweighted) & \checkmark & \texttimes & Unit mismatch, biased NN \\
+Feature-point distance option & proposed & \texttimes & Not implemented \\
+3 staged dev. flags & \checkmark & \texttimes & Cannot isolate failure mode \\
+Failure distribution logging & \checkmark & \texttimes & No restart statistics \\
+Tree workspace visualisation & \checkmark & \textasciitilde & draw\_fn exists but not systematic \\
+\texttt{delta > 0} in ladder expand & implied & \texttimes & Sparse ladder, frequent DFS failure \\
+Separate tree/ladder types & implied & \textasciitilde & Single struct, dual role \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% ------ Investigation Pathways ------
+\subsection*{Proposed Investigation Pathways}
+
+\paragraph{Path A — Fix debug scaffolding first.}
+Add \texttt{enable\_ik: bool} and \texttt{enable\_collision: bool} to \texttt{plan()}.
+Restore \texttt{floating\_collision\_fn} as stage-1 collision. Verify the task-space
+RRT explores the workspace correctly before adding IK and collision constraints.
+
+\paragraph{Path B — Fix the distance metric.}
+Implement a feature-point distance: choose 4 corners of the bar's bounding box,
+compute their world-frame positions for each Capsule pose, and use the sum of squared
+3-D distances.  This is purely in metres, eliminates unit mixing, and directly matches
+the RL intuition cited in the design notes.  Compare nearest-neighbour quality and
+tree-growth shape before and after.
+
+\paragraph{Path C — Fix ladder expansion (\texttt{delta}).}
+Change \texttt{expand()} to use \texttt{delta=np.pi/4} (or expose as a parameter).
+Measure: (a) mean number of distinct IK solutions per rung, (b) DFS success rate
+(ladder failures vs.\ RRT failures).  This is the highest-leverage single-line fix.
+
+\paragraph{Path D — Separate tree nodes from ladder rungs.}
+Introduce a \texttt{LadderRung} dataclass with an explicit multi-config list and
+connection map.  Produce it only inside \texttt{expand\_path}, not inside RRT.
+This eliminates the fast-skip hack and the dual-role Capsule ambiguity.
+
+\paragraph{Path E — Add failure attribution and visualisation.}
+For each attempt in the restart loop, record: did RRT connect? did expand succeed?
+did DFS find a path?  Print a summary after all attempts and, when \texttt{use\_draw=True},
+draw the final extent of both RRT trees in the workspace so failure geometry is visible.
+
+\end{document}

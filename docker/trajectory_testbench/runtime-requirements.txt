@@ -1,0 +1,15 @@
+compas>=2.3,<3
+compas_robots>=0.6,<1
+debugpy
+imageio
+kdtree==0.16
+matplotlib==3.10.3
+meshio>=4.3.11
+numpy<1.25.0
+psutil
+pybullet
+recordclass
+roslibpy>=1.1.0
+scipy
+snakeviz
+termcolor

@@ -1,0 +1,24 @@
+services:
+  constrained-bimanual-planner:
+    image: cohnt/constrained-bimanual-planning-example:latest
+    container_name: constrained-bimanual-planner
+    ports:
+      - "8888:8888"   # Jupyter notebook
+      - "7001:7000"   # Meshcat visualization (7000 often taken by AirPlay on macOS)
+    volumes:
+      - ../../data/planner_exchange:/opt/exchange
+      - .:/opt/proj/host_scripts
+      # Mount robot URDF/mesh packages for Drake to resolve package:// URIs
+      - ../../data/husky_urdf/mt_husky_dual_ur5_e_moveit_config:/opt/ros_packages/mt_husky_dual_ur5_e_moveit_config
+      - ../../data/husky_urdf/ur_description:/opt/ros_packages/ur_description
+      - ../../data/husky_urdf/husky_description:/opt/ros_packages/husky_description
+      - ../../data/husky_urdf/husky_ur_description:/opt/ros_packages/husky_ur_description
+      # Mount gripper descriptions for collision geometry
+      - ../../data/husky_urdf/robotiq_85:/opt/ros_packages/robotiq_85
+      - ../../data/husky_urdf/wsg_50_description:/opt/ros_packages/wsg_50_description
+      - ../../data/grasp_screw_tool_description:/opt/ros_packages/grasp_screw_tool_description
+    working_dir: /opt/proj
+    stdin_open: true
+    tty: true
+    # Jupyter kernel broken under x86 emulation on Apple Silicon; use python3 directly
+    command: tail -f /dev/null

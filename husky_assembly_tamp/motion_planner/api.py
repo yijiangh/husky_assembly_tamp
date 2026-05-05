@@ -217,12 +217,12 @@ def plan_constrained_dual_arm(
     stage: int = 3,
     position_res: float = 0.01,
     rotation_res: float = 0.025,
-    max_time: float = 5.0,
+    max_time: float = 30.0,           # per-attempt budget; matches plan_pose_rrt default
     max_iterations: int = 2000,
-    max_attempts: int = 3,
+    max_attempts: int = 5,             # matches plan_pose_rrt default
     enable_smoothing: bool = True,
     smooth_max_iterations: int = 100,
-    smooth_max_time: float = 5.0,
+    smooth_max_time: float = 10.0,
     random_seed: Optional[int] = None,
     use_draw: bool = False,
 ) -> Tuple[Optional[List[np.ndarray]], dict]:

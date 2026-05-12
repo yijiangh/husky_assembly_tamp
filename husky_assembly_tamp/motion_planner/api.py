@@ -79,7 +79,9 @@ def plan_free_dual_arm(
     goal_conf: Sequence[float],
     *,
     max_time: float = 10.0,
+    max_iterations: int = 20,
     debug: bool = False,
+    joint_resolution: float = 0.05,
 ) -> Tuple[Optional[List[np.ndarray]], dict]:
     """Free-space dual-arm BiRRT.
 
@@ -104,7 +106,11 @@ def plan_free_dual_arm(
 
     from husky_assembly_teleop.utils import plan_transit_motion
 
-    info: Dict[str, Any] = {"max_time": max_time}
+    info: Dict[str, Any] = {
+        "max_time": max_time,
+        "max_iterations": int(max_iterations),
+        "joint_resolution": float(joint_resolution),
+    }
     with pp.WorldSaver():
         pp.set_joint_positions(scene["robot"], scene["arm_joints"], start_conf)
         raw = plan_transit_motion(
@@ -115,6 +121,9 @@ def plan_free_dual_arm(
             debug=debug,
             disabled_collisions=scene.get("disabled_collisions"),
             dual_arm_index="both",
+            joint_resolution=joint_resolution,
+            max_time=max_time,
+            max_iterations=max_iterations,
         )
     if raw is None:
         info["failure_reason"] = "free_planner_failed"

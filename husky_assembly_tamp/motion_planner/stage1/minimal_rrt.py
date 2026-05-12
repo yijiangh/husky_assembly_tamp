@@ -81,6 +81,10 @@ MOBILE_BASE_FROM_TOOL0_LEFT_HOME: PoseLike = (
     np.array([-0.5000003576278687, 0.4999987483024597, -0.499999463558197, 0.5000012516975403], dtype=float),
     # np.array([0.4999987483024597, 0.5000003576278687, 0.5000012516975403, 0.499999463558197], dtype=float)
 )
+# = MOBILE_BASE_FROM_TOOL0_LEFT_HOME[0] + (0, -0.2, 0); orientation derived from grasps at runtime
+MOBILE_BASE_FROM_BAR_HOME_POSITION: np.ndarray = np.array(
+    [0.3974, -0.0398, 0.8622], dtype=float
+)
 DESIGN_STUDY_BAR_SEQUENCE = [
     "G1",
     "G2",
@@ -315,21 +319,54 @@ def derive_home_start_poses_from_grasps(
     }
 
 
+def bar_orientation_from_grasps(
+    grasp_targets: Sequence[GraspTarget],
+    target_axis_in_mb: np.ndarray = np.array([0.0, 1.0, 0.0]),
+) -> Tuple[float, float, float, float]:
+    """Quaternion (x,y,z,w) aligning the bar-local right->left grasp vector with target_axis_in_mb."""
+    if len(grasp_targets) < 2:
+        raise ValueError("Expected two grasp targets to derive bar orientation.")
+    mobile_base_from_bar_left, mobile_base_from_tool0_left_goal = grasp_targets[0]
+    mobile_base_from_bar_right, mobile_base_from_tool0_right_goal = grasp_targets[1]
+    bar_from_tool0_left = pp.multiply(pp.invert(mobile_base_from_bar_left), mobile_base_from_tool0_left_goal)
+    bar_from_tool0_right = pp.multiply(pp.invert(mobile_base_from_bar_right), mobile_base_from_tool0_right_goal)
+    v = np.asarray(bar_from_tool0_left[0], dtype=float) - np.asarray(bar_from_tool0_right[0], dtype=float)
+    norm = float(np.linalg.norm(v))
+    if norm < 1e-6:
+        return (0.0, 0.0, 0.0, 1.0)
+    v = v / norm
+    target = np.asarray(target_axis_in_mb, dtype=float)
+    target = target / float(np.linalg.norm(target))
+    cross = np.cross(v, target)
+    sin_theta = float(np.linalg.norm(cross))
+    cos_theta = float(np.dot(v, target))
+    if sin_theta < 1e-9:
+        if cos_theta > 0:
+            return (0.0, 0.0, 0.0, 1.0)
+        # antiparallel: 180 deg around X
+        return (1.0, 0.0, 0.0, 0.0)
+    axis = cross / sin_theta
+    angle = float(np.arctan2(sin_theta, cos_theta))
+    quat = pp.quat_from_axis_angle(axis, angle)
+    return (float(quat[0]), float(quat[1]), float(quat[2]), float(quat[3]))
+
+
 def auto_compute_home_bar_pose(
     grasp_targets: Sequence[GraspTarget],
-    mobile_base_from_tool0_left: PoseLike = MOBILE_BASE_FROM_TOOL0_LEFT_HOME,
+    mobile_base_from_bar: PoseLike,
     forward_direction: np.ndarray = np.array([1.0, 0.0, 0.0]),
     ik_validator: Optional[Callable[[PoseLike], bool]] = None,
     num_geometric_candidates: int = 20,
+    allow_unvalidated_fallback: bool = True,
+    bar_axis_step_rad: float = float(np.deg2rad(30.0)),
 ) -> Dict[str, Any]:
-    """Auto-compute the home bar pose by optimizing bar-axis rotation and EE-axis flip."""
+    """Auto-compute the home bar pose by optimizing bar-axis rotation around a fixed bar position+orientation."""
     if len(grasp_targets) < 2:
         raise ValueError("Expected two grasp targets to auto-compute the home bar pose.")
 
     mobile_base_from_bar_left, mobile_base_from_tool0_left_goal = grasp_targets[0]
     mobile_base_from_bar_right, mobile_base_from_tool0_right_goal = grasp_targets[1]
     bar_from_tool0_left = pp.multiply(pp.invert(mobile_base_from_bar_left), mobile_base_from_tool0_left_goal)
-    tool0_left_from_bar = pp.invert(bar_from_tool0_left)
     bar_from_tool0_right = pp.multiply(pp.invert(mobile_base_from_bar_right), mobile_base_from_tool0_right_goal)
 
     forward = np.asarray(forward_direction, dtype=float)
@@ -338,69 +375,59 @@ def auto_compute_home_bar_pose(
         raise ValueError("forward_direction must be non-zero.")
     forward = forward / forward_norm
 
-    all_candidates: List[Tuple[float, float, float, PoseLike]] = []
-    for flip_yaw in (0.0, np.pi):
-        adjusted_left = pp.multiply(
-            mobile_base_from_tool0_left,
-            pp.Pose(euler=pp.Euler(yaw=flip_yaw)),
-        )
-        bar_base = pp.multiply(adjusted_left, tool0_left_from_bar)
+    all_candidates: List[Tuple[float, float, PoseLike]] = []
+    for theta in np.arange(-np.pi, np.pi, bar_axis_step_rad):
+        bar_rotated = pp.multiply(mobile_base_from_bar, pp.Pose(euler=pp.Euler(yaw=float(theta))))
+        left_ee = pp.multiply(bar_rotated, bar_from_tool0_left)
+        right_ee = pp.multiply(bar_rotated, bar_from_tool0_right)
 
-        for theta in np.linspace(-np.pi, np.pi, 360, endpoint=False):
-            bar_rotated = pp.multiply(bar_base, pp.Pose(euler=pp.Euler(yaw=float(theta))))
-            left_ee = pp.multiply(bar_rotated, bar_from_tool0_left)
-            right_ee = pp.multiply(bar_rotated, bar_from_tool0_right)
+        left_z = np.asarray(pp.tform_from_pose(left_ee), dtype=float)[:3, 2]
+        right_z = np.asarray(pp.tform_from_pose(right_ee), dtype=float)[:3, 2]
+        avg_z = left_z + right_z
+        avg_z_norm = np.linalg.norm(avg_z)
+        if avg_z_norm < 1e-9:
+            continue
+        avg_z = avg_z / avg_z_norm
 
-            left_z = np.asarray(pp.tform_from_pose(left_ee), dtype=float)[:3, 2]
-            right_z = np.asarray(pp.tform_from_pose(right_ee), dtype=float)[:3, 2]
-            avg_z = left_z + right_z
-            avg_z_norm = np.linalg.norm(avg_z)
-            if avg_z_norm < 1e-9:
-                continue
-            avg_z = avg_z / avg_z_norm
-
-            score = float(np.dot(avg_z, forward))
-            all_candidates.append((score, float(flip_yaw), float(theta), bar_rotated))
+        score = float(np.dot(avg_z, forward))
+        all_candidates.append((score, float(theta), bar_rotated))
 
     if not all_candidates:
         raise ValueError("Could not generate any home bar pose candidates.")
 
     all_candidates.sort(key=lambda candidate: -candidate[0])
     chosen = all_candidates[0]
+    ik_validated = False
 
     if ik_validator is not None and num_geometric_candidates > 0:
         top_candidates = all_candidates[:num_geometric_candidates]
         for candidate in top_candidates:
-            _, _, _, bar_pose = candidate
+            _, _, bar_pose = candidate
             if ik_validator(bar_pose):
                 chosen = candidate
+                ik_validated = True
                 break
         else:
-            logger.warning(
-                "No IK-feasible candidate found among top %d geometric candidates; falling back to best geometric candidate.",
-                num_geometric_candidates,
-            )
+            if allow_unvalidated_fallback:
+                logger.warning(
+                    "No IK-feasible candidate found among top %d geometric candidates; falling back to best geometric candidate.",
+                    num_geometric_candidates,
+                )
 
-    best_score, best_flip, best_theta, _ = chosen
-    adjusted_left_final = pp.multiply(
-        mobile_base_from_tool0_left,
-        pp.Pose(euler=pp.Euler(yaw=best_flip)),
-    )
-    bar_final = pp.multiply(
-        pp.multiply(adjusted_left_final, tool0_left_from_bar),
-        pp.Pose(euler=pp.Euler(yaw=best_theta)),
-    )
+    best_score, best_theta, _ = chosen
+    bar_final = pp.multiply(mobile_base_from_bar, pp.Pose(euler=pp.Euler(yaw=best_theta)))
+    left_tool_final = pp.multiply(bar_final, bar_from_tool0_left)
     right_tool_final = pp.multiply(bar_final, bar_from_tool0_right)
 
     return {
-        "mobile_base_from_tool0_left_start": adjusted_left_final,
         "mobile_base_from_bar_start": bar_final,
+        "mobile_base_from_tool0_left_start": left_tool_final,
         "mobile_base_from_tool0_right_start": right_tool_final,
-        "tool0_left_from_bar": tool0_left_from_bar,
+        "tool0_left_from_bar": pp.invert(bar_from_tool0_left),
         "bar_from_tool0_right": bar_from_tool0_right,
-        "chosen_flip_yaw": best_flip,
         "chosen_bar_axis_theta": best_theta,
         "alignment_score": best_score,
+        "ik_validated": ik_validated,
     }
 
 
@@ -819,6 +846,7 @@ def solve_endpoint_dual_arm_ik(
     max_attempts: int,
     use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
     profile_out: Optional[Dict[str, Any]] = None,
+    collision_fn: Optional[Callable[[np.ndarray], bool]] = None,
 ) -> Optional[FullConf]:
     for attempt in range(max(1, max_attempts)):
         if attempt == 0:
@@ -838,6 +866,8 @@ def solve_endpoint_dual_arm_ik(
             profile_out=profile_out,
         )
         if conf is not None:
+            if collision_fn is not None and collision_fn(np.asarray(conf, dtype=float)):
+                continue
             return conf
     return None
 
@@ -1410,6 +1440,214 @@ def build_default_paths() -> Tuple[str, str, str]:
     return grasp_json, start_state, end_state
 
 
+# --- gdrive convention (2026-05+) ---------------------------------------------
+# New design-study datasets live on gdrive and follow a different convention
+# than the legacy design study:
+#   - cell state filename: <bar_tag>_<phase>.json  (e.g. B3_approach.json),
+#     not *_RobotCellState.json. No paired *_GraspTargets.json.
+#   - rigid bodies tagged by role: active_bar_*, active_<other>_* (rigidly
+#     bound to the bar at install), env_*. RobotCell.json sits at the
+#     dataset root, RobotCellStates/ holds the per-bar/per-phase states.
+#   - grasps come from FK at the cell state's joint values vs the active
+#     bar's frame (the cell state is the single source of truth for grasps).
+#   - the husky's robot_base_frame is non-identity. To keep the planner
+#     entirely in mobile-base coords (same convention as the legacy code),
+#     the gdrive loader transforms bar / env poses into mobile-base frame.
+GDRIVE_DATA_DIRECTORY = (
+    "/home/yijiangh/Insync/yijiang94817@gmail.com/Google Drive - Shared with me/2025-03 Husky Assembly/data_design_study"
+)
+
+
+def load_gdrive_active_bar_mesh(robot_cell_json: str, body_name: str) -> "BarMeshSpec":
+    """Like load_design_study_bar_mesh but keyed by the full body name
+    ('active_bar_B3', 'env_bar_B1', ...) rather than a target tag."""
+    with open(robot_cell_json) as f:
+        robot_cell = json.load(f)
+    rigid_body_models = robot_cell["data"]["rigid_body_models"]
+    if body_name not in rigid_body_models:
+        raise KeyError(f"Body {body_name} not found in {robot_cell_json}")
+    collision_meshes = rigid_body_models[body_name]["collision_meshes"]
+    if not collision_meshes:
+        raise ValueError(f"Body {body_name} has no collision meshes in {robot_cell_json}")
+    vertices, faces = compas_mesh_data_to_pybullet_mesh(collision_meshes[0])
+    return {
+        "name": body_name,
+        "body_name": body_name,
+        "vertices": vertices,
+        "faces": faces,
+        "aabb_dims": mesh_vertices_aabb_dims(vertices),
+    }
+
+
+def _fk_dual_arm_grasps_in_mb_frame(
+    goal_conf: np.ndarray,
+    mb_from_bar_goal: PoseLike,
+) -> Tuple[PoseLike, PoseLike]:
+    """FK both tool0 links at goal_conf to derive grasp_bar_from_left/right.
+
+    Operates in MOBILE-BASE frame (husky URDF is fixed_base at world origin
+    in the temp pybullet client, which matches the planner's convention).
+    Frame-invariant relative transforms: bar_from_tool0_* = inv(bar) * tool0.
+    """
+    pp.connect(use_gui=False)
+    try:
+        robot = pp.load_pybullet(HUSKY_DUAL_URDF_PATH, fixed_base=True)
+        arm_joints = pp.joints_from_names(robot, HUSKY_DUAL_ARM_JOINT_NAMES)
+        tool_link_left = pp.link_from_name(robot, TOOL_LINK_LEFT)
+        tool_link_right = pp.link_from_name(robot, TOOL_LINK_RIGHT)
+        pp.set_joint_positions(robot, arm_joints, np.asarray(goal_conf, dtype=float))
+        mb_from_tool0_L = pp.get_link_pose(robot, tool_link_left)
+        mb_from_tool0_R = pp.get_link_pose(robot, tool_link_right)
+    finally:
+        pp.disconnect()
+    bar_inv = pp.invert(mb_from_bar_goal)
+    grasp_bar_from_left = pp.multiply(bar_inv, mb_from_tool0_L)
+    grasp_bar_from_right = pp.multiply(bar_inv, mb_from_tool0_R)
+    return grasp_bar_from_left, grasp_bar_from_right
+
+
+def _resolve_gdrive_state_path(state_arg: str, problem: Optional[str] = None) -> Tuple[str, str, str]:
+    """Resolve a state arg to (state_path, problem_dir, robot_cell_json).
+
+    `state_arg` may be an absolute path OR a bare filename like
+    'B3_approach.json'. In the latter case `problem` is required and the
+    file is looked up under GDRIVE_DATA_DIRECTORY/<problem>/RobotCellStates/.
+    """
+    if os.path.isabs(state_arg) and os.path.isfile(state_arg):
+        state_path = state_arg
+        problem_dir = os.path.dirname(os.path.dirname(state_path))
+    else:
+        if not problem:
+            raise ValueError(
+                "When --gdrive-state is a bare filename you must also pass "
+                "--gdrive-problem (the dataset directory under "
+                f"{GDRIVE_DATA_DIRECTORY!r}).")
+        problem_dir = os.path.join(GDRIVE_DATA_DIRECTORY, problem)
+        state_path = os.path.join(problem_dir, "RobotCellStates", state_arg)
+        if not os.path.isfile(state_path):
+            raise FileNotFoundError(f"Gdrive state file not found: {state_path}")
+    robot_cell_json = os.path.join(problem_dir, "RobotCell.json")
+    if not os.path.isfile(robot_cell_json):
+        raise FileNotFoundError(f"RobotCell.json not found at {robot_cell_json}")
+    return state_path, problem_dir, robot_cell_json
+
+
+def build_gdrive_scene_spec(
+    state_json: str,
+    problem: Optional[str] = None,
+    *,
+    include_env_bars: bool = True,
+    include_active_extras: bool = True,
+) -> Dict[str, Any]:
+    """Build a scene_spec dict for run_stage_trial / setup_planning_scene
+    from a single gdrive RobotCellState file.
+
+    The husky's robot_base_frame is converted into the planner's mobile-base
+    convention: all bar / env poses are expressed in mobile-base frame so
+    the planner sees the husky at world origin (matching the legacy code's
+    implicit assumption).
+
+    Returns scene_spec with: start_joint_values, end_joint_values (both =
+    goal_conf), grasp_targets (mb-frame), world_from_bar_goal (mb-frame),
+    active_bar_mesh, built_bars (env_* + active_* extras as static bodies),
+    active_bar_name (informational).
+    """
+    state_path, problem_dir, robot_cell_json = _resolve_gdrive_state_path(state_json, problem)
+
+    with open(state_path) as f:
+        state_blob = json.load(f)
+    state_data = state_blob["data"]
+
+    rc_data = state_data["robot_configuration"]["data"]
+    name_to_value = {n: v for n, v in zip(rc_data["joint_names"], rc_data["joint_values"])}
+    try:
+        goal_conf = np.array([name_to_value[n] for n in HUSKY_DUAL_ARM_JOINT_NAMES], dtype=float)
+    except KeyError as e:
+        raise KeyError(f"Cell state {state_path!r} missing joint {e!s}; "
+                       f"expected {HUSKY_DUAL_ARM_JOINT_NAMES}")
+
+    world_from_mobile_base = frame_data_to_pose(state_data["robot_base_frame"])
+    mobile_base_from_world = pp.invert(world_from_mobile_base)
+
+    active_bar_name: Optional[str] = None
+    world_from_bar_goal: Optional[PoseLike] = None
+    extra_actives: List[Tuple[str, PoseLike]] = []
+    env_bodies: List[Tuple[str, PoseLike]] = []
+    for name, rbs_wrap in (state_data.get("rigid_body_states") or {}).items():
+        rbs = rbs_wrap.get("data", rbs_wrap)
+        frame_wrap = rbs.get("frame")
+        if frame_wrap is None:
+            continue
+        pose_world = frame_data_to_pose(frame_wrap)
+        if name.startswith("active_bar_"):
+            if active_bar_name is None:
+                active_bar_name = name
+                world_from_bar_goal = pose_world
+        elif name.startswith("active_"):
+            extra_actives.append((name, pose_world))
+        elif name.startswith("env_"):
+            env_bodies.append((name, pose_world))
+    if active_bar_name is None or world_from_bar_goal is None:
+        raise ValueError(f"No active_bar_* rigid body in {state_path}")
+
+    mb_from_bar_goal = pp.multiply(mobile_base_from_world, world_from_bar_goal)
+    grasp_bar_from_left, grasp_bar_from_right = _fk_dual_arm_grasps_in_mb_frame(
+        goal_conf, mb_from_bar_goal,
+    )
+    mb_from_tool0_L_goal = pp.multiply(mb_from_bar_goal, grasp_bar_from_left)
+    mb_from_tool0_R_goal = pp.multiply(mb_from_bar_goal, grasp_bar_from_right)
+    grasp_targets = [
+        (mb_from_bar_goal, mb_from_tool0_L_goal),
+        (mb_from_bar_goal, mb_from_tool0_R_goal),
+    ]
+
+    try:
+        active_bar_mesh = load_gdrive_active_bar_mesh(robot_cell_json, active_bar_name)
+    except (KeyError, ValueError) as e:
+        # Match husky_monitor._create_rigid_body_obstacle's fallback: when the
+        # RobotCell.json was authored for a different active bar (e.g. only B5
+        # has mesh data but the cell state is for B6), let setup_planning_scene
+        # fall back to BAR_BOX_DIMS via active_bar_mesh=None.
+        logger.warning(f"active bar mesh missing for {active_bar_name!r}: {e}; using default BAR_BOX_DIMS fallback")
+        active_bar_mesh = None
+
+    built_bars: List[Dict[str, Any]] = []
+    if include_env_bars:
+        for name, pose_world in env_bodies:
+            try:
+                mesh = load_gdrive_active_bar_mesh(robot_cell_json, name)
+            except (KeyError, ValueError) as e:
+                logger.warning(f"skipping env body {name!r}: {e}")
+                continue
+            mb_pose = pp.multiply(mobile_base_from_world, pose_world)
+            built_bars.append({"mesh": mesh, "pose": mb_pose, "collision": True,
+                                "color": (0.5, 0.5, 0.55, 0.95)})
+    if include_active_extras:
+        for name, pose_world in extra_actives:
+            try:
+                mesh = load_gdrive_active_bar_mesh(robot_cell_json, name)
+            except (KeyError, ValueError) as e:
+                logger.warning(f"skipping active extra {name!r}: {e}")
+                continue
+            mb_pose = pp.multiply(mobile_base_from_world, pose_world)
+            built_bars.append({"mesh": mesh, "pose": mb_pose, "collision": True,
+                                "color": (0.85, 0.45, 0.15, 0.55)})
+
+    return {
+        "start_joint_values": goal_conf,
+        "end_joint_values": goal_conf,
+        "grasp_targets": grasp_targets,
+        "world_from_bar_goal": mb_from_bar_goal,
+        "active_bar_mesh": active_bar_mesh,
+        "built_bars": built_bars,
+        # informational only (not consumed by setup_planning_scene)
+        "_gdrive_active_bar_name": active_bar_name,
+        "_gdrive_world_from_mobile_base": world_from_mobile_base,
+        "_gdrive_state_path": state_path,
+        "_gdrive_robot_cell_json": robot_cell_json,
+    }
+
+
 def import_static_bar_bodies(static_bar_specs: Sequence[Dict[str, Any]]) -> List[int]:
     bodies: List[int] = []
     for spec in static_bar_specs:
@@ -1698,6 +1936,16 @@ def run_stage_trial(
             grasp_bar_from_right = scene["grasp_bar_from_right"]
             if grasp_bar_from_right is None:
                 raise ValueError(f"Stage {stage} requires both left and right grasp targets.")
+            if enforce_collision:
+                env_obstacles = [body for body in scene["collision_obstacles"] if body != scene["robot"]]
+                joint_collision_fn = get_joint_collision_fn(
+                    robot=scene["robot"],
+                    arm_joints=scene["arm_joints"],
+                    obstacle_bodies=env_obstacles,
+                    tool_link_left=scene["tool_link_left"],
+                    bar_body=scene["bar_body"],
+                    grasp_bar_from_left=scene["grasp_bar_from_left"],
+                )
             t_endpoint = time.perf_counter()
             start_conf = solve_endpoint_dual_arm_ik(
                 robot=scene["robot"],
@@ -1712,6 +1960,7 @@ def run_stage_trial(
                 max_attempts=endpoint_ik_attempts,
                 use_angle_normalization=use_angle_normalization,
                 profile_out=planner_profile_out,
+                collision_fn=joint_collision_fn,
             )
             if start_conf is None:
                 add_profile_time(planner_profile_out, "endpoint_ik_time_s", time.perf_counter() - t_endpoint)
@@ -1732,6 +1981,7 @@ def run_stage_trial(
                 max_attempts=endpoint_ik_attempts,
                 use_angle_normalization=use_angle_normalization,
                 profile_out=planner_profile_out,
+                collision_fn=joint_collision_fn,
             )
             add_profile_time(planner_profile_out, "endpoint_ik_time_s", time.perf_counter() - t_endpoint)
             if goal_conf is None:
@@ -1739,16 +1989,6 @@ def run_stage_trial(
                     planner_profile_out["outcome"] = "goal_ik_failure"
                 logger.warning(f"Stage {stage} goal pose has no valid dual-arm IK solution.")
                 return early_failure("goal_ik_failure")
-            if enforce_collision:
-                env_obstacles = [body for body in scene["collision_obstacles"] if body != scene["robot"]]
-                joint_collision_fn = get_joint_collision_fn(
-                    robot=scene["robot"],
-                    arm_joints=scene["arm_joints"],
-                    obstacle_bodies=env_obstacles,
-                    tool_link_left=scene["tool_link_left"],
-                    bar_body=scene["bar_body"],
-                    grasp_bar_from_left=scene["grasp_bar_from_left"],
-                )
 
         logger.info(f"Running minimal Stage {stage} RRT.")
         logger.info(f"  start pose: {np.round(scene['world_from_bar_start'][0], 4)}")
@@ -2231,10 +2471,48 @@ def main() -> None:
         default="left",
         help="Which arm to plan for in single-arm-free mode (default: left)",
     )
+    # gdrive convention: single-state input (no GraspTargets JSON), bodies
+    # tagged active_bar_* / active_*_* / env_*. Overrides --grasp-json /
+    # --start-state / --end-state.
+    parser.add_argument(
+        "--gdrive-state", type=str, default=None,
+        help=("Path or bare filename of a gdrive-convention RobotCellState "
+              "(e.g. 'B3_approach.json'). When set, --grasp-json/--start-state/"
+              "--end-state are ignored and grasps come from FK at the cell "
+              "state's joint values."),
+    )
+    parser.add_argument(
+        "--gdrive-problem", type=str, default=None,
+        help=("Dataset directory under GDRIVE_DATA_DIRECTORY (e.g. "
+              "'2026-05-08_dual-arm_transfer_test'). Required when "
+              "--gdrive-state is a bare filename."),
+    )
+    parser.add_argument(
+        "--gdrive-no-env", action="store_true",
+        help="When using --gdrive-state, skip loading env_* bodies as static obstacles.",
+    )
+    parser.add_argument(
+        "--gdrive-no-active-extras", action="store_true",
+        help="When using --gdrive-state, skip loading active_* sibling bodies (joints) as static.",
+    )
     parser.set_defaults(floating_collision=False, lock_renderer_during_search=True)
     args = parser.parse_args()
 
     use_gui = not args.no_gui
+    # When --gdrive-state is provided, build a scene_spec from the new
+    # gdrive convention and route everything through it. The legacy
+    # --grasp-json / --start-state / --end-state paths are ignored.
+    gdrive_scene_spec: Optional[Dict[str, Any]] = None
+    if args.gdrive_state is not None:
+        gdrive_scene_spec = build_gdrive_scene_spec(
+            args.gdrive_state,
+            problem=args.gdrive_problem,
+            include_env_bars=not args.gdrive_no_env,
+            include_active_extras=not args.gdrive_no_active_extras,
+        )
+        logger.info(f"Using gdrive scene_spec from {gdrive_scene_spec['_gdrive_state_path']}")
+        logger.info(f"  active_bar={gdrive_scene_spec['_gdrive_active_bar_name']!r}, "
+                    f"built_bars={len(gdrive_scene_spec['built_bars'])}")
     if args.planner == "dual-arm-constrained":
         debug_tree_out: Dict = {}
         result = run_stage_trial(
@@ -2261,11 +2539,15 @@ def main() -> None:
             use_angle_normalization=args.use_angle_normalization,
             lock_renderer_during_search=args.lock_renderer_during_search,
             swap_grasps=args.swap_grasps,
+            scene_spec=gdrive_scene_spec,
             debug_tree_out=debug_tree_out,
         )
     else:
         from husky_assembly_tamp.motion_planner.stage1.free_space_rrt import run_free_space_trial
 
+        if gdrive_scene_spec is not None:
+            logger.warning("--gdrive-state with single-arm-free / dual-arm-free planners "
+                           "is not yet supported by run_free_space_trial; ignoring.")
         result = run_free_space_trial(
             planner_mode=args.planner,
             active_arm=args.active_arm,

@@ -32,9 +32,24 @@ SceneContext keys (dict):
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import pybullet_planning as pp
+
+
+logger = logging.getLogger(__name__)
+
+
+def _grid_in_box(
+    box: Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]],
+    step: float,
+) -> List[Tuple[float, float, float]]:
+    (x_lo, x_hi), (y_lo, y_hi), (z_lo, z_hi) = box
+    xs = np.arange(x_lo, x_hi + 0.5 * step, step)
+    ys = np.arange(y_lo, y_hi + 0.5 * step, step)
+    zs = np.arange(z_lo, z_hi + 0.5 * step, step)
+    return [(float(x), float(y), float(z)) for x in xs for y in ys for z in zs]
 
 
 _REQUIRED_SCENE_KEYS = (
@@ -145,62 +160,154 @@ def derive_constrained_start(
     world_from_bar_goal,
     seed_conf: Sequence[float],
     *,
-    mobile_base_from_tool0_left=None,
+    bar_body: Optional[int] = None,
+    obstacles: Sequence[int] = (),
+    world_from_mobile_base=None,
+    bar_sweep_box: Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]] = (
+        (-0.3, 0.3),
+        (-0.3, 0.3),
+        (-0.3, 0.3),
+    ),
+    bar_sweep_step: float = 0.1,
+    num_geometric_candidates: int = 20,
+    bar_axis_step_rad: float = float(np.deg2rad(30.0)),
     max_ik_attempts: int = 20,
     random_seed: Optional[int] = None,
 ) -> Tuple[Optional[Tuple], Optional[np.ndarray]]:
     """Derive a constraint-satisfying start (bar_pose, joint_conf).
 
-    Uses derive_home_start_poses_from_grasps to pick a "home"
-    world_from_bar_start geometrically, then solves dual-arm endpoint IK at
-    that pose.
+    Fixed-bar strategy: anchor the bar pose in the mobile-base frame at
+    `MOBILE_BASE_FROM_BAR_HOME_POSITION` (shifted by the grasp midpoint so
+    the bar's geometric center sits at the home), with orientation derived
+    from the grasps via `bar_orientation_from_grasps`. Sweep
+    `(dx, dy, dz)` closest-first; for each candidate position run
+    `auto_compute_home_bar_pose` (which spins the bar around its long axis
+    and validates IK + collisions). When `bar_body` is provided, the
+    validator is collision-aware against `obstacles`; otherwise it's
+    kinematic-only.
 
-    Assumes the husky robot base is at world origin (fixed_base=True). If the
-    base pose differs, the caller must compose with world_from_mobile_base.
-
-    Returns (world_from_bar_start, start_conf). start_conf is None if IK fails.
+    Returns (world_from_bar_start, start_conf). Both None if no
+    collision-free home pose was found.
     """
     from .stage1.minimal_rrt import (
-        derive_home_start_poses_from_grasps,
+        MOBILE_BASE_FROM_BAR_HOME_POSITION,
+        auto_compute_home_bar_pose,
+        bar_orientation_from_grasps,
+        get_joint_collision_fn,
         solve_endpoint_dual_arm_ik,
-        MOBILE_BASE_FROM_TOOL0_LEFT_HOME,
     )
 
     if len(seed_conf) != 12:
         raise ValueError("seed_conf must have length 12")
 
-    # Reconstruct world_from_tool0 at the goal state directly from the
-    # already-known grasp transforms — no FK needed.
-    # derive_home_start_poses_from_grasps expects pairs
-    # (world_from_bar_GOAL, world_from_tool0_GOAL) so it can derive
-    # bar_from_tool0 = inv(bar_goal) * tool0_goal.
-    world_from_tool0_L_goal = pp.multiply(world_from_bar_goal, grasp_bar_from_left)
-    world_from_tool0_R_goal = pp.multiply(world_from_bar_goal, grasp_bar_from_right)
-    grasp_targets = [
-        (world_from_bar_goal, world_from_tool0_L_goal),
-        (world_from_bar_goal, world_from_tool0_R_goal),
+    identity_pose = ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
+    if world_from_mobile_base is None:
+        world_from_mobile_base = identity_pose
+    mobile_base_from_world = pp.invert(world_from_mobile_base)
+
+    mb_from_bar_goal = pp.multiply(mobile_base_from_world, world_from_bar_goal)
+    mb_from_tool0_L_goal = pp.multiply(mb_from_bar_goal, grasp_bar_from_left)
+    mb_from_tool0_R_goal = pp.multiply(mb_from_bar_goal, grasp_bar_from_right)
+    grasp_targets_mb = [
+        (mb_from_bar_goal, mb_from_tool0_L_goal),
+        (mb_from_bar_goal, mb_from_tool0_R_goal),
     ]
-    base_from_tool0 = mobile_base_from_tool0_left or MOBILE_BASE_FROM_TOOL0_LEFT_HOME
-    ctx = derive_home_start_poses_from_grasps(
-        grasp_targets,
-        mobile_base_from_tool0_left=base_from_tool0,
+
+    home_bar_quat = bar_orientation_from_grasps(grasp_targets_mb)
+
+    # Anchor the geometric MIDPOINT between the two grasps at the home position
+    # rather than the bar-frame origin (which sits at one grasp end for typical
+    # datasets); without this shift the bar dangles ~1m off one arm.
+    bar_from_tool0_left_local = pp.multiply(pp.invert(mb_from_bar_goal), mb_from_tool0_L_goal)
+    bar_from_tool0_right_local = pp.multiply(pp.invert(mb_from_bar_goal), mb_from_tool0_R_goal)
+    grasp_midpoint_in_bar = 0.5 * (
+        np.asarray(bar_from_tool0_left_local[0], dtype=float)
+        + np.asarray(bar_from_tool0_right_local[0], dtype=float)
     )
-    world_from_bar_start = ctx["mobile_base_from_bar_start"]  # base==world
+    midpoint_in_mb = np.asarray(
+        pp.multiply(
+            ((0.0, 0.0, 0.0), home_bar_quat),
+            (tuple(grasp_midpoint_in_bar.tolist()), (0.0, 0.0, 0.0, 1.0)),
+        )[0],
+        dtype=float,
+    )
+    base_pos_mb = np.asarray(MOBILE_BASE_FROM_BAR_HOME_POSITION, dtype=float) - midpoint_in_mb
+
     rng = np.random.default_rng(random_seed)
-    with pp.WorldSaver():
-        start_conf = solve_endpoint_dual_arm_ik(
+
+    joint_collision_fn = None
+    if bar_body is not None:
+        joint_collision_fn = get_joint_collision_fn(
             robot=robot,
             arm_joints=arm_joints,
+            obstacle_bodies=list(obstacles),
             tool_link_left=tool_link_left,
-            tool_link_right=tool_link_right,
-            bar_pose=world_from_bar_start,
+            bar_body=bar_body,
             grasp_bar_from_left=grasp_bar_from_left,
-            grasp_bar_from_right=grasp_bar_from_right,
-            seed_conf=np.asarray(seed_conf, dtype=float),
-            rng=rng,
-            max_attempts=max_ik_attempts,
         )
-    return world_from_bar_start, start_conf
+
+    deltas = sorted(
+        _grid_in_box(bar_sweep_box, bar_sweep_step),
+        key=lambda d: float(np.linalg.norm(d)),
+    )
+
+    saved_bar_pose = pp.get_pose(bar_body) if bar_body is not None else None
+    found: Dict[str, Any] = {"world_from_bar": None, "conf": None}
+    chosen_ctx: Optional[Dict[str, Any]] = None
+
+    with pp.WorldSaver():
+        for d in deltas:
+            mb_from_bar_candidate = (
+                tuple((base_pos_mb + np.asarray(d, dtype=float)).tolist()),
+                home_bar_quat,
+            )
+
+            def ik_validator(bar_pose_mb, _found=found):
+                world_from_bar = pp.multiply(world_from_mobile_base, bar_pose_mb)
+                conf = solve_endpoint_dual_arm_ik(
+                    robot=robot,
+                    arm_joints=arm_joints,
+                    tool_link_left=tool_link_left,
+                    tool_link_right=tool_link_right,
+                    bar_pose=world_from_bar,
+                    grasp_bar_from_left=grasp_bar_from_left,
+                    grasp_bar_from_right=grasp_bar_from_right,
+                    seed_conf=np.asarray(seed_conf, dtype=float),
+                    rng=rng,
+                    max_attempts=max_ik_attempts,
+                    collision_fn=joint_collision_fn,
+                )
+                if conf is None:
+                    return False
+                _found["world_from_bar"] = world_from_bar
+                _found["conf"] = conf
+                return True
+
+            ctx = auto_compute_home_bar_pose(
+                grasp_targets_mb,
+                mobile_base_from_bar=mb_from_bar_candidate,
+                ik_validator=ik_validator,
+                num_geometric_candidates=num_geometric_candidates,
+                bar_axis_step_rad=bar_axis_step_rad,
+                allow_unvalidated_fallback=False,
+            )
+            if ctx.get("ik_validated", False):
+                chosen_ctx = ctx
+                break
+
+    if saved_bar_pose is not None:
+        pp.set_pose(bar_body, saved_bar_pose)
+
+    if chosen_ctx is None or found["conf"] is None:
+        logger.warning(
+            "derive_constrained_start: no collision-free home pose across %d deltas (kinematic_only=%s)",
+            len(deltas),
+            bar_body is None,
+        )
+        return None, None
+
+    world_from_bar_start = pp.multiply(world_from_mobile_base, chosen_ctx["mobile_base_from_bar_start"])
+    return world_from_bar_start, found["conf"]
 
 
 def plan_constrained_dual_arm(

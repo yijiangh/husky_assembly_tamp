@@ -17,10 +17,14 @@ from husky_assembly_tamp.motion_planner.stage1.minimal_rrt import (
     DESIGN_STUDY_BAR_SEQUENCE,
     DEFAULT_HOME_LEFT_TOOL_Z_OFFSET,
     DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
+    GDRIVE_DATA_DIRECTORY,
     HUSKY_DUAL_ARM_JOINT_NAMES,
+    INIT_ARM_JOINT_ANGLES,
     MOBILE_BASE_FROM_TOOL0_LEFT_HOME,
+    _resolve_gdrive_state_path,
     auto_compute_home_bar_pose,
     build_default_paths,
+    build_gdrive_scene_spec,
     build_real_design_goal_spec,
     derive_home_start_poses_from_grasps,
     get_joint_collision_fn,
@@ -46,6 +50,76 @@ logger = setup_logger("stage1_real_state_study")
 DEFAULT_TARGET_NAMES = ["G1", "G2", "G3", "G4", "V1", "V2", "H1", "D1", "V3"]
 BAR_POSE_POSITION_WARN_TOL_M = 1e-4
 BAR_POSE_ORIENTATION_WARN_TOL_RAD = 1e-3
+
+# gdrive-convention defaults (2026-05+). When --gdrive is set, --targets are
+# interpreted as state filenames under
+# GDRIVE_DATA_DIRECTORY/<gdrive_problem>/RobotCellStates/.
+GDRIVE_DEFAULT_PROBLEM = "2026-05-08_dual-arm_transfer_test"
+GDRIVE_DEFAULT_TARGETS = ["B3_approach.json"]
+
+
+def compute_gdrive_common_start(
+    *,
+    gdrive_seed_state: Optional[str] = None,
+    gdrive_problem: Optional[str] = None,
+) -> Dict[str, Any]:
+    """For gdrive datasets (no separate 'common start state' file).
+
+    IK seed defaults to INIT_ARM_JOINT_ANGLES; pass --gdrive-seed-state to use
+    a specific cell state's joint values instead (e.g. 'B3_approach.json').
+    """
+    if gdrive_seed_state:
+        state_path, _, _ = _resolve_gdrive_state_path(gdrive_seed_state, gdrive_problem)
+        seed = np.asarray(load_robot_cell_state(state_path), dtype=float)
+    else:
+        seed = np.asarray(INIT_ARM_JOINT_ANGLES, dtype=float)
+    return {
+        "start_joint_values": seed,
+        "mobile_base_from_tool0_left_home": MOBILE_BASE_FROM_TOOL0_LEFT_HOME,
+    }
+
+
+def build_gdrive_target_spec(
+    state_arg: str,
+    problem: Optional[str] = None,
+    *,
+    include_built_bars: bool = True,
+    enable_built_bar_collision: bool = True,
+) -> Dict[str, Any]:
+    """Adapter: build a spec dict in the legacy `build_real_design_goal_spec`
+    shape from a single gdrive RobotCellState. Used by run_endpoint_ik_diagnosis,
+    derive_start_pose_from_home_left_tool, and the per-stage runners.
+
+    All poses (goal_pose, grasp_targets, built_bars[*].pose) are in mobile-base
+    frame; the husky URDF stays at world origin in pybullet, matching the
+    legacy convention.
+    """
+    gdrive_spec = build_gdrive_scene_spec(
+        state_arg,
+        problem=problem,
+        include_env_bars=include_built_bars,
+        include_active_extras=include_built_bars,
+    )
+    state_path = gdrive_spec["_gdrive_state_path"]
+    target_name = os.path.splitext(os.path.basename(state_path))[0]
+    built_bars = gdrive_spec["built_bars"] if include_built_bars else []
+    if not enable_built_bar_collision and built_bars:
+        built_bars = [{**b, "collision": False} for b in built_bars]
+    return {
+        "target_name": target_name,
+        # No GraspTargets JSON in gdrive datasets; passing the state path here
+        # is harmless because setup_planning_scene only consults grasp_json
+        # when scene_spec["grasp_targets"] is missing.
+        "grasp_json": state_path,
+        "state_json": state_path,
+        "goal_pose": gdrive_spec["world_from_bar_goal"],
+        "grasp_targets": gdrive_spec["grasp_targets"],
+        "active_bar_mesh": gdrive_spec["active_bar_mesh"],
+        "built_bars": built_bars,
+        "robot_state": {"joint_values": gdrive_spec["end_joint_values"]},
+        "_gdrive_world_from_mobile_base": gdrive_spec["_gdrive_world_from_mobile_base"],
+        "_gdrive_active_bar_name": gdrive_spec["_gdrive_active_bar_name"],
+    }
 
 
 def default_design_root() -> str:
@@ -976,14 +1050,49 @@ def parse_args() -> argparse.Namespace:
         default="left",
         help="Which arm to plan for in single-arm-free mode",
     )
+    # gdrive convention (2026-05+): single state file per target, no GraspTargets JSON.
+    parser.add_argument(
+        "--gdrive",
+        action="store_true",
+        help=("Use the gdrive dataset convention. --targets are state filenames "
+              "(e.g. 'B3_approach.json' or 'B3_approach') under "
+              "GDRIVE_DATA_DIRECTORY/<gdrive-problem>/RobotCellStates/."),
+    )
+    parser.add_argument(
+        "--gdrive-problem",
+        type=str,
+        default=GDRIVE_DEFAULT_PROBLEM,
+        help=f"Dataset directory under GDRIVE_DATA_DIRECTORY (default: {GDRIVE_DEFAULT_PROBLEM!r}).",
+    )
+    parser.add_argument(
+        "--gdrive-seed-state",
+        type=str,
+        default=None,
+        help=("Optional cell state filename used as the IK seed in gdrive mode. "
+              "If unset, INIT_ARM_JOINT_ANGLES is used."),
+    )
     args = parser.parse_args()
     args.batch_targets_mode = not targets_flag_provided
+    if args.gdrive:
+        # Default targets in gdrive mode if user didn't specify.
+        if not targets_flag_provided:
+            args.targets = list(GDRIVE_DEFAULT_TARGETS)
+        # Normalize: accept 'B3_approach' and 'B3_approach.json'.
+        args.targets = [t if t.endswith(".json") else f"{t}.json" for t in args.targets]
+        # Override design_root for the report header.
+        args.design_root = os.path.join(GDRIVE_DATA_DIRECTORY, args.gdrive_problem)
     return args
 
 
 def main() -> None:
     args = parse_args()
-    common_start = compute_common_start_context(args.grasp_json, args.start_state, args.end_state)
+    if args.gdrive:
+        common_start = compute_gdrive_common_start(
+            gdrive_seed_state=args.gdrive_seed_state,
+            gdrive_problem=args.gdrive_problem,
+        )
+    else:
+        common_start = compute_common_start_context(args.grasp_json, args.start_state, args.end_state)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     json_path = os.path.join(support_dir(), f"real_state_study_{timestamp}.json")
     report_path = os.path.join(reports_dir(), f"real_state_study_report_{timestamp}.md")
@@ -991,16 +1100,29 @@ def main() -> None:
 
     summaries: List[Dict[str, Any]] = []
     for target_name in args.targets:
-        if target_name not in DESIGN_STUDY_BAR_SEQUENCE:
-            raise ValueError(f"Unknown design-study target: {target_name}")
-        spec = build_real_design_goal_spec(
-            design_root=args.design_root,
-            target_name=target_name,
-            robot_cell_json=args.robot_cell_json,
-            include_built_bars=args.include_built_bars,
-            enable_built_bar_collision=args.enable_built_bar_collision,
-            swap_grasps=args.swap_grasps,
-        )
+        if args.gdrive:
+            spec = build_gdrive_target_spec(
+                target_name,
+                problem=args.gdrive_problem,
+                include_built_bars=args.include_built_bars,
+                enable_built_bar_collision=args.enable_built_bar_collision,
+            )
+            target_name = spec["target_name"]
+            # setup_planning_scene reads start_state_json eagerly even when
+            # scene_spec provides start_joint_values. Point it at the gdrive
+            # state file so the (overridden) load succeeds.
+            args.start_state = spec["state_json"]
+        else:
+            if target_name not in DESIGN_STUDY_BAR_SEQUENCE:
+                raise ValueError(f"Unknown design-study target: {target_name}")
+            spec = build_real_design_goal_spec(
+                design_root=args.design_root,
+                target_name=target_name,
+                robot_cell_json=args.robot_cell_json,
+                include_built_bars=args.include_built_bars,
+                enable_built_bar_collision=args.enable_built_bar_collision,
+                swap_grasps=args.swap_grasps,
+            )
         # TODO here line 546 and line 566 can share one start context building
         if diagnose_mode is not None:
             result = run_endpoint_ik_diagnosis(args, common_start, spec, mode=diagnose_mode)

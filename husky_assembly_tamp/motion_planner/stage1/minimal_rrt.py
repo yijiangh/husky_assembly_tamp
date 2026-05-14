@@ -20,7 +20,7 @@ import json
 import os
 import sys
 import time
-from pathlib import Path
+from collections import Counter
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -36,7 +36,7 @@ from husky_assembly_tamp.utils.params import DATA_DIR
 from husky_assembly_tamp.utils.util import calculate_pose_error, normalize_angles, setup_logger
 
 
-logger = setup_logger("stage1_minimal_rrt")
+logger = setup_logger("stage1_minimal_rrt", file_mode="w")
 
 HUSKY_DUAL_URDF_PATH = os.path.join(
     DATA_DIR,
@@ -74,7 +74,7 @@ BAR_LENGTH = 1.0
 BAR_BOX_DIMS = (2.0 * BAR_RADIUS, 2.0 * BAR_RADIUS, BAR_LENGTH)
 STAGE1_DEBUG_START_OFFSET = np.array([-0.5, 0.0, 0.5], dtype=float)
 DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD = 10.0 * np.pi / 180.0
-DEFAULT_USE_ANGLE_NORMALIZATION = True
+DEFAULT_USE_ANGLE_NORMALIZATION = False
 DEFAULT_HOME_LEFT_TOOL_Z_OFFSET = 0.2
 MOBILE_BASE_FROM_TOOL0_LEFT_HOME: PoseLike = (
     np.array([0.3974141597747803, 0.16023626923561096, 0.8621799349784851], dtype=float),
@@ -85,24 +85,6 @@ MOBILE_BASE_FROM_TOOL0_LEFT_HOME: PoseLike = (
 MOBILE_BASE_FROM_BAR_HOME_POSITION: np.ndarray = np.array(
     [0.3974, -0.0398, 0.8622], dtype=float
 )
-DESIGN_STUDY_BAR_SEQUENCE = [
-    "G1",
-    "G2",
-    "G3",
-    "G4",
-    "V1",
-    "V1-G1",
-    "V1-G2",
-    "V2",
-    "V2-G1",
-    "V2-G2",
-    "H1",
-    "D1",
-    "V3",
-]
-DESIGN_STUDY_BAR_NAME_TO_INDEX = {name: idx for idx, name in enumerate(DESIGN_STUDY_BAR_SEQUENCE)}
-
-
 PoseLike = Tuple[np.ndarray, np.ndarray]
 GraspTarget = Tuple[PoseLike, PoseLike]
 ArmConf = np.ndarray
@@ -168,40 +150,25 @@ def maybe_normalize_angles(values: Sequence[float] | np.ndarray, use_angle_norma
     return arr
 
 
-def load_grasp_targets(
-    json_path: str,
-    world_from_mobile_base: Optional[PoseLike] = None,
-    swap_grasps: bool = False,
-) -> List[GraspTarget]:
-    with open(json_path) as f:
-        raw = json.load(f)
-    targets = []
-    mobile_base_from_world = pp.invert(world_from_mobile_base) if world_from_mobile_base is not None else None
-    for item in raw:
-        d = item["data"]
-        world_from_bar = pp.pose_from_tform(np.array(d["world_from_bar"]["data"]["matrix"]))
-        world_from_tool0 = pp.pose_from_tform(np.array(d["world_from_tool0"]["data"]["matrix"]))
-        if mobile_base_from_world is not None:
-            world_from_bar = pp.multiply(mobile_base_from_world, world_from_bar)
-            world_from_tool0 = pp.multiply(mobile_base_from_world, world_from_tool0)
-        targets.append((world_from_bar, world_from_tool0))
-    if swap_grasps and len(targets) >= 2:
-        targets[0], targets[1] = targets[1], targets[0]
-    return targets
+# DISABLED: 2pi-branch unwrapping of IK outputs against the previous conf. Left in source
+# (commented) for reference; call sites are also commented out.
+# def unwrap_conf_near_reference(conf: Sequence[float] | np.ndarray, reference: Sequence[float] | np.ndarray) -> np.ndarray:
+#     """Choose the equivalent joint branch closest to the previous command."""
+#     conf_arr = np.asarray(conf, dtype=float)
+#     ref_arr = np.asarray(reference, dtype=float)
+#     return ref_arr + np.asarray(normalize_angles(conf_arr - ref_arr), dtype=float)
 
 
-def load_robot_cell_state_data(json_path: str) -> Dict[str, Any]:
-    with open(json_path) as f:
-        data = json.load(f)
-    state = data["data"]
-    return {
-        "joint_values": np.asarray(state["robot_configuration"]["data"]["joint_values"], dtype=float),
-        "world_from_mobile_base": frame_data_to_pose(state["robot_base_frame"]),
-    }
-
-
-def load_robot_cell_state(json_path: str) -> np.ndarray:
-    return load_robot_cell_state_data(json_path)["joint_values"]
+def joint_step_exceeds_threshold(
+    next_conf: Sequence[float] | np.ndarray,
+    current_conf: Sequence[float] | np.ndarray,
+    threshold_rad: Optional[float],
+) -> bool:
+    """Check raw command-space delta after branch unwrapping."""
+    if threshold_rad is None:
+        return False
+    step_delta = np.abs(np.asarray(next_conf, dtype=float) - np.asarray(current_conf, dtype=float))
+    return bool(float(np.max(step_delta)) > float(threshold_rad))
 
 
 def get_bar_feature_points(bar_box_dims: Sequence[float] = BAR_BOX_DIMS) -> List[np.ndarray]:
@@ -251,32 +218,6 @@ def mesh_vertices_aabb_dims(vertices: Sequence[Sequence[float]]) -> Tuple[float,
     maxs = verts.max(axis=0)
     dims = maxs - mins
     return float(dims[0]), float(dims[1]), float(dims[2])
-
-
-def design_study_active_bar_body_name(target_name: str) -> str:
-    if target_name not in DESIGN_STUDY_BAR_NAME_TO_INDEX:
-        raise KeyError(f"Unknown design-study bar target: {target_name}")
-    return f"b{DESIGN_STUDY_BAR_NAME_TO_INDEX[target_name]}_0"
-
-
-def load_design_study_bar_mesh(robot_cell_json: str, target_name: str) -> BarMeshSpec:
-    active_bar_body_name = design_study_active_bar_body_name(target_name)
-    with open(robot_cell_json) as f:
-        robot_cell = json.load(f)
-    rigid_body_models = robot_cell["data"]["rigid_body_models"]
-    if active_bar_body_name not in rigid_body_models:
-        raise KeyError(f"Bar {active_bar_body_name} not found in {robot_cell_json}")
-    collision_meshes = rigid_body_models[active_bar_body_name]["collision_meshes"]
-    if not collision_meshes:
-        raise ValueError(f"Bar {active_bar_body_name} has no collision meshes in {robot_cell_json}")
-    vertices, faces = compas_mesh_data_to_pybullet_mesh(collision_meshes[0])
-    return {
-        "name": target_name,
-        "body_name": active_bar_body_name,
-        "vertices": vertices,
-        "faces": faces,
-        "aabb_dims": mesh_vertices_aabb_dims(vertices),
-    }
 
 
 def create_bar_mesh_body(mesh_spec: BarMeshSpec, color: Tuple[float, float, float, float], collision: bool = True) -> int:
@@ -428,65 +369,6 @@ def auto_compute_home_bar_pose(
         "chosen_bar_axis_theta": best_theta,
         "alignment_score": best_score,
         "ik_validated": ik_validated,
-    }
-
-
-def build_real_design_goal_spec(
-    design_root: str,
-    target_name: str,
-    robot_cell_json: Optional[str] = None,
-    include_built_bars: bool = False,
-    enable_built_bar_collision: bool = False,
-    swap_grasps: bool = False,
-) -> Dict[str, Any]:
-    design_root_path = Path(design_root)
-    robot_cell_states_dir = design_root_path / "RobotCellStates"
-    robot_cell_json_path = Path(robot_cell_json) if robot_cell_json is not None else design_root_path / "RobotCell.json"
-    state_json = robot_cell_states_dir / f"{target_name}_RobotCellState.json"
-    grasp_json = robot_cell_states_dir / f"{target_name}_GraspTargets.json"
-    if not state_json.is_file():
-        raise FileNotFoundError(f"RobotCellState not found for {target_name}: {state_json}")
-    if not grasp_json.is_file():
-        raise FileNotFoundError(f"GraspTargets not found for {target_name}: {grasp_json}")
-    state_data = load_robot_cell_state_data(str(state_json))
-    grasp_targets = load_grasp_targets(
-        str(grasp_json),
-        world_from_mobile_base=state_data["world_from_mobile_base"],
-        swap_grasps=swap_grasps,
-    )
-    built_bars: List[Dict[str, Any]] = []
-    if include_built_bars:
-        target_index = DESIGN_STUDY_BAR_NAME_TO_INDEX[target_name]
-        for prior_name in DESIGN_STUDY_BAR_SEQUENCE[:target_index]:
-            prior_grasp_json = robot_cell_states_dir / f"{prior_name}_GraspTargets.json"
-            prior_state_json = robot_cell_states_dir / f"{prior_name}_RobotCellState.json"
-            if not prior_grasp_json.is_file() or not prior_state_json.is_file():
-                logger.info("Skipping built-bar import for %s because pose files are unavailable.", prior_name)
-                continue
-            prior_state_data = load_robot_cell_state_data(str(prior_state_json))
-            prior_targets = load_grasp_targets(
-                str(prior_grasp_json),
-                world_from_mobile_base=prior_state_data["world_from_mobile_base"],
-                swap_grasps=swap_grasps,
-            )
-            built_bars.append(
-                {
-                    "name": prior_name,
-                    "mesh": load_design_study_bar_mesh(str(robot_cell_json_path), prior_name),
-                    "pose": get_goal_pose_from_grasp_targets(prior_targets),
-                    "collision": bool(enable_built_bar_collision),
-                    "color": (0.45, 0.45, 0.45, 0.95),
-                }
-            )
-    return {
-        "target_name": target_name,
-        "state_json": str(state_json),
-        "grasp_json": str(grasp_json),
-        "robot_state": state_data,
-        "grasp_targets": grasp_targets,
-        "goal_pose": get_goal_pose_from_grasp_targets(grasp_targets),
-        "active_bar_mesh": load_design_study_bar_mesh(str(robot_cell_json_path), target_name),
-        "built_bars": built_bars,
     }
 
 
@@ -679,18 +561,6 @@ def get_joint_collision_fn(
     return collision_fn
 
 
-def add_profile_time(profile_out: Optional[Dict[str, Any]], key: str, dt: float) -> None:
-    if profile_out is None:
-        return
-    profile_out[key] = float(profile_out.get(key, 0.0)) + float(dt)
-
-
-def bump_profile_count(profile_out: Optional[Dict[str, Any]], key: str, inc: int = 1) -> None:
-    if profile_out is None:
-        return
-    profile_out[key] = int(profile_out.get(key, 0)) + int(inc)
-
-
 def goal_pose_reached(pose: PoseLike, goal_pose: PoseLike, position_res: float, rotation_res: float) -> bool:
     return bool(
         pp.is_pose_close(
@@ -745,24 +615,26 @@ def validate_dual_arm_bar_pose(
     bar_pose: PoseLike,
     grasp_bar_from_left: PoseLike,
     grasp_bar_from_right: PoseLike,
+    pos_tolerance: float = 1e-4,
+    ori_tolerance: float = 1e-4,
 ) -> bool:
     pp.set_joint_positions(robot, arm_joints, full_conf)
     target_left = pp.multiply(bar_pose, grasp_bar_from_left)
     target_right = pp.multiply(bar_pose, grasp_bar_from_right)
     world_from_left = pp.get_link_pose(robot, tool_link_left)
     world_from_right = pp.get_link_pose(robot, tool_link_right)
-    if not pp.is_pose_close(target_left, world_from_left, pos_tolerance=1e-4, ori_tolerance=1e-4):
+    if not pp.is_pose_close(target_left, world_from_left, pos_tolerance=pos_tolerance, ori_tolerance=ori_tolerance):
         return False
-    if not pp.is_pose_close(target_right, world_from_right, pos_tolerance=1e-4, ori_tolerance=1e-4):
+    if not pp.is_pose_close(target_right, world_from_right, pos_tolerance=pos_tolerance, ori_tolerance=ori_tolerance):
         return False
     bar_from_left = pp.invert(grasp_bar_from_left)
     bar_from_right = pp.invert(grasp_bar_from_right)
     left_bar_pose = pp.multiply(world_from_left, bar_from_left)
     right_bar_pose = pp.multiply(world_from_right, bar_from_right)
     return bool(
-        pp.is_pose_close(left_bar_pose, bar_pose, pos_tolerance=1e-4, ori_tolerance=1e-4)
-        and pp.is_pose_close(right_bar_pose, bar_pose, pos_tolerance=1e-4, ori_tolerance=1e-4)
-        and pp.is_pose_close(left_bar_pose, right_bar_pose, pos_tolerance=1e-4, ori_tolerance=1e-4)
+        pp.is_pose_close(left_bar_pose, bar_pose, pos_tolerance=pos_tolerance, ori_tolerance=ori_tolerance)
+        and pp.is_pose_close(right_bar_pose, bar_pose, pos_tolerance=pos_tolerance, ori_tolerance=ori_tolerance)
+        and pp.is_pose_close(left_bar_pose, right_bar_pose, pos_tolerance=pos_tolerance, ori_tolerance=ori_tolerance)
     )
 
 
@@ -776,12 +648,10 @@ def solve_dual_arm_pose_ik(
     grasp_bar_from_right: PoseLike,
     seed_conf: FullConf,
     use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
-    profile_out: Optional[Dict[str, Any]] = None,
 ) -> Optional[FullConf]:
     target_left = pp.multiply(bar_pose, grasp_bar_from_left)
     target_right = pp.multiply(bar_pose, grasp_bar_from_right)
     seed_conf = maybe_normalize_angles(seed_conf, use_angle_normalization)
-    t0 = time.perf_counter()
     attempts = (
         ("right", "left"),
         ("left", "right"),
@@ -790,7 +660,6 @@ def solve_dual_arm_pose_ik(
         conf = seed_conf.copy()
         success = True
         for arm_name in order:
-            bump_profile_count(profile_out, "ik_calls")
             if arm_name == "right":
                 conf_next = solve_single_arm_ik(
                     robot=robot,
@@ -813,7 +682,6 @@ def solve_dual_arm_pose_ik(
                 )
             if conf_next is None:
                 success = False
-                bump_profile_count(profile_out, "ik_failures")
                 break
             conf = conf_next
         if success and validate_dual_arm_bar_pose(
@@ -826,10 +694,7 @@ def solve_dual_arm_pose_ik(
             grasp_bar_from_left=grasp_bar_from_left,
             grasp_bar_from_right=grasp_bar_from_right,
         ):
-            add_profile_time(profile_out, "ik_time_s", time.perf_counter() - t0)
-            bump_profile_count(profile_out, "nodes_with_ik")
             return maybe_normalize_angles(conf, use_angle_normalization)
-    add_profile_time(profile_out, "ik_time_s", time.perf_counter() - t0)
     return None
 
 
@@ -845,8 +710,8 @@ def solve_endpoint_dual_arm_ik(
     rng: np.random.Generator,
     max_attempts: int,
     use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
-    profile_out: Optional[Dict[str, Any]] = None,
     collision_fn: Optional[Callable[[np.ndarray], bool]] = None,
+    **_unused_kwargs: Any,
 ) -> Optional[FullConf]:
     for attempt in range(max(1, max_attempts)):
         if attempt == 0:
@@ -863,13 +728,158 @@ def solve_endpoint_dual_arm_ik(
             grasp_bar_from_right=grasp_bar_from_right,
             seed_conf=attempt_seed,
             use_angle_normalization=use_angle_normalization,
-            profile_out=profile_out,
         )
         if conf is not None:
             if collision_fn is not None and collision_fn(np.asarray(conf, dtype=float)):
                 continue
             return conf
     return None
+
+
+def _grid_in_box(
+    box: Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]],
+    step: float,
+) -> List[Tuple[float, float, float]]:
+    (x_lo, x_hi), (y_lo, y_hi), (z_lo, z_hi) = box
+    xs = np.arange(x_lo, x_hi + 0.5 * step, step)
+    ys = np.arange(y_lo, y_hi + 0.5 * step, step)
+    zs = np.arange(z_lo, z_hi + 0.5 * step, step)
+    return [(float(x), float(y), float(z)) for x in xs for y in ys for z in zs]
+
+
+def derive_constrained_start(
+    robot: int,
+    arm_joints: Sequence[int],
+    tool_link_left: int,
+    tool_link_right: int,
+    grasp_bar_from_left,
+    grasp_bar_from_right,
+    world_from_bar_goal,
+    seed_conf: Sequence[float],
+    *,
+    bar_body: Optional[int] = None,
+    obstacles: Sequence[int] = (),
+    world_from_mobile_base=None,
+    bar_sweep_box: Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]] = (
+        (-0.3, 0.3),
+        (-0.3, 0.3),
+        (-0.3, 0.3),
+    ),
+    bar_sweep_step: float = 0.1,
+    num_geometric_candidates: int = 20,
+    bar_axis_step_rad: float = float(np.deg2rad(30.0)),
+    max_ik_attempts: int = 20,
+    random_seed: Optional[int] = None,
+) -> Tuple[Optional[PoseLike], Optional[np.ndarray]]:
+    """Derive a constraint-satisfying start (bar pose, joint conf)."""
+    if len(seed_conf) != 12:
+        raise ValueError("seed_conf must have length 12")
+
+    identity_pose = ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
+    if world_from_mobile_base is None:
+        world_from_mobile_base = identity_pose
+    mobile_base_from_world = pp.invert(world_from_mobile_base)
+
+    mb_from_bar_goal = pp.multiply(mobile_base_from_world, world_from_bar_goal)
+    mb_from_tool0_left_goal = pp.multiply(mb_from_bar_goal, grasp_bar_from_left)
+    mb_from_tool0_right_goal = pp.multiply(mb_from_bar_goal, grasp_bar_from_right)
+    grasp_targets_mb = [
+        (mb_from_bar_goal, mb_from_tool0_left_goal),
+        (mb_from_bar_goal, mb_from_tool0_right_goal),
+    ]
+
+    home_bar_quat = bar_orientation_from_grasps(grasp_targets_mb)
+
+    # Anchor the grasp midpoint at the home position. Some bar frames live at
+    # one grasp end, so anchoring the frame origin would shift the held bar.
+    bar_from_tool0_left_local = pp.multiply(pp.invert(mb_from_bar_goal), mb_from_tool0_left_goal)
+    bar_from_tool0_right_local = pp.multiply(pp.invert(mb_from_bar_goal), mb_from_tool0_right_goal)
+    grasp_midpoint_in_bar = 0.5 * (
+        np.asarray(bar_from_tool0_left_local[0], dtype=float)
+        + np.asarray(bar_from_tool0_right_local[0], dtype=float)
+    )
+    midpoint_in_mb = np.asarray(
+        pp.multiply(
+            ((0.0, 0.0, 0.0), home_bar_quat),
+            (tuple(grasp_midpoint_in_bar.tolist()), (0.0, 0.0, 0.0, 1.0)),
+        )[0],
+        dtype=float,
+    )
+    base_pos_mb = np.asarray(MOBILE_BASE_FROM_BAR_HOME_POSITION, dtype=float) - midpoint_in_mb
+
+    rng = np.random.default_rng(random_seed)
+    joint_collision_fn = None
+    if bar_body is not None:
+        joint_collision_fn = get_joint_collision_fn(
+            robot=robot,
+            arm_joints=arm_joints,
+            obstacle_bodies=list(obstacles),
+            tool_link_left=tool_link_left,
+            bar_body=bar_body,
+            grasp_bar_from_left=grasp_bar_from_left,
+        )
+
+    deltas = sorted(
+        _grid_in_box(bar_sweep_box, bar_sweep_step),
+        key=lambda d: float(np.linalg.norm(d)),
+    )
+    saved_bar_pose = pp.get_pose(bar_body) if bar_body is not None else None
+    found: Dict[str, Any] = {"world_from_bar": None, "conf": None}
+    chosen_ctx: Optional[Dict[str, Any]] = None
+
+    with pp.WorldSaver():
+        for delta in deltas:
+            mb_from_bar_candidate = (
+                tuple((base_pos_mb + np.asarray(delta, dtype=float)).tolist()),
+                home_bar_quat,
+            )
+
+            def ik_validator(bar_pose_mb, _found=found):
+                world_from_bar = pp.multiply(world_from_mobile_base, bar_pose_mb)
+                conf = solve_endpoint_dual_arm_ik(
+                    robot=robot,
+                    arm_joints=arm_joints,
+                    tool_link_left=tool_link_left,
+                    tool_link_right=tool_link_right,
+                    bar_pose=world_from_bar,
+                    grasp_bar_from_left=grasp_bar_from_left,
+                    grasp_bar_from_right=grasp_bar_from_right,
+                    seed_conf=np.asarray(seed_conf, dtype=float),
+                    rng=rng,
+                    max_attempts=max_ik_attempts,
+                    collision_fn=joint_collision_fn,
+                )
+                if conf is None:
+                    return False
+                _found["world_from_bar"] = world_from_bar
+                _found["conf"] = conf
+                return True
+
+            ctx = auto_compute_home_bar_pose(
+                grasp_targets_mb,
+                mobile_base_from_bar=mb_from_bar_candidate,
+                ik_validator=ik_validator,
+                num_geometric_candidates=num_geometric_candidates,
+                bar_axis_step_rad=bar_axis_step_rad,
+                allow_unvalidated_fallback=False,
+            )
+            if ctx.get("ik_validated", False):
+                chosen_ctx = ctx
+                break
+
+    if saved_bar_pose is not None:
+        pp.set_pose(bar_body, saved_bar_pose)
+
+    if chosen_ctx is None or found["conf"] is None:
+        logger.warning(
+            "derive_constrained_start: no collision-free home pose across %d deltas (kinematic_only=%s)",
+            len(deltas),
+            bar_body is None,
+        )
+        return None, None
+
+    world_from_bar_start = pp.multiply(world_from_mobile_base, chosen_ctx["mobile_base_from_bar_start"])
+    return world_from_bar_start, found["conf"]
 
 
 def extend_toward(
@@ -890,14 +900,27 @@ def extend_toward(
     ik_context: Optional[Dict[str, Any]] = None,
     joint_continuity_threshold_rad: Optional[float] = None,
     use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
-    profile_out: Optional[Dict[str, Any]] = None,
 ) -> Tuple[TreeNode, bool, str]:
+    """Extend the RRT tree from ``source`` toward ``target_pose`` one interp step at a time.
+
+    Walks the SE(3) line from source.config to target_pose at (position_res, rotation_res)
+    granularity. At each intermediate pose: (optionally) solve IK + continuity + joint-collision,
+    then pose collision; on failure stop but keep all valid intermediate nodes appended.
+
+    Returns:
+        (last_node_added, reached_target, stop_reason)
+        ``stop_reason`` ∈ {"reached", "collision", "ik_failure", "continuity"}.
+    """
+    # `current`/`current_conf` track the frontier as we walk; updated each accepted step.
     current = source
     reached = True
     stop_reason = "reached"
     current_conf = None if node_confs is None else node_confs.get(id(source))
+    # IK mode requires both the conf cache and an ik_context; bail before any work if missing.
     if enable_ik and (node_confs is None or ik_context is None or current_conf is None):
         return current, False, "ik_failure"
+
+    # Discretize the SE(3) segment source -> target into waypoints. Skip index 0 (== source).
     for pose in list(
         pp.interpolate_poses(
             source.config,
@@ -906,9 +929,10 @@ def extend_toward(
             ori_step_size=max(rotation_res, 1e-6),
         )
     )[1:]:
-        bump_profile_count(profile_out, "poses_checked")
         next_conf = None
         if enable_ik:
+            # --- Stage 2/3: solve dual-arm IK at this pose, seeded by previous step's conf
+            # for warm-start continuity.
             next_conf = solve_dual_arm_pose_ik(
                 robot=ik_context["robot"],
                 arm_joints=ik_context["arm_joints"],
@@ -919,50 +943,58 @@ def extend_toward(
                 grasp_bar_from_right=ik_context["grasp_bar_from_right"],
                 seed_conf=current_conf,
                 use_angle_normalization=use_angle_normalization,
-                profile_out=profile_out,
             )
+
+            # IK miss -> can't follow the bar pose; stop extension here.
             if next_conf is None:
                 reached = False
                 stop_reason = "ik_failure"
                 break
-            if joint_continuity_threshold_rad is not None:
-                step_delta = np.abs(
-                    maybe_normalize_angles(
-                        np.asarray(next_conf, dtype=float) - np.asarray(current_conf, dtype=float),
-                        use_angle_normalization,
-                    )
-                )
-                if float(np.max(step_delta)) > float(joint_continuity_threshold_rad):
-                    reached = False
-                    stop_reason = "continuity"
-                    bump_profile_count(profile_out, "continuity_rejections")
-                    break
+
+            # Unwrap revolute joints to be ±pi-closest to the previous conf, so a step that
+            # "looks" like a 2pi jump is normalized away before the continuity check.
+            # DISABLED: keep raw IK output; let continuity check see the unmodified delta.
+            # next_conf = unwrap_conf_near_reference(next_conf, current_conf)
+
+            # Reject IK branch flips: large per-joint deltas between consecutive steps
+            # indicate the solver hopped to a different IK solution.
+            if joint_step_exceeds_threshold(next_conf, current_conf, joint_continuity_threshold_rad):
+                reached = False
+                stop_reason = "continuity"
+                break
+
+            # Stage 3: full robot-vs-world / self collision in joint space.
             if joint_collision_fn is not None and joint_collision_fn(next_conf):
                 reached = False
                 stop_reason = "collision"
-                bump_profile_count(profile_out, "collision_hits")
                 break
+
+        # Stage 1 (or always-on belt-and-braces): floating bar collision against obstacles.
         if collision_fn(pose):
             reached = False
             stop_reason = "collision"
-            bump_profile_count(profile_out, "collision_hits")
             break
+
         # this is the version of extension that stops at the first collision of the extend, but still add the valid interp so far into the tree
-        pp.VideoSaver
+        # --- Accept this waypoint: append as child of `current` and refresh caches.
         node = TreeNode(pose, parent=current)
         nodes.append(node)
         if enable_ik and node_confs is not None and next_conf is not None:
             node_confs[id(node)] = next_conf
-        bump_profile_count(profile_out, "nodes_created")
         if dist_metric == "feature":
             feature_vec = pose_to_feature_vec(pose, feature_points)
             if feature_vec is not None:
                 feature_vecs[id(node)] = feature_vec
+
         if use_draw:
+            # Visualize tree edge in the PyBullet GUI.
             pp.add_line(current.config[0], node.config[0], width=1.5, color=draw_color)
+
+        # Advance the frontier.
         current = node
         if next_conf is not None:
             current_conf = next_conf
+
     return current, reached, stop_reason
 
 
@@ -979,20 +1011,15 @@ def summarize_joint_continuity(
     }
     if joint_path is None:
         return summary
-    normalized_joint_path = [maybe_normalize_angles(conf, use_angle_normalization) for conf in joint_path]
-    if len(normalized_joint_path) < 2:
+    command_joint_path = [np.asarray(conf, dtype=float) for conf in joint_path]
+    if len(command_joint_path) < 2:
         summary["ok"] = True
         summary["max_delta_rad"] = 0.0
         return summary
 
     step_max_deltas = []
-    for prev_conf, next_conf in zip(normalized_joint_path[:-1], normalized_joint_path[1:]):
-        step_delta = np.abs(
-            maybe_normalize_angles(
-                np.asarray(next_conf, dtype=float) - np.asarray(prev_conf, dtype=float),
-                use_angle_normalization,
-            )
-        )
+    for prev_conf, next_conf in zip(command_joint_path[:-1], command_joint_path[1:]):
+        step_delta = np.abs(np.asarray(next_conf, dtype=float) - np.asarray(prev_conf, dtype=float))
         step_max_deltas.append(float(np.max(step_delta)))
     max_delta = max(step_max_deltas) if step_max_deltas else 0.0
     first_bad_step = next((idx + 1 for idx, delta in enumerate(step_max_deltas) if delta > threshold_rad), None)
@@ -1009,7 +1036,6 @@ def reconstruct_joint_path_for_pose_path(
     joint_collision_fn: Optional[Callable[[FullConf], bool]] = None,
     joint_continuity_threshold_rad: Optional[float] = None,
     use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
-    profile_out: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Optional[List[FullConf]], Optional[str]]:
     if not pose_path:
         return [], None
@@ -1017,7 +1043,7 @@ def reconstruct_joint_path_for_pose_path(
     if grasp_bar_from_right is None:
         return None, "missing_right_grasp"
 
-    current_conf = maybe_normalize_angles(start_conf, use_angle_normalization)
+    current_conf = np.asarray(start_conf, dtype=float)
     joint_path = [current_conf]
     for idx, pose in enumerate(pose_path[1:], start=1):
         next_conf = solve_dual_arm_pose_ik(
@@ -1030,28 +1056,15 @@ def reconstruct_joint_path_for_pose_path(
             grasp_bar_from_right=grasp_bar_from_right,
             seed_conf=current_conf,
             use_angle_normalization=use_angle_normalization,
-            profile_out=profile_out,
         )
         if next_conf is None:
             return None, f"ik_failure_at_waypoint_{idx}"
-        next_conf = maybe_normalize_angles(next_conf, use_angle_normalization)
-        if joint_continuity_threshold_rad is not None:
-            step_delta = np.abs(
-                maybe_normalize_angles(
-                    np.asarray(next_conf, dtype=float) - np.asarray(current_conf, dtype=float),
-                    use_angle_normalization,
-                )
-            )
-            if float(np.max(step_delta)) > float(joint_continuity_threshold_rad):
-                bump_profile_count(profile_out, "continuity_rejections")
-                return None, f"continuity_at_waypoint_{idx}"
-        if joint_collision_fn is not None:
-            t_collision = time.perf_counter()
-            in_collision = joint_collision_fn(next_conf)
-            add_profile_time(profile_out, "collision_check_time_s", time.perf_counter() - t_collision)
-            if in_collision:
-                bump_profile_count(profile_out, "collision_hits")
-                return None, f"collision_at_waypoint_{idx}"
+        # DISABLED: keep raw IK output; do not normalize to ±pi-closest branch of current_conf.
+        # next_conf = unwrap_conf_near_reference(next_conf, current_conf)
+        if joint_step_exceeds_threshold(next_conf, current_conf, joint_continuity_threshold_rad):
+            return None, f"continuity_at_waypoint_{idx}"
+        if joint_collision_fn is not None and joint_collision_fn(next_conf):
+            return None, f"collision_at_waypoint_{idx}"
         current_conf = next_conf
         joint_path.append(current_conf)
     return joint_path, None
@@ -1075,7 +1088,7 @@ def smooth_dual_arm_pose_path(
     min_cost_improvement: float = 0.0,
     inflection_tolerance: float = 1e-3,
     random_seed: Optional[int] = None,
-    profile_out: Optional[Dict[str, Any]] = None,
+    **_unused_kwargs: Any,
 ) -> Tuple[List[PoseLike], Optional[List[FullConf]]]:
     feature_points = list(feature_points) if feature_points is not None else get_bar_feature_points()
     current_poses = list(path_poses)
@@ -1084,23 +1097,6 @@ def smooth_dual_arm_pose_path(
         raise ValueError("Pose and joint path lengths must match for smoothing.")
 
     current_cost = _pose_path_cost(current_poses, dist_metric, feature_points)
-    if profile_out is not None:
-        profile_out.clear()
-        profile_out.update(
-            {
-                "cost_before": float(current_cost),
-                "cost_after": float(current_cost),
-                "waypoints_before": len(current_poses),
-                "waypoints_after": len(current_poses),
-                "shortcut_attempts": 0,
-                "cost_rejections": 0,
-                "ik_failures": 0,
-                "continuity_rejections": 0,
-                "collision_rejections": 0,
-                "accepts": 0,
-                "smooth_time_s": 0.0,
-            }
-        )
     if len(current_poses) < 3 or max_smooth_iterations <= 0 or max_time <= 0.0:
         return current_poses, current_confs
 
@@ -1113,7 +1109,6 @@ def smooth_dual_arm_pose_path(
         if len(inflection_indices) < 3:
             break
 
-        bump_profile_count(profile_out, "shortcut_attempts")
         ii = int(rng.integers(0, len(inflection_indices) - 2))
         jj = int(rng.integers(ii + 2, len(inflection_indices)))
         i = int(inflection_indices[ii])
@@ -1129,31 +1124,22 @@ def smooth_dual_arm_pose_path(
         candidate_poses = list(current_poses[:i]) + shortcut + list(current_poses[j + 1 :])
         new_cost = _pose_path_cost(candidate_poses, dist_metric, feature_points)
         if (current_cost - new_cost) <= min_cost_improvement:
-            bump_profile_count(profile_out, "cost_rejections")
             continue
 
         if pose_collision_fn is not None and any(pose_collision_fn(pose) for pose in shortcut[1:-1]):
-            bump_profile_count(profile_out, "collision_rejections")
             continue
 
         candidate_confs = None
         if current_confs is not None:
-            candidate_suffix, failure_reason = reconstruct_joint_path_for_pose_path(
+            candidate_suffix, _failure_reason = reconstruct_joint_path_for_pose_path(
                 scene=scene,
                 pose_path=candidate_poses[i:],
                 start_conf=current_confs[i],
                 joint_collision_fn=joint_collision_fn,
                 joint_continuity_threshold_rad=joint_continuity_threshold_rad,
                 use_angle_normalization=use_angle_normalization,
-                profile_out=profile_out,
             )
             if candidate_suffix is None:
-                if failure_reason and failure_reason.startswith("ik_failure"):
-                    bump_profile_count(profile_out, "ik_failures")
-                elif failure_reason and failure_reason.startswith("continuity"):
-                    bump_profile_count(profile_out, "continuity_rejections")
-                elif failure_reason and failure_reason.startswith("collision"):
-                    bump_profile_count(profile_out, "collision_rejections")
                 continue
             candidate_confs = list(current_confs[:i]) + list(candidate_suffix)
             if len(candidate_confs) != len(candidate_poses):
@@ -1163,12 +1149,7 @@ def smooth_dual_arm_pose_path(
         current_confs = candidate_confs
         current_cost = new_cost
         inflection_indices = _pose_path_inflection_indices(current_poses, feature_points, inflection_tolerance)
-        bump_profile_count(profile_out, "accepts")
 
-    if profile_out is not None:
-        profile_out["cost_after"] = float(current_cost)
-        profile_out["waypoints_after"] = len(current_poses)
-        profile_out["smooth_time_s"] = float(time.perf_counter() - start_time)
     return current_poses, current_confs
 
 
@@ -1179,6 +1160,7 @@ def update_debug_tree(
     nodes: List[TreeNode],
     start_pose: PoseLike,
     goal_pose: PoseLike,
+    extend_stop_reasons: Optional[Dict[str, int]] = None,
 ) -> None:
     if debug_tree_out is None:
         return
@@ -1189,6 +1171,9 @@ def update_debug_tree(
     debug_tree_out["tree2"] = {"points": [], "edges": []}
     debug_tree_out["start_pose"] = [float(v) for v in start_pose[0]]
     debug_tree_out["goal_pose"] = [float(v) for v in goal_pose[0]]
+    # Histogram of `extend_toward` stop_reasons across all RRT iterations.
+    # Useful for diagnosing failed plans (e.g. mostly "ik_failure" vs "collision").
+    debug_tree_out["extend_stop_reasons"] = dict(extend_stop_reasons) if extend_stop_reasons else {}
 
 
 def plan_pose_rrt(
@@ -1218,7 +1203,7 @@ def plan_pose_rrt(
     use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
     use_draw: bool = True,
     debug_tree_out: Optional[Dict] = None,
-    profile_out: Optional[Dict[str, Any]] = None,
+    **_unused_kwargs: Any,
 ) -> Tuple[Optional[List[PoseLike]], Optional[List[FullConf]]]:
     """Plan a collision-free path in SE(3) pose space using RRT.
 
@@ -1264,8 +1249,6 @@ def plan_pose_rrt(
             planning. Disable when running headless or for speed.
         debug_tree_out: Optional dict that is populated with the final RRT tree for
             offline inspection (nodes, edges, success flag, iteration count).
-        profile_out: Optional dict populated with timing and count statistics for
-            each planning run (collision checks, IK calls, node counts, outcome, etc.).
 
     Returns:
         A tuple ``(path_poses, path_confs)``.  On success, ``path_poses`` is the list
@@ -1273,71 +1256,49 @@ def plan_pose_rrt(
         corresponding list of joint configurations (or ``None`` when enable_ik is
         False).  Returns ``(None, None)`` if no path is found within the given limits.
     """
+    # --- Setup: RNG, feature points for "feature" distance, and pose-level collision fn.
+    # Pose collision fn only used when IK is off (Stage 1). With enable_ik, joint_collision_fn
+    # in extend_toward is the authoritative check, so we disable the pose-level one here.
     rng = np.random.default_rng(random_seed)
     feature_points = list(feature_points) if feature_points is not None else get_bar_feature_points()
     collision_fn = get_pose_collision_fn(bar_body, obstacle_bodies, enable_collision and not enable_ik)
-    if profile_out is not None:
-        profile_out.clear()
-        profile_out.update(
-            {
-                "attempts": 0,
-                "iterations": 0,
-                "nodes_created": 0,
-                "poses_checked": 0,
-                "collision_hits": 0,
-                "ik_calls": 0,
-                "ik_failures": 0,
-                "nodes_with_ik": 0,
-                "continuity_rejections": 0,
-            }
-        )
 
+    # --- Endpoint feasibility: reject early if start/goal already in collision.
+    # Use joint-space check when a robot collision fn is provided (Stage 3),
+    # otherwise check the floating bar pose against obstacles (Stage 1).
     if joint_collision_fn is not None:
         if start_conf is None or goal_conf is None:
             raise ValueError("Collision-aware planning requires both start_conf and goal_conf.")
-        t_collision = time.perf_counter()
         start_in_collision = joint_collision_fn(start_conf)
-        add_profile_time(profile_out, "collision_check_time_s", time.perf_counter() - t_collision)
         if start_in_collision:
             logger.warning("Start configuration is in collision.")
-            if profile_out is not None:
-                profile_out["outcome"] = "start_in_collision"
-                bump_profile_count(profile_out, "collision_hits")
             return None, None
-        t_collision = time.perf_counter()
         goal_in_collision = joint_collision_fn(goal_conf)
-        add_profile_time(profile_out, "collision_check_time_s", time.perf_counter() - t_collision)
         if goal_in_collision:
             logger.warning("Goal configuration is in collision.")
-            if profile_out is not None:
-                profile_out["outcome"] = "goal_in_collision"
-                bump_profile_count(profile_out, "collision_hits")
             return None, None
     else:
-        t_collision = time.perf_counter()
         start_in_collision = collision_fn(start_pose)
-        add_profile_time(profile_out, "collision_check_time_s", time.perf_counter() - t_collision)
         if start_in_collision:
             logger.warning("Start pose is in floating-body collision.")
-            if profile_out is not None:
-                profile_out["outcome"] = "start_in_collision"
-                bump_profile_count(profile_out, "collision_hits")
             return None, None
-        t_collision = time.perf_counter()
         goal_in_collision = collision_fn(goal_pose)
-        add_profile_time(profile_out, "collision_check_time_s", time.perf_counter() - t_collision)
         if goal_in_collision:
             logger.warning("Goal pose is in floating-body collision.")
-            if profile_out is not None:
-                profile_out["outcome"] = "goal_in_collision"
-                bump_profile_count(profile_out, "collision_hits")
             return None, None
 
+    # --- Outer loop: independent RRT restarts (each builds a fresh tree).
+    # Track histogram of extend_toward stop_reasons across the whole plan call
+    # (accumulates across attempts) so callers can see failure-mode breakdown.
+    extend_stop_reasons: Counter = Counter()
     best_tree: List[TreeNode] = []
     total_iterations = 0
     for attempt in range(max_attempts):
-        bump_profile_count(profile_out, "attempts")
         start_time = time.time()
+
+        # Root the tree at the start pose. Side caches keyed by id(node):
+        #   node_confs   -> full joint config at that node (only when enable_ik)
+        #   feature_vecs -> cached feature-point vector for fast nearest lookup
         root = TreeNode(start_pose)
         nodes = [root]
         node_confs: Dict[int, FullConf] = {}
@@ -1346,27 +1307,26 @@ def plan_pose_rrt(
                 raise ValueError("Stage 2/3 planning requires start_conf.")
             node_confs[id(root)] = np.asarray(start_conf, dtype=float)
         feature_vecs: Dict[int, np.ndarray] = {}
-        bump_profile_count(profile_out, "nodes_created")
         if dist_metric == "feature":
-            t_feature = time.perf_counter()
             root_feature = pose_to_feature_vec(start_pose, feature_points)
-            add_profile_time(profile_out, "feature_time_s", time.perf_counter() - t_feature)
             if root_feature is not None:
                 feature_vecs[id(root)] = root_feature
 
+        # --- Inner loop: standard RRT — sample, nearest, extend, goal-check.
         for iteration in range(max_iterations):
             total_iterations += 1
-            if profile_out is not None:
-                profile_out["iterations"] = total_iterations
+            # Wall-clock budget per attempt.
             if (time.time() - start_time) >= max_time:
                 break
-            t_sample = time.perf_counter()
+            # 1) Sample: with prob `goal_sample_prob` returns goal_pose, else random workspace pose.
             target_pose, _ = sample_pose(robot, goal_pose, rng, goal_sample_prob, workspace_xy, workspace_z)
-            add_profile_time(profile_out, "sample_time_s", time.perf_counter() - t_sample)
-            t_nearest = time.perf_counter()
+
+            # 2) Nearest-neighbor in current tree under chosen distance metric.
             nearest = nearest_node(nodes, target_pose, dist_metric, feature_points, feature_vecs)
-            add_profile_time(profile_out, "nearest_time_s", time.perf_counter() - t_nearest)
-            t_extend = time.perf_counter()
+
+            # 3) Extend: step from `nearest` toward `target_pose` at (position_res, rotation_res).
+            #    Stops on collision, IK fail, or joint-discontinuity; appends every valid
+            #    intermediate node into `nodes` and updates node_confs/feature_vecs in-place.
             new_last, reached, stop_reason = extend_toward(
                 nodes=nodes,
                 source=nearest,
@@ -1385,59 +1345,38 @@ def plan_pose_rrt(
                 ik_context=ik_context,
                 joint_continuity_threshold_rad=joint_continuity_threshold_rad,
                 use_angle_normalization=use_angle_normalization,
-                profile_out=profile_out,
             )
-            add_profile_time(profile_out, "extend_tree_time_s", time.perf_counter() - t_extend)
+            extend_stop_reasons[stop_reason] += 1
+
+            # Extension stalled before reaching target — keep iterating.
             if not reached:
-                if stop_reason == "ik_failure" and enable_ik and profile_out is not None:
-                    profile_out["outcome"] = "extend_ik_failure"
-                elif stop_reason == "continuity" and enable_ik and profile_out is not None:
-                    profile_out["outcome"] = "extend_continuity_failure"
-                elif stop_reason == "collision" and profile_out is not None:
-                    profile_out["outcome"] = "extend_collision_failure"
                 continue
-            t_goal_dist = time.perf_counter()
+
+            # 4) Goal test on the newly-added frontier node.
             if goal_pose_reached(new_last.config, goal_pose, position_res, rotation_res):
-                add_profile_time(profile_out, "goal_test_time_s", time.perf_counter() - t_goal_dist)
-                update_debug_tree(debug_tree_out, True, iteration + 1, nodes, start_pose, goal_pose)
-                if profile_out is not None:
-                    profile_out["outcome"] = "success"
+                update_debug_tree(
+                    debug_tree_out, True, iteration + 1, nodes, start_pose, goal_pose,
+                    extend_stop_reasons=extend_stop_reasons,
+                )
+                # Retrace tree from frontier back to root, then reverse to start->goal order.
                 path_nodes = new_last.retrace()
                 path_poses = configs(path_nodes)
                 path_confs = None
                 if enable_ik:
+                    # Pull cached joint configs for each pose waypoint.
                     path_confs = [np.asarray(node_confs[id(node)], dtype=float) for node in path_nodes]
                 return path_poses, path_confs
-            else:
-                add_profile_time(profile_out, "goal_test_time_s", time.perf_counter() - t_goal_dist)
+
+        # Attempt exhausted (time or iteration cap) — remember tree for debug, then restart.
         best_tree = nodes
         logger.info(f"Attempt {attempt + 1}/{max_attempts}: no path found.")
 
-    update_debug_tree(debug_tree_out, False, total_iterations, best_tree, start_pose, goal_pose)
-    if profile_out is not None:
-        profile_out["iterations"] = total_iterations
-        profile_out["outcome"] = "task_space_failure"
+    # All attempts failed. Dump last tree for inspection and signal failure.
+    update_debug_tree(
+        debug_tree_out, False, total_iterations, best_tree, start_pose, goal_pose,
+        extend_stop_reasons=extend_stop_reasons,
+    )
     return None, None
-
-
-def compute_bar_pose_from_state(
-    robot: int,
-    arm_joints: Sequence[int],
-    tool_link: int,
-    joint_values: Sequence[float],
-    grasp_bar_from_tool: PoseLike,
-) -> PoseLike:
-    pp.set_joint_positions(robot, arm_joints, joint_values)
-    world_from_tool = pp.get_link_pose(robot, tool_link)
-    return pp.multiply(world_from_tool, pp.invert(grasp_bar_from_tool))
-
-
-def build_default_paths() -> Tuple[str, str, str]:
-    robot_cell_dir = os.path.join(DATA_DIR, "husky_assembly_design_study", "250904_transfer_path_test", "RobotCellStates")
-    grasp_json = os.path.join(robot_cell_dir, "IK_test__GraspTargets.json")
-    start_state = os.path.join(robot_cell_dir, "IK_test__20250905_101010_RobotCellState.json")
-    end_state = os.path.join(robot_cell_dir, "IK_test__20250909_235058_RobotCellState.json")
-    return grasp_json, start_state, end_state
 
 
 # --- gdrive convention (2026-05+) ---------------------------------------------
@@ -1456,11 +1395,20 @@ def build_default_paths() -> Tuple[str, str, str]:
 GDRIVE_DATA_DIRECTORY = (
     "/home/yijiangh/Insync/yijiang94817@gmail.com/Google Drive - Shared with me/2025-03 Husky Assembly/data_design_study"
 )
+GDRIVE_DEFAULT_PROBLEM = "2026-05-14_foc_demo_reduced"
+
+
+def compas_frame_to_pose(frame: Any) -> PoseLike:
+    """Convert a compas Frame-like object to a pybullet_planning pose."""
+    return (
+        np.asarray(frame.point, dtype=float),
+        np.asarray(frame.quaternion.xyzw, dtype=float),
+    )
 
 
 def load_gdrive_active_bar_mesh(robot_cell_json: str, body_name: str) -> "BarMeshSpec":
-    """Like load_design_study_bar_mesh but keyed by the full body name
-    ('active_bar_B3', 'env_bar_B1', ...) rather than a target tag."""
+    """Load a bar mesh from RobotCell.json keyed by the full body name
+    ('active_bar_B3', 'env_bar_B1', ...)."""
     with open(robot_cell_json) as f:
         robot_cell = json.load(f)
     rigid_body_models = robot_cell["data"]["rigid_body_models"]
@@ -1530,6 +1478,153 @@ def _resolve_gdrive_state_path(state_arg: str, problem: Optional[str] = None) ->
     if not os.path.isfile(robot_cell_json):
         raise FileNotFoundError(f"RobotCell.json not found at {robot_cell_json}")
     return state_path, problem_dir, robot_cell_json
+
+
+def _resolve_gdrive_bar_action_path(action_arg: str, problem: Optional[str] = None) -> Tuple[str, str, str]:
+    """Resolve a BarAction arg to (action_path, problem_dir, robot_cell_json)."""
+    if os.path.isabs(action_arg) and os.path.isfile(action_arg):
+        action_path = action_arg
+        problem_dir = os.path.dirname(os.path.dirname(action_path))
+    else:
+        if not problem:
+            raise ValueError(
+                "When --gdrive-bar-action is a bare filename you must also pass "
+                "--gdrive-problem.")
+        problem_dir = os.path.join(GDRIVE_DATA_DIRECTORY, problem)
+        action_path = os.path.join(problem_dir, "BarActions", action_arg)
+        if not os.path.isfile(action_path):
+            raise FileNotFoundError(f"Gdrive BarAction not found: {action_path}")
+    robot_cell_json = os.path.join(problem_dir, "RobotCell.json")
+    if not os.path.isfile(robot_cell_json):
+        raise FileNotFoundError(f"RobotCell.json not found at {robot_cell_json}")
+    return action_path, problem_dir, robot_cell_json
+
+
+def _joint_values_from_robot_cell_state(state: Any) -> np.ndarray:
+    """Extract the dual-arm 12-vector from a compas_fab RobotCellState."""
+    robot_conf = state.robot_configuration
+    name_to_value = {n: v for n, v in zip(robot_conf.joint_names, robot_conf.joint_values)}
+    try:
+        return np.asarray([name_to_value[n] for n in HUSKY_DUAL_ARM_JOINT_NAMES], dtype=float)
+    except KeyError as e:
+        raise KeyError(f"BarAction start_state missing joint {e!s}; expected {HUSKY_DUAL_ARM_JOINT_NAMES}")
+
+
+def _joint_values_from_configuration(configuration: Any) -> np.ndarray:
+    """Extract the dual-arm 12-vector from a compas Configuration."""
+    name_to_value = {n: v for n, v in zip(configuration.joint_names, configuration.joint_values)}
+    try:
+        return np.asarray([name_to_value[n] for n in HUSKY_DUAL_ARM_JOINT_NAMES], dtype=float)
+    except KeyError as e:
+        raise KeyError(f"BarAction target_configuration missing joint {e!s}; expected {HUSKY_DUAL_ARM_JOINT_NAMES}")
+
+
+def build_gdrive_bar_action_scene_spec(
+    action_json: str,
+    movement: str | int = "M1",
+    problem: Optional[str] = None,
+    *,
+    include_built_bars: bool = False,
+) -> Dict[str, Any]:
+    """Build a lightweight scene_spec from a gdrive BarAction movement.
+
+    This intentionally avoids CfabSession / RobotCell materialization. It only
+    reads the BarAction, active bar mesh, start RobotCellState, and target EE
+    frames needed by the existing pp-only Stage 1/2/3 planner.
+    """
+    from husky_assembly_teleop.bar_action_io import find_movement, parse_bar_action
+
+    action_path, _, robot_cell_json = _resolve_gdrive_bar_action_path(action_json, problem)
+    action = parse_bar_action(action_path)
+    movement_index, mv = find_movement(action, movement)
+    if mv.start_state is None:
+        raise ValueError(f"Movement {mv.movement_id!r} in {action_path} has no start_state.")
+    if not mv.target_ee_frames or "left" not in mv.target_ee_frames or "right" not in mv.target_ee_frames:
+        raise ValueError(f"Movement {mv.movement_id!r} has no left/right target_ee_frames.")
+
+    start_state = mv.start_state
+    active_bar_name = f"bar_{action.active_bar_id}"
+    goal_state = None
+    goal_conf_source = None
+    target_configuration = getattr(mv, "target_configuration", None)
+    if target_configuration is not None:
+        goal_joint_values = _joint_values_from_configuration(target_configuration)
+        goal_state = start_state
+        goal_conf_source = "movement.target_configuration"
+    elif movement_index + 1 < len(action.movements) and action.movements[movement_index + 1].start_state is not None:
+        # For M1-style home->approach moves, the next movement starts at this
+        # movement's goal cell state, including the planned dual-arm joints.
+        goal_state = action.movements[movement_index + 1].start_state
+        goal_joint_values = _joint_values_from_robot_cell_state(goal_state)
+        goal_conf_source = f"movement[{movement_index + 1}].start_state"
+    else:
+        goal_state = start_state
+        goal_joint_values = _joint_values_from_robot_cell_state(start_state)
+        goal_conf_source = "movement.start_state"
+
+    bar_state = ((goal_state.rigid_body_states or {}).get(active_bar_name)
+                 or (start_state.rigid_body_states or {}).get(active_bar_name))
+    if bar_state is None or bar_state.attachment_frame is None:
+        raise ValueError(f"BarAction start_state has no attached active bar {active_bar_name!r}.")
+
+    start_joint_values = _joint_values_from_robot_cell_state(start_state)
+
+    # BarAction target EE frames are authored in the cell/world frame. Convert
+    # to the mobile-base frame because this planner keeps the husky at origin.
+    world_from_mobile_base = compas_frame_to_pose(goal_state.robot_base_frame)
+    mobile_base_from_world = pp.invert(world_from_mobile_base)
+    mobile_base_from_tool0_left_goal = pp.multiply(
+        mobile_base_from_world,
+        compas_frame_to_pose(mv.target_ee_frames["left"]),
+    )
+    mobile_base_from_tool0_right_goal = pp.multiply(
+        mobile_base_from_world,
+        compas_frame_to_pose(mv.target_ee_frames["right"]),
+    )
+
+    attached_link = getattr(bar_state, "attached_to_link", None)
+    if attached_link == TOOL_LINK_RIGHT:
+        tool0_from_bar = compas_frame_to_pose(bar_state.attachment_frame)
+        mobile_base_from_bar_goal = pp.multiply(mobile_base_from_tool0_right_goal, tool0_from_bar)
+    else:
+        # The current gdrive actions attach the active bar to left_ur_arm_tool0.
+        # Unknown link names fall back to the same convention and still log the
+        # source link in the returned metadata.
+        tool0_from_bar = compas_frame_to_pose(bar_state.attachment_frame)
+        mobile_base_from_bar_goal = pp.multiply(mobile_base_from_tool0_left_goal, tool0_from_bar)
+
+    grasp_targets = [
+        (mobile_base_from_bar_goal, mobile_base_from_tool0_left_goal),
+        (mobile_base_from_bar_goal, mobile_base_from_tool0_right_goal),
+    ]
+
+    try:
+        active_bar_mesh = load_gdrive_active_bar_mesh(robot_cell_json, active_bar_name)
+    except (KeyError, ValueError) as e:
+        logger.warning(f"active bar mesh missing for {active_bar_name!r}: {e}; using default BAR_BOX_DIMS fallback")
+        active_bar_mesh = None
+
+    built_bars: List[Dict[str, Any]] = []
+    if include_built_bars:
+        logger.warning("BarAction include_built_bars=True is intentionally light; no full RobotCell bodies are imported yet.")
+
+    return {
+        "start_joint_values": start_joint_values,
+        "end_joint_values": goal_joint_values,
+        "grasp_targets": grasp_targets,
+        "world_from_bar_goal": mobile_base_from_bar_goal,
+        "active_bar_mesh": active_bar_mesh,
+        "built_bars": built_bars,
+        "_gdrive_bar_action_path": action_path,
+        "_gdrive_bar_action_id": action.action_id,
+        "_gdrive_bar_action_movement": mv.movement_id,
+        "_gdrive_bar_action_movement_index": movement_index,
+        "_gdrive_bar_action_goal_conf_source": goal_conf_source,
+        "_gdrive_active_bar_name": active_bar_name,
+        "_gdrive_active_bar_attached_to_link": attached_link,
+        "_gdrive_world_from_mobile_base": world_from_mobile_base,
+        "_gdrive_robot_cell_json": robot_cell_json,
+    }
 
 
 def build_gdrive_scene_spec(
@@ -1709,15 +1804,17 @@ def add_grasp_pose_markers(
 
 
 def setup_planning_scene(
-    grasp_json: str,
-    start_state_json: str,
-    end_state_json: str,
+    scene_spec: Dict[str, Any],
     use_gui: bool = False,
-    scene_spec: Optional[Dict[str, Any]] = None,
-    swap_grasps: bool = False,
 ) -> Dict[str, Any]:
     if not os.path.isfile(HUSKY_DUAL_URDF_PATH):
         raise FileNotFoundError(f"URDF not found: {HUSKY_DUAL_URDF_PATH}")
+    scene_spec = dict(scene_spec)
+    for required_key in ("grasp_targets", "start_joint_values", "end_joint_values"):
+        if required_key not in scene_spec:
+            raise ValueError(f"scene_spec missing required key {required_key!r}")
+    if not scene_spec["grasp_targets"]:
+        raise ValueError("scene_spec must contain non-empty 'grasp_targets'")
 
     cid = pp.connect(use_gui=use_gui)
     if sys.platform == "win32":
@@ -1741,7 +1838,6 @@ def setup_planning_scene(
     tool_link_right = pp.link_from_name(robot, TOOL_LINK_RIGHT)
     pp.set_joint_positions(robot, arm_joints, INIT_ARM_JOINT_ANGLES)
 
-    scene_spec = dict(scene_spec or {})
     active_bar_mesh = scene_spec.get("active_bar_mesh")
     bar_box_dims = tuple(active_bar_mesh["aabb_dims"]) if active_bar_mesh is not None else BAR_BOX_DIMS
     bar_label = None if active_bar_mesh is None else active_bar_mesh.get("name", active_bar_mesh.get("body_name"))
@@ -1756,11 +1852,7 @@ def setup_planning_scene(
         ghost_start = pp.create_box(box_width, box_depth, box_length, color=(0.0, 0.8, 0.0, 0.35))
         ghost_goal = pp.create_box(box_width, box_depth, box_length, color=(0.8, 0.0, 0.0, 0.35))
 
-    grasp_targets = scene_spec.get("grasp_targets")
-    if grasp_targets is None:
-        grasp_targets = load_grasp_targets(grasp_json, swap_grasps=swap_grasps)
-    if len(grasp_targets) < 1:
-        raise ValueError(f"Expected at least one grasp target in {grasp_json}")
+    grasp_targets = scene_spec["grasp_targets"]
     world_from_bar_l, world_from_tool0_left = grasp_targets[0]
     grasp_bar_from_left = pp.multiply(pp.invert(world_from_bar_l), world_from_tool0_left)
     grasp_bar_from_right: Optional[PoseLike] = None
@@ -1768,8 +1860,8 @@ def setup_planning_scene(
         world_from_bar_r, world_from_tool0_right = grasp_targets[1]
         grasp_bar_from_right = pp.multiply(pp.invert(world_from_bar_r), world_from_tool0_right)
 
-    start_joint_values = np.asarray(scene_spec.get("start_joint_values", load_robot_cell_state(start_state_json)), dtype=float)
-    end_joint_values = np.asarray(scene_spec.get("end_joint_values", load_robot_cell_state(end_state_json)), dtype=float)
+    start_joint_values = np.asarray(scene_spec["start_joint_values"], dtype=float)
+    end_joint_values = np.asarray(scene_spec["end_joint_values"], dtype=float)
 
     world_from_bar_grasp = get_goal_pose_from_grasp_targets(grasp_targets)
     start_pose_context = None
@@ -1855,9 +1947,7 @@ def teardown_planning_scene() -> None:
 
 def run_stage_trial(
     stage: int,
-    grasp_json: str,
-    start_state_json: str,
-    end_state_json: str,
+    scene_spec: Dict[str, Any],
     use_gui: bool = False,
     dist_metric: str = "feature",
     goal_bias: float = 0.1,
@@ -1876,22 +1966,18 @@ def run_stage_trial(
     joint_continuity_threshold_rad: Optional[float] = DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
     use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
     lock_renderer_during_search: bool = False,
-    scene_spec: Optional[Dict[str, Any]] = None,
+    draw_rrt_tree: bool = True,
     validation_reports_dir: Optional[str] = None,
     debug_tree_out: Optional[Dict] = None,
-    planner_profile_out: Optional[Dict[str, Any]] = None,
-    swap_grasps: bool = False,
+    **_unused_kwargs: Any,
 ) -> Dict[str, Any]:
     if stage not in {1, 2, 3}:
         raise ValueError(f"Unsupported stage: {stage}")
-    scene = setup_planning_scene(
-        grasp_json,
-        start_state_json,
-        end_state_json,
-        use_gui=use_gui,
-        scene_spec=scene_spec,
-        swap_grasps=swap_grasps,
-    )
+    # Always have a local debug dict so we can capture the planner's stop_reason histogram,
+    # regardless of whether the caller wants the tree dump.
+    if debug_tree_out is None:
+        debug_tree_out = {}
+    scene = setup_planning_scene(scene_spec=scene_spec, use_gui=use_gui)
 
     def early_failure(failure_reason: str) -> Dict[str, Any]:
         return {
@@ -1926,18 +2012,20 @@ def run_stage_trial(
         enable_ik = stage >= 2
         enforce_collision = stage >= 3
         rng = np.random.default_rng(random_seed)
-        smooth_profile: Optional[Dict[str, Any]] = None
         start_conf = None
         goal_conf = None
         joint_collision_fn = None
         if enable_ik:
-            # Stages 2/3 solve dual-arm endpoint IK once before search so the tree
-            # starts from a robot-feasible grasp state instead of only a bar pose.
+            from husky_assembly_tamp.motion_planner.api import derive_grasps_from_state
+
+            # Match the live/headless constrained path: solve the goal first,
+            # derive FK-consistent grasps at the goal, then compute a validated
+            # home/start pose and start_conf with derive_constrained_start.
             grasp_bar_from_right = scene["grasp_bar_from_right"]
             if grasp_bar_from_right is None:
                 raise ValueError(f"Stage {stage} requires both left and right grasp targets.")
+            env_obstacles = [body for body in scene["collision_obstacles"] if body != scene["robot"]]
             if enforce_collision:
-                env_obstacles = [body for body in scene["collision_obstacles"] if body != scene["robot"]]
                 joint_collision_fn = get_joint_collision_fn(
                     robot=scene["robot"],
                     arm_joints=scene["arm_joints"],
@@ -1946,49 +2034,88 @@ def run_stage_trial(
                     bar_body=scene["bar_body"],
                     grasp_bar_from_left=scene["grasp_bar_from_left"],
                 )
-            t_endpoint = time.perf_counter()
-            start_conf = solve_endpoint_dual_arm_ik(
+            goal_seed = np.asarray(scene["end_joint_values"], dtype=float)
+            if validate_dual_arm_bar_pose(
                 robot=scene["robot"],
                 arm_joints=scene["arm_joints"],
                 tool_link_left=scene["tool_link_left"],
                 tool_link_right=scene["tool_link_right"],
-                bar_pose=scene["world_from_bar_start"],
-                grasp_bar_from_left=scene["grasp_bar_from_left"],
-                grasp_bar_from_right=grasp_bar_from_right,
-                seed_conf=scene["start_joint_values"],
-                rng=rng,
-                max_attempts=endpoint_ik_attempts,
-                use_angle_normalization=use_angle_normalization,
-                profile_out=planner_profile_out,
-                collision_fn=joint_collision_fn,
-            )
-            if start_conf is None:
-                add_profile_time(planner_profile_out, "endpoint_ik_time_s", time.perf_counter() - t_endpoint)
-                if planner_profile_out is not None:
-                    planner_profile_out["outcome"] = "start_ik_failure"
-                logger.warning(f"Stage {stage} start pose has no valid dual-arm IK solution.")
-                return early_failure("start_ik_failure")
-            goal_conf = solve_endpoint_dual_arm_ik(
-                robot=scene["robot"],
-                arm_joints=scene["arm_joints"],
-                tool_link_left=scene["tool_link_left"],
-                tool_link_right=scene["tool_link_right"],
+                full_conf=goal_seed,
                 bar_pose=scene["world_from_bar_goal"],
                 grasp_bar_from_left=scene["grasp_bar_from_left"],
                 grasp_bar_from_right=grasp_bar_from_right,
-                seed_conf=scene["end_joint_values"],
-                rng=rng,
-                max_attempts=endpoint_ik_attempts,
-                use_angle_normalization=use_angle_normalization,
-                profile_out=planner_profile_out,
-                collision_fn=joint_collision_fn,
-            )
-            add_profile_time(planner_profile_out, "endpoint_ik_time_s", time.perf_counter() - t_endpoint)
+                pos_tolerance=1e-3,
+                ori_tolerance=1e-2,
+            ) and (joint_collision_fn is None or not joint_collision_fn(goal_seed)):
+                goal_conf = goal_seed
+                logger.info("Using authored goal_conf from scene end_joint_values.")
+            else:
+                goal_conf = solve_endpoint_dual_arm_ik(
+                    robot=scene["robot"],
+                    arm_joints=scene["arm_joints"],
+                    tool_link_left=scene["tool_link_left"],
+                    tool_link_right=scene["tool_link_right"],
+                    bar_pose=scene["world_from_bar_goal"],
+                    grasp_bar_from_left=scene["grasp_bar_from_left"],
+                    grasp_bar_from_right=grasp_bar_from_right,
+                    seed_conf=goal_seed,
+                    rng=rng,
+                    max_attempts=endpoint_ik_attempts,
+                    use_angle_normalization=use_angle_normalization,
+                    collision_fn=joint_collision_fn,
+                )
             if goal_conf is None:
-                if planner_profile_out is not None:
-                    planner_profile_out["outcome"] = "goal_ik_failure"
                 logger.warning(f"Stage {stage} goal pose has no valid dual-arm IK solution.")
                 return early_failure("goal_ik_failure")
+            scene["end_joint_values"] = np.asarray(goal_conf, dtype=float)
+            scene["grasp_bar_from_left"], scene["grasp_bar_from_right"] = derive_grasps_from_state(
+                scene["robot"],
+                scene["arm_joints"],
+                scene["tool_link_left"],
+                scene["tool_link_right"],
+                goal_conf,
+                scene["world_from_bar_goal"],
+            )
+            grasp_bar_from_right = scene["grasp_bar_from_right"]
+            if enforce_collision:
+                # Rebuild after FK-consistent grasp derivation so the bar
+                # attachment used for start validation matches the planner.
+                joint_collision_fn = get_joint_collision_fn(
+                    robot=scene["robot"],
+                    arm_joints=scene["arm_joints"],
+                    obstacle_bodies=env_obstacles,
+                    tool_link_left=scene["tool_link_left"],
+                    bar_body=scene["bar_body"],
+                    grasp_bar_from_left=scene["grasp_bar_from_left"],
+                )
+            world_from_bar_start, start_conf = derive_constrained_start(
+                scene["robot"],
+                scene["arm_joints"],
+                scene["tool_link_left"],
+                scene["tool_link_right"],
+                scene["grasp_bar_from_left"],
+                grasp_bar_from_right,
+                scene["world_from_bar_goal"],
+                seed_conf=goal_conf,
+                bar_body=scene["bar_body"] if enforce_collision else None,
+                obstacles=env_obstacles if enforce_collision else (),
+                random_seed=random_seed,
+                max_ik_attempts=endpoint_ik_attempts,
+            )
+            if start_conf is None or world_from_bar_start is None:
+                logger.warning(f"Stage {stage} start pose has no valid derived dual-arm IK solution.")
+                return early_failure("start_ik_failure")
+            scene["world_from_bar_start"] = world_from_bar_start
+            scene["start_pose"] = world_from_bar_start
+            scene["start_joint_values"] = np.asarray(start_conf, dtype=float)
+            pp.set_pose(scene["bar_body"], world_from_bar_start)
+            pp.set_pose(scene["ghost_start"], world_from_bar_start)
+            grasp_marker_bodies = scene.get("grasp_marker_bodies") or []
+            if grasp_marker_bodies:
+                # Keep GUI markers consistent with the derived start pose.
+                pp.set_pose(grasp_marker_bodies[0], pp.multiply(world_from_bar_start, scene["grasp_bar_from_left"]))
+                if len(grasp_marker_bodies) >= 3:
+                    pp.set_pose(grasp_marker_bodies[2], pp.multiply(world_from_bar_start, grasp_bar_from_right))
 
         logger.info(f"Running minimal Stage {stage} RRT.")
         logger.info(f"  start pose: {np.round(scene['world_from_bar_start'][0], 4)}")
@@ -2037,9 +2164,8 @@ def run_stage_trial(
             feature_points=scene["feature_points"],
             joint_continuity_threshold_rad=(joint_continuity_threshold_rad if enable_ik else None),
             use_angle_normalization=use_angle_normalization,
-            use_draw=use_gui,
+            use_draw=use_gui and draw_rrt_tree,
             debug_tree_out=debug_tree_out,
-            profile_out=planner_profile_out,
         )
         t0 = time.perf_counter()
         planning_time_s = 0.0
@@ -2056,7 +2182,6 @@ def run_stage_trial(
         path_before_smoothing = None if path is None else list(path)
         path_confs_before_smoothing = None if path_confs is None else [np.asarray(conf, dtype=float) for conf in path_confs]
         if path is not None and enable_smoothing:
-            smooth_profile = {}
             smooth_pose_collision_fn = (
                 get_pose_collision_fn(scene["bar_body"], scene["collision_obstacles"], True)
                 if (stage == 1 and enable_collision)
@@ -2079,20 +2204,9 @@ def run_stage_trial(
                 max_time=smooth_max_time,
                 min_cost_improvement=smooth_min_cost_improvement,
                 random_seed=random_seed,
-                profile_out=smooth_profile,
             )
             smoothing_time_s = time.perf_counter() - t_smooth
-            if planner_profile_out is not None:
-                planner_profile_out["smoothing"] = smooth_profile
-            logger.info(
-                "Smoothing: cost %.4f -> %.4f, waypoints %d -> %d, accepts %d/%d",
-                float(smooth_profile.get("cost_before", 0.0)),
-                float(smooth_profile.get("cost_after", 0.0)),
-                int(smooth_profile.get("waypoints_before", 0)),
-                int(smooth_profile.get("waypoints_after", 0)),
-                int(smooth_profile.get("accepts", 0)),
-                int(smooth_profile.get("shortcut_attempts", 0)),
-            )
+            logger.info(f"Smoothing reduced path to {len(path)} waypoints.")
         runtime_s = time.perf_counter() - t0
 
         if path is not None:
@@ -2101,27 +2215,6 @@ def run_stage_trial(
             if enable_ik and path_confs:
                 pp.set_joint_positions(scene["robot"], scene["arm_joints"], path_confs[-1])
         else:
-            if (
-                enable_ik
-                and enforce_collision
-                and planner_profile_out is not None
-                and planner_profile_out.get("outcome") in {"start_in_collision", "goal_in_collision"}
-            ):
-                diagnosis_conf = start_conf if planner_profile_out["outcome"] == "start_in_collision" else goal_conf
-                if diagnosis_conf is not None:
-                    joint_collision_fn = get_joint_collision_fn(
-                        robot=scene["robot"],
-                        arm_joints=scene["arm_joints"],
-                        obstacle_bodies=[body for body in scene["collision_obstacles"] if body != scene["robot"]],
-                        tool_link_left=scene["tool_link_left"],
-                        bar_body=scene["bar_body"],
-                        grasp_bar_from_left=scene["grasp_bar_from_left"],
-                    )
-                    logger.warning(
-                        "%s collision diagnosis:",
-                        "Start" if planner_profile_out["outcome"] == "start_in_collision" else "Goal",
-                    )
-                    joint_collision_fn(diagnosis_conf, diagnosis=True)
             logger.warning(f"No Stage {stage} pose path found.")
 
         coarse_continuity = (
@@ -2131,7 +2224,14 @@ def run_stage_trial(
         )
 
         if path_confs is not None:
-            validation_joint_path = [maybe_normalize_angles(conf, use_angle_normalization) for conf in path_confs]
+            # Forward the smoothed path AS-IS (continuous joint values, can
+            # extend beyond ±π). Pre-normalizing here used to introduce
+            # spurious ±2π wraps in the validation display + continuity
+            # check; the densifier in refine_joint_path_for_validation
+            # re-normalizes internally for collision math, so this is a
+            # display + continuity-check fidelity win at no correctness
+            # cost.
+            validation_joint_path = [np.asarray(conf, dtype=float) for conf in path_confs]
             validation_joint_path_source = "planner"
             validation_joint_path_reason = None
         else:
@@ -2163,6 +2263,9 @@ def run_stage_trial(
         else:
             validation = validate_stage_trajectory(**validation_kwargs)
         validation_time_s = time.perf_counter() - t_validation
+        # Surface the RRT extend_toward stop_reason histogram on the validation dict
+        # so it gets logged and saved alongside other diagnostics.
+        validation["extend_stop_reasons"] = dict(debug_tree_out.get("extend_stop_reasons") or {})
         log_validation_summary(validation)
         path_found = path is not None
         validated_success = path_found
@@ -2189,7 +2292,7 @@ def run_stage_trial(
             "runtime_s": runtime_s,
             "path_found": path_found,
             "success": bool(validated_success),
-            "smoothing": smooth_profile,
+            "smoothing": None,
         }
     except Exception:
         teardown_planning_scene()
@@ -2212,6 +2315,15 @@ def log_validation_summary(validation: Dict[str, Any]) -> None:
     plot_path = validation.get("plot_path")
     if plot_path:
         logger.info(f"Saved trajectory validation plot: {plot_path}")
+
+    # RRT `extend_toward` stop_reason histogram — useful for diagnosing failed plans.
+    extend_stop_reasons = validation.get("extend_stop_reasons") or {}
+    if extend_stop_reasons:
+        total = sum(extend_stop_reasons.values())
+        # Sort by count descending so the dominant failure mode prints first.
+        items = sorted(extend_stop_reasons.items(), key=lambda kv: kv[1], reverse=True)
+        parts = [f"{reason}={count} ({count / total * 100:.1f}%)" for reason, count in items]
+        logger.info(f"extend_toward stop_reasons (total={total}): " + ", ".join(parts))
 
     collision_free = validation.get("collision_free")
     if collision_free is None:
@@ -2402,18 +2514,13 @@ def run_visualization_loop(
 
 
 def main() -> None:
-    default_grasp_json, default_start_state, default_end_state = build_default_paths()
     parser = argparse.ArgumentParser(description="Minimal Stage 1/2/3 floating-bar RRT")
-    parser.add_argument("--grasp-json", type=str, default=default_grasp_json, help="Path to grasp JSON file")
-    parser.add_argument("--start-state", type=str, default=default_start_state, help="Path to start RobotCellState JSON")
-    parser.add_argument("--end-state", type=str, default=default_end_state, help="Path to end RobotCellState JSON")
     parser.add_argument("--stage", choices=[1, 2, 3], type=int, default=3, help="Planning stage to run")
     parser.add_argument("--no-gui", action="store_true", help="Run without PyBullet GUI")
     parser.add_argument("--goal-bias", type=float, default=0.1, help="Goal sampling probability")
     parser.add_argument("--dist-metric", choices=["feature", "pose6d"], default="feature", help="Task-space distance metric")
     parser.add_argument("--position-res", type=float, default=0.01, help="Translation resolution used during pose extension, in meters")
     parser.add_argument("--rotation-res", type=float, default=0.025, help="Rotation resolution used during pose extension, in radians")
-    parser.add_argument("--swap-grasps", action="store_true", help="Swap the first two grasps loaded from the grasp JSON")
     parser.add_argument("--max-time", type=float, default=30.0, help="Max planning time per attempt")
     parser.add_argument("--max-iterations", type=int, default=2000, help="Max RRT iterations per attempt")
     parser.add_argument("--max-attempts", type=int, default=5, help="Random restarts")
@@ -2451,41 +2558,37 @@ def main() -> None:
         help="Enable floating-bar collision in Stage 1; Stage 3 always enables robot collision checking",
     )
     parser.add_argument(
-        "--lock-renderer-during-search",
+        "--no-lock-renderer-during-search",
         action="store_true",
-        help="Lock the PyBullet renderer while the tree is being expanded, then show the result afterward",
+        help="Don't Lock the PyBullet renderer while the tree is being expanded, so we can look at tree growth interactively",
     )
     parser.add_argument(
-        "--planner",
-        choices=["dual-arm-constrained", "single-arm-free", "dual-arm-free"],
-        default="dual-arm-constrained",
-        help=(
-            "Planning mode: dual-arm-constrained (default, pose-space RRT "
-            "maintaining bar grasp), single-arm-free (6-DOF joint-space BiRRT "
-            "for one arm), dual-arm-free (12-DOF joint-space BiRRT for both arms)"
-        ),
-    )
-    parser.add_argument(
-        "--active-arm",
-        choices=["left", "right"],
-        default="left",
-        help="Which arm to plan for in single-arm-free mode (default: left)",
+        "--draw-rrt-tree",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Draw RRT tree edges in the PyBullet GUI while planning (use --no-draw-rrt-tree to disable). Only effective when GUI is on.",
     )
     # gdrive convention: single-state input (no GraspTargets JSON), bodies
-    # tagged active_bar_* / active_*_* / env_*. Overrides --grasp-json /
-    # --start-state / --end-state.
+    # tagged active_bar_* / active_*_* / env_*.
     parser.add_argument(
         "--gdrive-state", type=str, default=None,
         help=("Path or bare filename of a gdrive-convention RobotCellState "
-              "(e.g. 'B3_approach.json'). When set, --grasp-json/--start-state/"
-              "--end-state are ignored and grasps come from FK at the cell "
+              "(e.g. 'B3_approach.json'). Grasps come from FK at the cell "
               "state's joint values."),
     )
     parser.add_argument(
-        "--gdrive-problem", type=str, default=None,
-        help=("Dataset directory under GDRIVE_DATA_DIRECTORY (e.g. "
-              "'2026-05-08_dual-arm_transfer_test'). Required when "
-              "--gdrive-state is a bare filename."),
+        "--gdrive-bar-action", type=str, default=None,
+        help=("Path or bare filename of a gdrive BarAction JSON "
+              "(e.g. 'B1.json'). When set, target EE frames come from the "
+              "selected BarAction movement and no full RobotCell scene is loaded."),
+    )
+    parser.add_argument(
+        "--movement", type=str, default="M1",
+        help="Movement selector for --gdrive-bar-action: index string, exact id, or substring (default: M1).",
+    )
+    parser.add_argument(
+        "--gdrive-problem", type=str, default=GDRIVE_DEFAULT_PROBLEM,
+        help=(f"Dataset directory under GDRIVE_DATA_DIRECTORY (default {GDRIVE_DEFAULT_PROBLEM!r})."),
     )
     parser.add_argument(
         "--gdrive-no-env", action="store_true",
@@ -2495,14 +2598,18 @@ def main() -> None:
         "--gdrive-no-active-extras", action="store_true",
         help="When using --gdrive-state, skip loading active_* sibling bodies (joints) as static.",
     )
-    parser.set_defaults(floating_collision=False, lock_renderer_during_search=True)
+    # parser.set_defaults(floating_collision=False, lock_renderer_during_search=True)
     args = parser.parse_args()
 
     use_gui = not args.no_gui
-    # When --gdrive-state is provided, build a scene_spec from the new
-    # gdrive convention and route everything through it. The legacy
-    # --grasp-json / --start-state / --end-state paths are ignored.
-    gdrive_scene_spec: Optional[Dict[str, Any]] = None
+    gdrive_movement: str | int = args.movement
+    if isinstance(gdrive_movement, str) and gdrive_movement.isdigit():
+        gdrive_movement = int(gdrive_movement)
+    if args.gdrive_state is not None and args.gdrive_bar_action is not None:
+        raise ValueError("--gdrive-state and --gdrive-bar-action are mutually exclusive.")
+    if args.gdrive_state is None and args.gdrive_bar_action is None:
+        raise ValueError("Exactly one of --gdrive-state / --gdrive-bar-action is required.")
+    gdrive_scene_spec: Dict[str, Any]
     if args.gdrive_state is not None:
         gdrive_scene_spec = build_gdrive_scene_spec(
             args.gdrive_state,
@@ -2513,60 +2620,41 @@ def main() -> None:
         logger.info(f"Using gdrive scene_spec from {gdrive_scene_spec['_gdrive_state_path']}")
         logger.info(f"  active_bar={gdrive_scene_spec['_gdrive_active_bar_name']!r}, "
                     f"built_bars={len(gdrive_scene_spec['built_bars'])}")
-    if args.planner == "dual-arm-constrained":
-        debug_tree_out: Dict = {}
-        result = run_stage_trial(
-            stage=args.stage,
-            grasp_json=args.grasp_json,
-            start_state_json=args.start_state,
-            end_state_json=args.end_state,
-            use_gui=use_gui,
-            dist_metric=args.dist_metric,
-            goal_bias=args.goal_bias,
-            position_res=args.position_res,
-            rotation_res=args.rotation_res,
-            max_time=args.max_time,
-            max_iterations=args.max_iterations,
-            max_attempts=args.max_attempts,
-            endpoint_ik_attempts=args.endpoint_ik_attempts,
-            random_seed=args.random_seed,
-            enable_collision=args.floating_collision,
-            enable_smoothing=args.smoothing,
-            smooth_max_iterations=args.smooth_iterations,
-            smooth_max_time=args.smooth_max_time,
-            smooth_min_cost_improvement=args.smooth_min_improvement,
-            joint_continuity_threshold_rad=args.joint_continuity_threshold,
-            use_angle_normalization=args.use_angle_normalization,
-            lock_renderer_during_search=args.lock_renderer_during_search,
-            swap_grasps=args.swap_grasps,
-            scene_spec=gdrive_scene_spec,
-            debug_tree_out=debug_tree_out,
-        )
     else:
-        from husky_assembly_tamp.motion_planner.stage1.free_space_rrt import run_free_space_trial
-
-        if gdrive_scene_spec is not None:
-            logger.warning("--gdrive-state with single-arm-free / dual-arm-free planners "
-                           "is not yet supported by run_free_space_trial; ignoring.")
-        result = run_free_space_trial(
-            planner_mode=args.planner,
-            active_arm=args.active_arm,
-            grasp_json=args.grasp_json,
-            start_state_json=args.start_state,
-            end_state_json=args.end_state,
-            use_gui=use_gui,
-            max_time=args.max_time,
-            max_iterations=args.max_iterations,
-            max_attempts=args.max_attempts,
-            enable_smoothing=args.smoothing,
-            smooth_iterations=args.smooth_iterations,
-            random_seed=args.random_seed,
-            lock_renderer_during_search=args.lock_renderer_during_search,
-            swap_grasps=args.swap_grasps,
-            joint_continuity_threshold_rad=args.joint_continuity_threshold,
-            use_angle_normalization=args.use_angle_normalization,
-            enable_collision=args.floating_collision,
+        gdrive_scene_spec = build_gdrive_bar_action_scene_spec(
+            args.gdrive_bar_action,
+            movement=gdrive_movement,
+            problem=args.gdrive_problem,
         )
+        logger.info(f"Using gdrive BarAction scene_spec from {gdrive_scene_spec['_gdrive_bar_action_path']}")
+        logger.info(f"  movement={gdrive_scene_spec['_gdrive_bar_action_movement']!r}, "
+                    f"active_bar={gdrive_scene_spec['_gdrive_active_bar_name']!r}, "
+                    f"built_bars={len(gdrive_scene_spec['built_bars'])}")
+    debug_tree_out: Dict = {}
+    result = run_stage_trial(
+        stage=args.stage,
+        scene_spec=gdrive_scene_spec,
+        use_gui=use_gui,
+        dist_metric=args.dist_metric,
+        goal_bias=args.goal_bias,
+        position_res=args.position_res,
+        rotation_res=args.rotation_res,
+        max_time=args.max_time,
+        max_iterations=args.max_iterations,
+        max_attempts=args.max_attempts,
+        endpoint_ik_attempts=args.endpoint_ik_attempts,
+        random_seed=args.random_seed,
+        enable_collision=args.floating_collision,
+        enable_smoothing=args.smoothing,
+        smooth_max_iterations=args.smooth_iterations,
+        smooth_max_time=args.smooth_max_time,
+        smooth_min_cost_improvement=args.smooth_min_improvement,
+        joint_continuity_threshold_rad=args.joint_continuity_threshold,
+        use_angle_normalization=args.use_angle_normalization,
+        lock_renderer_during_search=not args.no_lock_renderer_during_search,
+        draw_rrt_tree=args.draw_rrt_tree,
+        debug_tree_out=debug_tree_out,
+    )
 
     if use_gui:
         run_visualization_loop(

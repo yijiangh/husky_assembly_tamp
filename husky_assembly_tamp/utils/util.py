@@ -64,14 +64,15 @@ class FileFormatter(logging.Formatter):
         return f"[{timestamp}] {record.levelname:8} {record.getMessage()}"
 
 
-def setup_logger(name: str = "husky_assembly", log_dir: str = None, level: int = logging.DEBUG) -> logging.Logger:
+def setup_logger(name: str = "husky_assembly", log_dir: str = None, level: int = logging.DEBUG, file_mode: str = "a") -> logging.Logger:
     """Set up logger with both console (colored) and file handlers.
-    
+
     Args:
         name: Logger name (used for both the logger and log filename prefix)
         log_dir: Directory for log files. Defaults to LOG_DIR from params.
         level: Logging level. Defaults to DEBUG.
-    
+        file_mode: FileHandler mode. 'a' to append (default), 'w' to overwrite each run.
+
     Returns:
         Configured logger instance.
     """
@@ -96,7 +97,7 @@ def setup_logger(name: str = "husky_assembly", log_dir: str = None, level: int =
     log_filename = f"{name}.log"
     log_path = os.path.join(log_dir, log_filename)
     
-    file_handler = logging.FileHandler(log_path, encoding='utf-8')
+    file_handler = logging.FileHandler(log_path, mode=file_mode, encoding='utf-8')
     file_handler.setLevel(level)
     file_handler.setFormatter(FileFormatter())
     logger.addHandler(file_handler)

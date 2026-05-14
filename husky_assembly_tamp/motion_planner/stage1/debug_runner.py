@@ -16,7 +16,8 @@ import numpy as np
 
 from husky_assembly_tamp.motion_planner.stage1.minimal_rrt import (
     DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
-    build_default_paths,
+    build_gdrive_bar_action_scene_spec,
+    build_gdrive_scene_spec,
     run_stage_trial,
     run_visualization_loop,
     teardown_planning_scene,
@@ -588,9 +589,7 @@ def run_stage_analysis(args, stage: int, timestamp: str, outdir: str) -> Dict[st
                 result = profiler.runcall(
                     run_stage_trial,
                     stage=stage,
-                    grasp_json=args.grasp_json,
-                    start_state_json=args.start_state,
-                    end_state_json=args.end_state,
+                    scene_spec=args._scene_spec,
                     use_gui=False,
                     dist_metric=args.dist_metric,
                     goal_bias=args.goal_bias,
@@ -610,9 +609,7 @@ def run_stage_analysis(args, stage: int, timestamp: str, outdir: str) -> Dict[st
             else:
                 result = run_stage_trial(
                     stage=stage,
-                    grasp_json=args.grasp_json,
-                    start_state_json=args.start_state,
-                    end_state_json=args.end_state,
+                    scene_spec=args._scene_spec,
                     use_gui=False,
                     dist_metric=args.dist_metric,
                     goal_bias=args.goal_bias,
@@ -777,9 +774,7 @@ def run_stage_summary_only(
                 result = profiler.runcall(
                     run_stage_trial,
                     stage=stage,
-                    grasp_json=args.grasp_json,
-                    start_state_json=args.start_state,
-                    end_state_json=args.end_state,
+                    scene_spec=args._scene_spec,
                     use_gui=False,
                     dist_metric=args.dist_metric,
                     goal_bias=args.goal_bias,
@@ -799,9 +794,7 @@ def run_stage_summary_only(
             else:
                 result = run_stage_trial(
                     stage=stage,
-                    grasp_json=args.grasp_json,
-                    start_state_json=args.start_state,
-                    end_state_json=args.end_state,
+                    scene_spec=args._scene_spec,
                     use_gui=False,
                     dist_metric=args.dist_metric,
                     goal_bias=args.goal_bias,
@@ -1238,11 +1231,7 @@ def run_resolution_sweep(args) -> None:
 
 
 def parse_args():
-    default_grasp_json, default_start_state, default_end_state = build_default_paths()
     parser = argparse.ArgumentParser(description="Stage 1/2/3 floating-bar RRT debug runner")
-    parser.add_argument("--grasp-json", type=str, default=default_grasp_json, help="Path to grasp JSON file")
-    parser.add_argument("--start-state", type=str, default=default_start_state, help="Path to start RobotCellState JSON")
-    parser.add_argument("--end-state", type=str, default=default_end_state, help="Path to end RobotCellState JSON")
     parser.add_argument("--stage", choices=[1, 2, 3], type=int, default=1, help="Planning stage to analyze")
     parser.add_argument("--gui", action="store_true", help="Run with PyBullet GUI")
     parser.add_argument("--goal-bias", type=float, default=0.1, help="Goal sampling probability")
@@ -1283,12 +1272,57 @@ def parse_args():
     )
     parser.add_argument("--profile-seed", type=int, default=None, help="Seed to capture with cProfile during analysis")
     parser.add_argument("--profile-top-n", type=int, default=30, help="Number of cumulative cProfile rows to include in the text report")
+    parser.add_argument(
+        "--gdrive-state", type=str, default=None,
+        help="Path or bare filename of a gdrive RobotCellState (e.g. 'B3_approach.json').",
+    )
+    parser.add_argument(
+        "--gdrive-bar-action", type=str, default=None,
+        help="Path or bare filename of a gdrive BarAction JSON (e.g. 'B1.json').",
+    )
+    parser.add_argument(
+        "--movement", type=str, default="M1",
+        help="Movement selector for --gdrive-bar-action (default: M1).",
+    )
+    parser.add_argument(
+        "--gdrive-problem", type=str, default=None,
+        help="Dataset directory under GDRIVE_DATA_DIRECTORY (required when --gdrive-state/--gdrive-bar-action is a bare filename).",
+    )
+    parser.add_argument(
+        "--gdrive-no-env", action="store_true",
+        help="When using --gdrive-state, skip loading env_* bodies as static obstacles.",
+    )
+    parser.add_argument(
+        "--gdrive-no-active-extras", action="store_true",
+        help="When using --gdrive-state, skip loading active_* sibling bodies (joints) as static.",
+    )
     parser.set_defaults(floating_collision=False)
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.gdrive_state is not None and args.gdrive_bar_action is not None:
+        raise ValueError("--gdrive-state and --gdrive-bar-action are mutually exclusive.")
+    if args.gdrive_state is None and args.gdrive_bar_action is None:
+        raise ValueError("Exactly one of --gdrive-state / --gdrive-bar-action is required.")
+    return args
 
 
 def main() -> None:
     args = parse_args()
+    gdrive_movement: Any = args.movement
+    if isinstance(gdrive_movement, str) and gdrive_movement.isdigit():
+        gdrive_movement = int(gdrive_movement)
+    if args.gdrive_state is not None:
+        args._scene_spec = build_gdrive_scene_spec(
+            args.gdrive_state,
+            problem=args.gdrive_problem,
+            include_env_bars=not args.gdrive_no_env,
+            include_active_extras=not args.gdrive_no_active_extras,
+        )
+    else:
+        args._scene_spec = build_gdrive_bar_action_scene_spec(
+            args.gdrive_bar_action,
+            movement=gdrive_movement,
+            problem=args.gdrive_problem,
+        )
     if args.analysis_trials > 0:
         if args.resolution_sweep:
             run_resolution_sweep(args)
@@ -1302,9 +1336,7 @@ def main() -> None:
     debug_tree_out: Dict = {}
     result = run_stage_trial(
         stage=args.stage,
-        grasp_json=args.grasp_json,
-        start_state_json=args.start_state,
-        end_state_json=args.end_state,
+        scene_spec=args._scene_spec,
         use_gui=use_gui,
         dist_metric=args.dist_metric,
         goal_bias=args.goal_bias,

@@ -16,14 +16,10 @@ husky_assembly_tamp/motion_planner/algorithm_description.out
 
 husky_assembly_tamp/motion_planner/missfont.log
 
-husky_assembly_tamp/motion_planner/stage1/reports/
+husky_assembly_tamp/motion_planner/dual_arm_task_space_rrt/reports/
 
 temp/*
 
-husky_assembly_tamp/logs/stage1_minimal_rrt.log
+husky_assembly_tamp/logs
 
-husky_assembly_tamp/logs/stage1_path_validation.log
-
-husky_assembly_tamp/logs/stage1_real_state_study.log
-
-husky_assembly_tamp/motion_planner/stage1/temp
+husky_assembly_tamp/motion_planner/dual_arm_task_space_rrt/temp

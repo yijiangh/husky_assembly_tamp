@@ -30,13 +30,13 @@ Also has an endpoint-IK diagnosis mode (`--diagnose-endpoint-ik`) that tests IK 
 
 ```bash
 # Stage 3 planning on the default test case with GUI
-python -m husky_assembly_tamp.motion_planner.stage1.minimal_rrt --stage 3
+python -m husky_assembly_tamp.motion_planner.dual_arm_task_space_rrt.run --stage 3
 
 # Stage 1 only, headless
-python -m husky_assembly_tamp.motion_planner.stage1.minimal_rrt --stage 1 --no-gui
+python -m husky_assembly_tamp.motion_planner.dual_arm_task_space_rrt.run --stage 1 --no-gui
 
 # Custom grasp/state files
-python -m husky_assembly_tamp.motion_planner.stage1.minimal_rrt \
+python -m husky_assembly_tamp.motion_planner.dual_arm_task_space_rrt.run \
     --grasp-json path/to/GraspTargets.json \
     --start-state path/to/start_RobotCellState.json \
     --end-state path/to/end_RobotCellState.json \
@@ -47,24 +47,24 @@ python -m husky_assembly_tamp.motion_planner.stage1.minimal_rrt \
 
 ```bash
 # Full Stage 3 study on all default targets
-python -m husky_assembly_tamp.motion_planner.stage1.real_state_study --stage 3
+python -m husky_assembly_tamp.motion_planner.dual_arm_task_space_rrt.run --stage 3
 
 # Specific targets with GUI
-python -m husky_assembly_tamp.motion_planner.stage1.real_state_study \
+python -m husky_assembly_tamp.motion_planner.dual_arm_task_space_rrt.run \
     --targets G1 V1 H1 --stage 3 --gui
 
 # Endpoint IK diagnosis only (no planning)
-python -m husky_assembly_tamp.motion_planner.stage1.real_state_study \
+python -m husky_assembly_tamp.motion_planner.dual_arm_task_space_rrt.run \
     --diagnose-endpoint-ik both --targets G1 G2 --gui
 
 # Disable auto home pose, use manual offset/yaw
-python -m husky_assembly_tamp.motion_planner.stage1.real_state_study \
+python -m husky_assembly_tamp.motion_planner.dual_arm_task_space_rrt.run \
     --no-auto-home-pose \
     --home-left-tool-offset 0 0 0.2 \
     --home-left-tool-local-yaw 3.14159
 
 # Include already-built bars in the scene for collision
-python -m husky_assembly_tamp.motion_planner.stage1.real_state_study \
+python -m husky_assembly_tamp.motion_planner.dual_arm_task_space_rrt.run \
     --include-built-bars --enable-built-bar-collision --targets V2
 ```
 

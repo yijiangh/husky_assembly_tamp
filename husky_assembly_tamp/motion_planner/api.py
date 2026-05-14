@@ -151,8 +151,8 @@ def derive_constrained_start(
     *args,
     **kwargs,
 ):
-    """Compatibility wrapper; implementation lives in stage1.minimal_rrt."""
-    from husky_assembly_tamp.motion_planner.stage1.minimal_rrt import (
+    """Compatibility wrapper; implementation lives in dual_arm_task_space_rrt.core."""
+    from husky_assembly_tamp.motion_planner.dual_arm_task_space_rrt.core import (
         derive_constrained_start as _derive_constrained_start,
     )
 
@@ -202,12 +202,12 @@ def plan_constrained_dual_arm(
     if stage not in (1, 2, 3):
         raise ValueError(f"stage must be 1, 2, or 3; got {stage}")
 
-    from .stage1.minimal_rrt import (
+    from .dual_arm_task_space_rrt.core import (
         DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
         plan_pose_rrt,
-        smooth_dual_arm_pose_path,
         get_joint_collision_fn,
     )
+    from .dual_arm_task_space_rrt.smooth import smooth_dual_arm_pose_path
 
     enable_ik = stage >= 2
     enforce_collision = stage >= 3

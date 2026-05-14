@@ -12,11 +12,11 @@ import numpy as np
 import pybullet
 import pybullet_planning as pp
 
-from husky_assembly_tamp.motion_planner.stage1.minimal_rrt import (
+from .run import (
     setup_planning_scene,
     teardown_planning_scene,
 )
-from husky_assembly_tamp.motion_planner.stage1.trajectory_io import load_joint_trajectory_as_path
+from .trajectory_io import load_joint_trajectory_as_path
 
 
 PoseLike = Tuple[np.ndarray, np.ndarray]

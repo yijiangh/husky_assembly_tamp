@@ -1,9 +1,0 @@
-[2026-03-17 14:52:30.937] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_goal_pose_study.log
-[2026-03-17 14:52:59.326] INFO     Saved goal-pose study report: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/goal_pose_study_report_20260317_145230.md
-[2026-03-17 14:52:59.327] INFO     Saved goal-pose study JSON: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/goal_pose_study_20260317_145230.json
-[2026-03-17 16:01:15.121] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_goal_pose_study.log
-[2026-03-17 16:02:03.223] INFO     Saved goal-pose study report: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/goal_pose_study_report_20260317_160115.md
-[2026-03-17 16:02:03.224] INFO     Saved goal-pose study JSON: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/goal_pose_study_20260317_160115.json
-[2026-03-17 16:03:49.864] INFO     Log file: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/logs/stage1_goal_pose_study.log
-[2026-03-17 16:04:35.169] INFO     Saved goal-pose study report: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/goal_pose_study_report_20260317_160349.md
-[2026-03-17 16:04:35.169] INFO     Saved goal-pose study JSON: /workspace/husky-assembly-teleop/external/husky_assembly_tamp/husky_assembly_tamp/motion_planner/stage1/reports/_support/goal_pose_study_20260317_160349.json

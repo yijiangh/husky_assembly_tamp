@@ -81,11 +81,13 @@ def get_joint_labels(num_joints: int) -> list[str]:
     return [f"q{i + 1}" for i in range(num_joints)]
 
 
-def unwrap_joint_path_for_display_deg(joint_path_rad: Sequence[Sequence[float]]) -> np.ndarray:
-    wrapped = np.asarray(joint_path_rad, dtype=float)
-    if wrapped.size == 0:
+def joint_path_to_raw_deg(joint_path_rad: Sequence[Sequence[float]]) -> np.ndarray:
+    """Convert a list of joint configurations to a 2D array of degrees, with
+    NO ±π unwrapping — values are exactly what the UR controller consumes."""
+    arr = np.asarray(joint_path_rad, dtype=float)
+    if arr.size == 0:
         return np.empty((0, 0), dtype=float)
-    return np.degrees(np.unwrap(wrapped, axis=0))
+    return np.degrees(arr)
 
 
 def maybe_normalize_angles(values: Sequence[float] | np.ndarray, use_angle_normalization: bool) -> np.ndarray:
@@ -198,12 +200,13 @@ def save_validation_plot(
     collision_breakdown: Dict[str, Any],
     joint_path_deg: Optional[np.ndarray],
     original_joint_path_deg: Optional[np.ndarray] = None,
+    wrap_segments: Optional[Sequence[Tuple[int, int, float]]] = None,
 ) -> Optional[str]:
     plt = import_matplotlib_pyplot()
     if plt is None:
         return None
 
-    fig, axes = plt.subplots(6, 1, figsize=(11, 17), sharex=False)
+    fig, axes = plt.subplots(8, 1, figsize=(11, 22), sharex=False)
     title = (
         f"Stage {stage} validation | collisions: {status_label(collision_free)}"
         f" | joint continuity: {status_label(joint_continuity_ok)}"
@@ -340,6 +343,33 @@ def save_validation_plot(
         axis.set_xlim(0.0, 1.0)
         axis.set_xlabel("Path fraction")
 
+    # Wrap segments = ±2π discontinuities in the raw joint path. Plotted as
+    # red dashed verticals so the operator can see exactly which command
+    # transitions the UR driver will see as huge implied velocities (e.g.
+    # 21.9 rad/s in 0.002s = 0.044 rad/cycle = ~2π spread over the segment).
+    wrap_segments = list(wrap_segments or [])
+    wrap_labels_full = get_joint_labels(12) if (joint_path_deg is not None and joint_path_deg.shape[1] == 12) else None
+
+    def _draw_wrap_markers(axis, x_indices_iter, *, annotate_top: bool, joint_filter: Optional[range] = None) -> None:
+        if not wrap_segments:
+            return
+        drawn = False
+        y_top = axis.get_ylim()[1]
+        for seg_idx, joint_idx, dq_rad in wrap_segments:
+            if joint_filter is not None and joint_idx not in joint_filter:
+                continue
+            for xi in x_indices_iter(seg_idx):
+                axis.axvline(xi, color="#d9534f", linewidth=0.9, linestyle="--",
+                             alpha=0.7, label=("wrap segment (|dq|>π)" if not drawn else None))
+                drawn = True
+            if annotate_top:
+                jl = wrap_labels_full[joint_idx] if wrap_labels_full else f"q{joint_idx+1}"
+                axis.annotate(f"{jl}\nseg {seg_idx}->{seg_idx+1}\nΔ={np.degrees(dq_rad):+.0f}°",
+                              xy=(seg_idx, y_top), xytext=(seg_idx, y_top),
+                              fontsize=7, color="#d9534f", ha="center", va="top")
+
+    # Raw command-space values (no ±π unwrap), so wraps appear as visible
+    # vertical jumps — exactly what the UR driver consumes.
     if joint_path_deg is not None and joint_path_deg.size > 0:
         xs = np.arange(joint_path_deg.shape[0], dtype=int)
         labels = get_joint_labels(joint_path_deg.shape[1])
@@ -355,7 +385,8 @@ def save_validation_plot(
             )
         axes[4].set_ylabel("Joint angle (deg)")
         axes[4].set_xlabel("Waypoint index")
-        axes[4].set_title("Joint value evolution on smoothed path (unwrapped for display)")
+        axes[4].set_title("Joint value evolution on smoothed path (raw)")
+        _draw_wrap_markers(axes[4], lambda s: (s, s + 1), annotate_top=True)
         axes[4].legend(loc="center left", bbox_to_anchor=(1.01, 0.5), fontsize=8, ncol=1)
     else:
         axes[4].axis("off")
@@ -377,11 +408,50 @@ def save_validation_plot(
             )
         axes[5].set_ylabel("Joint angle (deg)")
         axes[5].set_xlabel("Waypoint index")
-        axes[5].set_title("Joint value evolution on original unsmoothed path (unwrapped for display)")
+        axes[5].set_title("Joint value evolution on original unsmoothed path (raw)")
+        _draw_wrap_markers(axes[5], lambda s: (s, s + 1), annotate_top=True)
         axes[5].legend(loc="center left", bbox_to_anchor=(1.01, 0.5), fontsize=8, ncol=1)
     else:
         axes[5].axis("off")
         axes[5].text(0.5, 0.5, "No original unsmoothed joint path available.", ha="center", va="center", fontsize=11)
+
+    # axes[6], axes[7]: per-segment joint deltas (waypoint i -> i+1) for left
+    # and right arm. Uses the raw command-space joint path, so ±2π wrap
+    # segments show up as ±360° spikes — exactly what the UR driver sees.
+    delta_source = joint_path_deg
+    if (delta_source is not None and delta_source.size > 0
+            and delta_source.shape[0] >= 2 and delta_source.shape[1] >= 12):
+        delta_deg = np.diff(delta_source, axis=0)
+        seg_xs = np.arange(delta_deg.shape[0], dtype=int)
+        labels = get_joint_labels(delta_source.shape[1])
+        for arm_idx, (slot, title, joint_slice) in enumerate((
+            (6, "Left arm joint deltas between consecutive waypoints (raw)", slice(0, 6)),
+            (7, "Right arm joint deltas between consecutive waypoints (raw)", slice(6, 12)),
+        )):
+            for joint_idx in range(joint_slice.start, joint_slice.stop):
+                axes[slot].plot(
+                    seg_xs,
+                    delta_deg[:, joint_idx],
+                    linewidth=1.2,
+                    marker="o",
+                    markersize=2.5,
+                    markeredgewidth=0.0,
+                    label=labels[joint_idx],
+                )
+            axes[slot].axhline(0.0, color="#888888", linewidth=0.6, linestyle="--")
+            axes[slot].set_ylabel("Δ joint (deg)")
+            axes[slot].set_xlabel("Segment index (i -> i+1)")
+            axes[slot].set_title(title)
+            _draw_wrap_markers(
+                axes[slot], lambda s: (s,), annotate_top=True,
+                joint_filter=range(joint_slice.start, joint_slice.stop),
+            )
+            axes[slot].legend(loc="center left", bbox_to_anchor=(1.01, 0.5), fontsize=8, ncol=1)
+    else:
+        for slot in (6, 7):
+            axes[slot].axis("off")
+        reason = joint_path_reason or "joint path too short or wrong width"
+        axes[6].text(0.5, 0.5, f"No joint delta plot available.\nReason: {reason}", ha="center", va="center", fontsize=11)
 
     details = [
         f"joint path source: {joint_path_source or 'n/a'}",
@@ -449,6 +519,8 @@ def validate_stage_trajectory(
         "joint_continuity_threshold_rad": float(joint_continuity_threshold_rad),
         "joint_continuity_max_delta_rad": None,
         "joint_continuity_first_bad_step": None,
+        "raw_wrap_segments": [],
+        "raw_wrap_segment_count": 0,
         "relative_transform_ok": None,
         "relative_translation_threshold_m": float(relative_translation_threshold_m),
         "relative_rotation_axis_threshold_deg": float(relative_rotation_axis_threshold_deg),
@@ -561,16 +633,37 @@ def validate_stage_trajectory(
     collision_keys = ("bar_robot", "robot_self", "robot_static", "bar_static")
     collision_flags = {key: False for key in collision_keys}
 
-    # Validation mirrors the planner's joint-angle wrapping setting so comparisons
-    # remain apples-to-apples when angle normalization is toggled.
-    normalized_joint_path = [maybe_normalize_angles(conf, use_angle_normalization) for conf in joint_path]
-    joint_path_deg = unwrap_joint_path_for_display_deg(normalized_joint_path)
+    # Validate the exact command-space values. No ±π unwrap — what we send is
+    # what we display, matching what the UR controller consumes.
+    command_joint_path = [np.asarray(conf, dtype=float) for conf in joint_path]
+    joint_path_deg = joint_path_to_raw_deg(command_joint_path)
+
+    # Detect ±2π wrap segments in the raw command path. These are
+    # continuous-joint discontinuities that the UR driver sees as huge
+    # implied velocities (External control speed limit violations).
+    wrap_segments: list[Tuple[int, int, float]] = []
+    if len(command_joint_path) >= 2:
+        raw_arr = np.asarray(command_joint_path, dtype=float)
+        raw_dq = np.diff(raw_arr, axis=0)
+        wrap_mask = np.abs(raw_dq) > np.pi
+        if wrap_mask.any():
+            seg_idxs, joint_idxs = np.where(wrap_mask)
+            wrap_segments = [(int(s), int(j), float(raw_dq[s, j]))
+                             for s, j in zip(seg_idxs, joint_idxs)]
+            result["raw_wrap_segments"] = [
+                {"segment_index": s, "joint_index": j, "delta_rad": dq}
+                for s, j, dq in wrap_segments
+            ]
+            result["raw_wrap_segment_count"] = len(wrap_segments)
+            logger.warning(
+                f"path_validation: {len(wrap_segments)} ±2π wrap segment(s) "
+                f"detected in raw joint path (will trigger UR speed-limit violations): "
+                f"{[(s, j, f'{float(np.degrees(dq)):+.1f}deg') for s, j, dq in wrap_segments]}"
+            )
     original_joint_path_deg = None
     if original_joint_path is not None:
-        normalized_original_joint_path = [
-            maybe_normalize_angles(conf, use_angle_normalization) for conf in original_joint_path
-        ]
-        original_joint_path_deg = unwrap_joint_path_for_display_deg(normalized_original_joint_path)
+        command_original_joint_path = [np.asarray(conf, dtype=float) for conf in original_joint_path]
+        original_joint_path_deg = joint_path_to_raw_deg(command_original_joint_path)
     if skip_relative_transform:
         coarse_relative_translation_errors_m = []
         coarse_relative_rotation_axis_errors_deg = {axis_name: [] for axis_name in AXIS_NAMES}
@@ -580,12 +673,12 @@ def validate_stage_trajectory(
             arm_joints,
             tool_link_left,
             tool_link_right,
-            normalized_joint_path,
+            command_joint_path,
         )
     dense_joint_path, dense_metadata = refine_joint_path_for_validation(
-        normalized_joint_path,
+        command_joint_path,
         dense_joint_validation_step_rad,
-        use_angle_normalization,
+        False,
     )
     result["dense_joint_validation_waypoints"] = len(dense_joint_path)
 
@@ -645,7 +738,7 @@ def validate_stage_trajectory(
             for axis_name in AXIS_NAMES:
                 relative_rotation_axis_errors_deg[axis_name].append(axis_diffs_deg[axis_name])
 
-    pp.set_joint_positions(robot, arm_joints, normalized_joint_path[-1])
+    pp.set_joint_positions(robot, arm_joints, command_joint_path[-1])
     if bar_pose_source == "path":
         pp.set_pose(bar_body, path[-1])
     else:
@@ -653,15 +746,10 @@ def validate_stage_trajectory(
 
     result["collision_free"] = not any(collision_flags.values())
 
-    if len(normalized_joint_path) >= 2:
+    if len(command_joint_path) >= 2:
         step_max_deltas = []
-        for prev_conf, next_conf in zip(normalized_joint_path[:-1], normalized_joint_path[1:]):
-            step_delta = np.abs(
-                maybe_normalize_angles(
-                    np.asarray(next_conf, dtype=float) - np.asarray(prev_conf, dtype=float),
-                    use_angle_normalization,
-                )
-            )
+        for prev_conf, next_conf in zip(command_joint_path[:-1], command_joint_path[1:]):
+            step_delta = np.abs(np.asarray(next_conf, dtype=float) - np.asarray(prev_conf, dtype=float))
             step_max_deltas.append(float(np.max(step_delta)))
         if step_max_deltas:
             max_delta = max(step_max_deltas)
@@ -712,5 +800,6 @@ def validate_stage_trajectory(
         collision_breakdown=result["collision_breakdown"],
         joint_path_deg=joint_path_deg,
         original_joint_path_deg=original_joint_path_deg,
+        wrap_segments=wrap_segments,
     )
     return result

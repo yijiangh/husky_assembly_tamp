@@ -92,6 +92,7 @@ def plan_free_dual_arm(
             "dual_arm_index='both' branch enforces this."
         )
 
+    # TODO this is disgusting circular import, plan_transit_motion should live in this repo
     from husky_assembly_teleop.utils import plan_transit_motion
 
     info: Dict[str, Any] = {
@@ -112,6 +113,11 @@ def plan_free_dual_arm(
             joint_resolution=joint_resolution,
             max_time=max_time,
             max_iterations=max_iterations,
+            # Optional list of EE type strings (len 2 for dual-arm), e.g.
+            # ["assembly_tool_v3_left", "assembly_tool_v3_right"]. Lets
+            # plan_transit_motion add a wrist_2_link disable per arm when
+            # the mounted tool extends past wrist_3.
+            ee_types=scene.get("ee_types"),
         )
     if raw is None:
         info["failure_reason"] = "free_planner_failed"

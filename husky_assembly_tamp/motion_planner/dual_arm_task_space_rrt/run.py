@@ -812,6 +812,7 @@ def run_stage_trial(
     draw_rrt_tree: bool = True,
     validation_reports_dir: Optional[str] = None,
     debug_tree_out: Optional[Dict] = None,
+    start_retries: int = 1,
     **_unused_kwargs: Any,
 ) -> Dict[str, Any]:
     if stage not in {1, 2, 3}:
@@ -931,20 +932,41 @@ def run_stage_trial(
                     bar_body=scene["bar_body"],
                     grasp_bar_from_left=scene["grasp_bar_from_left"],
                 )
-            world_from_bar_start, start_conf = derive_constrained_start(
-                scene["robot"],
-                scene["arm_joints"],
-                scene["tool_link_left"],
-                scene["tool_link_right"],
-                scene["grasp_bar_from_left"],
-                grasp_bar_from_right,
-                scene["world_from_bar_goal"],
-                seed_conf=goal_conf,
-                bar_body=scene["bar_body"] if enforce_collision else None,
-                obstacles=env_obstacles if enforce_collision else (),
-                random_seed=random_seed,
-                max_ik_attempts=endpoint_ik_attempts,
-            )
+            def _derive_start_for_attempt(attempt_idx: int) -> Tuple[Optional[PoseLike], Optional[np.ndarray]]:
+                # attempt_idx==0 keeps the original deterministic behavior so
+                # easy targets (e.g. B235) plan identically to the legacy code.
+                # Later attempts shuffle the bar-position grid with a different
+                # seed AND widen the sweep box (in z particularly) so we can
+                # derive starts much closer to extreme goals (e.g. floor-level).
+                if start_retries <= 1 or attempt_idx == 0:
+                    derive_seed = random_seed
+                    shuffle = False
+                    sweep_box = ((-0.3, 0.3), (-0.3, 0.3), (-0.3, 0.3))
+                else:
+                    base = 0 if random_seed is None else int(random_seed)
+                    derive_seed = base + 9973 * attempt_idx
+                    shuffle = True
+                    # Widen sweep box (especially -z) so that for goals far below
+                    # the default home (z=0.86) the start can be closer in z.
+                    sweep_box = ((-0.4, 0.4), (-0.4, 0.4), (-0.5, 0.3))
+                return derive_constrained_start(
+                    scene["robot"],
+                    scene["arm_joints"],
+                    scene["tool_link_left"],
+                    scene["tool_link_right"],
+                    scene["grasp_bar_from_left"],
+                    grasp_bar_from_right,
+                    scene["world_from_bar_goal"],
+                    seed_conf=goal_conf,
+                    bar_body=scene["bar_body"] if enforce_collision else None,
+                    obstacles=env_obstacles if enforce_collision else (),
+                    random_seed=derive_seed,
+                    max_ik_attempts=endpoint_ik_attempts,
+                    shuffle_deltas=shuffle,
+                    bar_sweep_box=sweep_box,
+                )
+
+            world_from_bar_start, start_conf = _derive_start_for_attempt(0)
             if start_conf is None or world_from_bar_start is None:
                 logger.warning(f"Stage {stage} start pose has no valid derived dual-arm IK solution.")
                 return early_failure("start_ik_failure")
@@ -1015,11 +1037,47 @@ def run_stage_trial(
         smoothing_time_s = 0.0
         validation_time_s = 0.0
         t_plan = time.perf_counter()
-        if use_gui and lock_renderer_during_search:
-            with pp.LockRenderer():
-                path, path_confs = plan_pose_rrt(**planning_kwargs)
-        else:
-            path, path_confs = plan_pose_rrt(**planning_kwargs)
+
+        def _run_plan() -> Tuple[Optional[List[PoseLike]], Optional[List[FullConf]]]:
+            if use_gui and lock_renderer_during_search:
+                with pp.LockRenderer():
+                    return plan_pose_rrt(**planning_kwargs)
+            return plan_pose_rrt(**planning_kwargs)
+
+        path, path_confs = _run_plan()
+        if path is None and enable_ik and start_retries > 1:
+            # Single fixed start can be a dead end for hard problems (e.g. when the
+            # goal is far from the home anchor in z). Re-derive the start with a
+            # shuffled bar-position grid and retry.
+            for retry_idx in range(1, start_retries):
+                logger.info(
+                    f"plan failed from start #{retry_idx - 1}; re-deriving start (retry {retry_idx}/{start_retries - 1})."
+                )
+                new_start_pose, new_start_conf = _derive_start_for_attempt(retry_idx)
+                if new_start_conf is None or new_start_pose is None:
+                    logger.warning(f"start retry {retry_idx}: no valid derived start; skipping.")
+                    continue
+                scene["world_from_bar_start"] = new_start_pose
+                scene["start_pose"] = new_start_pose
+                scene["start_joint_values"] = np.asarray(new_start_conf, dtype=float)
+                pp.set_pose(scene["bar_body"], new_start_pose)
+                pp.set_pose(scene["ghost_start"], new_start_pose)
+                grasp_marker_bodies = scene.get("grasp_marker_bodies") or []
+                if grasp_marker_bodies:
+                    pp.set_pose(grasp_marker_bodies[0], pp.multiply(new_start_pose, scene["grasp_bar_from_left"]))
+                    if len(grasp_marker_bodies) >= 3:
+                        pp.set_pose(grasp_marker_bodies[2], pp.multiply(new_start_pose, grasp_bar_from_right))
+                planning_kwargs["start_pose"] = new_start_pose
+                planning_kwargs["start_conf"] = new_start_conf
+                start_conf = new_start_conf
+                # Reset the debug tree (extend_stop_reasons accumulates) and re-run.
+                if debug_tree_out is not None:
+                    debug_tree_out.clear()
+                logger.info(f"  retry start pose: {np.round(new_start_pose[0], 4)}")
+                path, path_confs = _run_plan()
+                if path is not None:
+                    logger.info(f"plan succeeded on start retry {retry_idx}.")
+                    break
         planning_time_s = time.perf_counter() - t_plan
 
         path_before_smoothing = None if path is None else list(path)
@@ -1670,6 +1728,14 @@ def main() -> None:
     parser.add_argument("--max-iterations", type=int, default=2000, help="Max RRT iterations per attempt")
     parser.add_argument("--max-attempts", type=int, default=5, help="Random restarts")
     parser.add_argument("--endpoint-ik-attempts", type=int, default=20, help="Max random seeds used when solving endpoint IK in Stage 2/3")
+    parser.add_argument(
+        "--start-retries", type=int, default=1,
+        help="On planning failure, re-derive the start bar pose this many times with a shuffled, widened sweep box.",
+    )
+    parser.add_argument(
+        "--bidirectional", action="store_true",
+        help="Use bidirectional RRT-Connect (two trees rooted at start and goal). Helps hard cases where a single forward tree barely grows.",
+    )
     parser.add_argument("--random-seed", type=int, default=None, help="Random seed")
     parser.add_argument(
         "--smoothing",
@@ -1762,6 +1828,18 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if args.bidirectional:
+        # Swap plan_pose_rrt for plan_pose_birrt at module level. run_stage_trial
+        # imports plan_pose_rrt from .core at module load; mutating the binding
+        # here is the smallest change that lets the rest of the pipeline (start
+        # retries, smoothing, validation) compose unchanged.
+        from .core import plan_pose_birrt as _plan_pose_birrt
+        import husky_assembly_tamp.motion_planner.dual_arm_task_space_rrt.run as _run_mod
+        import husky_assembly_tamp.motion_planner.dual_arm_task_space_rrt.core as _core_mod
+        _run_mod.plan_pose_rrt = _plan_pose_birrt
+        _core_mod.plan_pose_rrt = _plan_pose_birrt
+        logger.info("Bidirectional RRT-Connect (plan_pose_birrt) enabled.")
+
     if args.gdrive_state and args.gdrive_bar_action:
         raise ValueError("--gdrive-state and --gdrive-bar-action are mutually exclusive.")
     if not (args.gdrive_state or args.gdrive_bar_action):
@@ -1801,6 +1879,7 @@ def main() -> None:
             smooth_min_cost_improvement=args.smooth_min_improvement,
             joint_continuity_threshold_rad=args.joint_continuity_threshold,
             use_angle_normalization=args.use_angle_normalization,
+            start_retries=args.start_retries,
             lock_renderer_during_search=args.lock_renderer_during_search,
             draw_rrt_tree=args.draw_rrt_tree,
             validation_reports_dir=support_dir(),

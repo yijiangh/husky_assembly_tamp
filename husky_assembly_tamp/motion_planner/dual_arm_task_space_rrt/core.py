@@ -588,8 +588,15 @@ def derive_constrained_start(
     bar_axis_step_rad: float = float(np.deg2rad(30.0)),
     max_ik_attempts: int = 20,
     random_seed: Optional[int] = None,
+    shuffle_deltas: bool = False,
 ) -> Tuple[Optional[PoseLike], Optional[np.ndarray]]:
-    """Derive a constraint-satisfying start (bar pose, joint conf)."""
+    """Derive a constraint-satisfying start (bar pose, joint conf).
+
+    When ``shuffle_deltas`` is True, the bar-position grid is randomly permuted
+    (driven by ``random_seed``) instead of sorted by distance to the home anchor.
+    This lets the caller derive *different* starts on different seeds — useful
+    for hard problems where the first-IK-feasible home cannot reach the goal.
+    """
     if len(seed_conf) != 12:
         raise ValueError("seed_conf must have length 12")
 
@@ -637,10 +644,12 @@ def derive_constrained_start(
             grasp_bar_from_left=grasp_bar_from_left,
         )
 
-    deltas = sorted(
-        _grid_in_box(bar_sweep_box, bar_sweep_step),
-        key=lambda d: float(np.linalg.norm(d)),
-    )
+    deltas = _grid_in_box(bar_sweep_box, bar_sweep_step)
+    if shuffle_deltas:
+        # Fully random permutation. Different random_seed -> different start.
+        rng.shuffle(deltas)
+    else:
+        deltas = sorted(deltas, key=lambda d: float(np.linalg.norm(d)))
     saved_bar_pose = pp.get_pose(bar_body) if bar_body is not None else None
     found: Dict[str, Any] = {"world_from_bar": None, "conf": None}
     chosen_ctx: Optional[Dict[str, Any]] = None
@@ -1107,6 +1116,293 @@ def plan_pose_rrt(
         logger.info(f"Attempt {attempt + 1}/{max_attempts}: no path found.")
 
     # All attempts failed. Dump last tree for inspection and signal failure.
+    update_debug_tree(
+        debug_tree_out, False, total_iterations, best_tree, start_pose, goal_pose,
+        extend_stop_reasons=extend_stop_reasons,
+    )
+    return None, None
+
+
+def plan_pose_birrt(
+    robot: int,
+    bar_body: int,
+    obstacle_bodies: Sequence[int],
+    start_pose: PoseLike,
+    goal_pose: PoseLike,
+    start_conf: Optional[FullConf] = None,
+    goal_conf: Optional[FullConf] = None,
+    dist_metric: str = "feature",
+    goal_sample_prob: float = 0.05,
+    workspace_xy: float = 2.2,
+    workspace_z: float = 1.2,
+    position_res: float = 0.05,
+    rotation_res: float = 0.1,
+    random_seed: Optional[int] = None,
+    max_time: float = 30.0,
+    max_iterations: int = 2000,
+    max_attempts: int = 5,
+    enable_collision: bool = False,
+    enable_ik: bool = False,
+    ik_context: Optional[Dict[str, Any]] = None,
+    joint_collision_fn: Optional[Callable[[FullConf], bool]] = None,
+    feature_points: Optional[Sequence[np.ndarray]] = None,
+    joint_continuity_threshold_rad: Optional[float] = None,
+    use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
+    use_draw: bool = True,
+    debug_tree_out: Optional[Dict] = None,
+    **_unused_kwargs: Any,
+) -> Tuple[Optional[List[PoseLike]], Optional[List[FullConf]]]:
+    """Bidirectional pose-space RRT-Connect with dual-arm IK propagation.
+
+    Grows two trees: T_a rooted at start_pose, T_b rooted at goal_pose. Each
+    iteration extends one tree toward a random sample, then tries to connect
+    the other tree to that tree's new frontier. Connection succeeds when the
+    two-tree meeting poses match AND the joint configs are continuous (no
+    branch flip across the connection).
+    """
+    rng = np.random.default_rng(random_seed)
+    feature_points = list(feature_points) if feature_points is not None else get_bar_feature_points()
+    collision_fn = get_pose_collision_fn(bar_body, obstacle_bodies, enable_collision and not enable_ik)
+
+    if joint_collision_fn is not None:
+        if start_conf is None or goal_conf is None:
+            raise ValueError("Collision-aware planning requires both start_conf and goal_conf.")
+        if joint_collision_fn(start_conf):
+            logger.warning("Start configuration is in collision.")
+            return None, None
+        if joint_collision_fn(goal_conf):
+            logger.warning("Goal configuration is in collision.")
+            return None, None
+    else:
+        if collision_fn(start_pose):
+            logger.warning("Start pose is in floating-body collision.")
+            return None, None
+        if collision_fn(goal_pose):
+            logger.warning("Goal pose is in floating-body collision.")
+            return None, None
+
+    def make_tree(root_pose: PoseLike, root_conf: Optional[FullConf]) -> Tuple[List[TreeNode], Dict, Dict]:
+        root = TreeNode(root_pose)
+        nodes = [root]
+        node_confs: Dict[int, FullConf] = {}
+        feature_vecs: Dict[int, np.ndarray] = {}
+        if enable_ik:
+            if root_conf is None:
+                raise ValueError("BiRRT with IK requires start_conf and goal_conf.")
+            node_confs[id(root)] = np.asarray(root_conf, dtype=float)
+        if dist_metric == "feature":
+            fvec = pose_to_feature_vec(root_pose, feature_points)
+            if fvec is not None:
+                feature_vecs[id(root)] = fvec
+        return nodes, node_confs, feature_vecs
+
+    extend_stop_reasons: Counter = Counter()
+    best_tree: List[TreeNode] = []
+    total_iterations = 0
+
+    for attempt in range(max_attempts):
+        start_time = time.time()
+        nodes_a, confs_a, fvecs_a = make_tree(start_pose, start_conf)
+        nodes_b, confs_b, fvecs_b = make_tree(goal_pose, goal_conf)
+
+        for iteration in range(max_iterations):
+            total_iterations += 1
+            if (time.time() - start_time) >= max_time:
+                break
+
+            # Alternate which tree extends toward the random sample.
+            # Convention: TreeA always rooted at start, TreeB at goal. We pick
+            # which tree extends first based on size (smaller grows first), but
+            # we always retrace the final path as start->goal.
+            grow_a_first = len(nodes_a) <= len(nodes_b)
+            tree_grow, confs_grow, fvecs_grow = (
+                (nodes_a, confs_a, fvecs_a) if grow_a_first else (nodes_b, confs_b, fvecs_b)
+            )
+            tree_other, confs_other, fvecs_other = (
+                (nodes_b, confs_b, fvecs_b) if grow_a_first else (nodes_a, confs_a, fvecs_a)
+            )
+
+            # Sample: occasional bias toward the other tree's root (cross-bias).
+            if rng.random() < goal_sample_prob:
+                target_pose = (nodes_a[0].config if not grow_a_first else nodes_b[0].config)
+            else:
+                target_pose, _ = sample_pose(robot, goal_pose, rng, 0.0, workspace_xy, workspace_z)
+
+            nearest = nearest_node(tree_grow, target_pose, dist_metric, feature_points, fvecs_grow)
+            new_last, _, stop_reason = extend_toward(
+                nodes=tree_grow,
+                source=nearest,
+                target_pose=target_pose,
+                collision_fn=collision_fn,
+                joint_collision_fn=joint_collision_fn,
+                draw_color=(0.85, 0.2, 0.2, 0.45) if grow_a_first else (0.2, 0.45, 0.85, 0.45),
+                use_draw=use_draw,
+                position_res=position_res,
+                rotation_res=rotation_res,
+                dist_metric=dist_metric,
+                feature_points=feature_points,
+                feature_vecs=fvecs_grow,
+                enable_ik=enable_ik,
+                node_confs=confs_grow,
+                ik_context=ik_context,
+                joint_continuity_threshold_rad=joint_continuity_threshold_rad,
+                use_angle_normalization=use_angle_normalization,
+            )
+            extend_stop_reasons[stop_reason] += 1
+            if new_last is nearest:
+                # No progress this iteration; move on.
+                continue
+
+            # Connect: try to extend the other tree all the way to `new_last`.
+            connect_target = new_last.config
+            connect_nearest = nearest_node(tree_other, connect_target, dist_metric, feature_points, fvecs_other)
+            connect_last, connect_reached, connect_stop = extend_toward(
+                nodes=tree_other,
+                source=connect_nearest,
+                target_pose=connect_target,
+                collision_fn=collision_fn,
+                joint_collision_fn=joint_collision_fn,
+                draw_color=(0.85, 0.5, 0.0, 0.6),
+                use_draw=use_draw,
+                position_res=position_res,
+                rotation_res=rotation_res,
+                dist_metric=dist_metric,
+                feature_points=feature_points,
+                feature_vecs=fvecs_other,
+                enable_ik=enable_ik,
+                node_confs=confs_other,
+                ik_context=ik_context,
+                joint_continuity_threshold_rad=joint_continuity_threshold_rad,
+                use_angle_normalization=use_angle_normalization,
+            )
+            extend_stop_reasons[f"connect_{connect_stop}"] += 1
+
+            if not connect_reached:
+                continue
+
+            # Stitch path: identify start-side (tree_a, anchored at start_pose) and
+            # goal-side (tree_b, anchored at goal_pose) portions of the BiRRT solution.
+            # The "frontier" on the start side and the "junction" on the goal side meet
+            # at the same pose; we drop the duplicate seam node.
+            if grow_a_first:
+                start_side_nodes = list(new_last.retrace())       # start -> new_last
+                goal_side_nodes_rev = list(reversed(connect_last.retrace()))  # connect_last -> goal_root
+            else:
+                start_side_nodes = list(connect_last.retrace())   # start -> connect_last
+                goal_side_nodes_rev = list(reversed(new_last.retrace()))      # new_last -> goal_root
+            # Drop the goal-side's first node (duplicate of start-side's last).
+            goal_side_nodes_rev_tail = goal_side_nodes_rev[1:]
+
+            start_side_poses = [n.config for n in start_side_nodes]
+            goal_side_poses = [n.config for n in goal_side_nodes_rev_tail]
+
+            path_poses: List[PoseLike] = start_side_poses + goal_side_poses
+            path_confs: Optional[List[FullConf]] = None
+
+            if enable_ik:
+                start_side_confs_raw = [np.asarray(confs_a[id(n)], dtype=float) for n in start_side_nodes]
+                # goal_side_nodes_rev_tail is [seam+1, ..., goal_root], in path order.
+                goal_side_confs_raw = [np.asarray(confs_b[id(n)], dtype=float) for n in goal_side_nodes_rev_tail]
+                if not start_side_confs_raw:
+                    continue
+
+                def _stitch_forward(seed_conf):
+                    """Re-IK along goal_side_poses, seeded from seed_conf. Returns confs or None."""
+                    out: List[FullConf] = []
+                    cur = seed_conf
+                    for stitch_pose in goal_side_poses:
+                        nxt = solve_dual_arm_pose_ik(
+                            robot=ik_context["robot"],
+                            arm_joints=ik_context["arm_joints"],
+                            tool_link_left=ik_context["tool_link_left"],
+                            tool_link_right=ik_context["tool_link_right"],
+                            bar_pose=stitch_pose,
+                            grasp_bar_from_left=ik_context["grasp_bar_from_left"],
+                            grasp_bar_from_right=ik_context["grasp_bar_from_right"],
+                            seed_conf=cur,
+                            use_angle_normalization=use_angle_normalization,
+                        )
+                        if nxt is None:
+                            extend_stop_reasons["stitch_ik_failure"] += 1
+                            return None
+                        if joint_step_exceeds_threshold(nxt, cur, joint_continuity_threshold_rad):
+                            extend_stop_reasons["stitch_continuity_fail"] += 1
+                            return None
+                        if joint_collision_fn is not None and joint_collision_fn(nxt):
+                            extend_stop_reasons["stitch_collision"] += 1
+                            return None
+                        out.append(np.asarray(nxt, dtype=float))
+                        cur = nxt
+                    return out
+
+                def _stitch_backward(seed_conf_at_goal):
+                    """Re-IK along start_side_poses from goal_root toward start, seeded at goal side.
+                    Returns confs in path-order (start->seam) or None."""
+                    out_rev: List[FullConf] = []
+                    cur = seed_conf_at_goal
+                    for stitch_pose in reversed([n.config for n in start_side_nodes]):
+                        nxt = solve_dual_arm_pose_ik(
+                            robot=ik_context["robot"],
+                            arm_joints=ik_context["arm_joints"],
+                            tool_link_left=ik_context["tool_link_left"],
+                            tool_link_right=ik_context["tool_link_right"],
+                            bar_pose=stitch_pose,
+                            grasp_bar_from_left=ik_context["grasp_bar_from_left"],
+                            grasp_bar_from_right=ik_context["grasp_bar_from_right"],
+                            seed_conf=cur,
+                            use_angle_normalization=use_angle_normalization,
+                        )
+                        if nxt is None:
+                            extend_stop_reasons["stitch_ik_failure"] += 1
+                            return None
+                        if joint_step_exceeds_threshold(nxt, cur, joint_continuity_threshold_rad):
+                            extend_stop_reasons["stitch_continuity_fail"] += 1
+                            return None
+                        if joint_collision_fn is not None and joint_collision_fn(nxt):
+                            extend_stop_reasons["stitch_collision"] += 1
+                            return None
+                        out_rev.append(np.asarray(nxt, dtype=float))
+                        cur = nxt
+                    out_rev.reverse()
+                    # Final start-side IK must agree with start_conf endpoint (it's the same pose).
+                    if joint_step_exceeds_threshold(out_rev[0], start_side_confs_raw[0], joint_continuity_threshold_rad):
+                        extend_stop_reasons["stitch_endpoint_mismatch"] += 1
+                        return None
+                    return out_rev
+
+                # Try forward stitch (rebuild goal side from start-side seam conf)
+                stitched_goal = _stitch_forward(start_side_confs_raw[-1])
+                if stitched_goal is not None:
+                    path_confs = start_side_confs_raw + stitched_goal
+                else:
+                    # Fallback: rebuild START side from goal-root branch.
+                    if goal_side_confs_raw:
+                        seed_goal = goal_side_confs_raw[-1]  # goal_root conf
+                    else:
+                        seed_goal = np.asarray(goal_conf, dtype=float)
+                    rebuilt_start = _stitch_backward(seed_goal)
+                    if rebuilt_start is None:
+                        continue
+                    # rebuilt_start[-1] is at the seam pose, on goal branch -> continuous with goal_side_confs_raw.
+                    # Seam continuity is guaranteed since both end at goal-side branch.
+                    path_confs = rebuilt_start + list(goal_side_confs_raw)
+
+            update_debug_tree(
+                debug_tree_out, True, iteration + 1, nodes_a + nodes_b, start_pose, goal_pose,
+                extend_stop_reasons=extend_stop_reasons,
+            )
+            logger.info(
+                f"birrt: connected after {iteration + 1} iters; "
+                f"tree_a={len(nodes_a)} nodes, tree_b={len(nodes_b)} nodes, path={len(path_poses)} waypoints."
+            )
+            return path_poses, path_confs
+
+        best_tree = nodes_a + nodes_b
+        logger.info(
+            f"birrt attempt {attempt + 1}/{max_attempts}: no path found "
+            f"(tree_a={len(nodes_a)}, tree_b={len(nodes_b)})."
+        )
+
     update_debug_tree(
         debug_tree_out, False, total_iterations, best_tree, start_pose, goal_pose,
         extend_stop_reasons=extend_stop_reasons,

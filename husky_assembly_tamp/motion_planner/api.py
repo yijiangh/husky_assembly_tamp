@@ -320,3 +320,257 @@ def plan_constrained_dual_arm(
         info["failure_reason"] = "no_joint_path"
         return None, info
     return [np.asarray(q, dtype=float) for q in path_confs], info
+
+
+def _fk_link_frame(planner, state, link_name):
+    """Forward kinematics: world frame of `link_name` at the given state.
+
+    Pushes state via planner.set_robot_cell_state(state) then reads the link
+    pose from the pybullet client. Returns compas.geometry.Frame.
+    """
+    import pybullet_planning as pp
+    from compas.geometry import Frame
+    from compas_fab.robots import RobotCellState  # noqa
+    planner.set_robot_cell_state(state)
+    client = planner.client
+    link_id = client.robot_link_puids[link_name]
+    pose = pp.get_link_pose(client.robot_puid, link_id)
+    pos, quat = pose
+    return Frame.from_quaternion([quat[3], quat[0], quat[1], quat[2]], point=list(pos))
+
+
+def _run_dual_arm_cartesian_ik_loop(
+    planner,
+    robot_cell,
+    start_state,
+    left_frames,
+    right_frames,
+    *,
+    max_results=20,
+    max_descend_iterations=200,
+    skip_env_collisions=True,
+):
+    """Solve per-waypoint IK for synchronized dual-arm cartesian motion.
+
+    Uses the previous waypoint's full configuration as the IK seed for the
+    next. Returns a single compas_fab JointTrajectory with joint_names =
+    LEFT + RIGHT (12 joints) on success, or None on the first IK failure.
+
+    Skips env collisions via _skip_cc3/4/5 when skip_env_collisions=True.
+    """
+    from copy import deepcopy
+    from compas_fab.backends import CollisionCheckError, InverseKinematicsError
+    from compas_fab.robots import FrameTarget, JointTrajectory, JointTrajectoryPoint, TargetMode
+
+    assert len(left_frames) == len(right_frames), \
+        f"left/right frame lists must be equal length; got {len(left_frames)} vs {len(right_frames)}"
+
+    LEFT_GROUP = "base_left_arm_manipulator"
+    RIGHT_GROUP = "base_right_arm_manipulator"
+    left_joint_names = list(robot_cell.get_configurable_joint_names(LEFT_GROUP))
+    right_joint_names = list(robot_cell.get_configurable_joint_names(RIGHT_GROUP))
+
+    def _is_arm_joint(name):
+        return any(name.endswith(suf) for suf in (
+            "shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
+            "wrist_1_joint", "wrist_2_joint", "wrist_3_joint",
+        ))
+    left_arm_joints = [n for n in left_joint_names if _is_arm_joint(n)]
+    right_arm_joints = [n for n in right_joint_names if _is_arm_joint(n)]
+    assert len(left_arm_joints) == 6 and len(right_arm_joints) == 6, \
+        f"expected 6 arm joints per side, got L={left_arm_joints}, R={right_arm_joints}"
+    joint_names_12 = left_arm_joints + right_arm_joints
+
+    ik_options = {
+        "max_results": max_results,
+        "max_descend_iterations": max_descend_iterations,
+        "return_full_configuration": True,
+        "check_collision": True,
+        "verbose": False,
+    }
+    if skip_env_collisions:
+        ik_options["_skip_cc3"] = True
+        ik_options["_skip_cc4"] = True
+        ik_options["_skip_cc5"] = True
+
+    state = start_state.copy()
+    planner.set_robot_cell_state(state)
+
+    path_12 = []
+    for i, (lf, rf) in enumerate(zip(left_frames, right_frames)):
+        left_target = FrameTarget(
+            lf, target_mode=TargetMode.ROBOT,
+            tolerance_position=0.001, tolerance_orientation=0.01,
+        )
+        right_target = FrameTarget(
+            rf, target_mode=TargetMode.ROBOT,
+            tolerance_position=0.001, tolerance_orientation=0.01,
+        )
+        try:
+            conf_L = planner.inverse_kinematics(left_target, state, LEFT_GROUP, ik_options)
+        except (InverseKinematicsError, CollisionCheckError) as e:
+            print(f"[cartesian IK loop] waypoint {i}: LEFT FAIL: {getattr(e, 'message', e)}")
+            return None
+        state.robot_configuration = conf_L
+        try:
+            conf_LR = planner.inverse_kinematics(right_target, state, RIGHT_GROUP, ik_options)
+        except (InverseKinematicsError, CollisionCheckError) as e:
+            print(f"[cartesian IK loop] waypoint {i}: RIGHT FAIL: {getattr(e, 'message', e)}")
+            return None
+        state.robot_configuration = conf_LR
+        path_12.append([float(conf_LR[n]) for n in joint_names_12])
+
+    from husky_assembly_teleop.utils import joint_trajectory_from_path
+    return joint_trajectory_from_path(path_12)
+
+
+def plan_constrained_dual_arm_linear(
+    planner,
+    robot_cell,
+    start_state,
+    start_conf,
+    goal_world_from_bar,
+    bar_from_left_tool0,
+    bar_from_right_tool0,
+    *,
+    max_step_distance=0.005,
+    max_step_angle=0.05,
+    max_results=20,
+    max_descend_iterations=200,
+    skip_env_collisions=True,
+):
+    """Linear dual-arm motion with bar-held inter-EE constraint.
+
+    Interpolate the bar's world frame from start (FK at start_conf) to
+    goal_world_from_bar. Derive left/right tool0 targets at each waypoint
+    by composing bar_t * bar_from_left_tool0 (and right). IK both arms
+    per waypoint with previous conf as seed.
+
+    Mirrors GH_dual_arm_approach_plan.py:43-200 algorithm.
+    Returns JointTrajectory(12) or None on IK failure.
+    """
+    from compas.geometry import Frame, Transformation
+    from compas_fab.backends.pybullet.backend_features.pybullet_plan_cartesian_motion import (
+        FrameInterpolator,
+    )
+
+    if len(start_conf) != 12:
+        raise ValueError("start_conf must be length 12")
+
+    state = start_state.copy()
+    LEFT_GROUP = "base_left_arm_manipulator"
+    RIGHT_GROUP = "base_right_arm_manipulator"
+    left_arm_joints = [n for n in robot_cell.get_configurable_joint_names(LEFT_GROUP)
+                       if any(n.endswith(s) for s in (
+                           "shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
+                           "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"))]
+    right_arm_joints = [n for n in robot_cell.get_configurable_joint_names(RIGHT_GROUP)
+                        if any(n.endswith(s) for s in (
+                            "shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
+                            "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"))]
+    for n, v in zip(left_arm_joints + right_arm_joints, start_conf):
+        state.robot_configuration[n] = float(v)
+    planner.set_robot_cell_state(state)
+
+    start_left_frame = _fk_link_frame(planner, state, "left_ur_arm_tool0")
+    start_right_frame = _fk_link_frame(planner, state, "right_ur_arm_tool0")
+
+    inv_left = bar_from_left_tool0.inverted()
+    start_world_from_bar = Frame.from_transformation(
+        Transformation.from_frame(start_left_frame) * inv_left
+    )
+
+    options = {
+        "max_step_distance": max_step_distance,
+        "max_step_angle": max_step_angle,
+    }
+    bar_interp = FrameInterpolator(start_world_from_bar, goal_world_from_bar, options)
+    N = max(2, bar_interp.regular_interpolation_steps + 1)
+
+    left_frames = []
+    right_frames = []
+    for i in range(N):
+        t = i / (N - 1) if N > 1 else 0.0
+        bar_t = bar_interp.get_interpolated_frame(t)
+        bar_t_tf = Transformation.from_frame(bar_t)
+        left_frames.append(Frame.from_transformation(bar_t_tf * bar_from_left_tool0))
+        right_frames.append(Frame.from_transformation(bar_t_tf * bar_from_right_tool0))
+
+    return _run_dual_arm_cartesian_ik_loop(
+        planner, robot_cell, state,
+        left_frames, right_frames,
+        max_results=max_results,
+        max_descend_iterations=max_descend_iterations,
+        skip_env_collisions=skip_env_collisions,
+    )
+
+
+def plan_dual_arm_linear_independent(
+    planner,
+    robot_cell,
+    start_state,
+    start_conf,
+    target_left_frame,
+    target_right_frame,
+    *,
+    max_step_distance=0.005,
+    max_step_angle=0.05,
+    max_results=20,
+    max_descend_iterations=200,
+    skip_env_collisions=True,
+):
+    """Linear dual-arm motion with INDEPENDENT EE interpolation (M3 retreat).
+
+    Each arm interpolates from its FK-at-start frame to its target frame
+    independently. Synchronized by padding to max waypoint count. IK both
+    arms per waypoint with previous conf as seed.
+
+    Mirrors GH_dual_arm_retreat_plan.py:54-200 algorithm.
+    Returns JointTrajectory(12) or None on IK failure.
+    """
+    from compas_fab.backends.pybullet.backend_features.pybullet_plan_cartesian_motion import (
+        FrameInterpolator,
+    )
+
+    if len(start_conf) != 12:
+        raise ValueError("start_conf must be length 12")
+
+    state = start_state.copy()
+    LEFT_GROUP = "base_left_arm_manipulator"
+    RIGHT_GROUP = "base_right_arm_manipulator"
+    left_arm_joints = [n for n in robot_cell.get_configurable_joint_names(LEFT_GROUP)
+                       if any(n.endswith(s) for s in (
+                           "shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
+                           "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"))]
+    right_arm_joints = [n for n in robot_cell.get_configurable_joint_names(RIGHT_GROUP)
+                        if any(n.endswith(s) for s in (
+                            "shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
+                            "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"))]
+    for n, v in zip(left_arm_joints + right_arm_joints, start_conf):
+        state.robot_configuration[n] = float(v)
+    planner.set_robot_cell_state(state)
+
+    start_left_frame = _fk_link_frame(planner, state, "left_ur_arm_tool0")
+    start_right_frame = _fk_link_frame(planner, state, "right_ur_arm_tool0")
+
+    options = {"max_step_distance": max_step_distance, "max_step_angle": max_step_angle}
+    left_interp = FrameInterpolator(start_left_frame, target_left_frame, options)
+    right_interp = FrameInterpolator(start_right_frame, target_right_frame, options)
+    N = max(2,
+            max(left_interp.regular_interpolation_steps,
+                right_interp.regular_interpolation_steps) + 1)
+
+    left_frames = []
+    right_frames = []
+    for i in range(N):
+        t = i / (N - 1) if N > 1 else 0.0
+        left_frames.append(left_interp.get_interpolated_frame(t))
+        right_frames.append(right_interp.get_interpolated_frame(t))
+
+    return _run_dual_arm_cartesian_ik_loop(
+        planner, robot_cell, state,
+        left_frames, right_frames,
+        max_results=max_results,
+        max_descend_iterations=max_descend_iterations,
+        skip_env_collisions=skip_env_collisions,
+    )

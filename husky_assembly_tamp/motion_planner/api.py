@@ -349,6 +349,7 @@ def _run_dual_arm_cartesian_ik_loop(
     max_results=20,
     max_descend_iterations=200,
     skip_env_collisions=True,
+    joint_continuity_threshold_rad=None,
 ):
     """Solve per-waypoint IK for synchronized dual-arm cartesian motion.
 
@@ -361,6 +362,10 @@ def _run_dual_arm_cartesian_ik_loop(
     from copy import deepcopy
     from compas_fab.backends import CollisionCheckError, InverseKinematicsError
     from compas_fab.robots import FrameTarget, JointTrajectory, JointTrajectoryPoint, TargetMode
+    from .dual_arm_task_space_rrt.core import (
+        DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
+        joint_step_exceeds_threshold,
+    )
 
     assert len(left_frames) == len(right_frames), \
         f"left/right frame lists must be equal length; got {len(left_frames)} vs {len(right_frames)}"
@@ -392,12 +397,24 @@ def _run_dual_arm_cartesian_ik_loop(
         ik_options["_skip_cc3"] = True
         ik_options["_skip_cc4"] = True
         ik_options["_skip_cc5"] = True
+    if joint_continuity_threshold_rad is None:
+        joint_continuity_threshold_rad = DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD
 
     state = start_state.copy()
     planner.set_robot_cell_state(state)
 
     path_12 = []
+    N = len(left_frames)
     for i, (lf, rf) in enumerate(zip(left_frames, right_frames)):
+        if i == 0:
+            # Both callers (plan_constrained_dual_arm_linear,
+            # plan_dual_arm_linear_independent) build left_frames[0] /
+            # right_frames[0] as FK(start_conf, *_ur_arm_tool0). So the
+            # propagated input start_conf is a hard constraint for the
+            # first waypoint. Skip IK here so an equivalent wrapped IK
+            # branch cannot replace the chain handoff from the previous move.
+            path_12.append([float(state.robot_configuration[n]) for n in joint_names_12])
+            continue
         left_target = FrameTarget(
             lf, target_mode=TargetMode.ROBOT,
             tolerance_position=0.001, tolerance_orientation=0.01,
@@ -418,7 +435,15 @@ def _run_dual_arm_cartesian_ik_loop(
             print(f"[cartesian IK loop] waypoint {i}: RIGHT FAIL: {getattr(e, 'message', e)}")
             return None
         state.robot_configuration = conf_LR
-        path_12.append([float(conf_LR[n]) for n in joint_names_12])
+        next_vec = [float(conf_LR[n]) for n in joint_names_12]
+        if joint_step_exceeds_threshold(next_vec, path_12[-1], joint_continuity_threshold_rad):
+            diff = float(np.abs(np.asarray(next_vec, dtype=float) - np.asarray(path_12[-1], dtype=float)).max())
+            print(
+                f"[cartesian IK loop] waypoint {i}: joint step {diff:.4f} rad exceeds "
+                f"threshold {float(joint_continuity_threshold_rad):.4f} rad; rejecting IK branch."
+            )
+            return None
+        path_12.append(next_vec)
 
     from husky_assembly_teleop.utils import joint_trajectory_from_path
     return joint_trajectory_from_path(path_12)
@@ -438,6 +463,7 @@ def plan_constrained_dual_arm_linear(
     max_results=20,
     max_descend_iterations=200,
     skip_env_collisions=True,
+    joint_continuity_threshold_rad=None,
 ):
     """Linear dual-arm motion with bar-held inter-EE constraint.
 
@@ -502,6 +528,7 @@ def plan_constrained_dual_arm_linear(
         max_results=max_results,
         max_descend_iterations=max_descend_iterations,
         skip_env_collisions=skip_env_collisions,
+        joint_continuity_threshold_rad=joint_continuity_threshold_rad,
     )
 
 
@@ -518,6 +545,7 @@ def plan_dual_arm_linear_independent(
     max_results=20,
     max_descend_iterations=200,
     skip_env_collisions=True,
+    joint_continuity_threshold_rad=None,
 ):
     """Linear dual-arm motion with INDEPENDENT EE interpolation (M3 retreat).
 
@@ -573,4 +601,5 @@ def plan_dual_arm_linear_independent(
         max_results=max_results,
         max_descend_iterations=max_descend_iterations,
         skip_env_collisions=skip_env_collisions,
+        joint_continuity_threshold_rad=joint_continuity_threshold_rad,
     )

@@ -40,11 +40,22 @@ def status_label(value: Optional[bool]) -> str:
     return "PASS" if value else "FAIL"
 
 
-def import_matplotlib_pyplot():
+def import_matplotlib_pyplot(interactive: bool = False):
     try:
         import matplotlib
 
-        matplotlib.use("Agg", force=True)
+        if interactive and "agg" in matplotlib.get_backend().lower():
+            # Monitor-triggered validation should pop up a plot instead of
+            # writing an image file. Try common GUI backends when matplotlib
+            # defaulted to Agg.
+            for backend in ("QtAgg", "TkAgg"):
+                try:
+                    matplotlib.use(backend, force=True)
+                    break
+                except Exception:
+                    continue
+        if not interactive:
+            matplotlib.use("Agg", force=True)
         import matplotlib.pyplot as plt
 
         return plt
@@ -177,9 +188,58 @@ def compute_relative_transform_drift(
     return translation_errors_m, rotation_axis_errors_deg
 
 
+def update_joint_continuity_result(
+    result: Dict[str, Any],
+    command_joint_path: Sequence[FullConf],
+) -> None:
+    # Joint flips must be checked on the exact command waypoints, not on
+    # inserted validation samples.
+    if len(command_joint_path) >= 2:
+        step_max_deltas = []
+        for prev_conf, next_conf in zip(command_joint_path[:-1], command_joint_path[1:]):
+            step_delta = np.abs(np.asarray(next_conf, dtype=float) - np.asarray(prev_conf, dtype=float))
+            step_max_deltas.append(float(np.max(step_delta)))
+        if step_max_deltas:
+            max_delta = max(step_max_deltas)
+            threshold = float(result["joint_continuity_threshold_rad"])
+            first_bad_step = next(
+                (idx + 1 for idx, delta in enumerate(step_max_deltas) if delta > threshold),
+                None,
+            )
+            result["joint_continuity_max_delta_rad"] = max_delta
+            result["joint_continuity_first_bad_step"] = first_bad_step
+            result["joint_continuity_ok"] = first_bad_step is None
+    else:
+        result["joint_continuity_ok"] = True
+        result["joint_continuity_max_delta_rad"] = 0.0
+
+
+def update_relative_transform_result(
+    result: Dict[str, Any],
+    relative_translation_errors_m: Sequence[float],
+    relative_rotation_axis_errors_deg: Dict[str, Sequence[float]],
+    relative_translation_threshold_m: float,
+    relative_rotation_axis_threshold_deg: float,
+) -> None:
+    # EE constraint is the left->right tool relative transform drift.
+    if relative_translation_errors_m and relative_rotation_axis_errors_deg["x"]:
+        result["relative_transform_max_translation_m"] = float(max(relative_translation_errors_m))
+        result["relative_transform_max_axis_angle_deg"] = {
+            axis_name: float(max(relative_rotation_axis_errors_deg[axis_name]))
+            for axis_name in AXIS_NAMES
+        }
+        result["relative_transform_ok"] = bool(
+            result["relative_transform_max_translation_m"] <= relative_translation_threshold_m
+            and all(
+                float(result["relative_transform_max_axis_angle_deg"][axis_name]) <= relative_rotation_axis_threshold_deg
+                for axis_name in AXIS_NAMES
+            )
+        )
+
+
 def save_validation_plot(
     *,
-    out_path: str,
+    out_path: Optional[str],
     stage: int,
     target_label: Optional[str],
     position_res: Optional[float],
@@ -201,8 +261,10 @@ def save_validation_plot(
     joint_path_deg: Optional[np.ndarray],
     original_joint_path_deg: Optional[np.ndarray] = None,
     wrap_segments: Optional[Sequence[Tuple[int, int, float]]] = None,
+    save_plot: bool = True,
+    show_plot: bool = False,
 ) -> Optional[str]:
-    plt = import_matplotlib_pyplot()
+    plt = import_matplotlib_pyplot(interactive=show_plot and not save_plot)
     if plt is None:
         return None
 
@@ -463,9 +525,23 @@ def save_validation_plot(
     fig.text(0.02, 0.02, " | ".join(details), fontsize=9)
 
     fig.tight_layout(rect=(0.0, 0.04, 0.86, 0.93))
-    fig.savefig(out_path, dpi=180)
-    plt.close(fig)
-    return out_path
+    saved_path = None
+    if save_plot:
+        if out_path is None:
+            raise ValueError("out_path is required when save_plot=True")
+        fig.savefig(out_path, dpi=180)
+        saved_path = out_path
+    if show_plot:
+        try:
+            fig.canvas.manager.set_window_title(f"Stage {stage} validation")
+            plt.show(block=False)
+            plt.pause(0.001)
+        except Exception as exc:
+            logger.warning(f"Could not display validation plot: {exc}")
+            plt.close(fig)
+    else:
+        plt.close(fig)
+    return saved_path
 
 
 def validate_stage_trajectory(
@@ -490,14 +566,19 @@ def validate_stage_trajectory(
     use_angle_normalization: bool = False,
     reports_dir: str = REPORTS_DIR,
     skip_relative_transform: bool = False,
+    skip_dense_collision_checks: bool = False,
+    save_plot: bool = True,
+    show_plot: bool = False,
     bar_pose_source: str = "left_grasp",
 ) -> Dict[str, Any]:
     if bar_pose_source not in {"left_grasp", "path"}:
         raise ValueError(f"Unsupported bar_pose_source: {bar_pose_source!r}")
 
-    os.makedirs(reports_dir, exist_ok=True)
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
-    out_path = os.path.join(reports_dir, f"trajectory_validation_stage{stage}_{timestamp}.png")
+    out_path = None
+    if save_plot:
+        os.makedirs(reports_dir, exist_ok=True)
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        out_path = os.path.join(reports_dir, f"trajectory_validation_stage{stage}_{timestamp}.png")
 
     result: Dict[str, Any] = {
         "plot_path": None,
@@ -515,6 +596,7 @@ def validate_stage_trajectory(
             "bar_static": {"count": 0, "first_index": None, "first_dense_index": None},
         },
         "collision_failures": [],
+        "dense_collision_checks_skipped": bool(skip_dense_collision_checks),
         "joint_continuity_ok": None,
         "joint_continuity_threshold_rad": float(joint_continuity_threshold_rad),
         "joint_continuity_max_delta_rad": None,
@@ -551,6 +633,8 @@ def validate_stage_trajectory(
             collision_breakdown=result["collision_breakdown"],
             joint_path_deg=None,
             original_joint_path_deg=None,
+            save_plot=save_plot,
+            show_plot=show_plot,
         )
         return result
 
@@ -576,6 +660,8 @@ def validate_stage_trajectory(
             collision_breakdown=result["collision_breakdown"],
             joint_path_deg=None,
             original_joint_path_deg=None,
+            save_plot=save_plot,
+            show_plot=show_plot,
         )
         return result
 
@@ -583,49 +669,6 @@ def validate_stage_trajectory(
     arm_joints = scene["arm_joints"]
     tool_link_left = scene["tool_link_left"]
     tool_link_right = scene["tool_link_right"]
-    bar_body = scene["bar_body"]
-    bar_from_left = pp.invert(scene["grasp_bar_from_left"])
-    static_obstacles = [body for body in scene["collision_obstacles"] if body != robot]
-
-    robot_model = RobotModel.from_urdf_file(urdf_path)
-    semantics = RobotSemantics.from_srdf_file(srdf_path, robot_model)
-    disabled_collisions = get_disabled_collisions_from_link_names(robot, semantics.disabled_collisions)
-    extra_disabled_collisions = []
-    for link_name in grasp_mask_links:
-        if not pp.has_link(robot, link_name):
-            continue
-        extra_disabled_collisions.append(((robot, pp.link_from_name(robot, link_name)), (bar_body, pp.BASE_LINK)))
-
-    robot_self_collision_fn = pp.get_collision_fn(
-        robot,
-        arm_joints,
-        obstacles=[],
-        attachments=[],
-        self_collisions=True,
-        disabled_collisions=disabled_collisions,
-        extra_disabled_collisions=[],
-        max_distance=0.0,
-    )
-    robot_static_collision_fn = pp.get_collision_fn(
-        robot,
-        arm_joints,
-        obstacles=static_obstacles,
-        attachments=[],
-        self_collisions=False,
-        disabled_collisions=disabled_collisions,
-        extra_disabled_collisions=[],
-        max_distance=0.0,
-    )
-    bar_robot_collision_fn = pp.get_floating_body_collision_fn(
-        bar_body,
-        obstacles=[robot],
-        disabled_collisions=extra_disabled_collisions,
-    )
-    bar_static_collision_fn = pp.get_floating_body_collision_fn(
-        bar_body,
-        obstacles=static_obstacles,
-        disabled_collisions=[],
-    )
 
     relative_translation_errors_m: list[float] = []
     relative_rotation_axis_errors_deg = {axis_name: [] for axis_name in AXIS_NAMES}
@@ -675,6 +718,93 @@ def validate_stage_trajectory(
             tool_link_right,
             command_joint_path,
         )
+    update_joint_continuity_result(result, command_joint_path)
+    if skip_dense_collision_checks:
+        relative_translation_errors_m = list(coarse_relative_translation_errors_m)
+        relative_rotation_axis_errors_deg = {
+            axis_name: list(coarse_relative_rotation_axis_errors_deg[axis_name])
+            for axis_name in AXIS_NAMES
+        }
+        result["dense_joint_validation_waypoints"] = 0
+        result["dense_joint_validation_step_rad"] = 0.0
+        update_relative_transform_result(
+            result,
+            relative_translation_errors_m,
+            relative_rotation_axis_errors_deg,
+            relative_translation_threshold_m,
+            relative_rotation_axis_threshold_deg,
+        )
+        result["plot_path"] = save_validation_plot(
+            out_path=out_path,
+            stage=stage,
+            target_label=target_label,
+            position_res=position_res,
+            rotation_res=rotation_res,
+            dense_joint_validation_step_rad=0.0,
+            collision_free=result["collision_free"],
+            joint_continuity_ok=result["joint_continuity_ok"],
+            joint_continuity_max_delta_rad=result["joint_continuity_max_delta_rad"],
+            joint_continuity_threshold_rad=joint_continuity_threshold_rad,
+            joint_path_source=joint_path_source,
+            joint_path_reason=result["joint_path_reason"],
+            relative_translation_errors_m=relative_translation_errors_m,
+            relative_rotation_axis_errors_deg=relative_rotation_axis_errors_deg,
+            coarse_relative_translation_errors_m=coarse_relative_translation_errors_m,
+            coarse_relative_rotation_axis_errors_deg=coarse_relative_rotation_axis_errors_deg,
+            relative_translation_threshold_m=relative_translation_threshold_m,
+            relative_rotation_axis_threshold_deg=relative_rotation_axis_threshold_deg,
+            collision_breakdown=result["collision_breakdown"],
+            joint_path_deg=joint_path_deg,
+            original_joint_path_deg=original_joint_path_deg,
+            wrap_segments=wrap_segments,
+            save_plot=save_plot,
+            show_plot=show_plot,
+        )
+        return result
+
+    bar_body = scene["bar_body"]
+    bar_from_left = pp.invert(scene["grasp_bar_from_left"])
+    static_obstacles = [body for body in scene["collision_obstacles"] if body != robot]
+
+    robot_model = RobotModel.from_urdf_file(urdf_path)
+    semantics = RobotSemantics.from_srdf_file(srdf_path, robot_model)
+    disabled_collisions = get_disabled_collisions_from_link_names(robot, semantics.disabled_collisions)
+    extra_disabled_collisions = []
+    for link_name in grasp_mask_links:
+        if not pp.has_link(robot, link_name):
+            continue
+        extra_disabled_collisions.append(((robot, pp.link_from_name(robot, link_name)), (bar_body, pp.BASE_LINK)))
+
+    robot_self_collision_fn = pp.get_collision_fn(
+        robot,
+        arm_joints,
+        obstacles=[],
+        attachments=[],
+        self_collisions=True,
+        disabled_collisions=disabled_collisions,
+        extra_disabled_collisions=[],
+        max_distance=0.0,
+    )
+    robot_static_collision_fn = pp.get_collision_fn(
+        robot,
+        arm_joints,
+        obstacles=static_obstacles,
+        attachments=[],
+        self_collisions=False,
+        disabled_collisions=disabled_collisions,
+        extra_disabled_collisions=[],
+        max_distance=0.0,
+    )
+    bar_robot_collision_fn = pp.get_floating_body_collision_fn(
+        bar_body,
+        obstacles=[robot],
+        disabled_collisions=extra_disabled_collisions,
+    )
+    bar_static_collision_fn = pp.get_floating_body_collision_fn(
+        bar_body,
+        obstacles=static_obstacles,
+        disabled_collisions=[],
+    )
     dense_joint_path, dense_metadata = refine_joint_path_for_validation(
         command_joint_path,
         dense_joint_validation_step_rad,
@@ -745,38 +875,13 @@ def validate_stage_trajectory(
         pp.set_pose(bar_body, pp.multiply(pp.get_link_pose(robot, tool_link_left), bar_from_left))
 
     result["collision_free"] = not any(collision_flags.values())
-
-    if len(command_joint_path) >= 2:
-        step_max_deltas = []
-        for prev_conf, next_conf in zip(command_joint_path[:-1], command_joint_path[1:]):
-            step_delta = np.abs(np.asarray(next_conf, dtype=float) - np.asarray(prev_conf, dtype=float))
-            step_max_deltas.append(float(np.max(step_delta)))
-        if step_max_deltas:
-            max_delta = max(step_max_deltas)
-            first_bad_step = next(
-                (idx + 1 for idx, delta in enumerate(step_max_deltas) if delta > joint_continuity_threshold_rad),
-                None,
-            )
-            result["joint_continuity_max_delta_rad"] = max_delta
-            result["joint_continuity_first_bad_step"] = first_bad_step
-            result["joint_continuity_ok"] = first_bad_step is None
-    else:
-        result["joint_continuity_ok"] = True
-        result["joint_continuity_max_delta_rad"] = 0.0
-
-    if relative_translation_errors_m and relative_rotation_axis_errors_deg["x"]:
-        result["relative_transform_max_translation_m"] = float(max(relative_translation_errors_m))
-        result["relative_transform_max_axis_angle_deg"] = {
-            axis_name: float(max(relative_rotation_axis_errors_deg[axis_name]))
-            for axis_name in AXIS_NAMES
-        }
-        result["relative_transform_ok"] = bool(
-            result["relative_transform_max_translation_m"] <= relative_translation_threshold_m
-            and all(
-                float(result["relative_transform_max_axis_angle_deg"][axis_name]) <= relative_rotation_axis_threshold_deg
-                for axis_name in AXIS_NAMES
-            )
-        )
+    update_relative_transform_result(
+        result,
+        relative_translation_errors_m,
+        relative_rotation_axis_errors_deg,
+        relative_translation_threshold_m,
+        relative_rotation_axis_threshold_deg,
+    )
 
     result["plot_path"] = save_validation_plot(
         out_path=out_path,
@@ -801,5 +906,7 @@ def validate_stage_trajectory(
         joint_path_deg=joint_path_deg,
         original_joint_path_deg=original_joint_path_deg,
         wrap_segments=wrap_segments,
+        save_plot=save_plot,
+        show_plot=show_plot,
     )
     return result

@@ -398,20 +398,20 @@ def _run_dual_arm_cartesian_ik_loop(
     )
     from compas_fab.backends.pybullet.exceptions import PlanningGroupNotSupported
 
-    def _wrap_angles_in_state(s):
-        # PyBullet IK numerically drifts non-target joints. When seed values
-        # are far from zero (e.g. wrist_1=4.32 rad from an M1 trajectory
-        # endpoint), small deltas can exceed cfab's TOL.is_close and trip
-        # _check_configuration_match_group("...not in the group"). Wrap arm
-        # joints into [-pi, pi] (same physical pose for revolute joints) so
-        # PyBullet's solver has minimal room to drift.
-        import math
-        for n in s.robot_configuration.joint_names:
-            v = float(s.robot_configuration[n])
-            if abs(v) > math.pi:
-                wrapped = (v + math.pi) % (2 * math.pi) - math.pi
-                s.robot_configuration[n] = wrapped
-        return s
+    # def _wrap_angles_in_state(s):
+    #     # PyBullet IK numerically drifts non-target joints. When seed values
+    #     # are far from zero (e.g. wrist_1=4.32 rad from an M1 trajectory
+    #     # endpoint), small deltas can exceed cfab's TOL.is_close and trip
+    #     # _check_configuration_match_group("...not in the group"). Wrap arm
+    #     # joints into [-pi, pi] (same physical pose for revolute joints) so
+    #     # PyBullet's solver has minimal room to drift.
+    #     import math
+    #     for n in s.robot_configuration.joint_names:
+    #         v = float(s.robot_configuration[n])
+    #         if abs(v) > math.pi:
+    #             wrapped = (v + math.pi) % (2 * math.pi) - math.pi
+    #             s.robot_configuration[n] = wrapped
+    #     return s
 
     assert len(left_frames) == len(right_frames), \
         f"left/right frame lists must be equal length; got {len(left_frames)} vs {len(right_frames)}"
@@ -447,7 +447,8 @@ def _run_dual_arm_cartesian_ik_loop(
         joint_continuity_threshold_rad = DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD
 
     state = start_state.copy()
-    _wrap_angles_in_state(state)
+    print('Yo')
+    # _wrap_angles_in_state(state)
     planner.set_robot_cell_state(state)
 
     path_12 = []
@@ -477,7 +478,7 @@ def _run_dual_arm_cartesian_ik_loop(
             return None
         except PlanningGroupNotSupported as e:
             print(f"[cartesian IK loop] waypoint {i}: LEFT IK drift; retrying with wrapped seed.")
-            _wrap_angles_in_state(state)
+            # _wrap_angles_in_state(state)
             planner.set_robot_cell_state(state)
             try:
                 conf_L = planner.inverse_kinematics(left_target, state, LEFT_GROUP, ik_options)
@@ -497,7 +498,7 @@ def _run_dual_arm_cartesian_ik_loop(
             return None
         except PlanningGroupNotSupported as e:
             print(f"[cartesian IK loop] waypoint {i}: RIGHT IK drift; retrying with wrapped seed.")
-            _wrap_angles_in_state(state)
+            # _wrap_angles_in_state(state)
             planner.set_robot_cell_state(state)
             try:
                 conf_LR = planner.inverse_kinematics(right_target, state, RIGHT_GROUP, ik_options)

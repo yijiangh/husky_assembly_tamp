@@ -379,6 +379,29 @@ def get_joint_collision_fn(
     return collision_fn
 
 
+def get_joint_collision_fn_cfab(
+    cfab_session,
+    template_state,
+    *,
+    joint_names_12: Optional[Sequence[str]] = None,
+    cc_options: Optional[dict] = None,
+) -> Callable[..., bool]:
+    """cfab equivalent of get_joint_collision_fn for Stage 3 RRT.
+
+    Caller must ensure template_state has the held bar attached to the left
+    tool (RigidBodyState.attached_to_tool/link set) with STAGE3_GRASP_MASK_LINKS
+    listed in its touch_links so the grasp contact is not flagged as a
+    collision.
+    """
+    from husky_assembly_teleop.cfab_collision_adapter import make_cfab_collision_fn
+
+    return make_cfab_collision_fn(
+        cfab_session, template_state,
+        joint_names_12=joint_names_12,
+        cc_options=cc_options,
+    )
+
+
 def goal_pose_reached(pose: PoseLike, goal_pose: PoseLike, position_res: float, rotation_res: float) -> bool:
     return bool(
         pp.is_pose_close(

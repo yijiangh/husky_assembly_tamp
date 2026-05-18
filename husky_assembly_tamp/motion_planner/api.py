@@ -70,6 +70,7 @@ def plan_free_dual_arm(
     max_iterations: int = 20,
     debug: bool = False,
     joint_resolution: float = 0.05,
+    cfab_collision_fn=None,
 ) -> Tuple[Optional[List[np.ndarray]], dict]:
     """Free-space dual-arm BiRRT.
 
@@ -118,6 +119,7 @@ def plan_free_dual_arm(
             # plan_transit_motion add a wrist_2_link disable per arm when
             # the mounted tool extends past wrist_3.
             ee_types=scene.get("ee_types"),
+            cfab_collision_fn=cfab_collision_fn,
         )
     if raw is None:
         info["failure_reason"] = "free_planner_failed"
@@ -188,6 +190,8 @@ def plan_constrained_dual_arm(
     joint_continuity_threshold_rad: Optional[float] = None,
     random_seed: Optional[int] = None,
     use_draw: bool = False,
+    cfab_session=None,
+    cfab_template_state=None,
 ) -> Tuple[Optional[List[np.ndarray]], dict]:
     """Constrained dual-arm SE(3) RRT with rigid grasp constraint.
 
@@ -199,6 +203,12 @@ def plan_constrained_dual_arm(
       1 -> pose-only RRT, no IK, no robot collision (path_confs = None)
       2 -> pose RRT + IK in extend, no robot collision
       3 -> pose RRT + IK + joint-space robot collision (full)
+
+    cfab_session / cfab_template_state (optional, stage 3 only): when both
+    provided, build the joint collision predicate via cfab's
+    PyBulletCheckCollision (5-step CC with SRDF + per-state touch_links)
+    instead of the pp.get_collision_fn path. Falls back to pp when either is
+    None.
     """
     _validate_scene(scene)
     if len(start_conf) != 12 or len(goal_conf) != 12:
@@ -212,6 +222,7 @@ def plan_constrained_dual_arm(
         DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
         plan_pose_rrt,
         get_joint_collision_fn,
+        get_joint_collision_fn_cfab,
     )
     from .dual_arm_task_space_rrt.smooth import smooth_dual_arm_pose_path
 
@@ -229,14 +240,21 @@ def plan_constrained_dual_arm(
     with pp.WorldSaver():
         joint_collision_fn = None
         if enforce_collision:
-            joint_collision_fn = get_joint_collision_fn(
-                robot=scene["robot"],
-                arm_joints=scene["arm_joints"],
-                obstacle_bodies=list(scene["obstacles"]),
-                tool_link_left=scene["tool_link_left"],
-                bar_body=bar_body,
-                grasp_bar_from_left=grasp_bar_from_left,
-            )
+            if cfab_session is not None and cfab_template_state is not None:
+                joint_collision_fn = get_joint_collision_fn_cfab(
+                    cfab_session, cfab_template_state,
+                )
+                info["joint_collision_backend"] = "cfab"
+            else:
+                joint_collision_fn = get_joint_collision_fn(
+                    robot=scene["robot"],
+                    arm_joints=scene["arm_joints"],
+                    obstacle_bodies=list(scene["obstacles"]),
+                    tool_link_left=scene["tool_link_left"],
+                    bar_body=bar_body,
+                    grasp_bar_from_left=grasp_bar_from_left,
+                )
+                info["joint_collision_backend"] = "pp"
         ik_context = None
         if enable_ik:
             ik_context = {
@@ -311,6 +329,18 @@ def plan_constrained_dual_arm(
             info["path_poses"] = path_poses
 
     pp.set_pose(bar_body, saved_bar_pose)
+    # If we routed CC through cfab, the adapter's last set_robot_cell_state
+    # call left cfab.client._robot_cell_state at the final RRT sample. pp's
+    # WorldSaver restored body/joint positions in the PyBullet world, but
+    # cfab's Python-side cache is independent. Subsequent IK callers
+    # (e.g. _plan_M2_dispatch's plan_constrained_dual_arm_linear) read both
+    # the pybullet world AND this cache, so leave it pointed at the template
+    # we received to avoid stale-state leakage between movements.
+    if cfab_session is not None and cfab_template_state is not None:
+        try:
+            cfab_session.planner.set_robot_cell_state(cfab_template_state)
+        except Exception:
+            pass
     if path_confs is None:
         # stage 1 intentionally produces no joint path; this is success, not failure.
         # caller should consult info["path_poses"] when stage == 1.
@@ -366,6 +396,22 @@ def _run_dual_arm_cartesian_ik_loop(
         DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
         joint_step_exceeds_threshold,
     )
+    from compas_fab.backends.pybullet.exceptions import PlanningGroupNotSupported
+
+    def _wrap_angles_in_state(s):
+        # PyBullet IK numerically drifts non-target joints. When seed values
+        # are far from zero (e.g. wrist_1=4.32 rad from an M1 trajectory
+        # endpoint), small deltas can exceed cfab's TOL.is_close and trip
+        # _check_configuration_match_group("...not in the group"). Wrap arm
+        # joints into [-pi, pi] (same physical pose for revolute joints) so
+        # PyBullet's solver has minimal room to drift.
+        import math
+        for n in s.robot_configuration.joint_names:
+            v = float(s.robot_configuration[n])
+            if abs(v) > math.pi:
+                wrapped = (v + math.pi) % (2 * math.pi) - math.pi
+                s.robot_configuration[n] = wrapped
+        return s
 
     assert len(left_frames) == len(right_frames), \
         f"left/right frame lists must be equal length; got {len(left_frames)} vs {len(right_frames)}"
@@ -401,6 +447,7 @@ def _run_dual_arm_cartesian_ik_loop(
         joint_continuity_threshold_rad = DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD
 
     state = start_state.copy()
+    _wrap_angles_in_state(state)
     planner.set_robot_cell_state(state)
 
     path_12 = []
@@ -428,12 +475,37 @@ def _run_dual_arm_cartesian_ik_loop(
         except (InverseKinematicsError, CollisionCheckError) as e:
             print(f"[cartesian IK loop] waypoint {i}: LEFT FAIL: {getattr(e, 'message', e)}")
             return None
+        except PlanningGroupNotSupported as e:
+            print(f"[cartesian IK loop] waypoint {i}: LEFT IK drift; retrying with wrapped seed.")
+            _wrap_angles_in_state(state)
+            planner.set_robot_cell_state(state)
+            try:
+                conf_L = planner.inverse_kinematics(left_target, state, LEFT_GROUP, ik_options)
+            except Exception as e2:
+                print(f"[cartesian IK loop] waypoint {i}: LEFT FAIL after retry: {e2}")
+                return None
+        # Right-arm joints in conf_L may have drifted from PyBullet IK's
+        # numerical solver. Restore them from state (LEFT IK should not have
+        # moved RIGHT). Then write the LEFT-arm joints from conf_L.
+        for n in right_arm_joints:
+            conf_L[n] = float(state.robot_configuration[n])
         state.robot_configuration = conf_L
         try:
             conf_LR = planner.inverse_kinematics(right_target, state, RIGHT_GROUP, ik_options)
         except (InverseKinematicsError, CollisionCheckError) as e:
             print(f"[cartesian IK loop] waypoint {i}: RIGHT FAIL: {getattr(e, 'message', e)}")
             return None
+        except PlanningGroupNotSupported as e:
+            print(f"[cartesian IK loop] waypoint {i}: RIGHT IK drift; retrying with wrapped seed.")
+            _wrap_angles_in_state(state)
+            planner.set_robot_cell_state(state)
+            try:
+                conf_LR = planner.inverse_kinematics(right_target, state, RIGHT_GROUP, ik_options)
+            except Exception as e2:
+                print(f"[cartesian IK loop] waypoint {i}: RIGHT FAIL after retry: {e2}")
+                return None
+        for n in left_arm_joints:
+            conf_LR[n] = float(state.robot_configuration[n])
         state.robot_configuration = conf_LR
         next_vec = [float(conf_LR[n]) for n in joint_names_12]
         if joint_step_exceeds_threshold(next_vec, path_12[-1], joint_continuity_threshold_rad):

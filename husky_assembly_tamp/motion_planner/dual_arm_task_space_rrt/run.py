@@ -821,6 +821,13 @@ def run_stage_trial(
     # regardless of whether the caller wants the tree dump.
     if debug_tree_out is None:
         debug_tree_out = {}
+
+    #* ================================================================
+    #* SCENE SETUP
+    #* Build the pybullet planning scene (robot, bar, obstacles, markers)
+    #* from scene_spec, and define the early_failure() result builder used
+    #* when any pre-plan step can't produce a valid start/goal.
+    #* ================================================================
     scene = setup_planning_scene(scene_spec=scene_spec, use_gui=use_gui)
 
     def early_failure(failure_reason: str) -> Dict[str, Any]:
@@ -862,6 +869,13 @@ def run_stage_trial(
         if enable_ik:
             from husky_assembly_tamp.motion_planner.api import derive_grasps_from_state
 
+            #* ============================================================
+            #* SOLVE GOAL CONF
+            #* Establish goal_conf (what the RRT plans TO): reuse the authored
+            #* end_joint_values if it already holds the bar at the goal with
+            #* both grasps, else re-solve via dual-arm IK; then derive
+            #* FK-consistent grasps from the accepted goal_conf.
+            #* ============================================================
             # Match the live/headless constrained path: solve the goal first,
             # derive FK-consistent grasps at the goal, then compute a validated
             # home/start pose and start_conf with derive_constrained_start.
@@ -879,6 +893,14 @@ def run_stage_trial(
                     grasp_bar_from_left=scene["grasp_bar_from_left"],
                 )
             goal_seed = np.asarray(scene["end_joint_values"], dtype=float)
+            # validate_dual_arm_bar_pose checks whether the authored goal_seed conf
+            # is already a usable goal: it sets the robot to goal_seed via FK and
+            # verifies (1) each tool link lands on its grasp target (bar_pose *
+            # grasp_bar_from_arm) and (2) the bar pose recovered from each tool
+            # (left, right) agrees with the goal bar_pose and with each other,
+            # all within pos/ori tolerance. If it passes AND the conf is
+            # collision-free, we reuse the authored conf as-is; otherwise we fall
+            # through to solving a fresh dual-arm goal IK below.
             if validate_dual_arm_bar_pose(
                 robot=scene["robot"],
                 arm_joints=scene["arm_joints"],
@@ -894,50 +916,89 @@ def run_stage_trial(
                 goal_conf = goal_seed
                 logger.info("Using authored goal_conf from scene end_joint_values.")
             else:
+                # The authored end_joint_values did not place the bar at the goal
+                # pose (or collided), so solve for a fresh dual-arm goal_conf that
+                # holds the bar at world_from_bar_goal with both grasps satisfied.
+                logger.warning(
+                    "Authored end_joint_values failed validation (bar pose/grasp mismatch "
+                    "or collision); re-solving goal_conf via dual-arm IK."
+                )
                 goal_conf = solve_endpoint_dual_arm_ik(
                     robot=scene["robot"],
                     arm_joints=scene["arm_joints"],
                     tool_link_left=scene["tool_link_left"],
                     tool_link_right=scene["tool_link_right"],
+                    # Target: where the bar must end up in world coordinates.
                     bar_pose=scene["world_from_bar_goal"],
+                    # Fixed bar<-tool grasp transforms each arm must respect.
                     grasp_bar_from_left=scene["grasp_bar_from_left"],
                     grasp_bar_from_right=grasp_bar_from_right,
+                    # Warm-start the solver from the authored conf so the solution
+                    # stays near the intended pose when one exists.
                     seed_conf=goal_seed,
-                    rng=rng,
+                    rng=rng,  # drives random restarts when the seed fails
                     max_attempts=endpoint_ik_attempts,
                     use_angle_normalization=use_angle_normalization,
+                    # When set (stage >= 3), reject IK solutions that collide.
                     collision_fn=joint_collision_fn,
                 )
             if goal_conf is None:
                 logger.warning(f"Stage {stage} goal pose has no valid dual-arm IK solution.")
                 return early_failure("goal_ik_failure")
             scene["end_joint_values"] = np.asarray(goal_conf, dtype=float)
-            scene["grasp_bar_from_left"], scene["grasp_bar_from_right"] = derive_grasps_from_state(
+            # The loaded grasp transforms are the single source of truth. The goal
+            # gate above (authored-conf validation, or the IK solve) only guarantees
+            # the bar pose within tolerance, so the grasps *implied* by goal_conf's
+            # FK can drift slightly from the loaded ones. Re-derive them ONLY to
+            # check that drift and fail loud if it is too large — never overwrite the
+            # loaded grasps, so IK residual is not propagated into the rigid bar
+            # attachment used by the collision fn and planner downstream.
+            fk_grasp_left, fk_grasp_right = derive_grasps_from_state(
                 scene["robot"],
                 scene["arm_joints"],
                 scene["tool_link_left"],
                 scene["tool_link_right"],
-                goal_conf,
-                scene["world_from_bar_goal"],
+                goal_conf,  # solved goal configuration to read FK from
+                scene["world_from_bar_goal"],  # bar pose the grasps are measured against
             )
-            grasp_bar_from_right = scene["grasp_bar_from_right"]
-            if enforce_collision:
-                # Rebuild after FK-consistent grasp derivation so the bar
-                # attachment used for start validation matches the planner.
-                joint_collision_fn = get_joint_collision_fn(
-                    robot=scene["robot"],
-                    arm_joints=scene["arm_joints"],
-                    obstacle_bodies=env_obstacles,
-                    tool_link_left=scene["tool_link_left"],
-                    bar_body=scene["bar_body"],
-                    grasp_bar_from_left=scene["grasp_bar_from_left"],
-                )
+            # Same tolerance used to accept the authored goal above (1e-3 m / 1e-2 rad).
+            grasp_pos_tol, grasp_ori_tol = 1e-3, 1e-2
+            for side, fk_grasp, loaded_grasp in (
+                ("left", fk_grasp_left, scene["grasp_bar_from_left"]),
+                ("right", fk_grasp_right, grasp_bar_from_right),
+            ):
+                if not pp.is_pose_close(
+                    fk_grasp,
+                    loaded_grasp,
+                    pos_tolerance=grasp_pos_tol,
+                    ori_tolerance=grasp_ori_tol,
+                ):
+                    raise ValueError(
+                        f"Stage {stage} {side} grasp implied by goal_conf drifted from "
+                        f"the loaded grasp beyond tolerance "
+                        f"(pos {grasp_pos_tol} m, ori {grasp_ori_tol} rad); goal_conf is "
+                        "inconsistent with the authoritative grasp transform."
+                    )
+            # No collision-fn rebuild here: the loaded grasp is unchanged, so the
+            # joint_collision_fn built above (from the same grasp) is still valid.
+
+            #* ============================================================
+            #* SOLVE START CONF
+            #* Derive the home/start bar pose + start_conf that the RRT plans
+            #* FROM (the goal_conf above is what it plans TO). Uses the
+            #* FK-consistent grasps and goal_conf solved above as the seed.
+            #* ============================================================
             def _derive_start_for_attempt(attempt_idx: int) -> Tuple[Optional[PoseLike], Optional[np.ndarray]]:
-                # attempt_idx==0 keeps the original deterministic behavior so
-                # easy targets (e.g. B235) plan identically to the legacy code.
-                # Later attempts shuffle the bar-position grid with a different
-                # seed AND widen the sweep box (in z particularly) so we can
-                # derive starts much closer to extreme goals (e.g. floor-level).
+                # "Legacy mode" == how the start was derived before start_retries
+                # existed: a single deterministic call to derive_constrained_start
+                # with a fixed seed, no grid shuffling, and the default narrow
+                # sweep box. attempt_idx==0 (or retries disabled, start_retries<=1)
+                # reproduces that exactly, so easy targets (e.g. B235) plan
+                # bit-for-bit identically to the old code.
+                # Later attempts (only reachable when start_retries>1) leave legacy
+                # mode: they shuffle the bar-position grid with a per-attempt seed
+                # AND widen the sweep box (in z particularly) so we can derive
+                # starts much closer to extreme goals (e.g. floor-level).
                 if start_retries <= 1 or attempt_idx == 0:
                     derive_seed = random_seed
                     shuffle = False
@@ -982,6 +1043,12 @@ def run_stage_trial(
                 if len(grasp_marker_bodies) >= 3:
                     pp.set_pose(grasp_marker_bodies[2], pp.multiply(world_from_bar_start, grasp_bar_from_right))
 
+        #* ================================================================
+        #* CONFIGURE RRT
+        #* Log the resolved run settings and assemble planning_kwargs: the
+        #* start/goal poses + confs, IK/collision callbacks, and resolution
+        #* params handed to plan_pose_rrt.
+        #* ================================================================
         logger.info(f"Running minimal Stage {stage} RRT.")
         logger.info(f"  start pose: {np.round(scene['world_from_bar_start'][0], 4)}")
         logger.info(f"  goal pose:  {np.round(scene['world_from_bar_goal'][0], 4)}")
@@ -1038,6 +1105,12 @@ def run_stage_trial(
         validation_time_s = 0.0
         t_plan = time.perf_counter()
 
+        #* ================================================================
+        #* RUN RRT (with start retries)
+        #* Search for a path. If the first start is a dead end and
+        #* start_retries > 1, re-derive the start (shuffled/widened) and
+        #* re-plan until one succeeds or the retry budget is exhausted.
+        #* ================================================================
         def _run_plan() -> Tuple[Optional[List[PoseLike]], Optional[List[FullConf]]]:
             if use_gui and lock_renderer_during_search:
                 with pp.LockRenderer():
@@ -1080,6 +1153,11 @@ def run_stage_trial(
                     break
         planning_time_s = time.perf_counter() - t_plan
 
+        #* ================================================================
+        #* SMOOTH PATH
+        #* Keep the raw path as *_before_smoothing, then shortcut/smooth the
+        #* found path (when enabled) to fewer, cleaner waypoints.
+        #* ================================================================
         path_before_smoothing = None if path is None else list(path)
         path_confs_before_smoothing = None if path_confs is None else [np.asarray(conf, dtype=float) for conf in path_confs]
         if path is not None and enable_smoothing:
@@ -1110,6 +1188,12 @@ def run_stage_trial(
             logger.info(f"Smoothing reduced path to {len(path)} waypoints.")
         runtime_s = time.perf_counter() - t0
 
+        #* ================================================================
+        #* VALIDATE TRAJECTORY
+        #* Snap the scene to the final pose, summarize joint continuity, and
+        #* run validate_stage_trajectory (collision + continuity checks,
+        #* optional report) to decide pass/fail.
+        #* ================================================================
         if path is not None:
             logger.info(f"Found Stage {stage} pose path with {len(path)} waypoints.")
             pp.set_pose(scene["bar_body"], path[-1])
@@ -1174,6 +1258,11 @@ def run_stage_trial(
             validated_success = validated_success and bool(validation.get("joint_continuity_ok"))
             validated_success = validated_success and bool(validation.get("collision_free"))
 
+        #* ================================================================
+        #* BUILD RESULT
+        #* Package the path, confs, timings, validation, and success flags
+        #* into the result dict returned to the caller.
+        #* ================================================================
         return {
             "stage": stage,
             "scene": scene,

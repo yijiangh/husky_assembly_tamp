@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from collections import Counter
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
@@ -11,6 +12,7 @@ from compas_fab.robots import RobotSemantics
 from compas_robots import RobotModel
 from pybullet_planning.motion_planners.rrt import TreeNode, configs
 
+from husky_assembly_tamp.utils.params import DATA_DIR
 from husky_assembly_tamp.utils.util import calculate_pose_error, normalize_angles, setup_logger
 
 
@@ -36,6 +38,19 @@ STAGE3_GRASP_MASK_LINKS = [
 # = MOBILE_BASE_FROM_TOOL0_LEFT_HOME[0] + (0, -0.2, 0); orientation derived from grasps at runtime
 MOBILE_BASE_FROM_BAR_HOME_POSITION: np.ndarray = np.array(
     [0.3974, -0.0398, 0.8622], dtype=float
+)
+
+# Husky dual-arm URDF/SRDF, used by the joint-space collision predicate.
+# Defined here (not imported from ``run``) so this module never needs to import
+# the standalone runner — importing ``run`` would pull in its heavier deps and
+# create a core<->run import cycle.
+HUSKY_DUAL_URDF_PATH = os.path.join(
+    DATA_DIR,
+    "husky_urdf/mt_husky_dual_ur5_e_moveit_config/urdf/husky_dual_ur5_e_no_base_joint_All_Calibrated.urdf",
+)
+HUSKY_DUAL_SRDF_PATH = os.path.join(
+    DATA_DIR,
+    "husky_urdf/mt_husky_dual_ur5_e_moveit_config/config/dual_arm_husky.srdf",
 )
 
 
@@ -323,15 +338,66 @@ def export_tree(nodes: List[TreeNode]) -> Dict[str, List[List[float]]]:
     return {"points": points, "edges": edges}
 
 
-def get_pose_collision_fn(bar_body: int, obstacle_bodies: Sequence[int], enable_collision: bool) -> Callable[[PoseLike], bool]:
-    if not enable_collision:
-        return lambda pose: False
-    floating_collision_fn = pp.get_floating_body_collision_fn(
-        bar_body,
-        obstacles=list(obstacle_bodies),
-        disabled_collisions=[],
-    )
-    return lambda pose: bool(floating_collision_fn(pose))
+def build_cfab_pose_collision_fn(planner, start_state, active_bar_id: str) -> Callable[[PoseLike], bool]:
+    """Return a closure ``(world_from_bar_sample: PoseLike) -> bool``.
+
+    True == colliding. The closure clones ``start_state`` per call, overrides
+    the active bar's ``attachment_frame`` so cfab's ``set_robot_cell_state``
+    lands the bar at the sampled world pose (the bar stays attached, so cfab's
+    CC.4 still fires with ``touch_bodies`` respected), and calls
+    ``planner.check_collision`` with all CC steps skipped except CC.4.
+
+    Math: ``set_robot_cell_state`` places an attached RB at
+    ``link_pose_world * attachment_frame``. To land it at a sampled world
+    pose we override ``attachment_frame = inverse(link_pose_world) * sample``.
+    The link pose is captured ONCE at start_state (the robot configuration
+    does not change between pose samples).
+
+    Note on joints: joints in this cell attach to robot tool0 links, NOT to
+    the bar. When the bar is moved to a sampled pose, joints stay anchored
+    to the robot — their cfab CC checks reflect the joints' current
+    tool0-anchored positions, not their hypothetical positions had they
+    followed the bar. That's fine for pose-space pre-reject (bar mesh vs
+    environment); joints get their real check at the joint-space layer.
+    """
+    from compas.geometry import Frame
+    from compas_fab.backends import CollisionCheckError
+
+    attached_link_name = start_state.rigid_body_states[active_bar_id].attached_to_link
+    if not attached_link_name:
+        raise ValueError(
+            f"{active_bar_id!r} is not attached to any link in start_state; "
+            "pose-space override needs an attached link to compute attachment_frame."
+        )
+    robot_puid = planner.client.robot_puid
+    attached_link_id = planner.client.robot_link_puids[attached_link_name]
+    link_pose_world_at_start = pp.get_link_pose(robot_puid, attached_link_id)
+    inv_link = pp.invert(link_pose_world_at_start)
+
+    pose_cc_opts = {
+        "_skip_cc1": True, "_skip_cc2": True, "_skip_cc3": True,
+        "_skip_cc4": False, "_skip_cc5": True, "verbose": False,
+    }
+
+    def _pose_collision_fn(world_from_bar_sample: PoseLike) -> bool:
+        attach_pose = pp.multiply(inv_link, world_from_bar_sample)
+        attach_frame = Frame.from_quaternion(
+            [attach_pose[1][3], attach_pose[1][0], attach_pose[1][1], attach_pose[1][2]],
+            point=list(attach_pose[0]),
+        )
+        s = start_state.copy()
+        s.rigid_body_states[active_bar_id].attachment_frame = attach_frame
+        try:
+            planner.check_collision(s, options=pose_cc_opts)
+        except CollisionCheckError:
+            return True
+        return False
+
+    return _pose_collision_fn
+
+
+def _noop_pose_collision_fn(pose: PoseLike) -> bool:
+    return False
 
 
 def get_disabled_collisions_from_link_names(
@@ -354,7 +420,6 @@ def get_joint_collision_fn(
     bar_body: int,
     grasp_bar_from_left: PoseLike,
 ) -> Callable[..., bool]:
-    from .run import HUSKY_DUAL_URDF_PATH, HUSKY_DUAL_SRDF_PATH
     robot_model = RobotModel.from_urdf_file(HUSKY_DUAL_URDF_PATH)
     semantics = RobotSemantics.from_srdf_file(HUSKY_DUAL_SRDF_PATH, robot_model)
     disabled_collisions = get_disabled_collisions_from_link_names(robot, semantics.disabled_collisions)
@@ -612,6 +677,7 @@ def derive_constrained_start(
     max_ik_attempts: int = 20,
     random_seed: Optional[int] = None,
     shuffle_deltas: bool = False,
+    joint_collision_fn: Optional[Callable[[FullConf], bool]] = None,
 ) -> Tuple[Optional[PoseLike], Optional[np.ndarray]]:
     """Derive a constraint-satisfying start (bar pose, joint conf).
 
@@ -619,6 +685,12 @@ def derive_constrained_start(
     (driven by ``random_seed``) instead of sorted by distance to the home anchor.
     This lets the caller derive *different* starts on different seeds — useful
     for hard problems where the first-IK-feasible home cannot reach the goal.
+
+    ``joint_collision_fn`` (``conf_12 -> bool``, True == colliding) lets the
+    caller inject a collision predicate. When given it is used as-is; otherwise
+    one is built from the husky URDF/SRDF via :func:`get_joint_collision_fn`
+    (the standalone-runner path). Callers driving a compas_fab planner pass a
+    cfab-backed predicate so no URDF file on disk is required.
     """
     if len(seed_conf) != 12:
         raise ValueError("seed_conf must have length 12")
@@ -656,8 +728,7 @@ def derive_constrained_start(
     base_pos_mb = np.asarray(MOBILE_BASE_FROM_BAR_HOME_POSITION, dtype=float) - midpoint_in_mb
 
     rng = np.random.default_rng(random_seed)
-    joint_collision_fn = None
-    if bar_body is not None:
+    if joint_collision_fn is None and bar_body is not None:
         joint_collision_fn = get_joint_collision_fn(
             robot=robot,
             arm_joints=arm_joints,
@@ -949,6 +1020,10 @@ def plan_pose_rrt(
     obstacle_bodies: Sequence[int],
     start_pose: PoseLike,
     goal_pose: PoseLike,
+    *,
+    planner=None,
+    start_state=None,
+    active_bar_id: Optional[str] = None,
     start_conf: Optional[FullConf] = None,
     goal_conf: Optional[FullConf] = None,
     dist_metric: str = "feature",
@@ -1024,11 +1099,21 @@ def plan_pose_rrt(
         False).  Returns ``(None, None)`` if no path is found within the given limits.
     """
     # --- Setup: RNG, feature points for "feature" distance, and pose-level collision fn.
-    # Pose collision fn only used when IK is off (Stage 1). With enable_ik, joint_collision_fn
-    # in extend_toward is the authoritative check, so we disable the pose-level one here.
+    # Pose collision fn now uses cfab.check_collision via build_cfab_pose_collision_fn.
+    # It runs whenever enable_collision is True, regardless of IK stage — the cfab
+    # check is fast enough and is the single source of truth for ACM.
     rng = np.random.default_rng(random_seed)
     feature_points = list(feature_points) if feature_points is not None else get_bar_feature_points()
-    collision_fn = get_pose_collision_fn(bar_body, obstacle_bodies, enable_collision and not enable_ik)
+    if enable_collision:
+        if planner is None or start_state is None or active_bar_id is None:
+            raise ValueError(
+                "plan_pose_rrt with enable_collision=True requires keyword args "
+                "`planner`, `start_state`, and `active_bar_id` so the cfab "
+                "pose-collision closure can be built."
+            )
+        collision_fn = build_cfab_pose_collision_fn(planner, start_state, active_bar_id)
+    else:
+        collision_fn = _noop_pose_collision_fn
 
     # --- Endpoint feasibility: reject early if start/goal already in collision.
     # Use joint-space check when a robot collision fn is provided (Stage 3),
@@ -1152,6 +1237,10 @@ def plan_pose_birrt(
     obstacle_bodies: Sequence[int],
     start_pose: PoseLike,
     goal_pose: PoseLike,
+    *,
+    planner=None,
+    start_state=None,
+    active_bar_id: Optional[str] = None,
     start_conf: Optional[FullConf] = None,
     goal_conf: Optional[FullConf] = None,
     dist_metric: str = "feature",
@@ -1185,7 +1274,15 @@ def plan_pose_birrt(
     """
     rng = np.random.default_rng(random_seed)
     feature_points = list(feature_points) if feature_points is not None else get_bar_feature_points()
-    collision_fn = get_pose_collision_fn(bar_body, obstacle_bodies, enable_collision and not enable_ik)
+    if enable_collision:
+        if planner is None or start_state is None or active_bar_id is None:
+            raise ValueError(
+                "plan_pose_birrt with enable_collision=True requires keyword args "
+                "`planner`, `start_state`, and `active_bar_id`."
+            )
+        collision_fn = build_cfab_pose_collision_fn(planner, start_state, active_bar_id)
+    else:
+        collision_fn = _noop_pose_collision_fn
 
     if joint_collision_fn is not None:
         if start_conf is None or goal_conf is None:

@@ -758,6 +758,56 @@ def plan_constrained_dual_arm(
     return [np.asarray(q, dtype=float) for q in path_confs], info
 
 
+# === DEBUG (temporary; remove after M2 waypoint-1 debugging) ==================
+def _dbg_probe_ik_failure(planner, state, target, ik_options, group, waypoint,
+                          side, joint_names_12, in_group_joints, other_joints):
+    """Re-probe a failed group IK to split unreachable / other-arm-recruited /
+    collision. Runs on a copy of ``state`` so the real loop is undisturbed."""
+    seed = {n: float(state.robot_configuration[n]) for n in joint_names_12}
+    print(f"\n[DBG wp{waypoint}] {side} IK failed under the real options; probing why...")
+    print(f"[DBG]   seed in-group = {[round(seed[n], 3) for n in in_group_joints]}")
+    print(f"[DBG]   seed other    = {[round(seed[n], 3) for n in other_joints]}")
+
+    # (1) Same target + seed, but collision OFF: does the group even converge?
+    opts = dict(ik_options)
+    opts["check_collision"] = False
+    try:
+        conf = planner.inverse_kinematics(target, state.copy(), group, opts)
+    except PlanningGroupNotSupported:
+        print("[DBG]   collision-OFF: CONVERGED but pybullet moved an OUT-OF-GROUP "
+              "joint (whole-body IK recruited the OTHER arm) -> cfab rejects it.")
+        print("[DBG]   => this arm alone cannot reach the target from the seed.")
+        return
+    except (InverseKinematicsError, CollisionCheckError) as e2:
+        print(f"[DBG]   collision-OFF: STILL no solution ({type(e2).__name__}).")
+        print("[DBG]   => target is unreachable / non-convergent, not a collision issue.")
+        return
+
+    sol = {n: float(conf[n]) for n in joint_names_12}
+    d_in = max(abs(sol[n] - seed[n]) for n in in_group_joints)
+    d_ot = max(abs(sol[n] - seed[n]) for n in other_joints)
+    print(f"[DBG]   collision-OFF: CONVERGED in-group. |d| in-group={d_in:.3f} "
+          f"other-arm={d_ot:.3f} rad")
+
+    # (2) Does that converged solution collide? Mirror the loop's skip flags
+    # (CC1 self + CC2 tool active; CC3/4/5 env skipped when skip_env_collisions).
+    s = state.copy()
+    for n in joint_names_12:
+        s.robot_configuration[n] = sol[n]
+    cc_opts = {"full_report": True, "verbose": False}
+    for k in ("_skip_cc3", "_skip_cc4", "_skip_cc5"):
+        if ik_options.get(k):
+            cc_opts[k] = True
+    try:
+        planner.check_collision(s, options=cc_opts)
+        print("[DBG]   that solution is COLLISION-FREE under the loop's CC flags.")
+    except CollisionCheckError as cc:
+        print("[DBG]   that solution COLLIDES under the loop's CC flags:")
+        for line in str(cc).splitlines():
+            print(f"[DBG]       {line}")
+# === END DEBUG ================================================================
+
+
 def _run_dual_arm_cartesian_ik_loop(
     planner,
     robot_cell,
@@ -823,6 +873,10 @@ def _run_dual_arm_cartesian_ik_loop(
             conf_L = planner.inverse_kinematics(left_target, state, LEFT_GROUP, ik_options)
         except (InverseKinematicsError, CollisionCheckError) as e:
             logger.warning(f"[cartesian IK loop] waypoint {i}: LEFT FAIL: {getattr(e, 'message', e)}")
+            # === DEBUG (temporary; remove after M2 debugging) ===
+            _dbg_probe_ik_failure(planner, state, left_target, ik_options, LEFT_GROUP,
+                                  i, "LEFT", joint_names_12, left_arm_joints, right_arm_joints)
+            # === END DEBUG ===
             return None
         except PlanningGroupNotSupported:
             planner.set_robot_cell_state(state)
@@ -830,6 +884,10 @@ def _run_dual_arm_cartesian_ik_loop(
                 conf_L = planner.inverse_kinematics(left_target, state, LEFT_GROUP, ik_options)
             except Exception as e2:
                 logger.warning(f"[cartesian IK loop] waypoint {i}: LEFT FAIL after retry: {e2}")
+                # === DEBUG (temporary; remove after M2 debugging) ===
+                _dbg_probe_ik_failure(planner, state, left_target, ik_options, LEFT_GROUP,
+                                      i, "LEFT", joint_names_12, left_arm_joints, right_arm_joints)
+                # === END DEBUG ===
                 return None
         for n in right_arm_joints:
             conf_L[n] = float(state.robot_configuration[n])

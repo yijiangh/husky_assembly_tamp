@@ -414,12 +414,18 @@ def plan_free_dual_arm(
     joint_resolution: float = 0.05,
     smooth_iterations: int = 20,
     debug: bool = False,
+    draw_fn=None,
 ) -> Tuple[Optional[List[np.ndarray]], dict]:
     """12-DOF joint-space BiRRT between ``start_state`` and ``goal_conf``.
 
     Uses ``planner.check_collision`` as the collision predicate — obstacles,
     attached tools, attached rigid bodies, and the ACM all come from the
     cell state. ``pybullet_planning.solve_motion_plan`` runs the BiRRT.
+
+    ``draw_fn`` (optional) is forwarded to ``solve_motion_plan`` for live
+    search-tree visualization; see pybullet_planning's ``rrt_connect`` for its
+    ``draw_fn(config, segment, *valid)`` contract. ``None`` (default) draws
+    nothing.
 
     Returns ``(path, info)`` where ``path`` is a list of 12-vec numpy
     arrays, or ``None`` on failure (``info['failure_reason']`` populated).
@@ -466,6 +472,7 @@ def plan_free_dual_arm(
             smooth=int(smooth_iterations),
             diagnosis=debug,
             coarse_waypoints=False,
+            draw_fn=draw_fn,
         )
 
     if raw_path is None:

@@ -1,10 +1,44 @@
+"""Task-space (SE(3)) RRT motion planner for a dual-arm Husky carrying a bar.
+
+The robot holds one rigid bar with both arms and we want to move that bar from
+a start pose to a goal pose without hitting anything. Instead of planning
+directly in the 12 arm joints, we plan in the *bar's* SE(3) pose (position +
+orientation) and let inverse kinematics figure out the arm joints at each step.
+That keeps the two-arm grasp rigid throughout the motion.
+
+Every candidate bar pose is checked in three escalating stages:
+
+    Stage 1 - float the bar (no robot) and check the bar mesh against the
+              environment obstacles. Cheap early reject.
+    Stage 2 - solve dual-arm IK so both tool flanges follow the grasped bar
+              pose. If IK misses, the bar pose is unreachable.
+    Stage 3 - with the IK joints set, check the whole robot (arms + tools +
+              held bar) for self / world collision in joint space.
+
+Collision checks in Stages 1 and 3 are delegated to the compas_fab ("cfab")
+PyBullet planner so the allowed-collision rules are defined in exactly one
+place (see ``build_cfab_pose_collision_fn`` and the cfab collision adapter).
+
+Two public planners are provided:
+
+    ``plan_pose_rrt``   - single-tree RRT grown from the start pose.
+    ``plan_pose_birrt`` - bidirectional RRT-Connect (grows a start tree and a
+                          goal tree and stitches them when they meet).
+
+Both return ``(path_poses, path_confs)``: the SE(3) waypoints of the bar and,
+when IK is enabled, the matching 12-DOF dual-arm joint configuration per
+waypoint. Distances are in metres and angles in radians throughout.
+"""
+
 from __future__ import annotations
 
+# * Standard library
 import os
 import time
 from collections import Counter
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+# * Third-party: numeric core, PyBullet, and the compas robotics stack
 import numpy as np
 import pybullet
 import pybullet_planning as pp
@@ -12,6 +46,7 @@ from compas_fab.robots import RobotSemantics
 from compas_robots import RobotModel
 from pybullet_planning.motion_planners.rrt import TreeNode, configs
 
+# * This package (husky_assembly_tamp) — data paths + shared helpers
 from husky_assembly_tamp.utils.params import DATA_DIR
 from husky_assembly_tamp.utils.util import calculate_pose_error, normalize_angles, setup_logger
 
@@ -55,6 +90,19 @@ HUSKY_DUAL_SRDF_PATH = os.path.join(
 
 
 def maybe_normalize_angles(values: Sequence[float] | np.ndarray, use_angle_normalization: bool) -> np.ndarray:
+    """Optionally wrap joint angles into a canonical (-pi, pi] branch.
+
+    A single on/off switch so call sites can choose between raw IK output and
+    normalized angles without duplicating the check.
+
+    Args:
+        values (Sequence[float] | np.ndarray): joint angles in radians.
+        use_angle_normalization (bool): when True, wrap each angle via
+            ``normalize_angles``; when False, pass the values through unchanged.
+
+    Returns:
+        np.ndarray: the (optionally normalized) angles as a float array.
+    """
     arr = np.asarray(values, dtype=float)
     if use_angle_normalization:
         return np.asarray(normalize_angles(arr), dtype=float)
@@ -75,7 +123,21 @@ def joint_step_exceeds_threshold(
     current_conf: Sequence[float] | np.ndarray,
     threshold_rad: Optional[float],
 ) -> bool:
-    """Check raw command-space delta after branch unwrapping."""
+    """Whether any joint moved more than ``threshold_rad`` between two configs.
+
+    Used to reject IK "branch flips": when consecutive pose steps land on
+    different IK solutions, one or more joints jump by a large amount even though
+    the tool pose barely changed.
+
+    Args:
+        next_conf (Sequence[float] | np.ndarray): the candidate next configuration.
+        current_conf (Sequence[float] | np.ndarray): the previous configuration.
+        threshold_rad (Optional[float]): max allowed per-joint change in radians;
+            ``None`` disables the check (always returns False).
+
+    Returns:
+        bool: True if the largest per-joint delta exceeds the threshold.
+    """
     if threshold_rad is None:
         return False
     step_delta = np.abs(np.asarray(next_conf, dtype=float) - np.asarray(current_conf, dtype=float))
@@ -83,6 +145,19 @@ def joint_step_exceeds_threshold(
 
 
 def get_bar_feature_points(bar_box_dims: Sequence[float] = BAR_BOX_DIMS) -> List[np.ndarray]:
+    """Return the 8 corner points of the bar bounding box, in the bar-local frame.
+
+    These corners are the "feature points" used by the ``"feature"`` distance
+    metric: projecting all eight through a pose and comparing corner-to-corner
+    captures position and orientation differences together in one vector.
+
+    Args:
+        bar_box_dims (Sequence[float]): the bar bounding-box side lengths
+            (width, depth, length) in metres.
+
+    Returns:
+        List[np.ndarray]: eight 3-vectors, one per box corner, in the bar frame.
+    """
     half_width, half_depth, half_length = 0.5 * np.asarray(bar_box_dims, dtype=float)
     return [
         np.array([sx * half_width, sy * half_depth, sz * half_length], dtype=float)
@@ -96,7 +171,27 @@ def bar_orientation_from_grasps(
     grasp_targets: Sequence[GraspTarget],
     target_axis_in_mb: np.ndarray = np.array([0.0, 1.0, 0.0]),
 ) -> Tuple[float, float, float, float]:
-    """Quaternion (x,y,z,w) aligning the bar-local right->left grasp vector with target_axis_in_mb."""
+    """Quaternion that aligns the bar's right->left grasp axis with a target axis.
+
+    From the two grasp targets (each a bar pose plus the tool0 pose that grasps
+    it), find the bar-local vector pointing from the right grasp to the left
+    grasp and return the rotation that turns that vector onto
+    ``target_axis_in_mb`` (expressed in the mobile-base frame). Used to pick a
+    natural home orientation for the held bar.
+
+    Args:
+        grasp_targets (Sequence[GraspTarget]): at least two
+            ``(mobile_base_from_bar, mobile_base_from_tool0)`` pairs; index 0 is
+            the left grasp, index 1 the right.
+        target_axis_in_mb (np.ndarray): the direction, in the mobile-base frame,
+            the right->left grasp vector should end up pointing along.
+
+    Returns:
+        Tuple[float, float, float, float]: the aligning quaternion as (x, y, z, w).
+
+    Raises:
+        ValueError: if fewer than two grasp targets are given.
+    """
     if len(grasp_targets) < 2:
         raise ValueError("Expected two grasp targets to derive bar orientation.")
     mobile_base_from_bar_left, mobile_base_from_tool0_left_goal = grasp_targets[0]
@@ -133,7 +228,42 @@ def auto_compute_home_bar_pose(
     allow_unvalidated_fallback: bool = True,
     bar_axis_step_rad: float = float(np.deg2rad(30.0)),
 ) -> Dict[str, Any]:
-    """Auto-compute the home bar pose by optimizing bar-axis rotation around a fixed bar position+orientation."""
+    """Pick a home bar pose by sweeping rotation about the bar's own long axis.
+
+    Holds the bar position and base orientation fixed and spins the bar about
+    its long axis in ``bar_axis_step_rad`` increments. Each candidate is scored
+    by how well the average of the two tool0 Z-axes points along
+    ``forward_direction`` (so the tools face "forward"). Candidates are ranked
+    best-first; when an ``ik_validator`` is given, the best IK-feasible one among
+    the top ``num_geometric_candidates`` is chosen.
+
+    Args:
+        grasp_targets (Sequence[GraspTarget]): two
+            ``(mobile_base_from_bar, mobile_base_from_tool0)`` grasp pairs (left
+            then right).
+        mobile_base_from_bar (PoseLike): the fixed bar position + orientation to
+            spin about (only the bar-axis rotation is optimized).
+        forward_direction (np.ndarray): the mobile-base direction the tools
+            should face; higher alignment scores better.
+        ik_validator (Optional[Callable[[PoseLike], bool]]): optional test that
+            returns True when a candidate bar pose is IK-feasible.
+        num_geometric_candidates (int): how many top-scoring candidates to feed
+            through ``ik_validator`` before giving up.
+        allow_unvalidated_fallback (bool): when True, fall back to the best
+            geometric candidate if none pass IK; when False, leave the result
+            un-validated (the caller inspects ``ik_validated``).
+        bar_axis_step_rad (float): angular step (radians) of the bar-axis sweep.
+
+    Returns:
+        Dict[str, Any]: the chosen home pose plus metadata, including
+        ``mobile_base_from_bar_start`` (final bar pose), the two
+        ``mobile_base_from_tool0_*_start`` tool poses, the grasp transforms,
+        ``chosen_bar_axis_theta``, ``alignment_score``, and ``ik_validated``.
+
+    Raises:
+        ValueError: if fewer than two grasp targets are given, if
+            ``forward_direction`` is zero, or if no candidate could be generated.
+    """
     if len(grasp_targets) < 2:
         raise ValueError("Expected two grasp targets to auto-compute the home bar pose.")
 
@@ -205,6 +335,18 @@ def auto_compute_home_bar_pose(
 
 
 def pose_to_feature_vec(pose: PoseLike, feature_points: Sequence[np.ndarray]) -> Optional[np.ndarray]:
+    """Project the bar feature points through a pose into a flat world-coord vector.
+
+    Args:
+        pose (PoseLike): the bar pose ``((x, y, z), (qx, qy, qz, qw))``.
+        feature_points (Sequence[np.ndarray]): bar-local corner points from
+            ``get_bar_feature_points``.
+
+    Returns:
+        Optional[np.ndarray]: the concatenated world coordinates of every
+        feature point (length ``3 * n_points``), or ``None`` if no feature
+        points were supplied.
+    """
     if not feature_points:
         return None
     pts = []
@@ -215,6 +357,20 @@ def pose_to_feature_vec(pose: PoseLike, feature_points: Sequence[np.ndarray]) ->
 
 
 def pose_distance(pose1: PoseLike, pose2: PoseLike, dist_metric: str, feature_points: Sequence[np.ndarray]) -> float:
+    """Distance between two bar poses under the chosen metric.
+
+    Args:
+        pose1 (PoseLike): first pose ``((x, y, z), quat_xyzw)``.
+        pose2 (PoseLike): second pose, same format.
+        dist_metric (str): ``"feature"`` compares projected feature-point vectors
+            (blends position and orientation); anything else uses the straight
+            position delta combined with the quaternion angle.
+        feature_points (Sequence[np.ndarray]): bar-local corners, used only for
+            the ``"feature"`` metric.
+
+    Returns:
+        float: the scalar distance.
+    """
     pos1, quat1 = pose1
     pos2, quat2 = pose2
     if dist_metric == "feature":
@@ -228,6 +384,17 @@ def pose_distance(pose1: PoseLike, pose2: PoseLike, dist_metric: str, feature_po
 
 
 def _pose_path_cost(path_poses: Sequence[PoseLike], dist_metric: str, feature_points: Sequence[np.ndarray]) -> float:
+    """Total path length as the sum of consecutive pose-to-pose distances.
+
+    Args:
+        path_poses (Sequence[PoseLike]): ordered poses along the path.
+        dist_metric (str): distance metric passed to ``pose_distance``.
+        feature_points (Sequence[np.ndarray]): bar-local corners for the
+            ``"feature"`` metric.
+
+    Returns:
+        float: the summed segment distances (0.0 for a path shorter than 2 poses).
+    """
     if len(path_poses) < 2:
         return 0.0
     return float(
@@ -243,7 +410,23 @@ def _pose_path_inflection_indices(
     feature_points: Sequence[np.ndarray],
     tolerance: float = 1e-3,
 ) -> List[int]:
-    """Return dense-path indices that act like geometric control points."""
+    """Find the "corner" indices of a dense pose path (its geometric control points).
+
+    Walks the feature-vector path and marks an index whenever the travel
+    direction changes by more than ``tolerance``. This thins a dense interpolated
+    path down to the few waypoints that actually define its shape.
+
+    Args:
+        path_poses (Sequence[PoseLike]): the dense ordered poses.
+        feature_points (Sequence[np.ndarray]): bar-local corners used to build
+            each pose's feature vector.
+        tolerance (float): minimum direction change (and minimum travel distance)
+            for a point to count as a new segment.
+
+    Returns:
+        List[int]: indices into ``path_poses`` for the start, each detected
+        inflection, and the end.
+    """
     if not path_poses:
         return []
     if len(path_poses) <= 2:
@@ -288,6 +471,26 @@ def sample_pose(
     workspace_xy: float,
     workspace_z: float,
 ) -> Tuple[PoseLike, bool]:
+    """Draw a target bar pose for one RRT iteration (goal-biased sampling).
+
+    With probability ``goal_sample_prob`` returns the goal pose directly;
+    otherwise samples a random pose in a box around the robot base (uniform XY
+    within ``workspace_xy``, Z above the base up to ``workspace_z``, and a fully
+    random orientation).
+
+    Args:
+        robot (int): PyBullet body id, used to read the base position the box is
+            centred on.
+        goal_pose (PoseLike): the goal bar pose returned on a goal-sample.
+        rng (np.random.Generator): random source.
+        goal_sample_prob (float): probability of returning ``goal_pose`` directly.
+        workspace_xy (float): full XY side length (metres) of the sampling box.
+        workspace_z (float): Z height (metres) of the sampling box above the base.
+
+    Returns:
+        Tuple[PoseLike, bool]: the sampled pose and a flag that is True when the
+        pose is the goal pose.
+    """
     if rng.random() < goal_sample_prob:
         return goal_pose, True
     base_pos, _ = pp.get_pose(robot)
@@ -309,6 +512,21 @@ def nearest_node(
     feature_points: Sequence[np.ndarray],
     feature_vecs: Dict[int, np.ndarray],
 ) -> TreeNode:
+    """Return the tree node closest to ``target_pose`` under the chosen metric.
+
+    Args:
+        nodes (List[TreeNode]): the current tree nodes.
+        target_pose (PoseLike): the pose to find the nearest node to.
+        dist_metric (str): ``"feature"`` uses the cached feature-vector distance
+            (fast); otherwise falls back to ``pose_distance``.
+        feature_points (Sequence[np.ndarray]): bar-local corners for the feature
+            metric.
+        feature_vecs (Dict[int, np.ndarray]): cache mapping ``id(node)`` to that
+            node's feature vector (feature metric only).
+
+    Returns:
+        TreeNode: the nearest node.
+    """
     if dist_metric == "feature":
         target_vec = pose_to_feature_vec(target_pose, feature_points)
         if target_vec is not None:
@@ -320,6 +538,17 @@ def nearest_node(
 
 
 def export_tree(nodes: List[TreeNode]) -> Dict[str, List[List[float]]]:
+    """Flatten a tree into a serializable points + edges dict for debugging.
+
+    Args:
+        nodes (List[TreeNode]): the tree nodes; each node's ``config`` is a pose
+            whose position becomes a point.
+
+    Returns:
+        Dict[str, List[List[float]]]: ``{"points": [[x, y, z], ...], "edges":
+        [[parent_idx, child_idx], ...]}`` where the edge indices refer into
+        ``points``.
+    """
     id_to_idx: Dict[int, int] = {}
     points: List[List[float]] = []
     for node in nodes:
@@ -380,6 +609,18 @@ def build_cfab_pose_collision_fn(planner, start_state, active_bar_id: str) -> Ca
     }
 
     def _pose_collision_fn(world_from_bar_sample: PoseLike) -> bool:
+        """Return True if the bar collides when placed at ``world_from_bar_sample``.
+
+        Clones the captured start state, overrides the bar's attachment frame so
+        cfab lands it at the sampled world pose, and runs only the CC.4 step of
+        ``planner.check_collision``.
+
+        Args:
+            world_from_bar_sample (PoseLike): the world bar pose to test.
+
+        Returns:
+            bool: True if colliding, False otherwise.
+        """
         attach_pose = pp.multiply(inv_link, world_from_bar_sample)
         attach_frame = Frame.from_quaternion(
             [attach_pose[1][3], attach_pose[1][0], attach_pose[1][1], attach_pose[1][2]],
@@ -397,6 +638,14 @@ def build_cfab_pose_collision_fn(planner, start_state, active_bar_id: str) -> Ca
 
 
 def _noop_pose_collision_fn(pose: PoseLike) -> bool:
+    """Collision stub that always reports "no collision" (used when disabled).
+
+    Args:
+        pose (PoseLike): ignored.
+
+    Returns:
+        bool: always False.
+    """
     return False
 
 
@@ -404,6 +653,18 @@ def get_disabled_collisions_from_link_names(
     robot: int,
     link_name_pairs: Sequence[Tuple[str, str]],
 ) -> List[Tuple[int, int]]:
+    """Translate link-name pairs into PyBullet (link-index, link-index) pairs.
+
+    Pairs whose links are missing on the robot are silently skipped.
+
+    Args:
+        robot (int): PyBullet body id.
+        link_name_pairs (Sequence[Tuple[str, str]]): pairs of link names whose
+            mutual collision should be disabled.
+
+    Returns:
+        List[Tuple[int, int]]: the resolved link-index pairs.
+    """
     disabled_pairs: List[Tuple[int, int]] = []
     for link1_name, link2_name in link_name_pairs:
         if not (pp.has_link(robot, link1_name) and pp.has_link(robot, link2_name)):
@@ -420,6 +681,28 @@ def get_joint_collision_fn(
     bar_body: int,
     grasp_bar_from_left: PoseLike,
 ) -> Callable[..., bool]:
+    """Build a joint-space collision predicate for the dual-arm robot + held bar.
+
+    Loads the Husky URDF/SRDF to seed the disabled-collision (self-collision)
+    set, attaches the bar to the left tool, and additionally disables collisions
+    between the grasp-mask links (wrists/tools) and the bar so the grasp contact
+    itself is not flagged. Returns the standard pybullet_planning collision
+    function.
+
+    Args:
+        robot (int): PyBullet body id.
+        arm_joints (Sequence[int]): the movable arm joint indices the predicate
+            reads.
+        obstacle_bodies (Sequence[int]): body ids to check the robot against.
+        tool_link_left (int): link index the bar is attached to.
+        bar_body (int): PyBullet body id of the held bar.
+        grasp_bar_from_left (PoseLike): the left-tool grasp transform
+            (bar-from-tool), used to build the attachment.
+
+    Returns:
+        Callable[..., bool]: a predicate ``(conf) -> bool`` that is True when the
+        configuration is in collision.
+    """
     robot_model = RobotModel.from_urdf_file(HUSKY_DUAL_URDF_PATH)
     semantics = RobotSemantics.from_srdf_file(HUSKY_DUAL_SRDF_PATH, robot_model)
     disabled_collisions = get_disabled_collisions_from_link_names(robot, semantics.disabled_collisions)
@@ -468,6 +751,17 @@ def get_joint_collision_fn_cfab(
 
 
 def goal_pose_reached(pose: PoseLike, goal_pose: PoseLike, position_res: float, rotation_res: float) -> bool:
+    """Whether ``pose`` is within position + rotation tolerance of ``goal_pose``.
+
+    Args:
+        pose (PoseLike): the pose to test.
+        goal_pose (PoseLike): the goal pose.
+        position_res (float): position tolerance in metres.
+        rotation_res (float): orientation tolerance in radians.
+
+    Returns:
+        bool: True if within both tolerances.
+    """
     return bool(
         pp.is_pose_close(
             pose,
@@ -487,6 +781,27 @@ def solve_single_arm_ik(
     arm_slice: slice,
     use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
 ) -> Optional[FullConf]:
+    """Solve IK for one arm and splice the result into the full 12-DOF config.
+
+    Seeds pybullet's IK from ``full_seed_conf``, solves for ``tool_link`` to
+    reach ``target_tool_pose``, writes only the ``arm_slice`` joints back, and
+    verifies the achieved tool pose is within tolerance before accepting.
+
+    Args:
+        robot (int): PyBullet body id.
+        arm_joints (Sequence[int]): all arm joint indices (both arms) the seed is
+            applied to.
+        tool_link (int): the tool link index to drive to the target.
+        full_seed_conf (FullConf): the 12-DOF warm-start configuration.
+        target_tool_pose (PoseLike): the world tool0 pose to reach.
+        arm_slice (slice): the slice of the 12-vector this arm owns (0:6 left,
+            6:12 right).
+        use_angle_normalization (bool): whether to normalize the solved angles.
+
+    Returns:
+        Optional[FullConf]: the updated 12-DOF configuration, or ``None`` if IK
+        returned too few values or missed the target beyond 1e-4.
+    """
     seed_conf = np.asarray(full_seed_conf, dtype=float)
     pp.set_joint_positions(robot, arm_joints, seed_conf)
     result = np.asarray(
@@ -524,6 +839,28 @@ def validate_dual_arm_bar_pose(
     pos_tolerance: float = 1e-4,
     ori_tolerance: float = 1e-4,
 ) -> bool:
+    """Check that a 12-DOF config really holds the bar at ``bar_pose`` with both arms.
+
+    Sets the configuration, then confirms (a) each tool0 reaches its grasp
+    target, and (b) the bar pose implied by each tool through the inverse grasp
+    matches ``bar_pose`` and the two arms agree with each other -- i.e. the rigid
+    dual-arm grasp is self-consistent.
+
+    Args:
+        robot (int): PyBullet body id.
+        arm_joints (Sequence[int]): arm joint indices set from ``full_conf``.
+        tool_link_left (int): left tool0 link index.
+        tool_link_right (int): right tool0 link index.
+        full_conf (FullConf): the 12-DOF configuration to validate.
+        bar_pose (PoseLike): the intended world bar pose.
+        grasp_bar_from_left (PoseLike): left grasp transform (bar-from-tool).
+        grasp_bar_from_right (PoseLike): right grasp transform (bar-from-tool).
+        pos_tolerance (float): position tolerance in metres.
+        ori_tolerance (float): orientation tolerance in radians.
+
+    Returns:
+        bool: True if both tools reach their targets and the grasp is consistent.
+    """
     pp.set_joint_positions(robot, arm_joints, full_conf)
     target_left = pp.multiply(bar_pose, grasp_bar_from_left)
     target_right = pp.multiply(bar_pose, grasp_bar_from_right)
@@ -555,6 +892,28 @@ def solve_dual_arm_pose_ik(
     seed_conf: FullConf,
     use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
 ) -> Optional[FullConf]:
+    """Solve both arms so they rigidly hold the bar at ``bar_pose``.
+
+    Tries two solve orders (right-then-left, then left-then-right): within an
+    order each arm's IK is warm-started from the running configuration so the
+    second arm solves around the first. The first order that yields a validated,
+    consistent dual-arm grasp (see ``validate_dual_arm_bar_pose``) wins.
+
+    Args:
+        robot (int): PyBullet body id.
+        arm_joints (Sequence[int]): arm joint indices.
+        tool_link_left (int): left tool0 link index.
+        tool_link_right (int): right tool0 link index.
+        bar_pose (PoseLike): the world bar pose both arms must grasp.
+        grasp_bar_from_left (PoseLike): left grasp transform (bar-from-tool).
+        grasp_bar_from_right (PoseLike): right grasp transform (bar-from-tool).
+        seed_conf (FullConf): the 12-DOF warm-start configuration.
+        use_angle_normalization (bool): whether to normalize the solved angles.
+
+    Returns:
+        Optional[FullConf]: a validated 12-DOF configuration, or ``None`` if
+        neither solve order produced a consistent grasp.
+    """
     target_left = pp.multiply(bar_pose, grasp_bar_from_left)
     target_right = pp.multiply(bar_pose, grasp_bar_from_right)
     seed_conf = maybe_normalize_angles(seed_conf, use_angle_normalization)
@@ -619,6 +978,33 @@ def solve_endpoint_dual_arm_ik(
     collision_fn: Optional[Callable[[np.ndarray], bool]] = None,
     **_unused_kwargs: Any,
 ) -> Optional[FullConf]:
+    """Dual-arm IK for a single pose, with random restarts and optional collision reject.
+
+    Attempt 0 uses ``seed_conf``; later attempts resample a fully random seed.
+    Each attempt calls ``solve_dual_arm_pose_ik``; the first solution that also
+    passes the optional ``collision_fn`` is returned. Used to find a feasible
+    start/goal joint config for the grasped bar.
+
+    Args:
+        robot (int): PyBullet body id.
+        arm_joints (Sequence[int]): arm joint indices.
+        tool_link_left (int): left tool0 link index.
+        tool_link_right (int): right tool0 link index.
+        bar_pose (PoseLike): the world bar pose to grasp.
+        grasp_bar_from_left (PoseLike): left grasp transform (bar-from-tool).
+        grasp_bar_from_right (PoseLike): right grasp transform (bar-from-tool).
+        seed_conf (FullConf): warm-start for attempt 0.
+        rng (np.random.Generator): random source for the restart seeds.
+        max_attempts (int): number of seeds to try (>= 1).
+        use_angle_normalization (bool): whether to normalize the solved angles.
+        collision_fn (Optional[Callable[[np.ndarray], bool]]): optional predicate;
+            solutions for which it returns True are rejected.
+        **_unused_kwargs: ignored (lets callers pass a shared kwargs bag).
+
+    Returns:
+        Optional[FullConf]: the first collision-free solved configuration, or
+        ``None`` if every attempt failed.
+    """
     for attempt in range(max(1, max_attempts)):
         if attempt == 0:
             attempt_seed = np.asarray(seed_conf, dtype=float)
@@ -646,6 +1032,17 @@ def _grid_in_box(
     box: Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]],
     step: float,
 ) -> List[Tuple[float, float, float]]:
+    """Enumerate a regular 3D grid of points spanning an axis-aligned box.
+
+    Args:
+        box (Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]):
+            the ``((x_lo, x_hi), (y_lo, y_hi), (z_lo, z_hi))`` bounds.
+        step (float): grid spacing along every axis.
+
+    Returns:
+        List[Tuple[float, float, float]]: the grid points (upper bounds included
+        within half a step).
+    """
     (x_lo, x_hi), (y_lo, y_hi), (z_lo, z_hi) = box
     xs = np.arange(x_lo, x_hi + 0.5 * step, step)
     ys = np.arange(y_lo, y_hi + 0.5 * step, step)
@@ -756,6 +1153,19 @@ def derive_constrained_start(
             )
 
             def ik_validator(bar_pose_mb, _found=found):
+                """Return True if a collision-free dual-arm grasp exists for this bar pose.
+
+                Converts the mobile-base bar pose to world, runs
+                ``solve_endpoint_dual_arm_ik``, and on success stashes the world
+                bar pose + solved config into the captured ``found`` dict.
+
+                Args:
+                    bar_pose_mb (PoseLike): candidate bar pose in the mobile-base frame.
+                    _found (dict): captured accumulator for the winning pose/config.
+
+                Returns:
+                    bool: True if an IK solution was found (and recorded).
+                """
                 world_from_bar = pp.multiply(world_from_mobile_base, bar_pose_mb)
                 conf = solve_endpoint_dual_arm_ik(
                     robot=robot,
@@ -924,6 +1334,22 @@ def summarize_joint_continuity(
     threshold_rad: float = DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
     use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
 ) -> Dict[str, Any]:
+    """Summarize the largest per-step joint jump along a joint-space path.
+
+    Args:
+        joint_path (Optional[Sequence[FullConf]]): the ordered configurations, or
+            ``None``.
+        threshold_rad (float): per-step jump (radians) above which a step counts
+            as "bad".
+        use_angle_normalization (bool): accepted for signature symmetry; the raw
+            command deltas are used as-is.
+
+    Returns:
+        Dict[str, Any]: ``{"ok", "max_delta_rad", "first_bad_step",
+        "threshold_rad"}``. ``ok`` is ``None`` for a ``None`` path and True/False
+        otherwise; ``first_bad_step`` is the 1-based index of the first offending
+        step, or ``None``.
+    """
     summary = {
         "ok": None,
         "max_delta_rad": None,
@@ -958,6 +1384,28 @@ def reconstruct_joint_path_for_pose_path(
     joint_continuity_threshold_rad: Optional[float] = None,
     use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
 ) -> Tuple[Optional[List[FullConf]], Optional[str]]:
+    """Re-solve a joint path along a pose path, enforcing continuity + collision.
+
+    Walks the pose path from ``start_conf``, warm-starting each step's dual-arm
+    IK from the previous config, and bails at the first waypoint that fails IK,
+    the continuity check, or collision.
+
+    Args:
+        scene (Dict[str, Any]): solver context (robot, arm_joints, tool links,
+            and the two grasp transforms).
+        pose_path (Sequence[PoseLike]): the ordered bar poses to follow.
+        start_conf (FullConf): the joint configuration at the first pose.
+        joint_collision_fn (Optional[Callable[[FullConf], bool]]): optional
+            joint-space collision predicate.
+        joint_continuity_threshold_rad (Optional[float]): max allowed per-step
+            joint jump; ``None`` disables the check.
+        use_angle_normalization (bool): whether to normalize the solved angles.
+
+    Returns:
+        Tuple[Optional[List[FullConf]], Optional[str]]: ``(joint_path, None)`` on
+        success, or ``(None, reason)`` where ``reason`` names the failed waypoint
+        (e.g. ``"ik_failure_at_waypoint_3"``) or the missing input.
+    """
     if not pose_path:
         return [], None
     grasp_bar_from_right = scene["grasp_bar_from_right"]
@@ -1000,6 +1448,26 @@ def update_debug_tree(
     goal_pose: PoseLike,
     extend_stop_reasons: Optional[Dict[str, int]] = None,
 ) -> None:
+    """Populate ``debug_tree_out`` in place with the tree + planning outcome.
+
+    A no-op when ``debug_tree_out`` is ``None``. Records success, iteration
+    count, the exported tree, endpoints, and a histogram of ``extend_toward``
+    stop reasons for offline diagnosis.
+
+    Args:
+        debug_tree_out (Optional[Dict]): the dict to fill (cleared first), or
+            ``None`` to skip.
+        success (bool): whether a path was found.
+        iterations (int): iteration count to record.
+        nodes (List[TreeNode]): the tree to export.
+        start_pose (PoseLike): the start bar pose.
+        goal_pose (PoseLike): the goal bar pose.
+        extend_stop_reasons (Optional[Dict[str, int]]): histogram of extend stop
+            reasons across the run.
+
+    Returns:
+        None. Mutates ``debug_tree_out``.
+    """
     if debug_tree_out is None:
         return
     debug_tree_out.clear()
@@ -1302,6 +1770,21 @@ def plan_pose_birrt(
             return None, None
 
     def make_tree(root_pose: PoseLike, root_conf: Optional[FullConf]) -> Tuple[List[TreeNode], Dict, Dict]:
+        """Create one BiRRT tree rooted at a pose, with its per-node side caches.
+
+        Args:
+            root_pose (PoseLike): the tree's root bar pose.
+            root_conf (Optional[FullConf]): the root joint config; required when
+                IK is enabled.
+
+        Returns:
+            Tuple[List[TreeNode], Dict, Dict]: ``(nodes, node_confs,
+            feature_vecs)`` -- the node list plus the per-node config and
+            feature-vector caches (both keyed by ``id(node)``).
+
+        Raises:
+            ValueError: if IK is enabled but ``root_conf`` is ``None``.
+        """
         root = TreeNode(root_pose)
         nodes = [root]
         node_confs: Dict[int, FullConf] = {}
@@ -1427,7 +1910,19 @@ def plan_pose_birrt(
                     continue
 
                 def _stitch_forward(seed_conf):
-                    """Re-IK along goal_side_poses, seeded from seed_conf. Returns confs or None."""
+                    """Rebuild the goal-side joint configs by re-IK'ing from the seam.
+
+                    Warm-starts from ``seed_conf`` and solves each goal-side pose
+                    in order, rejecting on IK failure, continuity break, or
+                    collision (each recorded in ``extend_stop_reasons``).
+
+                    Args:
+                        seed_conf (FullConf): the seam configuration to start from.
+
+                    Returns:
+                        Optional[List[FullConf]]: the goal-side configs in path
+                        order, or ``None`` if any step failed.
+                    """
                     out: List[FullConf] = []
                     cur = seed_conf
                     for stitch_pose in goal_side_poses:
@@ -1456,8 +1951,22 @@ def plan_pose_birrt(
                     return out
 
                 def _stitch_backward(seed_conf_at_goal):
-                    """Re-IK along start_side_poses from goal_root toward start, seeded at goal side.
-                    Returns confs in path-order (start->seam) or None."""
+                    """Rebuild the start-side joint configs by re-IK'ing from the goal branch.
+
+                    Walks the start-side poses in reverse (goal_root -> start)
+                    warm-started from ``seed_conf_at_goal``, then reverses the
+                    result into path order and checks the start endpoint agrees
+                    with the tree's start config.
+
+                    Args:
+                        seed_conf_at_goal (FullConf): the goal-branch config to
+                            start the backward solve from.
+
+                    Returns:
+                        Optional[List[FullConf]]: the start-side configs in path
+                        order (start -> seam), or ``None`` if any step failed or
+                        the start endpoint mismatched.
+                    """
                     out_rev: List[FullConf] = []
                     cur = seed_conf_at_goal
                     for stitch_pose in reversed([n.config for n in start_side_nodes]):

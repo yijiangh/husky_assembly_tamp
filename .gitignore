@@ -4,6 +4,12 @@ __pycache__/
 .DS_Store
 **/.DS_Store
 
+# Local Python virtual environments (e.g. the uv-created py311 env for the
+# headless scripts). Never commit these -- each machine builds its own.
+.venv/
+**/.venv/
+venv/
+
 z.log.global
 husky_assembly_tamp/husky_assembly_tamp.egg-info
 husky_assembly_tamp.egg-info

@@ -9,20 +9,29 @@ compas_fab + pybullet, run planning, and confirm collision + ACM setup
 are correct end-to-end.
 
 CLI:
-    python scripts/headless_bar_action_planner.py [<data_root>]
-        --bar-action B6.json
+    python external/husky_assembly_tamp/scripts/headless_bar_action_planner.py [<data_root>]
+        --bar-action B6.json     # or --all for every clean bar in the problem
         --movement {M1,M2,M3,M4}
+        [--all]               # solve for EVERY clean BarActions/<bar>.json (skip
+                              # sidecars like B6.solved.json). Works in BOTH modes:
+                              # motion planning, or --solve-keyframes base+IK.
+        [--solve-keyframes]   # base+IK keyframe solve instead of motion planning
         [--gui]
         [--max-time 60]
         [--no-replay]
         [--probe-endpoints]   # M1: report start/goal feasibility, skip the RRT
         [--diagnosis]         # M4: draw birrt trees live (needs --gui); no
                               # LockRenderer, timeout-only stop
-        [--load {clean,solved}]  # clean = Rhino export; solved = reuse the
-                                 # half-solved sidecar and plan only the rest
+        [--load {clean,solved_motion,solved_keyframe}]
+                              # clean = Rhino export; solved_motion = reuse this
+                              # bar's motion sidecar (continue the motion plan);
+                              # solved_keyframe = load the keyframe-solve sidecar
+                              # (its solved base + keyframe configs) and plan the
+                              # trajectories from there
         [--cell <RobotCell.json>]
 
-Default ``<data_root>`` matches ``tests/debug_load_bar_action.py``.
+``<data_root>`` resolves as: the positional argument if given, else the
+``HUSKY_ASSEMBLY_DATA_ROOT`` environment variable, else a clear error.
 """
 
 from __future__ import annotations
@@ -34,13 +43,12 @@ import sys
 import time
 from typing import List, Optional, Sequence, Tuple
 
-import numpy as np
-import matplotlib.pyplot as plt
 
-
-# This script lives in the husky_assembly_tamp repo at ``scripts/``. All the
-# packages it needs are sibling checkouts under the parent ``external/`` folder,
-# so locate them relative to this file:
+# This script lives in the husky_assembly_tamp repo at ``scripts/``. Its
+# dependencies are either pip-installed (`pip install -e` this repo into a venv,
+# e.g. on Ubuntu) or sibling checkouts under the parent ``external/`` folder when
+# this repo is vendored inside the design repo -- locate the siblings relative to
+# this file (each is only added if the folder actually exists):
 #   .../external/husky_assembly_tamp/scripts/  <- SCRIPT_DIR (this file's folder)
 #   .../external/husky_assembly_tamp/          <- TAMP_SRC (the tamp package root)
 #   .../external/                              <- EXTERNAL_DIR (holds the siblings)
@@ -57,22 +65,29 @@ for _p in (SCRIPT_DIR, TAMP_SRC, CFAB_SRC, RSDS_SRC):
     if os.path.isdir(_p) and _p not in sys.path:
         sys.path.insert(0, _p)
 
-# Home-configuration constants come from the ``config`` module that sits next
-# to this script, so the planner stays standalone (no dependency on
-# husky_assembly_teleop or ros2). SCRIPT_DIR is already on sys.path above, so
-# ``config`` resolves.
-from types import SimpleNamespace  # noqa: E402
-from config import HUSKY_DUAL_ARM_HOME_CONF_12  # noqa: E402
+# On a Windows machine with Rhino, wire Rhino's pip site-envs (numpy, compas,
+# pybullet, ...) onto sys.path so a plain py39 interpreter finds them. No-op
+# inside Rhino and on machines without Rhino (e.g. an Ubuntu venv).
+from _rhino_env_bootstrap import bootstrap_rhino_site_envs  # noqa: E402
 
-_config = SimpleNamespace(
-    HUSKY_DUAL_ARM_HOME_CONF_12=list(HUSKY_DUAL_ARM_HOME_CONF_12),
-    HOME_CONF_LEFT_6=list(HUSKY_DUAL_ARM_HOME_CONF_12[:6]),
-    HOME_CONF_RIGHT_6=list(HUSKY_DUAL_ARM_HOME_CONF_12[6:]),
-)
+bootstrap_rhino_site_envs(verbose=False)
 
-# Movement dataclasses. Imported here (after ``core`` is cached above) rather
-# than inside functions: they are cheap and carry no import-order risk of
-# their own now that ``core`` has already loaded.
+import numpy as np  # noqa: E402
+import matplotlib.pyplot as plt  # noqa: E402
+
+# Cheap canary for the whole compas / compas_fab / pybullet stack: fail with
+# setup instructions instead of a bare ModuleNotFoundError deep in the imports.
+try:
+    import compas  # noqa: F401, E402
+except ImportError as exc:
+    raise SystemExit(
+        "Missing planning dependencies. Either run with Rhino's py39 interpreter "
+        "(its site-envs are wired automatically), or `pip install -e "
+        "<husky_assembly_tamp>` into your venv. Underlying error: " + str(exc)
+    )
+
+# Movement dataclasses. Imported at the top rather than inside functions: they
+# are cheap (pure compas Data classes) and carry no import-order risk.
 from rs_data_structure.bar_action import (  # noqa: E402
     IndependentDualArmFreeMovement,
     EndEffectorConstrainedDualArmFreeMovement,
@@ -110,33 +125,115 @@ from husky_assembly_tamp.motion_planner.dual_arm_task_space_rrt.core import (  #
     validate_dual_arm_bar_pose,
 )
 
+# Keyframe-solve mode (base sampling + IK, the headless twin of RSIKKeyframe).
+# Everything comes from the keyframe package in THIS repo -- the design repo's
+# Rhino scripts are never imported here; all data comes from the exported JSONs.
+from husky_assembly_tamp.keyframe.dual_arm_ik import resolve_arm_groups  # noqa: E402
+from husky_assembly_tamp.keyframe.ik_keyframe import (  # noqa: E402
+    frame_to_mm4,
+    mm4_to_frame,
+    solve_keyframe_chain,
+)
+from husky_assembly_tamp.keyframe.walkable_ground import (  # noqa: E402
+    load_walkable_grounds,
+    solve_chain_with_base_search,
+)
 
-# Insync gdrive location of the design-study data, per machine. Pick whichever
-# exists so the same script runs on both the Windows/Rhino box and the Linux box.
-_DATA_ROOT_CANDIDATES = (
-    # Linux (robot / ros2 machine)
-    "/home/su/Insync/yijiang94817@gmail.com"
-    "/Google Drive - Shared with me/2025-03 Husky Assembly/data_design_study",
-    # Windows (Rhino design machine)
-    r"C:\Users\yijiangh\Insync\yijiang94817@gmail.com"
-    r"\Google Drive - Shared with me\2025-03 Husky Assembly\data_design_study",
-)
-DEFAULT_DATA_ROOT = next(
-    (p for p in _DATA_ROOT_CANDIDATES if os.path.isdir(p)),
-    _DATA_ROOT_CANDIDATES[0],
-)
+
 # DEFAULT_PROBLEM = "2026-05-14_foc_demo_reduced"
 # DEFAULT_BAR_ACTION = "B226.json"
 DEFAULT_PROBLEM = "2026-05-16_double_kissing_jig_demo"
 DEFAULT_BAR_ACTION = "B6.json"
 
-LEFT_GROUP = "base_left_arm_manipulator"
-RIGHT_GROUP = "base_right_arm_manipulator"
+
+def resolve_data_root(cli_value) -> str:
+    """Resolve the data root folder: CLI value -> env var -> clear error.
+
+    The data root is machine-specific (a synced folder of exported problems), so
+    it is never baked into the code: pass it as the positional argument, or set
+    the ``HUSKY_ASSEMBLY_DATA_ROOT`` environment variable once per machine.
+
+    Args:
+        cli_value (str | None): the positional ``data_root`` argument, if given.
+
+    Returns:
+        str: the absolute data-root path.
+
+    Raises:
+        SystemExit: when neither source provides a path -- the message says
+            exactly what to pass or set (no silent guessed default).
+    """
+    if cli_value:
+        return os.path.abspath(cli_value)
+    env_value = os.environ.get("HUSKY_ASSEMBLY_DATA_ROOT")
+    if env_value:
+        return os.path.abspath(env_value)
+    raise SystemExit(
+        "[X] no data root: pass it as the positional argument "
+        "(e.g. `headless_bar_action_planner.py <data_root> ...`) or set the "
+        "HUSKY_ASSEMBLY_DATA_ROOT environment variable to the folder that holds "
+        "the per-problem subfolders."
+    )
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def arm_joint_names_12(rcell, groups) -> List[str]:
+    """The twelve arm-joint names (left 6 then right 6) read from the cell.
+
+    Filters each planning group's configurable joints down to the six UR arm
+    joints (dropping e.g. a mobile-base joint the group may also carry), using
+    the arm-joint suffix list shared with the motion planners.
+
+    Args:
+        rcell: the loaded RobotCell (its semantics name the joints).
+        groups (tuple[str, str]): the ``(left_group, right_group)`` names, e.g.
+            from ``resolve_arm_groups(rcell)``.
+
+    Returns:
+        List[str]: the twelve joint names, left arm first.
+    """
+    left_group, right_group = groups
+    left = [n for n in rcell.get_configurable_joint_names(left_group)
+            if any(n.endswith(s) for s in _ARM_SUFFIXES)]
+    right = [n for n in rcell.get_configurable_joint_names(right_group)
+             if any(n.endswith(s) for s in _ARM_SUFFIXES)]
+    return left + right
+
+
+def home_conf12_from_action(action, joint_names_12: Sequence[str]) -> np.ndarray:
+    """The 12-vec home configuration authored into M4's target_configuration.
+
+    The exported BarAction JSON is the source of truth for the home pose: the
+    Rhino export writes it as M4's goal (``core.bar_action._build_m4`` on the
+    design side). The planner reads it from there instead of keeping its own
+    copy of the constant -- so a re-exported action always wins.
+
+    Args:
+        action: the loaded BarAssemblyAction.
+        joint_names_12 (Sequence[str]): the twelve arm-joint names, in order.
+
+    Returns:
+        np.ndarray: the twelve home joint values (left arm first).
+
+    Raises:
+        RuntimeError: when M4 (or its target_configuration) is missing -- the
+            planner does not invent a home; re-export the bar with the current
+            exporter.
+    """
+    m4 = select_movement(action, "M4")
+    target = getattr(m4, "target_configuration", None) if m4 is not None else None
+    if target is None:
+        raise RuntimeError(
+            f"{getattr(action, 'action_id', '<action>')}: M4 has no "
+            "target_configuration, so no home pose is available. The Rhino export "
+            "writes the home config there -- re-export this bar with the current "
+            "exporter (the planner does not invent a home)."
+        )
+    return vec12_from_conf(target, joint_names_12)
 
 
 _ROLE_RE = re.compile(r"_M([0-9])_")
@@ -175,18 +272,21 @@ def match_role(mv) -> Optional[str]:
     return None
 
 
-def fill_missing_config(state, rcell, home_left: Sequence[float],
+def fill_missing_config(state, rcell, groups, home_left: Sequence[float],
                         home_right: Sequence[float]) -> None:
     """Fill a state's robot configuration with the home pose when it has none.
 
-    Test-only convenience. If ``state`` already carries a robot configuration,
+    Planner-side convenience for movements whose start config is deliberately
+    absent in the export. If ``state`` already carries a robot configuration,
     nothing happens. Otherwise a fresh zero configuration is built and the two
-    arms are set to the given home joint values.
+    arms are set to the given home joint values (read from M4's authored target
+    via :func:`home_conf12_from_action` -- the JSON, not a Python constant).
 
     Args:
         state: The RobotCellState to fill in place. May be ``None`` (ignored).
         rcell: The RobotCell, used to build a zero configuration and to look up
             the left/right arm joint names.
+        groups (tuple[str, str]): the ``(left_group, right_group)`` names.
         home_left (Sequence[float]): Home joint values for the left arm.
         home_right (Sequence[float]): Home joint values for the right arm.
 
@@ -195,9 +295,10 @@ def fill_missing_config(state, rcell, home_left: Sequence[float],
     """
     if state is None or state.robot_configuration is not None:
         return
+    left_group, right_group = groups
     cfg = rcell.zero_full_configuration()
-    left_names = list(rcell.get_configurable_joint_names(LEFT_GROUP))
-    right_names = list(rcell.get_configurable_joint_names(RIGHT_GROUP))
+    left_names = list(rcell.get_configurable_joint_names(left_group))
+    right_names = list(rcell.get_configurable_joint_names(right_group))
     for n, v in zip(left_names, home_left):
         cfg[n] = float(v)
     for n, v in zip(right_names, home_right):
@@ -504,44 +605,79 @@ def vec12_from_conf(conf, joint_names_12: Sequence[str]) -> np.ndarray:
     return np.asarray([float(conf[n]) for n in joint_names_12], dtype=float)
 
 
-def accept_trajectory(mv, path: Sequence[Sequence[float]], *, role: str,
-                      index: int, movements, rcell,
-                      joint_names_12: Sequence[str], source: str = "Plan") -> bool:
-    """Chain the joint configs forward after a movement is planned.
+def conf12_to_configuration(rcell, joint_names_12: Sequence[str], q: Sequence[float]):
+    """Build a compas ``Configuration`` from a 12-vec (for ``target_configuration``).
 
-    Headless adaptation of ``husky_monitor._accept_trajectory`` (trimmed of ROS
-    logging, visualizer wiring, disk save, CDFM validation and the synthetic-M0
-    backfill).
-
-    What it does, by role:
-      - M1/M4 own their start: mirror ``path[0]`` into ``mv.start_state``.
-      - M2/M3 must already carry a propagated start config; the trajectory is
-        rejected if that config is missing or disagrees with ``path[0]``.
-      - M1/M2/M3 forward-propagate ``path[-1]`` into the *next* movement's
-        ``start_state.robot_configuration`` (M0/M4 end the chain).
-      - A backward continuity check compares against the previous movement's
-        ``path[-1]``.
+    Starts from the cell's zero full configuration and writes the twelve arm-joint
+    values onto it, so the result is a complete configuration the movement schema
+    can store as its goal.
 
     Args:
-        mv: The Movement that was just planned; its ``trajectory`` is set here.
-        path (Sequence[Sequence[float]]): The planned waypoints, each a 12-vec
-            ordered by ``joint_names_12``.
-        role (str): This movement's role, ``'M1'``..``'M4'``.
-        index (int): Position of this movement inside ``movements``.
-        movements: All movements in planning order (used to reach the next and
-            previous ones).
-        rcell: The RobotCell, used to build configurations when propagating.
-        joint_names_12 (Sequence[str]): The twelve arm-joint names, in order.
-        source (str): Short label printed with each log line.
+        rcell: The RobotCell, used to build the zero full configuration.
+        joint_names_12 (Sequence[str]): the twelve arm-joint names, left then right.
+        q (Sequence[float]): the twelve joint values to write.
 
     Returns:
-        bool: True when the trajectory is accepted, False on a chain break (the
-        caller should stop chaining).
+        Configuration: the full configuration with the arm joints set to ``q``.
     """
-    mv.trajectory = path
-    if path:
-        start_vec = np.asarray(path[0], dtype=float)
+    cfg = rcell.zero_full_configuration()
+    for name, val in zip(joint_names_12, q):
+        cfg[name] = float(val)
+    return cfg
 
+
+def accept_solved_movement(mv, *, role: str, index: int, movements, rcell,
+                           joint_names_12: Sequence[str], path=None,
+                           end_conf12=None, source: str = "solve") -> bool:
+    """Record a solved movement and chain its END config to the next movement.
+
+    A movement is "solved" either by MOTION planning (a full ``path`` of 12-vec
+    waypoints) or by KEYFRAME IK (only its end configuration, ``end_conf12``, with
+    no trajectory). This runs the state propagation common to BOTH -- so, for
+    example, M3's retreat config becomes M4's start whether or not a trajectory was
+    planned. Renamed + generalized from the old ``accept_trajectory`` (headless
+    adaptation of ``husky_monitor._accept_trajectory``).
+
+    What it does:
+      - motion only: store ``path`` on ``mv.trajectory`` and set/validate the
+        movement's start config from ``path[0]`` (M1/M4 own their start; M2/M3
+        must already carry the propagated start and are rejected on a mismatch);
+      - both: record the movement's END config as ``mv.target_configuration`` when
+        it has none yet (M4's authored home / M0's backfilled goal are preserved);
+      - both: forward-propagate the END config into the NEXT movement's
+        ``start_state.robot_configuration`` (M0/M4 terminate the chain);
+      - motion only: a backward continuity check vs the previous movement's
+        ``trajectory[-1]``.
+
+    Args:
+        mv: the just-solved Movement.
+        role (str): this movement's role, ``'M0'``..``'M4'``.
+        index (int): position of ``mv`` inside ``movements``.
+        movements: the movement list to reach the next/previous ones (planning
+            order for motion; ``action.movements`` for keyframe).
+        rcell: the RobotCell, used to build configurations.
+        joint_names_12 (Sequence[str]): the twelve arm-joint names, in order.
+        path: motion waypoints (each a 12-vec), or ``None`` for a keyframe solve.
+        end_conf12: the movement's END config as a 12-vec; defaults to ``path[-1]``.
+            Required when ``path`` is ``None``.
+        source (str): short label printed with each log line.
+
+    Returns:
+        bool: True when accepted, False on a chain break (motion start mismatch or
+        a missing endpoint), so the caller can stop chaining.
+    """
+    if end_conf12 is None:
+        if not path:
+            print(f"[{source}] {getattr(mv, 'movement_id', '?')!r}: no path and no "
+                  "end_conf12 to accept.")
+            return False
+        end_conf12 = path[-1]
+    end_vec = np.asarray(end_conf12, dtype=float)
+
+    # --- motion: store the trajectory + set/validate this movement's start. ---
+    if path:
+        mv.trajectory = path
+        start_vec = np.asarray(path[0], dtype=float)
         if role in ("M2", "M3") and mv.start_state is not None:
             existing = mv.start_state.robot_configuration
             if existing is None:
@@ -559,56 +695,72 @@ def accept_trajectory(mv, path: Sequence[Sequence[float]], *, role: str,
             # M1/M4 own their generated start_conf.
             apply_conf12(mv.start_state, rcell, joint_names_12, start_vec)
 
-        # Forward-chain propagation.
-        if role in ("M0", "M4"):
-            pass
-        elif index + 1 < len(movements):
-            next_mv = movements[index + 1]
-            if next_mv is not None and next_mv.start_state is not None:
-                existing = next_mv.start_state.robot_configuration
-                new_end = np.asarray(path[-1], dtype=float)
-                if existing is None:
-                    apply_conf12(next_mv.start_state, rcell, joint_names_12, new_end)
-                    print(f"[{source}] propagated {mv.movement_id!r}.traj[-1] -> "
-                          f"{next_mv.movement_id!r}.start_state.robot_configuration "
-                          "(was None).")
-                else:
-                    diff = float(np.abs(
-                        new_end - vec12_from_conf(existing, joint_names_12)
-                    ).max())
-                    if diff > 1e-3:
-                        print(f"[{source}] end of {mv.movement_id!r} differs from existing "
-                              f"{next_mv.movement_id!r}.start by max {diff:.4f} rad/m; "
-                              "overwriting (chain rule).")
-                    apply_conf12(next_mv.start_state, rcell, joint_names_12, new_end)
+    # --- both: record the movement's goal config (fill-if-empty so authored
+    # targets like M4's home survive). ---
+    if getattr(mv, "target_configuration", None) is None:
+        mv.target_configuration = conf12_to_configuration(rcell, joint_names_12, end_vec)
 
-        # Backward continuity check.
-        if index > 0:
-            prev_mv = movements[index - 1]
-            prev_path = getattr(prev_mv, "trajectory", None)
-            if prev_path:
-                diff = float(np.abs(
-                    np.asarray(prev_path[-1], dtype=float) - start_vec
-                ).max())
+    # --- both: forward-propagate the END config into the next movement's start. ---
+    if role not in ("M0", "M4") and index + 1 < len(movements):
+        next_mv = movements[index + 1]
+        if next_mv is not None and next_mv.start_state is not None:
+            existing = next_mv.start_state.robot_configuration
+            if existing is None:
+                apply_conf12(next_mv.start_state, rcell, joint_names_12, end_vec)
+                print(f"[{source}] propagated {mv.movement_id!r} end -> "
+                      f"{next_mv.movement_id!r}.start_state.robot_configuration "
+                      "(was None).")
+            else:
+                diff = float(np.abs(end_vec - vec12_from_conf(existing, joint_names_12)).max())
                 if diff > 1e-3:
-                    print(f"[{source}] start of {mv.movement_id!r} differs from "
-                          f"{prev_mv.movement_id!r}.trajectory[-1] by max {diff:.4f} rad/m.")
-                else:
-                    print(f"[{source}] start agrees with {prev_mv.movement_id!r}."
-                          f"trajectory[-1] (max diff {diff:.6f}).")
+                    print(f"[{source}] end of {mv.movement_id!r} differs from existing "
+                          f"{next_mv.movement_id!r}.start by max {diff:.4f} rad/m; "
+                          "overwriting (chain rule).")
+                apply_conf12(next_mv.start_state, rcell, joint_names_12, end_vec)
+
+    # --- motion only: backward continuity check vs the previous trajectory. ---
+    if path and index > 0:
+        prev_mv = movements[index - 1]
+        prev_path = getattr(prev_mv, "trajectory", None)
+        if prev_path:
+            diff = float(np.abs(
+                np.asarray(prev_path[-1], dtype=float) - np.asarray(path[0], dtype=float)
+            ).max())
+            if diff > 1e-3:
+                print(f"[{source}] start of {mv.movement_id!r} differs from "
+                      f"{prev_mv.movement_id!r}.trajectory[-1] by max {diff:.4f} rad/m.")
+            else:
+                print(f"[{source}] start agrees with {prev_mv.movement_id!r}."
+                      f"trajectory[-1] (max diff {diff:.6f}).")
 
     print_roster(movements, source)
     return True
 
 
-def solved_action_path(clean_action_path: str) -> str:
+def solved_action_path(clean_action_path: str, kind: str) -> str:
     """Sidecar path for the half-solved BarAction, next to the clean file.
 
-    For ``.../BarActions/B6.json`` this returns ``.../BarActions/B6.solved.json``.
-    The clean file (the Rhino export) is never overwritten; only this sidecar is.
+    The two solve modes write SEPARATE sidecars so a keyframe solve and a motion
+    plan for the same bar don't overwrite each other:
+
+    - ``kind="keyframe"`` -> ``.../BarActions/B6.solved_keyframe.json``
+      (base + IK keyframe configs from ``--solve-keyframes``)
+    - ``kind="motion"``   -> ``.../BarActions/B6.solved_motion.json``
+      (full motion-planned trajectories)
+
+    The clean file (the Rhino export) is never overwritten; only these sidecars
+    are. Their dotted stems mean the ``--all`` clean-file scan skips them.
+
+    Args:
+        clean_action_path (str): the clean ``<bar>.json`` export path.
+        kind (str): ``"keyframe"`` or ``"motion"``.
+
+    Returns:
+        str: the sidecar path.
     """
+    tag = {"keyframe": "solved_keyframe", "motion": "solved_motion"}[kind]
     stem, ext = os.path.splitext(clean_action_path)
-    return f"{stem}.solved{ext}"
+    return f"{stem}.{tag}{ext}"
 
 
 def save_solved_action(action, path: str) -> None:
@@ -848,10 +1000,15 @@ def plan_movement(planner, state, role: str, selected, *, active_bar_id: str,
         path = _path_from_jt(jt, joint_names_12)
         return path, {"failure_reason": None if jt is not None else "linear-ik failed"}
     if role == "M4" and isinstance(selected, IndependentDualArmFreeMovement):
-        # M4 returns to a fixed dual-arm home. Override the (placeholder) target
-        # from the action with the known-good home config (left 6 then right 6,
-        # matching joint_names_12).
-        goal_conf = list(_config.HUSKY_DUAL_ARM_HOME_CONF_12)
+        # M4 returns to the fixed dual-arm home AUTHORED INTO THE EXPORT (the
+        # Rhino side writes it as M4's target_configuration). The JSON is the
+        # source of truth -- there is no Python-side home constant to fall back on.
+        if goal_conf is None:
+            return None, {"failure_reason": (
+                "M4 has no target_configuration (the authored home pose). "
+                "Re-export this bar with the current exporter -- the planner "
+                "does not invent a home."
+            )}
         extra = {}
         if draw:
             # Diagnosis: build a live tree draw_fn over both arms' tool0 FK and
@@ -868,9 +1025,10 @@ def plan_movement(planner, state, role: str, selected, *, active_bar_id: str,
             )
             extra = {"draw_fn": draw_fn, "max_iterations": 10_000_000}
             print("[plan] plan_free_dual_arm + tree drawing "
-                  "(diagnosis; goal = HUSKY_DUAL_ARM_HOME_CONF_12)")
+                  "(diagnosis; goal = M4 target_configuration, the authored home)")
         else:
-            print("[plan] plan_free_dual_arm (goal = HUSKY_DUAL_ARM_HOME_CONF_12)")
+            print("[plan] plan_free_dual_arm (goal = M4 target_configuration, "
+                  "the authored home)")
         return plan_free_dual_arm(planner, state, goal_conf, max_time=max_time, **extra)
 
     return None, {
@@ -934,7 +1092,8 @@ def plot_conf_comparison(joint_names_12, start_conf, goal_conf, out_path, *, sho
 
 
 def probe_endpoints(planner, rcell, action, active_bar_rb_name: Optional[str],
-                    joint_names_12: Sequence[str], *, use_gui: bool = False) -> int:
+                    joint_names_12: Sequence[str], *, groups, home12,
+                    use_gui: bool = False) -> int:
     """Report M1 start/goal endpoint feasibility WITHOUT running the RRT.
 
     Runs only the goal-IK plus start-derivation stage of
@@ -951,6 +1110,10 @@ def probe_endpoints(planner, rcell, action, active_bar_rb_name: Optional[str],
         action: The BarAssemblyAction holding the movements.
         active_bar_rb_name (Optional[str]): The active bar's rigid-body name.
         joint_names_12 (Sequence[str]): The twelve arm-joint names, in order.
+        groups (tuple[str, str]): the ``(left_group, right_group)`` names.
+        home12 (np.ndarray | None): the authored home 12-vec from the JSON, used
+            only when M1's start config is absent; ``None`` when the export has
+            no M4 target (then a missing start config is a hard error).
 
     Returns:
         int: 0 when both endpoints are feasible, otherwise 2.
@@ -968,7 +1131,11 @@ def probe_endpoints(planner, rcell, action, active_bar_rb_name: Optional[str],
         print("[probe] M1 has no target_ee_frames.")
         return 2
     if state.robot_configuration is None:
-        fill_missing_config(state, rcell, _config.HOME_CONF_LEFT_6, _config.HOME_CONF_RIGHT_6)
+        if home12 is None:
+            print("[probe] M1 has no start config and the action has no authored "
+                  "home (M4 target_configuration) to fill it from; re-export the bar.")
+            return 2
+        fill_missing_config(state, rcell, groups, home12[:6], home12[6:])
     planner.set_robot_cell_state(state)
 
     robot_puid = planner.client.robot_puid
@@ -1066,6 +1233,632 @@ def probe_endpoints(planner, rcell, action, active_bar_rb_name: Optional[str],
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Keyframe-solve mode (base sampling + IK -- the headless twin of RSIKKeyframe)
+# ---------------------------------------------------------------------------
+
+
+def _bar_midpoint_mm(m2) -> Optional[np.ndarray]:
+    """Bar assembled midpoint (mm) = midpoint of M2's two EE target points.
+
+    The mate movement (M2) targets the two tool0 flanges at the assembled pose;
+    their midpoint is a good stand-in for the bar center, and it needs no bar
+    geometry -- just the frames already in the action. Used as the sampling seed
+    reference + heading in ``core.walkable_ground``.
+
+    Args:
+        m2: the M2 (mate) Movement.
+
+    Returns:
+        Optional[np.ndarray]: the midpoint in mm, or None if M2 lacks targets.
+    """
+    targets = getattr(m2, "target_ee_frames", None) or {}
+    left = targets.get("left")
+    right = targets.get("right")
+    if left is None or right is None:
+        return None
+    pl = np.asarray(left.point, dtype=float) * 1000.0
+    pr = np.asarray(right.point, dtype=float) * 1000.0
+    return 0.5 * (pl + pr)
+
+
+def _avg_insertion_dir_mm(m2) -> Optional[np.ndarray]:
+    """Average male-joint insertion direction = avg of M2's two tool0 +Z axes.
+
+    The tools push the male joints into their mates along +tool0_z (tool block
+    local +Z points out of the flange toward the joint), so the average of the
+    two assembled tool0 Z-axes is the assembly/insertion axis. This is the
+    direction the seed mobile base faces (standing behind the bar), removing the
+    left/right side ambiguity of the old bar-axis heuristic.
+
+    Args:
+        m2: the M2 (mate) Movement; its ``target_ee_frames`` are the assembled
+            tool0 frames.
+
+    Returns:
+        Optional[np.ndarray]: the (unnormalized) insertion direction vector, or
+        None if M2 lacks left/right targets.
+    """
+    targets = getattr(m2, "target_ee_frames", None) or {}
+    left = targets.get("left")
+    right = targets.get("right")
+    if left is None or right is None:
+        return None
+    avg = np.asarray(left.zaxis, dtype=float) + np.asarray(right.zaxis, dtype=float)
+    if float(np.linalg.norm(avg)) < 1e-9:
+        return None
+    return avg
+
+
+def plot_config_vs_limits(state, rcell, joint_names: Sequence[str], width: int = 34) -> str:
+    """Return an ASCII plot of each arm joint value within its ``[lower, upper]`` limit.
+
+    One line per joint, e.g.::
+
+        L J1 shoulder_pan     -6.28 [----------|(-1.10)---------------] +6.28
+        R J5 wrist_2          -6.28 [-----------------------|(+2.71)--] +6.28  !OUT-OF-LIMIT
+
+    The ``|`` marks where the value sits inside the joint's range and ``(v)`` is
+    the value in radians; a value outside its limits is flagged. Continuous joints
+    (no limit) are printed as such. Reads limits from
+    ``rcell.robot_model.get_joint_by_name(name).limit`` (lower/upper).
+
+    Args:
+        state: the solved RobotCellState (its ``robot_configuration`` is read).
+        rcell: the RobotCell (its ``robot_model`` supplies the joint limits).
+        joint_names (Sequence[str]): the arm joint names in order (left 6 then
+            right 6), used both to read values and to label ``L/R J1..J6``.
+        width (int): inner width of the ``[...]`` bar in characters.
+
+    Returns:
+        str: the multi-line plot (one line per joint).
+    """
+    cfg = state.robot_configuration
+    model = rcell.robot_model
+    n_left = len(joint_names) // 2
+    lines = []
+    for idx, name in enumerate(joint_names):
+        val = float(cfg[name])
+        joint = model.get_joint_by_name(name)
+        lim = getattr(joint, "limit", None)
+        side = "L" if idx < n_left else "R"
+        jnum = (idx % n_left) + 1 if n_left else idx + 1
+        short = "_".join(re.sub(r"_joint$", "", str(name)).split("_")[-2:])
+        label = f"{side} J{jnum} {short:<16}"
+        if lim is None:
+            lines.append(f"{label} [continuous / no limit]   value={val:+.3f}")
+            continue
+        lo, hi = float(lim.lower), float(lim.upper)
+        frac = (val - lo) / (hi - lo) if hi > lo else 0.5
+        pos = int(round(max(0.0, min(1.0, frac)) * (width - 1)))
+        left = "-" * pos
+        right = "-" * (width - 1 - pos)
+        flag = "" if lo <= val <= hi else "  !OUT-OF-LIMIT"
+        lines.append(f"{label} {lo:+6.2f} [{left}|({val:+.2f}){right}] {hi:+6.2f}{flag}")
+    return "\n".join(lines)
+
+
+def make_keyframe_pause_hook(planner, rcell, joint_names: Sequence[str]):
+    """Build an ``after_solve(role, state)`` hook for ``solve_keyframe_chain``.
+
+    On each solved keyframe the hook (1) pushes the pose into PyBullet so it is
+    visible in the GUI, (2) prints the joint-vs-limit plot, and (3) calls
+    ``pp.wait_if_gui`` to pause. ``wait_if_gui`` only blocks when a GUI is
+    connected, so this is a no-op pause in DIRECT mode. It is the place to
+    inspect *why* M2 fails from M1's just-solved pose.
+
+    Args:
+        planner: the active PyBulletPlanner (its cell is shown/paused).
+        rcell: the RobotCell (for joint limits in the plot).
+        joint_names (Sequence[str]): arm joint names (left 6 then right 6).
+
+    Returns:
+        callable: ``after_solve(role, state)`` for ``solve_keyframe_chain``.
+    """
+    def _hook(role, state):
+        try:
+            planner.set_robot_cell_state(state)
+        except Exception as exc:  # visualization must never break the solve
+            print(f"[viz] {role}: could not push state to PyBullet ({exc}).")
+        print(f"\n[viz] {role} solved -- arm joints vs limits:")
+        print(plot_config_vs_limits(state, rcell, joint_names))
+        pp.wait_if_gui(f"{role} solved; press Enter in the PyBullet window to continue")
+    return _hook
+
+
+def _write_back_solve(action, base_frame_mm: np.ndarray, solved: dict,
+                      rcell, joint_names_12: Sequence[str]) -> None:
+    """Stamp the found base + keyframe configs back onto the action's movements.
+
+    The M1->M2->M3 chain solves IK for each movement's GOAL ee-frames, so
+    ``solved["M1"]`` is the APPROACH config, ``solved["M2"]`` the ASSEMBLED config,
+    and ``solved["M3"]`` the RETREAT config. The base frame goes on every
+    movement's ``start_state``; the per-keyframe configs are chained onto the
+    movements with the SAME propagation the motion path uses
+    (:func:`accept_solved_movement`, called with ``path=None`` since a keyframe has
+    no trajectory). So each solved movement's end config becomes its
+    ``target_configuration`` and the next movement's start config:
+
+      - approach  -> M1.target + M2.start,
+      - assembled -> M2.target + M3.start,
+      - retreat   -> M3.target + M4.start (M4 then runs retreat -> home).
+
+    The retreat config used to be discarded, leaving M3's goal config and M4's
+    start config empty; the shared propagation now fills them.
+
+    Args:
+        action: the BarAssemblyAction being solved (mutated in place).
+        base_frame_mm (np.ndarray): the accepted 4x4 mm base frame.
+        solved (dict): ``{"M1": state, "M2": state, "M3": state}`` from the chain.
+        rcell: the RobotCell, used to build configurations.
+        joint_names_12 (Sequence[str]): the twelve arm-joint names, in order.
+
+    Returns:
+        None.
+    """
+    base_frame = mm4_to_frame(base_frame_mm)
+    for mv in action.movements:
+        if mv.start_state is not None:
+            mv.start_state.robot_base_frame = base_frame
+
+    # Chain the solved keyframe configs with the shared propagation. Process in
+    # order so each movement's start is already set by the previous propagation.
+    for role in ("M1", "M2", "M3"):
+        mv = select_movement(action, role)
+        if mv is None or role not in solved:
+            continue
+        end_vec = vec12_from_conf(solved[role].robot_configuration, joint_names_12)
+        accept_solved_movement(
+            mv, role=role, index=action.movements.index(mv),
+            movements=action.movements, rcell=rcell,
+            joint_names_12=joint_names_12, end_conf12=end_vec, source="keyframe",
+        )
+
+
+def solve_keyframes_for_action(planner, action, clean_action_path: str, *,
+                               base_mode: str, grounds: dict, groups,
+                               after_solve=None) -> Tuple[bool, str]:
+    """Solve base + IK keyframes for one BarAction; write back on success.
+
+    Args:
+        planner: the active PyBulletPlanner (cell already loaded).
+        action: the loaded BarAssemblyAction.
+        clean_action_path (str): the clean file path (the .solved.json sidecar is
+            derived from it; the clean file is never overwritten).
+        base_mode (str): ``"saved"`` (use the stored base, no sampling) or
+            ``"sample"`` (auto-seed + expanding-radius search on the ground).
+        grounds (dict): ``{ground_id: TriangleSoup}`` from
+            ``load_walkable_grounds`` (only used for ``"sample"``).
+        groups (tuple[str, str]): the ``(left_group, right_group)`` names derived
+            from the cell semantics (``resolve_arm_groups``).
+        after_solve (callable | None): optional ``after_solve(role, state)`` hook
+            forwarded to ``solve_keyframe_chain`` in the ``saved`` path (used by
+            --gui to pause + plot each keyframe); not used in ``sample`` mode.
+
+    Returns:
+        Tuple[bool, str]: ``(ok, detail)`` -- detail is a short human message.
+    """
+    m1 = select_movement(action, "M1")
+    m2 = select_movement(action, "M2")
+    m3 = select_movement(action, "M3")
+    if m1 is None or m2 is None or m3 is None:
+        return False, "missing one of M1/M2/M3"
+    if m1.start_state is None:
+        return False, "M1 has no start_state"
+    movements = {"M1": m1, "M2": m2, "M3": m3}
+    ordered = [("M1", m1), ("M2", m2), ("M3", m3)]
+
+    rcell = planner.client.robot_cell
+    joint_names_12 = arm_joint_names_12(rcell, groups)
+    # The home pose orders ssik's cold candidate pairs; it comes from the JSON
+    # (M4's authored target), never from a Python constant. A missing home is a
+    # per-bar failure (batch runs keep going), with the fix in the message.
+    try:
+        home12 = home_conf12_from_action(action, joint_names_12)
+    except RuntimeError as exc:
+        return False, str(exc)
+
+    if base_mode == "saved":
+        # Use the base frame stored in the export as-is (no sampling), then solve
+        # the keyframe IK chain at it. We do NOT require any saved start
+        # configuration: keyframe IK solves for each movement's GOAL ee-frames,
+        # so a movement with no start config just gets a cold solve (any valid
+        # IK), and the chain warm-starts each later movement from the previous
+        # one's solution to stay on the same IK branch. M1 in particular is
+        # *designed* to carry no start config (its start is planner-filled later),
+        # so a missing start config must never abort the solve.
+        base_frame = getattr(m1.start_state, "robot_base_frame", None)
+        if base_frame is None:
+            return False, "no saved base frame on M1 start_state"
+        used_base = frame_to_mm4(base_frame)
+        solved = solve_keyframe_chain(
+            planner, ordered, used_base, check_collision=True, after_solve=after_solve,
+            groups=groups, home_conf_12=home12,
+        )
+    else:  # sample
+        gids = getattr(action, "walkable_ground_ids", None) or []
+        soups = [grounds[g] for g in gids if g in grounds]
+        if not soups:
+            return False, f"no associated WalkableGround (ids={gids})"
+        midpoint = _bar_midpoint_mm(m2)
+        if midpoint is None:
+            return False, "M2 has no left/right target_ee_frames"
+        solved, used_base = solve_chain_with_base_search(
+            planner, movements, soups, midpoint,
+            heading_dir_mm=_avg_insertion_dir_mm(m2), check_collision=True,
+            groups=groups, home_conf_12=home12,
+        )
+
+    if solved is None:
+        return False, "IK chain failed for all base attempts"
+
+    _write_back_solve(action, used_base, solved, rcell, joint_names_12)
+    save_path = solved_action_path(clean_action_path, "keyframe")
+    save_solved_action(action, save_path)
+    o = used_base[:3, 3]
+    return True, f"base ({o[0]:.0f},{o[1]:.0f},{o[2]:.0f})mm -> {os.path.basename(save_path)}"
+
+
+def run_solve_keyframes(args, problem_dir: str) -> int:
+    """Keyframe-solve entry point: single or batch base+IK over BarAction file(s).
+
+    Args:
+        args: parsed CLI args.
+        problem_dir (str): the resolved ``<data_root>/<problem>`` directory.
+
+    Returns:
+        int: 0 when every action solved, 2 when any failed, 1 on setup errors.
+    """
+    cell_path = args.cell or os.path.join(problem_dir, "RobotCell.json")
+    if not os.path.isfile(cell_path):
+        print(f"[X] missing RobotCell.json: {cell_path}")
+        return 1
+
+    actions_dir = os.path.join(problem_dir, "BarActions")
+    if args.all_bars:
+        if not os.path.isdir(actions_dir):
+            print(f"[X] missing BarActions dir: {actions_dir}")
+            return 1
+        action_files = sorted(
+            os.path.join(actions_dir, f) for f in os.listdir(actions_dir)
+            # Only CLEAN export files "<bar_id>.json". Skip any sidecar that has an
+            # extra dotted tag in the middle -- e.g. "B6.solved.json" (half-solved
+            # write-back) or "B6.20260430_002744.json" (timestamped capture) -- by
+            # requiring the stem (name minus ".json") to contain no dot.
+            if f.endswith(".json") and "." not in os.path.splitext(f)[0]
+        )
+        if not action_files:
+            print(f"[X] no clean BarAction files in {actions_dir}")
+            return 1
+    else:
+        one = os.path.join(actions_dir, args.bar_action)
+        if not os.path.isfile(one):
+            print(f"[X] missing BarAction file: {one}")
+            return 1
+        action_files = [one]
+
+    grounds = {}
+    if args.base == "sample":
+        wg_path = args.walkable_ground or os.path.join(problem_dir, "WalkableGround.json")
+        if not os.path.isfile(wg_path):
+            print(f"[X] --base sample needs WalkableGround.json: {wg_path}")
+            return 1
+        grounds = load_walkable_grounds(wg_path)
+        print(f"[load] WalkableGround <- {wg_path} ({len(grounds)} ground(s))")
+
+    print(f"[load] RobotCell    <- {cell_path}")
+    rcell = json_load(cell_path)
+    # The planning-group names come from the cell's own SRDF semantics (embedded
+    # in RobotCell.json) -- nothing is hardcoded here. The solvers read the cell
+    # straight from the planner (`start_planner` pushes it), so no extra
+    # registration step is needed.
+    groups = resolve_arm_groups(rcell)
+    print(f"  planning groups: left={groups[0]!r} right={groups[1]!r}")
+
+    print(f"\n[pb] starting PyBullet ({'GUI' if args.gui else 'DIRECT'})")
+    _client, planner = start_planner(rcell, use_gui=args.gui)
+
+    # In --gui mode, pause + plot after each solved keyframe so the pose can be
+    # inspected (e.g. "M1 solved, why does M2 fail from here?"). Only the `saved`
+    # base mode threads this hook through -- `sample` mode would otherwise pause on
+    # every one of many base attempts. Off (None) in headless batch runs.
+    after_solve = None
+    if args.gui and args.base == "saved":
+        after_solve = make_keyframe_pause_hook(
+            planner, rcell, arm_joint_names_12(rcell, groups)
+        )
+
+    results = []
+    try:
+        for path in action_files:  # `path` is always the CLEAN <bar>.json
+            bar_file = os.path.basename(path)
+            # --load names which file to solve from: 'clean' = the Rhino export;
+            # 'solved_keyframe' = this bar's prior keyframe solve (e.g. so --base
+            # saved can pick up the base it already found); 'solved_motion' = its
+            # motion sidecar. Either way the write-back goes to the keyframe sidecar
+            # derived from the clean path, so the motion sidecar is never touched.
+            if args.load == "clean":
+                load_path = path
+            else:
+                kind = "motion" if args.load == "solved_motion" else "keyframe"
+                sidecar = solved_action_path(path, kind)
+                if not os.path.isfile(sidecar):
+                    print(f"\n[solve] {bar_file}: --load {args.load} but no "
+                          f"{os.path.basename(sidecar)}; skipping.")
+                    results.append((bar_file, False, f"no {os.path.basename(sidecar)}"))
+                    continue
+                load_path = sidecar
+            action = json_load(load_path)
+            bar_id = getattr(action, "active_bar_id", "") or bar_file
+            print(f"\n[solve] {bar_id} ({os.path.basename(load_path)}) base={args.base}")
+            ok, detail = solve_keyframes_for_action(
+                planner, action, path, base_mode=args.base, grounds=grounds,
+                groups=groups, after_solve=after_solve,
+            )
+            mark = "OK  " if ok else "FAIL"
+            print(f"  [{mark}] {bar_id}: {detail}")
+            results.append((bar_id, ok, detail))
+
+        # Print the summary BEFORE disconnecting. In --gui mode pp.disconnect()
+        # tears down the PyBullet window, which on Windows invalidates the console
+        # stdout handle -- any print() after it then raises "OSError [WinError 6]
+        # The handle is invalid". So all output happens here first, and disconnect
+        # (in the finally) is the very last thing we do.
+        n_ok = sum(1 for _, ok, _ in results if ok)
+        print(f"\n[summary] keyframe-solve: {n_ok}/{len(results)} solved")
+        for bar_id, ok, detail in results:
+            mark = "OK  " if ok else "FAIL"
+            print(f"  [{mark}] {bar_id}: {detail}")
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+    finally:
+        # Last operation: no stdout writes after this (see note above). A raising
+        # disconnect must not itself try to print (that would hit the same
+        # invalidated handle), so swallow it silently.
+        try:
+            pp.disconnect()
+        except Exception:
+            pass
+    return 0 if results and all(ok for _, ok, _ in results) else 2
+
+
+def plan_one_action(planner, rcell, clean_action_path: str, args, groups):
+    """Run full motion planning for ONE BarAction file (no PyBullet lifecycle / replay).
+
+    Loads the action named by ``--load``: the clean export (``clean``), this bar's
+    motion sidecar to continue an in-progress plan (``solved_motion``), or the
+    keyframe sidecar from ``--solve-keyframes`` to plan on top of its solved base +
+    keyframe configs (``solved_keyframe``). Runs the planning sequence (chaining
+    M1->M2->M3->M4 for
+    ``--movement all``), and writes the motion sidecar after each solved movement.
+    The
+    PyBullet client/planner is created once by the caller and shared across a batch;
+    replay stays in the caller so ``--all`` runs skip it.
+
+    Args:
+        planner: the active PyBulletPlanner (dual-arm cell already loaded).
+        rcell: the loaded RobotCell.
+        clean_action_path (str): path to the clean ``BarActions/<bar>.json``.
+        args: parsed CLI args.
+        groups (tuple[str, str]): the ``(left_group, right_group)`` names derived
+            from the cell semantics (``resolve_arm_groups``).
+
+    Returns:
+        tuple: ``(all_ok, segments, joint_names_12, active_bar_id)`` where
+        ``segments`` is ``[(role, state, path), ...]`` for optional single-bar
+        replay (empty on a setup error or in ``--probe-endpoints`` mode).
+    """
+    bar_file = os.path.basename(clean_action_path)
+
+    # The clean file (Rhino export) is never overwritten; the half-solved motion
+    # snapshot is always written to this sidecar, regardless of which we load.
+    save_path = solved_action_path(clean_action_path, "motion")
+    if args.load == "clean":
+        action_path = clean_action_path
+    else:
+        # --load names exactly which partly-solved sidecar to start from:
+        #   solved_motion   -- this bar's motion sidecar: continue an in-progress
+        #                      motion plan, keeping its already-planned trajectories.
+        #   solved_keyframe -- the keyframe-solve sidecar from --solve-keyframes: it
+        #                      carries the solved robot base + per-keyframe
+        #                      start/goal configs but NO trajectories, so motion
+        #                      planning starts from that base and fills in the
+        #                      trajectories between the keyframes.
+        # Either way the write-back still goes to save_path (the motion sidecar), so
+        # loading solved_keyframe never overwrites the keyframe solve.
+        kind = "motion" if args.load == "solved_motion" else "keyframe"
+        action_path = solved_action_path(clean_action_path, kind)
+        if not os.path.isfile(action_path):
+            print(f"[X] {bar_file}: --load {args.load} but no such sidecar yet: "
+                  f"{action_path}")
+            return False, [], [], ""
+
+    print(f"[load] BarAction ({args.load}) <- {action_path}")
+    action = json_load(action_path)
+    active_bar_id = getattr(action, "active_bar_id", "") or ""
+    print(f"  action_id     : {action.action_id}")
+    print(f"  active_bar_id : {active_bar_id}")
+    print(f"  movements     : {len(action.movements)}")
+
+    # The cell stores bars as rigid bodies named ``bar_<bar_id>``. The planner API
+    # needs that rigid-body name, not the bare bar id.
+    def _resolve_bar_rb_name(cell, bar_id: str) -> Optional[str]:
+        for candidate in (bar_id, f"bar_{bar_id}"):
+            if candidate in cell.rigid_body_models:
+                return candidate
+        return None
+
+    active_bar_rb_name = _resolve_bar_rb_name(rcell, active_bar_id) if active_bar_id else None
+    if active_bar_id and active_bar_rb_name is None:
+        print(f"[X] {bar_file}: active_bar_id {active_bar_id!r} not in cell.rigid_body_models")
+        return False, [], [], active_bar_id
+    if active_bar_rb_name and active_bar_rb_name != active_bar_id:
+        print(f"  bar rigid-body name: {active_bar_rb_name}")
+
+    # Planning sequence: the order movements are planned in (not just a set of
+    # roles). Order matters — each solved movement's start/end config propagates
+    # into its neighbours (see accept_trajectory), so M1 must plan before M2, etc.
+    planning_sequence = (
+        ["M1", "M2", "M3", "M4"] if args.movement == "all" else [args.movement]
+    )
+
+    # 12-vec joint names — read from the cell, shared across movements.
+    joint_names_12 = arm_joint_names_12(rcell, groups)
+
+    # The authored home pose, read from the JSON (M4's target_configuration). It
+    # is only needed as the fill-in for movements exported without a start config;
+    # a missing home only fails a movement that actually needs the fill.
+    try:
+        home12 = home_conf12_from_action(action, joint_names_12)
+    except RuntimeError as exc:
+        home12 = None
+        print(f"[!] {exc}")
+
+    # Resolve the movements once, in planning order, and mutate their start_states
+    # in place — accept_trajectory propagates each planned endpoint into the next
+    # movement's start_state (the key chaining step).
+    movements = [select_movement(action, r) for r in planning_sequence]
+
+    segments = []          # (role, state, path) for each solved movement
+    results = []           # (role, ok, detail) for the roll-up
+
+    # Pre-flight: show what will be planned, in order, before we start.
+    print_roster(movements, tag="pre-flight")
+
+    # Endpoint feasibility probe (M1): derive + report start/goal, no RRT.
+    if args.probe_endpoints:
+        code = probe_endpoints(
+            planner, rcell, action, active_bar_rb_name, joint_names_12,
+            groups=groups, home12=home12, use_gui=args.gui,
+        )
+        return code == 0, [], joint_names_12, active_bar_id
+
+    for index, role in enumerate(planning_sequence):
+        selected = movements[index]
+        if selected is None:
+            msg = f"no movement matches role {role!r} in {bar_file}"
+            print(f"[X] {msg}")
+            results.append((role, False, msg))
+            break  # chain can't continue past a missing movement
+
+        print(f"\n[pick] {role} -> {type(selected).__name__} {selected.movement_id}")
+
+        state = selected.start_state
+        if state is None:
+            msg = f"{selected.movement_id}: start_state is None."
+            print(f"[X] {msg}")
+            results.append((role, False, msg))
+            break
+
+        # Reuse an already-planned trajectory from the loaded sidecar: skip
+        # planning, keep it for replay + chaining. Only the motion sidecar carries
+        # trajectories; a keyframe sidecar has none, so this simply never fires for
+        # --load solved_keyframe (every movement is planned fresh from its base).
+        existing_traj = getattr(selected, "trajectory", None)
+        if args.load != "clean" and existing_traj:
+            path = [[float(v) for v in wp] for wp in existing_traj]
+            print(f"[reuse] {role}: {len(path)} waypoint(s) from half-solved file.")
+            segments.append((role, state, path))
+            results.append((role, True, f"reused {len(path)} waypoint(s)"))
+            continue
+
+        # M1 derives its own start; M2/M3/M4 should already carry a start config
+        # propagated from the previous movement's accept_trajectory. The authored
+        # home (from the JSON) is only a fallback when nothing has set one.
+        if state.robot_configuration is None:
+            if home12 is None:
+                msg = (f"{selected.movement_id}: no start config and no authored "
+                       "home (M4 target_configuration) to fill it from; "
+                       "re-export the bar.")
+                print(f"[X] {msg}")
+                results.append((role, False, msg))
+                break
+            fill_missing_config(state, rcell, groups, home12[:6], home12[6:])
+
+        # Apply start_state to the live scene.
+        t0 = time.time()
+        with pp.LockRenderer(False):
+            planner.set_robot_cell_state(state)
+        print(f"[pb] set_robot_cell_state: {time.time() - t0:.2f}s")
+
+        # Tint the active bar vivid blue so it's easy to track during replay.
+        if args.gui and active_bar_rb_name is not None:
+            color_rigid_body(planner, active_bar_rb_name, rgba=(0.1, 0.4, 1.0, 1.0))
+
+        # Primary ACM check. Skip it only for an M1 that derives its own start (the
+        # config here is just the HOME placeholder the planner is about to replace).
+        if role == "M1" and args.derive_start:
+            print(f"[skip-check] {selected.movement_id}: start conf is a HOME "
+                  "placeholder (planner derives its own start); skipping "
+                  "pre-plan collision check.")
+        else:
+            check_collision(planner, state, label=selected.movement_id)
+
+        plan_kwargs = dict(
+            active_bar_id=active_bar_id,
+            active_bar_rb_name=active_bar_rb_name,
+            joint_names_12=joint_names_12,
+            max_time=args.max_time,
+            derive_start=args.derive_start,
+            draw=args.diagnosis,
+        )
+        if args.diagnosis:
+            # Diagnosis: keep the renderer UNLOCKED so the search trees draw live.
+            path, info = plan_movement(planner, state, role, selected, **plan_kwargs)
+        else:
+            # Lock the renderer during planning (redraw of intermediate configs
+            # dominates wall-clock in GUI mode; no-op in DIRECT).
+            with pp.LockRenderer():
+                path, info = plan_movement(planner, state, role, selected, **plan_kwargs)
+
+        if path is None:
+            reason = (info or {}).get("failure_reason", "<unknown>")
+            print(f"[plan] {role} FAILED: {reason}")
+            results.append((role, False, reason))
+            break  # can't chain the next movement without this one's end config
+
+        print(f"[plan] {role} OK: {len(path)} waypoint(s)")
+        for k, v in (info or {}).items():
+            if k in ("profile", "smooth_profile", "path_poses", "derived_start_conf"):
+                continue
+            print(f"  {k}: {v}")
+
+        # Chain bookkeeping: propagate traj[0]/[-1] into neighbouring start_states.
+        accepted = accept_solved_movement(
+            selected, role=role, index=index, movements=movements,
+            rcell=rcell, joint_names_12=joint_names_12, path=path, source="Plan",
+        )
+        if not accepted:
+            results.append((role, False, "chain rejected (start mismatch)"))
+            break
+
+        # M0 is left unplanned offline; backfill its goal from M1's start config.
+        if role == "M1":
+            m0 = select_movement(action, "M0")
+            m1_start = getattr(selected.start_state, "robot_configuration", None)
+            if m0 is not None and m1_start is not None:
+                m0.target_configuration = m1_start
+                print("[Plan] backfilled M0.target_configuration <- M1 start config.")
+
+        segments.append((role, selected.start_state, path))
+        results.append((role, True, f"{len(path)} waypoint(s)"))
+
+        # Snapshot progress after every solved movement.
+        save_solved_action(action, save_path)
+
+    # Per-bar roll-up (most useful in --movement all).
+    if len(planning_sequence) > 1:
+        print("\n[summary]")
+        for role, ok, detail in results:
+            mark = "OK  " if ok else "FAIL"
+            print(f"  [{mark}] {role}: {detail}")
+
+    all_ok = bool(segments) and all(ok for _, ok, _ in results)
+    return all_ok, segments, joint_names_12, active_bar_id
+
+
 def main() -> int:
     """Parse CLI args, load the cell and action, then plan and optionally replay.
 
@@ -1080,8 +1873,10 @@ def main() -> int:
     """
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
-        "data_root", nargs="?", default=DEFAULT_DATA_ROOT,
-        help="Parent folder containing per-problem subfolders.",
+        "data_root", nargs="?", default=None,
+        help="Parent folder containing per-problem subfolders. Falls back to the "
+             "HUSKY_ASSEMBLY_DATA_ROOT environment variable; errors if neither "
+             "is given.",
     )
     parser.add_argument(
         "--problem", default=DEFAULT_PROBLEM,
@@ -1092,13 +1887,47 @@ def main() -> int:
         help="BarAction filename inside <data_root>/<problem>/BarActions/.",
     )
     parser.add_argument(
-        "--movement", required=True, choices=("M0", "M1", "M2", "M3", "M4", "all"),
-        help="Which movement role to plan. 'all' chains M1->M2->M3->M4 (M0 is "
-             "left unplanned offline -- the live monitor plans it). 'M0' only "
-             "works after M1 has been planned so its goal config is backfilled.",
+        "--movement", default=None, choices=("M0", "M1", "M2", "M3", "M4", "all"),
+        help="Which movement role to plan (required unless --solve-keyframes). "
+             "'all' chains M1->M2->M3->M4 (M0 is left unplanned offline -- the "
+             "live monitor plans it). 'M0' only works after M1 has been planned "
+             "so its goal config is backfilled.",
+    )
+    parser.add_argument(
+        "--solve-keyframes", action="store_true",
+        help="Keyframe-solve mode (the headless twin of RSIKKeyframe): solve the "
+             "M1->M2->M3 IK chain to find a robot base + per-keyframe configs, "
+             "instead of running motion planning. Writes the found base into every "
+             "movement's start_state + a .solved.json sidecar. Ignores --movement.",
+    )
+    parser.add_argument(
+        "--all", dest="all_bars", action="store_true",
+        help="Solve for EVERY clean BarActions/<bar>.json in the problem dir "
+             "(files with an extra dotted tag like B6.solved.json are skipped), "
+             "instead of just --bar-action. Applies to BOTH modes: with "
+             "--solve-keyframes it base+IK-solves every bar; without it, it runs "
+             "full motion planning for every bar. Single-bar replay / "
+             "--probe-endpoints / --diagnosis are not available with --all.",
+    )
+    parser.add_argument(
+        "--base", choices=("sample", "saved"), default="sample",
+        help="Keyframe-solve mode: 'sample' (default) auto-seeds on the bar's "
+             "associated WalkableGround and grows the sample radius until the "
+             "chain solves; 'saved' strictly uses the base already stored in the "
+             "BarAction (no sampling).",
+    )
+    parser.add_argument(
+        "--walkable-ground", default=None,
+        help="Keyframe-solve mode: path to WalkableGround.json (default: "
+             "<problem>/WalkableGround.json). Only needed for --base sample.",
     )
     parser.add_argument("--gui", action="store_true")
-    parser.add_argument("--max-time", type=float, default=60.0)
+    parser.add_argument(
+        "--max-time", type=float, default=60.0,
+        help="Motion-planning time budget in seconds, per movement -- how long "
+             "the RRT motion planner is allowed to search for a collision-free "
+             "path before giving up (default: 60). Not the IK-solve budget.",
+    )
     parser.add_argument("--no-replay", action="store_true")
     parser.add_argument(
         "--no-derive-start", dest="derive_start", action="store_false",
@@ -1107,13 +1936,20 @@ def main() -> int:
     )
     parser.set_defaults(derive_start=True)
     parser.add_argument(
-        "--load", choices=("clean", "solved"), default="clean",
-        help="Which BarAction to load. 'clean' (default) = the Rhino export, "
-             "plan the requested movement(s) from scratch. 'solved' = the "
-             "half-solved sidecar (<bar-action>.solved.json): reuse movements "
-             "that already have a trajectory and only plan the ones still "
-             "missing. The clean file is never overwritten; the sidecar is "
-             "rewritten after each movement is planned.",
+        "--load", choices=("clean", "solved_motion", "solved_keyframe"),
+        default="clean",
+        help="Which BarAction file to load. 'clean' (default) = the Rhino export, "
+             "solve from scratch. 'solved_motion' = this bar's motion sidecar "
+             "<bar>.solved_motion.json (keep its already-planned trajectories, plan "
+             "only the missing ones). 'solved_keyframe' = the keyframe-solve "
+             "sidecar <bar>.solved_keyframe.json from --solve-keyframes (its solved "
+             "base + per-keyframe configs, with trajectories still to plan) -- use "
+             "this to run motion planning on top of a keyframe solve, or (in "
+             "--solve-keyframes mode) so --base saved picks up the base it found. "
+             "The clean file is never overwritten; motion planning always writes "
+             "<bar>.solved_motion.json and --solve-keyframes always writes "
+             "<bar>.solved_keyframe.json, so loading one sidecar never overwrites "
+             "the other.",
     )
     parser.add_argument(
         "--probe-endpoints", action="store_true",
@@ -1139,7 +1975,7 @@ def main() -> int:
         print("[diagnosis] --diagnosis draws in the GUI; without --gui the trees "
               "won't render (planning still runs with the renderer 'unlocked').")
 
-    data_root = os.path.abspath(args.data_root)
+    data_root = resolve_data_root(args.data_root)
     if not os.path.isdir(data_root):
         print(f"[X] missing data_root: {data_root}")
         return 1
@@ -1149,22 +1985,40 @@ def main() -> int:
         print(f"[X] missing problem dir: {problem_dir}")
         return 1
 
-    clean_action_path = os.path.join(problem_dir, "BarActions", args.bar_action)
-    if not os.path.isfile(clean_action_path):
-        print(f"[X] missing BarAction file: {clean_action_path}")
+    # Keyframe-solve mode has its own single/batch lifecycle (no --movement, its
+    # own cell + planner + write-back). Branch off before the planning setup.
+    if args.solve_keyframes:
+        return run_solve_keyframes(args, problem_dir)
+
+    if args.movement is None:
+        print("[X] --movement is required unless --solve-keyframes is set.")
         return 1
 
-    # The clean file (Rhino export) is never overwritten; the half-solved
-    # snapshot is always written to this sidecar, regardless of which we load.
-    save_path = solved_action_path(clean_action_path)
-    if args.load == "solved":
-        if not os.path.isfile(save_path):
-            print(f"[X] --load solved but no half-solved file yet: {save_path}")
-            print("    Run once with --load clean to produce it.")
+    # Single bar (--bar-action) or every clean bar (--all). "Clean" = a plain
+    # "<bar_id>.json" with no extra dotted tag in the stem, so sidecars like
+    # "B6.solved.json" / timestamped captures are skipped.
+    actions_dir = os.path.join(problem_dir, "BarActions")
+    if args.all_bars:
+        if args.probe_endpoints or args.diagnosis:
+            print("[X] --all is a batch run; --probe-endpoints / --diagnosis are "
+                  "single-bar debug modes. Drop --all or the debug flag.")
             return 1
-        action_path = save_path
+        if not os.path.isdir(actions_dir):
+            print(f"[X] missing BarActions dir: {actions_dir}")
+            return 1
+        action_files = sorted(
+            os.path.join(actions_dir, f) for f in os.listdir(actions_dir)
+            if f.endswith(".json") and "." not in os.path.splitext(f)[0]
+        )
+        if not action_files:
+            print(f"[X] no clean BarAction files in {actions_dir}")
+            return 1
     else:
-        action_path = clean_action_path
+        one = os.path.join(actions_dir, args.bar_action)
+        if not os.path.isfile(one):
+            print(f"[X] missing BarAction file: {one}")
+            return 1
+        action_files = [one]
 
     cell_path = args.cell or os.path.join(problem_dir, "RobotCell.json")
     if not os.path.isfile(cell_path):
@@ -1176,208 +2030,49 @@ def main() -> int:
     print(f"  robot model   : {getattr(rcell.robot_model, 'name', '<?>')}")
     print(f"  tool models   : {sorted(rcell.tool_models.keys())}")
     print(f"  rigid bodies  : {len(rcell.rigid_body_models)}")
-
-    print(f"[load] BarAction ({args.load}) <- {action_path}")
-    action = json_load(action_path)
-    active_bar_id = getattr(action, "active_bar_id", "") or ""
-    print(f"  action_id     : {action.action_id}")
-    print(f"  active_bar_id : {active_bar_id}")
-    print(f"  movements     : {len(action.movements)}")
-
-    # The cell stores bars as rigid bodies named ``bar_<bar_id>``. The
-    # planner API needs that rigid-body name, not the bare bar id.
-    def _resolve_bar_rb_name(cell, bar_id: str) -> Optional[str]:
-        for candidate in (bar_id, f"bar_{bar_id}"):
-            if candidate in cell.rigid_body_models:
-                return candidate
-        return None
-
-    active_bar_rb_name = _resolve_bar_rb_name(rcell, active_bar_id) if active_bar_id else None
-    if active_bar_id and active_bar_rb_name is None:
-        print(f"[X] active_bar_id {active_bar_id!r} not found in cell.rigid_body_models")
-        return 1
-    if active_bar_rb_name and active_bar_rb_name != active_bar_id:
-        print(f"  bar rigid-body name: {active_bar_rb_name}")
-
-    # Planning sequence: the order movements are planned in (not just a set of
-    # roles). Order matters — each solved movement's start/end config propagates
-    # into its neighbours (see accept_trajectory), so M1 must plan before M2, etc.
-    planning_sequence = (
-        ["M1", "M2", "M3", "M4"] if args.movement == "all" else [args.movement]
-    )
+    # Planning-group names come from the cell's own SRDF semantics, not constants.
+    groups = resolve_arm_groups(rcell)
+    print(f"  planning groups: left={groups[0]!r} right={groups[1]!r}")
 
     print(f"\n[pb] starting PyBullet ({'GUI' if args.gui else 'DIRECT'})")
     _client, planner = start_planner(rcell, use_gui=args.gui)
 
     try:
-        # 12-vec joint names — read from the cell, shared across movements.
-        left_names = [n for n in rcell.get_configurable_joint_names(LEFT_GROUP)
-                      if any(n.endswith(s) for s in _ARM_SUFFIXES)]
-        right_names = [n for n in rcell.get_configurable_joint_names(RIGHT_GROUP)
-                       if any(n.endswith(s) for s in _ARM_SUFFIXES)]
-        joint_names_12 = left_names + right_names
-
-        # Resolve the movements once, in planning order, and mutate their
-        # start_states in place — accept_trajectory propagates each planned
-        # endpoint into the next movement's start_state (the key chaining step).
-        movements = [select_movement(action, r) for r in planning_sequence]
-
-        segments = []          # (role, state, path) for each solved movement
-        results = []           # (role, ok, detail) for the final roll-up
-
-        # Pre-flight: show what will be planned, in order, before we start.
-        print_roster(movements, tag="pre-flight")
-
-        # Endpoint feasibility probe (M1): derive + report start/goal, no RRT.
-        if args.probe_endpoints:
-            return probe_endpoints(
-                planner, rcell, action, active_bar_rb_name, joint_names_12,
-                use_gui=args.gui,
+        single = (len(action_files) == 1)
+        results = []          # (bar_file, all_ok)
+        replayable = None     # (segments, joint_names_12) for a single-bar replay
+        for clean_action_path in action_files:
+            bar_file = os.path.basename(clean_action_path)
+            print(f"\n[plan] ===== {bar_file} =====")
+            all_ok, segments, joint_names_12, _bar_id = plan_one_action(
+                planner, rcell, clean_action_path, args, groups,
             )
+            results.append((bar_file, all_ok))
+            if single:
+                replayable = (segments, joint_names_12)
 
-        for index, role in enumerate(planning_sequence):
-            selected = movements[index]
-            if selected is None:
-                msg = f"no movement matches role {role!r} in {args.bar_action}"
-                print(f"[X] {msg}")
-                results.append((role, False, msg))
-                break  # chain can't continue past a missing movement
+        # Batch roll-up (print BEFORE any disconnect so --gui teardown can't
+        # invalidate the console stdout handle mid-print).
+        if not single:
+            n_ok = sum(1 for _, ok in results if ok)
+            print(f"\n[summary] planning: {n_ok}/{len(results)} bar(s) fully planned")
+            for bar_file, ok in results:
+                print(f"  [{'OK  ' if ok else 'FAIL'}] {bar_file}")
 
-            print(f"\n[pick] {role} -> {type(selected).__name__} {selected.movement_id}")
-
-            state = selected.start_state
-            if state is None:
-                msg = f"{selected.movement_id}: start_state is None."
-                print(f"[X] {msg}")
-                results.append((role, False, msg))
-                break
-
-            # Reuse an already-planned trajectory from the half-solved file:
-            # skip planning, keep it for replay + chaining. Its start_state (and
-            # the next movement's propagated start) were saved with it, so the
-            # chain stays consistent and we only plan the still-missing roles.
-            existing_traj = getattr(selected, "trajectory", None)
-            if args.load == "solved" and existing_traj:
-                path = [[float(v) for v in wp] for wp in existing_traj]
-                print(f"[reuse] {role}: {len(path)} waypoint(s) from half-solved file.")
-                segments.append((role, state, path))
-                results.append((role, True, f"reused {len(path)} waypoint(s)"))
-                continue
-
-            # M1 derives its own start; M2/M3/M4 should already carry a start
-            # config propagated from the previous movement's accept_trajectory.
-            # Home is only a fallback when nothing has set one (e.g. a single
-            # non-M1 movement run in isolation, or M1 before it derives).
-            if state.robot_configuration is None:
-                fill_missing_config(
-                    state, rcell, _config.HOME_CONF_LEFT_6, _config.HOME_CONF_RIGHT_6,
-                )
-
-            # Apply start_state to the live scene.
-            t0 = time.time()
-            with pp.LockRenderer(False):
-                planner.set_robot_cell_state(state)
-            print(f"[pb] set_robot_cell_state: {time.time() - t0:.2f}s")
-
-            # Tint the active bar vivid blue so it's easy to track during replay.
-            if args.gui and active_bar_rb_name is not None:
-                color_rigid_body(planner, active_bar_rb_name, rgba=(0.1, 0.4, 1.0, 1.0))
-
-            # Primary ACM check. Skip it only for an M1 that derives its own
-            # start: the config in `state` here is just the HOME placeholder the
-            # planner is about to replace, so the check would flag that
-            # placeholder's (expected) collisions and mislead. M2/M3/M4 (real
-            # propagated starts) and a --no-derive-start M1 (trusted cell start)
-            # still get checked.
-            if role == "M1" and args.derive_start:
-                print(f"[skip-check] {selected.movement_id}: start conf is a HOME "
-                      "placeholder (planner derives its own start); skipping "
-                      "pre-plan collision check.")
+        # Replay is single-bar + GUI only.
+        if single and replayable is not None:
+            segments, joint_names_12 = replayable
+            if not segments:
+                return 0 if results and results[0][1] else 2
+            if args.no_replay or not args.gui:
+                print("[replay] skipped (use --gui without --no-replay to enable).")
+            elif len(segments) == 1:
+                _role, state, path = segments[0]
+                replay_with_slider(planner, state, path, joint_names_12)
             else:
-                check_collision(planner, state, label=selected.movement_id)
+                replay_segments(planner, segments, joint_names_12)
 
-            plan_kwargs = dict(
-                active_bar_id=active_bar_id,
-                active_bar_rb_name=active_bar_rb_name,
-                joint_names_12=joint_names_12,
-                max_time=args.max_time,
-                derive_start=args.derive_start,
-                draw=args.diagnosis,
-            )
-            if args.diagnosis:
-                # Diagnosis: keep the renderer UNLOCKED so the search trees draw
-                # live as they grow (the whole point of --diagnosis).
-                path, info = plan_movement(planner, state, role, selected, **plan_kwargs)
-            else:
-                # Lock the renderer during planning: the RRT/IK sets many
-                # intermediate configs and redrawing each one dominates wall-clock
-                # in GUI mode. (No-op in DIRECT.)
-                with pp.LockRenderer():
-                    path, info = plan_movement(planner, state, role, selected, **plan_kwargs)
-
-            if path is None:
-                reason = (info or {}).get("failure_reason", "<unknown>")
-                print(f"[plan] {role} FAILED: {reason}")
-                results.append((role, False, reason))
-                break  # can't chain the next movement without this one's end config
-
-            print(f"[plan] {role} OK: {len(path)} waypoint(s)")
-            for k, v in (info or {}).items():
-                if k in ("profile", "smooth_profile", "path_poses", "derived_start_conf"):
-                    continue
-                print(f"  {k}: {v}")
-
-            # Chain bookkeeping: write traj[0] into this movement's start_state
-            # (M1/M4), validate it (M2/M3), and propagate traj[-1] into the next
-            # movement's start_state. Mirrors husky_monitor._accept_trajectory.
-            accepted = accept_trajectory(
-                selected, path,
-                role=role, index=index, movements=movements,
-                rcell=rcell, joint_names_12=joint_names_12, source="Plan",
-            )
-            if not accepted:
-                results.append((role, False, "chain rejected (start mismatch)"))
-                break
-
-            # M0 (live-deployment lead-in) is left unplanned offline; its goal is
-            # M1's start config. Now that M1 is planned and owns its start config,
-            # copy it into M0.target_configuration (backward fill). Mirrors the
-            # live monitor's synthetic-M0 backfill.
-            if role == "M1":
-                m0 = select_movement(action, "M0")
-                m1_start = getattr(selected.start_state, "robot_configuration", None)
-                if m0 is not None and m1_start is not None:
-                    m0.target_configuration = m1_start
-                    print("[Plan] backfilled M0.target_configuration <- M1 start config.")
-
-            segments.append((role, selected.start_state, path))
-            results.append((role, True, f"{len(path)} waypoint(s)"))
-
-            # Snapshot progress after every solved movement, so a later failure
-            # still leaves this one on disk to reload with --load solved.
-            save_solved_action(action, save_path)
-
-        # Roll-up summary (most useful in batch mode).
-        if len(planning_sequence) > 1:
-            print("\n[summary]")
-            for role, ok, detail in results:
-                mark = "OK  " if ok else "FAIL"
-                print(f"  [{mark}] {role}: {detail}")
-
-        all_ok = bool(segments) and all(ok for _, ok, _ in results)
-
-        # Replay.
-        if not segments:
-            return 2
-        if args.no_replay or not args.gui:
-            print("[replay] skipped (use --gui without --no-replay to enable).")
-            return 0 if all_ok else 2
-        if len(segments) == 1:
-            _role, state, path = segments[0]
-            replay_with_slider(planner, state, path, joint_names_12)
-        else:
-            replay_segments(planner, segments, joint_names_12)
-        return 0 if all_ok else 2
+        return 0 if results and all(ok for _, ok in results) else 2
     finally:
         try:
             pp.disconnect()
@@ -1386,4 +2081,17 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    _exit_code = main()
+    # PyBullet's teardown on Windows (especially the --gui window) invalidates the
+    # console stdout handle, so any flush here -- and CPython's own exit-time
+    # finalizer flush -- would raise a benign "OSError [WinError 6] The handle is
+    # invalid" (shown as 'Exception ignored in: <stdout>') AFTER the run has
+    # finished, without affecting the result. Guard the manual flush (the handle
+    # may already be dead), then hard-exit with os._exit to skip the finalizer
+    # flush entirely. Safe here: main() has returned and PyBullet is disconnected.
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.flush()
+        except Exception:
+            pass
+    os._exit(_exit_code if isinstance(_exit_code, int) else 0)

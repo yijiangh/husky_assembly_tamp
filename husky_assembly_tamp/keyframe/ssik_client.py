@@ -1,14 +1,18 @@
 """Client for the ssik analytical-IK sidecar (works inside Rhino AND headless).
 
 ssik needs Python 3.11+ and ships compiled extensions, so it cannot be imported
-into Rhino's CPython 3.9 (or an arbitrary offline venv). Instead we run it in a
-small sidecar process (a Python 3.11 venv, see ``keyframe/ssik_sidecar/serve.py``)
-and talk to it over stdin/stdout using newline-delimited JSON. This module is the
-caller-side half: it spawns and caches the sidecar, sends solve requests, and
-shuts it down.
+into Rhino's CPython 3.9. Instead we run it in a small sidecar process (a Python
+3.11 venv, see ``keyframe/ssik_sidecar/serve.py``) and talk to it over
+stdin/stdout using newline-delimited JSON. This module is the caller-side half:
+it spawns and caches the sidecar, sends solve requests, and shuts it down.
 
-Only the standard library + ``keyframe.config`` are used here, so it imports
-cleanly inside Rhino without pulling in the heavy compas / pybullet stack.
+! The sidecar is a RHINO workaround only: when the current interpreter can
+! import ssik itself (the offline Python 3.11 venv), :func:`solve` short-circuits
+! to ``keyframe.ssik_inprocess`` and no subprocess is ever spawned.
+
+Only the standard library + numpy + ``keyframe.config`` / ``ssik_inprocess``
+are used here, so it imports cleanly inside Rhino without pulling in the heavy
+compas / pybullet stack.
 """
 
 from __future__ import annotations
@@ -18,7 +22,7 @@ import os
 import subprocess
 import sys
 
-from husky_assembly_tamp.keyframe import config
+from husky_assembly_tamp.keyframe import config, ssik_inprocess
 
 
 # Reuse Rhino's per-session sticky cache when available (so the sidecar survives
@@ -171,6 +175,17 @@ def solve(arm: str, target_in_base, *, max_solutions: int = 8) -> list:
     Raises:
         RuntimeError: if the sidecar is unavailable or reports a solve error.
     """
+    # * Short-circuit: in a Python 3.11 env (the offline planner venv) ssik
+    # * imports directly -- call it in-process and never spawn the sidecar.
+    # * Same return shape as the wire protocol, so callers don't notice.
+    if ssik_inprocess.available():
+        return [
+            [float(v) for v in q]
+            for q, _residual in ssik_inprocess.solve(
+                arm, target_in_base, max_solutions=max_solutions
+            )
+        ]
+
     module = config.SSIK_ARM_BUILD[arm][2]
     request = {
         "arm": arm,

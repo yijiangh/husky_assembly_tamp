@@ -26,6 +26,12 @@ setup(
         "video": [
             "imageio[ffmpeg]",
         ],
+        # Analytical IK backend, imported in-process by the offline planner.
+        # Optional because ssik needs Python 3.11+ while this package still
+        # supports 3.8 (Rhino's CPython 3.9 reaches ssik via the sidecar instead).
+        "ssik": [
+            "ssik>=3.0,<4; python_version >= '3.11'",
+        ],
     },
     zip_safe=False,
 )

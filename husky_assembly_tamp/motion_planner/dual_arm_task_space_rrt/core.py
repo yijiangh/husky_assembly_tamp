@@ -47,6 +47,7 @@ from compas_robots import RobotModel
 from pybullet_planning.motion_planners.rrt import TreeNode, configs
 
 # * This package (husky_assembly_tamp) — data paths + shared helpers
+from husky_assembly_tamp.motion_planner import ssik_ik
 from husky_assembly_tamp.utils.params import DATA_DIR
 from husky_assembly_tamp.utils.util import calculate_pose_error, normalize_angles, setup_logger
 
@@ -914,6 +915,20 @@ def solve_dual_arm_pose_ik(
         Optional[FullConf]: a validated 12-DOF configuration, or ``None`` if
         neither solve order produced a consistent grasp.
     """
+    # * Backend dispatch: analytical ssik (the default) replaces the PyBullet
+    # * gradient descent below. Set HUSKY_IK_BACKEND=gradient to get the old path.
+    if ssik_ik.ik_backend() == "ssik":
+        return _solve_dual_arm_pose_ik_ssik(
+            robot=robot,
+            arm_joints=arm_joints,
+            tool_link_left=tool_link_left,
+            tool_link_right=tool_link_right,
+            bar_pose=bar_pose,
+            grasp_bar_from_left=grasp_bar_from_left,
+            grasp_bar_from_right=grasp_bar_from_right,
+            seed_conf=seed_conf,
+            use_angle_normalization=use_angle_normalization,
+        )
     target_left = pp.multiply(bar_pose, grasp_bar_from_left)
     target_right = pp.multiply(bar_pose, grasp_bar_from_right)
     seed_conf = maybe_normalize_angles(seed_conf, use_angle_normalization)
@@ -963,6 +978,74 @@ def solve_dual_arm_pose_ik(
     return None
 
 
+def _solve_dual_arm_pose_ik_ssik(
+    robot: int,
+    arm_joints: Sequence[int],
+    tool_link_left: int,
+    tool_link_right: int,
+    bar_pose: PoseLike,
+    grasp_bar_from_left: PoseLike,
+    grasp_bar_from_right: PoseLike,
+    seed_conf: FullConf,
+    use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
+) -> Optional[FullConf]:
+    """ssik variant of :func:`solve_dual_arm_pose_ik` (warm, per-waypoint).
+
+    Each arm is an independent 6R chain rooted at its own base link, so there is
+    no right-then-left / left-then-right solve-order dance: both arms are solved
+    directly, each taking its branch nearest (raw distance, after 2*pi
+    re-branching) to the seed -- which is exactly what keeps the joint path
+    continuous through the RRT / path reconstruction.
+
+    Args:
+        robot (int): PyBullet body id.
+        arm_joints (Sequence[int]): arm joint indices (both arms).
+        tool_link_left (int): left tool0 link index.
+        tool_link_right (int): right tool0 link index.
+        bar_pose (PoseLike): the world bar pose both arms must grasp.
+        grasp_bar_from_left (PoseLike): left grasp transform (bar-from-tool).
+        grasp_bar_from_right (PoseLike): right grasp transform (bar-from-tool).
+        seed_conf (FullConf): the 12-DOF warm-start configuration.
+        use_angle_normalization (bool): whether to normalize the solved angles.
+
+    Returns:
+        Optional[FullConf]: a validated 12-DOF configuration, or ``None`` when
+        either arm cannot reach its grasp target.
+    """
+    seed = np.asarray(maybe_normalize_angles(seed_conf, use_angle_normalization), dtype=float)
+    conf = seed.copy()
+    targets = {
+        "left": pp.multiply(bar_pose, grasp_bar_from_left),
+        "right": pp.multiply(bar_pose, grasp_bar_from_right),
+    }
+    for arm in ("left", "right"):
+        arm_slice = ssik_ik.ARM_SLICE[arm]
+        # All branches come back sorted nearest-to-seed; take the closest one.
+        # ! allow_rescue=False: this runs per RRT waypoint, so an unreachable
+        # ! pose must fail fast (~1 ms) instead of burning ~40 ms on ssik's
+        # ! numeric rescue -- whose loose LM solutions can also branch-flip.
+        branches = ssik_ik.ssik_arm_branches(
+            robot, arm, targets[arm], seed[arm_slice], allow_rescue=False
+        )
+        if not branches:
+            return None  # this arm cannot reach its tool0 target
+        conf[arm_slice] = branches[0]
+    # ! Keep the PyBullet FK ground-truth gate the gradient path used: it guards
+    # ! against any joint-order / frame-convention mismatch with ssik.
+    if not validate_dual_arm_bar_pose(
+        robot=robot,
+        arm_joints=arm_joints,
+        tool_link_left=tool_link_left,
+        tool_link_right=tool_link_right,
+        full_conf=conf,
+        bar_pose=bar_pose,
+        grasp_bar_from_left=grasp_bar_from_left,
+        grasp_bar_from_right=grasp_bar_from_right,
+    ):
+        return None
+    return maybe_normalize_angles(conf, use_angle_normalization)
+
+
 def solve_endpoint_dual_arm_ik(
     robot: int,
     arm_joints: Sequence[int],
@@ -1005,6 +1088,22 @@ def solve_endpoint_dual_arm_ik(
         Optional[FullConf]: the first collision-free solved configuration, or
         ``None`` if every attempt failed.
     """
+    # * Backend dispatch: with ssik the whole random-restart loop is pointless --
+    # * the analytical solver enumerates EVERY branch once, deterministically, so
+    # * ``rng`` / ``max_attempts`` are intentionally ignored on that path.
+    if ssik_ik.ik_backend() == "ssik":
+        return _solve_endpoint_dual_arm_ik_ssik(
+            robot=robot,
+            arm_joints=arm_joints,
+            tool_link_left=tool_link_left,
+            tool_link_right=tool_link_right,
+            bar_pose=bar_pose,
+            grasp_bar_from_left=grasp_bar_from_left,
+            grasp_bar_from_right=grasp_bar_from_right,
+            seed_conf=seed_conf,
+            collision_fn=collision_fn,
+            use_angle_normalization=use_angle_normalization,
+        )
     for attempt in range(max(1, max_attempts)):
         if attempt == 0:
             attempt_seed = np.asarray(seed_conf, dtype=float)
@@ -1028,6 +1127,80 @@ def solve_endpoint_dual_arm_ik(
     return None
 
 
+def _solve_endpoint_dual_arm_ik_ssik(
+    robot: int,
+    arm_joints: Sequence[int],
+    tool_link_left: int,
+    tool_link_right: int,
+    bar_pose: PoseLike,
+    grasp_bar_from_left: PoseLike,
+    grasp_bar_from_right: PoseLike,
+    seed_conf: FullConf,
+    collision_fn: Optional[Callable[[np.ndarray], bool]] = None,
+    use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
+) -> Optional[FullConf]:
+    """ssik variant of :func:`solve_endpoint_dual_arm_ik` (cold, single pose).
+
+    Enumerates every analytical branch per arm (up to 8), forms all left/right
+    combinations (up to 64), orders them by distance to ``seed_conf``, and
+    returns the first combination that passes the FK validation and the
+    optional collision reject. Fully deterministic -- no random restarts.
+
+    Args:
+        robot (int): PyBullet body id.
+        arm_joints (Sequence[int]): arm joint indices.
+        tool_link_left (int): left tool0 link index.
+        tool_link_right (int): right tool0 link index.
+        bar_pose (PoseLike): the world bar pose to grasp.
+        grasp_bar_from_left (PoseLike): left grasp transform (bar-from-tool).
+        grasp_bar_from_right (PoseLike): right grasp transform (bar-from-tool).
+        seed_conf (FullConf): preferred configuration; candidates are tried
+            nearest-to-it first.
+        collision_fn (Optional[Callable[[np.ndarray], bool]]): optional
+            predicate; candidates for which it returns True are rejected.
+        use_angle_normalization (bool): whether to normalize the solved angles.
+
+    Returns:
+        Optional[FullConf]: the best surviving configuration, or ``None`` when
+        no branch combination is reachable + valid + collision-free.
+    """
+    seed = np.asarray(seed_conf, dtype=float)
+    branches_left = ssik_ik.ssik_arm_branches(
+        robot, "left", pp.multiply(bar_pose, grasp_bar_from_left), seed[0:6], max_solutions=8
+    )
+    branches_right = ssik_ik.ssik_arm_branches(
+        robot, "right", pp.multiply(bar_pose, grasp_bar_from_right), seed[6:12], max_solutions=8
+    )
+    if not branches_left or not branches_right:
+        return None  # at least one arm cannot reach its grasp target at all
+    # * Cross-product of per-arm branches, tried nearest-to-seed first so the
+    # * accepted endpoint stays close to where the robot already is.
+    candidates = [
+        (float(np.linalg.norm(np.concatenate([ql, qr]) - seed)), np.concatenate([ql, qr]))
+        for ql in branches_left
+        for qr in branches_right
+    ]
+    candidates.sort(key=lambda pair: pair[0])
+    for _distance, conf in candidates:
+        conf = maybe_normalize_angles(conf, use_angle_normalization)
+        # ! PyBullet FK ground-truth gate (same role as in the gradient path).
+        if not validate_dual_arm_bar_pose(
+            robot=robot,
+            arm_joints=arm_joints,
+            tool_link_left=tool_link_left,
+            tool_link_right=tool_link_right,
+            full_conf=conf,
+            bar_pose=bar_pose,
+            grasp_bar_from_left=grasp_bar_from_left,
+            grasp_bar_from_right=grasp_bar_from_right,
+        ):
+            continue
+        if collision_fn is not None and collision_fn(np.asarray(conf, dtype=float)):
+            continue
+        return conf
+    return None
+
+
 def _grid_in_box(
     box: Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]],
     step: float,
@@ -1048,6 +1221,56 @@ def _grid_in_box(
     ys = np.arange(y_lo, y_hi + 0.5 * step, step)
     zs = np.arange(z_lo, z_hi + 0.5 * step, step)
     return [(float(x), float(y), float(z)) for x in xs for y in ys for z in zs]
+
+
+def home_bar_anchor_pose_mb(
+    mb_from_bar_goal: PoseLike,
+    grasp_bar_from_left: PoseLike,
+    grasp_bar_from_right: PoseLike,
+) -> Tuple[Tuple[float, float, float], Tuple[float, float, float, float]]:
+    """The canonical "home" bar anchor pose (mobile-base frame) for start derivation.
+
+    Orientation comes from the grasp geometry (``bar_orientation_from_grasps``);
+    position anchors the GRASP MIDPOINT (not the bar frame origin -- some bar
+    frames live at one grasp end) at ``MOBILE_BASE_FROM_BAR_HOME_POSITION``.
+    ``derive_constrained_start`` sweeps position deltas around this anchor, and
+    the ssik goal/start branch pairing in api.py evaluates branch sets at it.
+
+    Args:
+        mb_from_bar_goal (PoseLike): the goal bar pose in the mobile-base frame.
+        grasp_bar_from_left (PoseLike): left grasp transform (bar-from-tool).
+        grasp_bar_from_right (PoseLike): right grasp transform (bar-from-tool).
+
+    Returns:
+        Tuple[Tuple[float, float, float], Tuple[float, float, float, float]]:
+        the anchor as a ``(position, quaternion_xyzw)`` pair in the mobile-base
+        frame.
+    """
+    mb_from_tool0_left_goal = pp.multiply(mb_from_bar_goal, grasp_bar_from_left)
+    mb_from_tool0_right_goal = pp.multiply(mb_from_bar_goal, grasp_bar_from_right)
+    grasp_targets_mb = [
+        (mb_from_bar_goal, mb_from_tool0_left_goal),
+        (mb_from_bar_goal, mb_from_tool0_right_goal),
+    ]
+    home_bar_quat = bar_orientation_from_grasps(grasp_targets_mb)
+
+    # Anchor the grasp midpoint at the home position. Some bar frames live at
+    # one grasp end, so anchoring the frame origin would shift the held bar.
+    bar_from_tool0_left_local = pp.multiply(pp.invert(mb_from_bar_goal), mb_from_tool0_left_goal)
+    bar_from_tool0_right_local = pp.multiply(pp.invert(mb_from_bar_goal), mb_from_tool0_right_goal)
+    grasp_midpoint_in_bar = 0.5 * (
+        np.asarray(bar_from_tool0_left_local[0], dtype=float)
+        + np.asarray(bar_from_tool0_right_local[0], dtype=float)
+    )
+    midpoint_in_mb = np.asarray(
+        pp.multiply(
+            ((0.0, 0.0, 0.0), home_bar_quat),
+            (tuple(grasp_midpoint_in_bar.tolist()), (0.0, 0.0, 0.0, 1.0)),
+        )[0],
+        dtype=float,
+    )
+    base_pos_mb = np.asarray(MOBILE_BASE_FROM_BAR_HOME_POSITION, dtype=float) - midpoint_in_mb
+    return tuple(base_pos_mb.tolist()), home_bar_quat
 
 
 def derive_constrained_start(
@@ -1105,24 +1328,13 @@ def derive_constrained_start(
         (mb_from_bar_goal, mb_from_tool0_right_goal),
     ]
 
-    home_bar_quat = bar_orientation_from_grasps(grasp_targets_mb)
-
-    # Anchor the grasp midpoint at the home position. Some bar frames live at
-    # one grasp end, so anchoring the frame origin would shift the held bar.
-    bar_from_tool0_left_local = pp.multiply(pp.invert(mb_from_bar_goal), mb_from_tool0_left_goal)
-    bar_from_tool0_right_local = pp.multiply(pp.invert(mb_from_bar_goal), mb_from_tool0_right_goal)
-    grasp_midpoint_in_bar = 0.5 * (
-        np.asarray(bar_from_tool0_left_local[0], dtype=float)
-        + np.asarray(bar_from_tool0_right_local[0], dtype=float)
+    # Canonical "home" bar anchor (position + orientation in the mobile-base
+    # frame) the delta sweep expands around. Shared helper so the ssik
+    # branch-pairing in api.py can reason about the same anchor pose.
+    base_pos_mb, home_bar_quat = home_bar_anchor_pose_mb(
+        mb_from_bar_goal, grasp_bar_from_left, grasp_bar_from_right
     )
-    midpoint_in_mb = np.asarray(
-        pp.multiply(
-            ((0.0, 0.0, 0.0), home_bar_quat),
-            (tuple(grasp_midpoint_in_bar.tolist()), (0.0, 0.0, 0.0, 1.0)),
-        )[0],
-        dtype=float,
-    )
-    base_pos_mb = np.asarray(MOBILE_BASE_FROM_BAR_HOME_POSITION, dtype=float) - midpoint_in_mb
+    base_pos_mb = np.asarray(base_pos_mb, dtype=float)
 
     rng = np.random.default_rng(random_seed)
     if joint_collision_fn is None and bar_body is not None:
@@ -1211,6 +1423,149 @@ def derive_constrained_start(
 
     world_from_bar_start = pp.multiply(world_from_mobile_base, chosen_ctx["mobile_base_from_bar_start"])
     return world_from_bar_start, found["conf"]
+
+
+def derive_constrained_start_tracked(
+    robot: int,
+    arm_joints: Sequence[int],
+    tool_link_left: int,
+    tool_link_right: int,
+    grasp_bar_from_left: PoseLike,
+    grasp_bar_from_right: PoseLike,
+    world_from_bar_goal: PoseLike,
+    goal_conf: Sequence[float],
+    *,
+    world_from_mobile_base: Optional[PoseLike] = None,
+    bar_sweep_box: Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]] = (
+        (-0.3, 0.3),
+        (-0.3, 0.3),
+        (-0.3, 0.3),
+    ),
+    bar_sweep_step: float = 0.1,
+    position_res: float = 0.01,
+    rotation_res: float = 0.025,
+    joint_continuity_threshold_rad: float = DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
+    joint_collision_fn: Optional[Callable[[FullConf], bool]] = None,
+    use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
+) -> Tuple[Optional[PoseLike], Optional[np.ndarray], Dict[str, Any]]:
+    """Derive M1's start by TRACKING the goal conf backward to a home pose.
+
+    Why this exists (ssik / joint-limits era): the cold endpoint IK in
+    :func:`derive_constrained_start` picks the home-pose branch nearest the
+    goal seed among those that are collision-free -- but with real joint limits
+    the near branches are often colliding or clipped, so the sweep silently
+    accepts a FAR branch and no continuous in-limit motion connects start to
+    goal (the RRT then dies of continuity stops). This variant removes that
+    failure mode by construction: walk the interpolated SE(3) bar segment from
+    the GOAL pose (at ``goal_conf``) to each candidate home pose with
+    warm-seeded per-waypoint IK. If tracking survives the continuity gate the
+    arrival config is on the goal's own branch sheet, so a continuous joint
+    path start->goal exists along that segment.
+
+    Collisions ALONG the segment are deliberately ignored -- the RRT's job is
+    to route around them. Only the arrival (start) config must be
+    collision-free, since it becomes a plan endpoint.
+
+    Args:
+        robot (int): PyBullet body id.
+        arm_joints (Sequence[int]): arm joint indices (both arms).
+        tool_link_left (int): left tool0 link index.
+        tool_link_right (int): right tool0 link index.
+        grasp_bar_from_left (PoseLike): left grasp transform (bar-from-tool).
+        grasp_bar_from_right (PoseLike): right grasp transform (bar-from-tool).
+        world_from_bar_goal (PoseLike): the goal bar pose.
+        goal_conf (Sequence[float]): the solved 12-DOF goal configuration the
+            backward track starts from.
+        world_from_mobile_base (Optional[PoseLike]): robot base pose (None =
+            identity), used to place the canonical home anchor.
+        bar_sweep_box: position-delta box swept around the home anchor
+            (same convention as :func:`derive_constrained_start`).
+        bar_sweep_step (float): grid spacing of the delta sweep, meters.
+        position_res (float): linear interpolation step for tracking, meters
+            (match the RRT's resolution).
+        rotation_res (float): angular interpolation step, radians.
+        joint_continuity_threshold_rad (float): max per-joint step between
+            consecutive tracked waypoints before the track counts as broken.
+        joint_collision_fn (Optional[Callable[[FullConf], bool]]): predicate
+            for the ARRIVAL config only (True = colliding).
+        use_angle_normalization (bool): forwarded to the per-waypoint IK.
+
+    Returns:
+        Tuple[Optional[PoseLike], Optional[np.ndarray], Dict[str, Any]]:
+        ``(world_from_bar_start, start_conf, info)`` on success, or
+        ``(None, None, info)`` when no delta yields a trackable, collision-free
+        start. ``info`` carries counters for diagnosis.
+    """
+    identity_pose = ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
+    if world_from_mobile_base is None:
+        world_from_mobile_base = identity_pose
+
+    mb_from_bar_goal = pp.multiply(pp.invert(world_from_mobile_base), world_from_bar_goal)
+    base_pos_mb, home_bar_quat = home_bar_anchor_pose_mb(
+        mb_from_bar_goal, grasp_bar_from_left, grasp_bar_from_right
+    )
+    base_pos_mb = np.asarray(base_pos_mb, dtype=float)
+
+    # Nearest-to-anchor deltas first, exactly like the cold sweep.
+    deltas = sorted(_grid_in_box(bar_sweep_box, bar_sweep_step), key=lambda d: float(np.linalg.norm(d)))
+
+    info: Dict[str, Any] = {"tracked_deltas": 0, "track_breaks": 0, "arrival_collisions": 0}
+    with pp.WorldSaver():
+        for delta in deltas:
+            home_mb = (
+                tuple((base_pos_mb + np.asarray(delta, dtype=float)).tolist()),
+                home_bar_quat,
+            )
+            world_from_bar_home = pp.multiply(world_from_mobile_base, home_mb)
+            info["tracked_deltas"] += 1
+
+            # --- Walk goal -> home with warm per-waypoint IK (backend-dispatched).
+            conf = np.asarray(goal_conf, dtype=float)
+            track_ok = True
+            for pose in list(
+                pp.interpolate_poses(
+                    world_from_bar_goal,
+                    world_from_bar_home,
+                    pos_step_size=max(position_res, 1e-6),
+                    ori_step_size=max(rotation_res, 1e-6),
+                )
+            )[1:]:
+                next_conf = solve_dual_arm_pose_ik(
+                    robot=robot,
+                    arm_joints=arm_joints,
+                    tool_link_left=tool_link_left,
+                    tool_link_right=tool_link_right,
+                    bar_pose=pose,
+                    grasp_bar_from_left=grasp_bar_from_left,
+                    grasp_bar_from_right=grasp_bar_from_right,
+                    seed_conf=conf,
+                    use_angle_normalization=use_angle_normalization,
+                )
+                # Track breaks on IK miss or a branch flip -- try the next delta.
+                if next_conf is None or joint_step_exceeds_threshold(
+                    next_conf, conf, joint_continuity_threshold_rad
+                ):
+                    track_ok = False
+                    break
+                conf = np.asarray(next_conf, dtype=float)
+            if not track_ok:
+                info["track_breaks"] += 1
+                continue
+
+            # --- Arrival config must be collision-free (it is a plan endpoint).
+            if joint_collision_fn is not None and joint_collision_fn(conf):
+                info["arrival_collisions"] += 1
+                continue
+
+            info["delta"] = [float(v) for v in delta]
+            return world_from_bar_home, conf, info
+
+    logger.warning(
+        "derive_constrained_start_tracked: no trackable collision-free home across "
+        "%d deltas (%d track breaks, %d arrival collisions)",
+        info["tracked_deltas"], info["track_breaks"], info["arrival_collisions"],
+    )
+    return None, None, info
 
 
 def extend_toward(

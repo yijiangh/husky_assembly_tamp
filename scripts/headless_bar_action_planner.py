@@ -982,20 +982,25 @@ def plan_movement(planner, state, role: str, selected, *, active_bar_id: str,
         if not active_bar_id:
             return None, {"failure_reason": "M2 needs active_bar_id on the action."}
         print(f"[plan] plan_constrained_dual_arm_linear (active_bar_id={active_bar_id})")
+        # A keyframe-solved sidecar carries BOTH the authored target frames and
+        # the solved target configuration; the planner wants exactly one, and
+        # the solved config wins (it pins the IK branch the keyframe chose).
         jt = plan_constrained_dual_arm_linear(
             planner, state,
             active_bar_id=active_bar_rb_name,
             goal_conf=goal_conf,
-            goal_ee_frames=goal_ee_frames,
+            goal_ee_frames=None if goal_conf is not None else goal_ee_frames,
         )
         path = _path_from_jt(jt, joint_names_12)
         return path, {"failure_reason": None if jt is not None else "linear-ik failed"}
     if role == "M3" and isinstance(selected, IndependentDualArmLinearMovement):
         print("[plan] plan_dual_arm_linear_independent")
+        # Same both-set situation as M2 when loading a keyframe-solved sidecar:
+        # the solved target configuration wins over the authored frames.
         jt = plan_dual_arm_linear_independent(
             planner, state,
             goal_conf=goal_conf,
-            goal_ee_frames=goal_ee_frames,
+            goal_ee_frames=None if goal_conf is not None else goal_ee_frames,
         )
         path = _path_from_jt(jt, joint_names_12)
         return path, {"failure_reason": None if jt is not None else "linear-ik failed"}
@@ -1723,6 +1728,7 @@ def plan_one_action(planner, rcell, clean_action_path: str, args, groups):
 
     segments = []          # (role, state, path) for each solved movement
     results = []           # (role, ok, detail) for the roll-up
+    plan_times = {}        # role -> planning wall time in seconds (for [timing])
 
     # Pre-flight: show what will be planned, in order, before we start.
     print_roster(movements, tag="pre-flight")
@@ -1804,6 +1810,7 @@ def plan_one_action(planner, rcell, clean_action_path: str, args, groups):
             derive_start=args.derive_start,
             draw=args.diagnosis,
         )
+        plan_t0 = time.time()  # wall clock for this movement's planning call
         if args.diagnosis:
             # Diagnosis: keep the renderer UNLOCKED so the search trees draw live.
             path, info = plan_movement(planner, state, role, selected, **plan_kwargs)
@@ -1812,14 +1819,27 @@ def plan_one_action(planner, rcell, clean_action_path: str, args, groups):
             # dominates wall-clock in GUI mode; no-op in DIRECT).
             with pp.LockRenderer():
                 path, info = plan_movement(planner, state, role, selected, **plan_kwargs)
+        plan_times[role] = time.time() - plan_t0
 
         if path is None:
             reason = (info or {}).get("failure_reason", "<unknown>")
-            print(f"[plan] {role} FAILED: {reason}")
+            print(f"[plan] {role} FAILED: {reason} (after {plan_times[role]:.1f} s)")
+            # Failure-mode breakdown from the RRT (why extends stopped), so a
+            # failed plan is diagnosable without a rerun.
+            profile = (info or {}).get("profile") or {}
+            if profile.get("extend_stop_reasons"):
+                print(f"  extend_stop_reasons: {profile['extend_stop_reasons']}")
+            if profile.get("iterations") is not None:
+                print(f"  rrt_iterations: {profile['iterations']}")
             results.append((role, False, reason))
             break  # can't chain the next movement without this one's end config
 
-        print(f"[plan] {role} OK: {len(path)} waypoint(s)")
+        print(f"[plan] {role} OK: {len(path)} waypoint(s) in {plan_times[role]:.1f} s")
+        # Same failure-mode breakdown as on the FAILED branch -- on success it
+        # shows how much the RRT fought (branch flips, collisions) to get there.
+        ok_profile = (info or {}).get("profile") or {}
+        if ok_profile.get("extend_stop_reasons"):
+            print(f"  extend_stop_reasons: {ok_profile['extend_stop_reasons']}")
         for k, v in (info or {}).items():
             if k in ("profile", "smooth_profile", "path_poses", "derived_start_conf"):
                 continue
@@ -1847,6 +1867,11 @@ def plan_one_action(planner, rcell, clean_action_path: str, args, groups):
 
         # Snapshot progress after every solved movement.
         save_solved_action(action, save_path)
+
+    # Planning-time breakdown, one line per planned movement + total.
+    if plan_times:
+        breakdown = ", ".join(f"{r}: {t:.1f} s" for r, t in plan_times.items())
+        print(f"\n[timing] {breakdown}  (total: {sum(plan_times.values()):.1f} s)")
 
     # Per-bar roll-up (most useful in --movement all).
     if len(planning_sequence) > 1:

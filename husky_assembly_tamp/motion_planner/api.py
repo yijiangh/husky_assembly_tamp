@@ -719,7 +719,7 @@ def plan_constrained_dual_arm(
     max_time: float = 30.0,
     max_iterations: int = 2000,
     max_attempts: int = 5,
-    use_birrt: bool = False,
+    use_birrt: bool = True,
     enable_smoothing: bool = True,
     smooth_max_iterations: int = 100,
     smooth_max_time: float = 10.0,
@@ -734,6 +734,11 @@ def plan_constrained_dual_arm(
     ] = None,
 ) -> Tuple[Optional[List[np.ndarray]], dict]:
     """Constrained dual-arm SE(3) RRT with a rigid bar grasp.
+
+    By default this runs the bidirectional RRT-Connect search
+    (``use_birrt=True`` -> ``plan_pose_birrt``), which benchmarking showed to
+    be the clear winner. Set ``use_birrt=False`` to fall back to the archival
+    single start-rooted tree (``plan_pose_rrt``), kept only for comparison.
 
     Exactly one of ``goal_conf`` (12-vec / Configuration) or
     ``goal_ee_frames`` (dict ``{'left': Frame, 'right': Frame}``) must be
@@ -932,10 +937,13 @@ def plan_constrained_dual_arm(
                 "grasp_bar_from_right": grasp_bar_from_right,
             }
         planner_profile: Dict[str, Any] = {}
-        # * Bidirectional connect for narrow-passage goals (a goal pose inside a
-        # * cluttered pocket that a single start-rooted tree cannot thread into);
-        # * both trees stay on one IK branch sheet thanks to the ssik pairing +
-        # * tracked start, so tree-connects pass the continuity gate.
+        # * Bidirectional connect is now the default: it handles narrow-passage
+        # * goals (a goal pose inside a cluttered pocket that a single start-
+        # * rooted tree cannot thread into) by also growing a goal-rooted tree
+        # * out of the pocket. Both trees stay on one IK branch sheet thanks to
+        # * the ssik pairing + tracked start, so tree-connects pass the
+        # * continuity gate. The single-tree plan_pose_rrt is kept for archival
+        # * comparison only (use_birrt=False).
         rrt_fn = plan_pose_birrt if use_birrt else plan_pose_rrt
         path_poses, path_confs = rrt_fn(
             robot=robot_puid,

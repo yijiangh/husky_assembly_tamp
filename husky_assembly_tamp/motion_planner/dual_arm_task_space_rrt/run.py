@@ -1822,8 +1822,11 @@ def main() -> None:
         help="On planning failure, re-derive the start bar pose this many times with a shuffled, widened sweep box.",
     )
     parser.add_argument(
-        "--bidirectional", action="store_true",
-        help="Use bidirectional RRT-Connect (two trees rooted at start and goal). Helps hard cases where a single forward tree barely grows.",
+        "--single-rrt", dest="bidirectional", action="store_false", default=True,
+        help="Use the archival single start-rooted RRT instead of the default "
+             "bidirectional RRT-Connect (two trees rooted at start and goal). "
+             "Birrt is the default because it handles hard cases where a single "
+             "forward tree barely grows; keep single-tree for comparison only.",
     )
     parser.add_argument("--random-seed", type=int, default=None, help="Random seed")
     parser.add_argument(

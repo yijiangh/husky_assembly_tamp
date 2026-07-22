@@ -21,9 +21,11 @@ place (see ``build_cfab_pose_collision_fn`` and the cfab collision adapter).
 
 Two public planners are provided:
 
-    ``plan_pose_rrt``   - single-tree RRT grown from the start pose.
     ``plan_pose_birrt`` - bidirectional RRT-Connect (grows a start tree and a
-                          goal tree and stitches them when they meet).
+                          goal tree and stitches them when they meet). This is
+                          the DEFAULT planner (benchmarking showed it wins).
+    ``plan_pose_rrt``   - single-tree RRT grown from the start pose. Kept for
+                          archival comparison only; no longer the default.
 
 Both return ``(path_poses, path_confs)``: the SE(3) waypoints of the bar and,
 when IK is enabled, the matching 12-DOF dual-arm joint configuration per
@@ -2081,7 +2083,11 @@ def plan_pose_rrt(
     debug_tree_out: Optional[Dict] = None,
     **_unused_kwargs: Any,
 ) -> Tuple[Optional[List[PoseLike]], Optional[List[FullConf]]]:
-    """Plan a collision-free path in SE(3) pose space using RRT.
+    """Plan a collision-free path in SE(3) pose space using a single-tree RRT.
+
+    ARCHIVAL: this single start-rooted RRT is no longer the default. The
+    bidirectional :func:`plan_pose_birrt` is now used everywhere (it won the
+    benchmark); this function is retained only for comparison.
 
     Args:
         robot: PyBullet body ID of the robot (used for IK and workspace sampling).

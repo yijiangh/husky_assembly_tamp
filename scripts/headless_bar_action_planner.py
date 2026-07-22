@@ -914,7 +914,7 @@ def plan_movement(planner, state, role: str, selected, *, active_bar_id: str,
                   active_bar_rb_name: Optional[str],
                   joint_names_12: Sequence[str], max_time: float,
                   max_iterations: int = 2000, max_attempts: int = 5,
-                  use_birrt: bool = False,
+                  use_birrt: bool = True,
                   derive_start: bool = True, draw: bool = False):
     """Send one movement to the right planner API for its role.
 
@@ -935,8 +935,9 @@ def plan_movement(planner, state, role: str, selected, *, active_bar_id: str,
         max_time (float): Planning time budget in seconds.
         max_iterations (int): M1 only — RRT iteration cap per attempt.
         max_attempts (int): M1 only — number of independent RRT restarts.
-        use_birrt (bool): M1 only — bidirectional pose RRT instead of the
-            single start-rooted tree (see --birrt).
+        use_birrt (bool): M1 only — bidirectional pose RRT (the default);
+            set False for the archival single start-rooted tree (see
+            --single-rrt).
         derive_start (bool): M1 only — derive a fresh feasible start instead of
             trusting the cell state's start config.
         draw (bool): M4 only — pass a live search-tree ``draw_fn`` (built by
@@ -1976,11 +1977,12 @@ def main() -> int:
         help="M1 only: number of independent RRT restarts (default 5).",
     )
     parser.add_argument(
-        "--birrt", action="store_true",
-        help="M1 only: use the BIDIRECTIONAL pose RRT (rrt-connect) instead of "
-             "the single start-rooted tree. Helps when the goal (approach) pose "
-             "sits in a cluttered pocket the forward tree cannot thread into -- "
-             "the goal-rooted tree grows out of the pocket instead.",
+        "--single-rrt", dest="birrt", action="store_false", default=True,
+        help="M1 only: use the archival single start-rooted RRT instead of the "
+             "default BIDIRECTIONAL pose RRT (rrt-connect). Birrt is the default "
+             "because it handles a goal (approach) pose sitting in a cluttered "
+             "pocket the forward tree cannot thread into -- the goal-rooted tree "
+             "grows out of the pocket instead. Use this flag only for comparison.",
     )
     parser.add_argument("--no-replay", action="store_true")
     parser.add_argument(

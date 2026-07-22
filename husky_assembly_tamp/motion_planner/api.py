@@ -299,7 +299,7 @@ def _ssik_pair_goal_branch_with_home(
         np.ndarray: the (possibly re-picked) goal 12-vec.
     """
     from .dual_arm_task_space_rrt.core import (
-        home_bar_anchor_pose_mb,
+        home_bar_anchor_variants,
         validate_dual_arm_bar_pose,
     )
     from husky_assembly_tamp.keyframe import ssik_inprocess
@@ -307,24 +307,32 @@ def _ssik_pair_goal_branch_with_home(
     if world_from_mobile_base is None:
         world_from_mobile_base = ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
     mb_from_bar_goal = pp.multiply(pp.invert(world_from_mobile_base), world_from_bar_goal)
-    anchor_mb = home_bar_anchor_pose_mb(
-        mb_from_bar_goal, grasp_bar_from_left, grasp_bar_from_right
-    )
-    world_from_bar_home = pp.multiply(world_from_mobile_base, anchor_mb)
+    # All candidate home anchors the start derivation may use: canonical
+    # orientation plus the rotated variants. A goal branch counts as
+    # home-compatible if it is near a legal branch at ANY of them.
+    home_poses_world = [
+        pp.multiply(world_from_mobile_base, anchor_mb)
+        for _label, anchor_mb in home_bar_anchor_variants(
+            mb_from_bar_goal, grasp_bar_from_left, grasp_bar_from_right
+        )
+    ]
 
     # * Per arm: rank every legal goal branch by its distance to the NEAREST
-    # * legal home branch (after 2*pi re-branching toward the goal branch).
+    # * legal branch across all home anchor variants (after 2*pi re-branching
+    # * toward the goal branch).
     per_arm = {}
     for arm, grasp in (("left", grasp_bar_from_left), ("right", grasp_bar_from_right)):
         goal_branches = ssik_ik.ssik_arm_branches(
             robot_puid, arm, pp.multiply(world_from_bar_goal, grasp), None
         )
-        home_branches = ssik_ik.ssik_arm_branches(
-            robot_puid, arm, pp.multiply(world_from_bar_home, grasp), None
-        )
+        home_branches = []
+        for home_pose in home_poses_world:
+            home_branches.extend(
+                ssik_ik.ssik_arm_branches(robot_puid, arm, pp.multiply(home_pose, grasp), None)
+            )
         if not goal_branches or not home_branches:
-            # Anchor (or goal) unreachable for this arm -- keep the seeded goal;
-            # the delta sweep downstream may still find a workable home pose.
+            # No anchor variant (or the goal) is reachable for this arm -- keep
+            # the seeded goal; the sweep downstream may still find something.
             return goal_conf_fallback
         limits = ssik_inprocess.joint_limits(arm)
         ranked = []
@@ -512,6 +520,7 @@ def _derive_constrained_start_for_plan(
         derive_kwargs["bar_sweep_box"] = bar_sweep_box
 
     world_from_bar_start = start_conf = None
+    tracked_info = None  # set by the ssik tracked derivation below
     if ssik_ik.ik_backend() == "ssik":
         # * ssik first choice: derive the start by TRACKING the goal conf
         # * backward to a home pose -- the arrival config is on the goal's own
@@ -535,12 +544,29 @@ def _derive_constrained_start_for_plan(
             **tracked_kwargs,
         )
         if start_conf is not None:
+            partial_note = ""
+            if tracked_info.get("partial"):
+                partial_note = (f", PARTIAL start {tracked_info.get('partial_distance_m', 0.0):.3f} m "
+                                f"from goal (M0 covers the rest)")
+            corridor_note = ", corridor COLLISION-FREE (RRT will be skipped)" \
+                if "corridor" in tracked_info else ""
             print(f"[ssik] start derived by backward tracking "
-                  f"(delta {tracked_info.get('delta')}, "
-                  f"max |start-goal| {np.max(np.abs(start_conf - goal_conf_arr)):.3f} rad)")
+                  f"(home variant {tracked_info.get('variant')}, delta {tracked_info.get('delta')}, "
+                  f"max |start-goal| {np.max(np.abs(start_conf - goal_conf_arr)):.3f} rad"
+                  f"{partial_note}{corridor_note})")
+            # Where blocked corridors collided, as fractions along goal->home
+            # (0 = at the goal exit, 1 = at home). Clustered-low means straight
+            # corridors are hopeless and the RRT must find the detour.
+            fractions = tracked_info.get("blocked_fractions")
+            if fractions:
+                print(f"[ssik]   {len(fractions)} corridors blocked; collision at "
+                      f"fraction min {min(fractions):.2f} / median "
+                      f"{sorted(fractions)[len(fractions) // 2]:.2f} / max {max(fractions):.2f} "
+                      f"of the way goal->home")
         else:
             print(f"[ssik] backward-tracked start derivation found nothing "
-                  f"({tracked_info.get('track_breaks')} track breaks, "
+                  f"({tracked_info.get('track_breaks')} track breaks over "
+                  f"{tracked_info.get('tracked_deltas')} home candidates, "
                   f"{tracked_info.get('arrival_collisions')} arrival collisions); "
                   f"falling back to the cold endpoint sweep.")
 
@@ -560,6 +586,11 @@ def _derive_constrained_start_for_plan(
         return (*_fail, {"failure_reason": "start_derivation_failed"})
 
     info = {"derived_start_conf": [float(x) for x in start_conf]}
+    # Forward a fully collision-free tracked corridor (goal->home order) when
+    # the ssik derivation found one -- the caller can use it as the finished
+    # M1 path and skip the RRT (direct-connect-first).
+    if ssik_ik.ik_backend() == "ssik" and tracked_info is not None and "corridor" in tracked_info:
+        info["corridor"] = tracked_info["corridor"]
     return (
         np.asarray(start_conf, dtype=float),
         world_from_bar_start,
@@ -688,6 +719,7 @@ def plan_constrained_dual_arm(
     max_time: float = 30.0,
     max_iterations: int = 2000,
     max_attempts: int = 5,
+    use_birrt: bool = False,
     enable_smoothing: bool = True,
     smooth_max_iterations: int = 100,
     smooth_max_time: float = 10.0,
@@ -740,6 +772,7 @@ def plan_constrained_dual_arm(
     from .dual_arm_task_space_rrt.core import (
         DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
         get_bar_feature_points,
+        plan_pose_birrt,
         plan_pose_rrt,
     )
     from .dual_arm_task_space_rrt.smooth import smooth_dual_arm_pose_path
@@ -792,6 +825,25 @@ def plan_constrained_dual_arm(
             return None, derive_info
         # cfab cache was touched by the goal IK / FK probes above.
         planner.set_robot_cell_state(start_state)
+
+        # * Direct-connect shortcut (ssik): the start derivation may have found
+        # * a fully collision-free tracked corridor goal->home. Reversed, that
+        # * IS the M1 path -- every waypoint already passed IK continuity + the
+        # * stage-3 collision check -- so the RRT search is skipped entirely.
+        corridor = derive_info.get("corridor")
+        if corridor is not None:
+            corridor_poses, corridor_confs = corridor
+            path_poses = list(reversed(corridor_poses))
+            path_confs = [np.asarray(q, dtype=float) for q in reversed(corridor_confs)]
+            info: Dict[str, Any] = {
+                "stage": stage,
+                "max_time": float(max_time),
+                "ik_backend": ssik_ik.ik_backend(),
+                "planner": "tracked_corridor",
+                "derived_start_conf": derive_info.get("derived_start_conf"),
+                "path_poses": path_poses,
+            }
+            return path_confs, info
     else:
         start_conf = _conf12_from_state(start_state, joint_names_12)
 
@@ -855,6 +907,8 @@ def plan_constrained_dual_arm(
         "joint_continuity_threshold_rad": joint_continuity_threshold_rad,
         # Which IK engine solved the waypoints/endpoints (observability only).
         "ik_backend": ssik_ik.ik_backend(),
+        # Which search algorithm ran (single-tree rrt vs bidirectional connect).
+        "planner": "birrt" if use_birrt else "rrt",
     }
     if derive_start:
         info["derived_start_conf"] = derive_info.get("derived_start_conf")
@@ -878,7 +932,12 @@ def plan_constrained_dual_arm(
                 "grasp_bar_from_right": grasp_bar_from_right,
             }
         planner_profile: Dict[str, Any] = {}
-        path_poses, path_confs = plan_pose_rrt(
+        # * Bidirectional connect for narrow-passage goals (a goal pose inside a
+        # * cluttered pocket that a single start-rooted tree cannot thread into);
+        # * both trees stay on one IK branch sheet thanks to the ssik pairing +
+        # * tracked start, so tree-connects pass the continuity gate.
+        rrt_fn = plan_pose_birrt if use_birrt else plan_pose_rrt
+        path_poses, path_confs = rrt_fn(
             robot=robot_puid,
             bar_body=bar_body,
             obstacle_bodies=obstacles,

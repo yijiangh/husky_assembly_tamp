@@ -913,6 +913,8 @@ def _make_tree_draw_fn(planner, robot_puid, arm_joints, tool_link_left, tool_lin
 def plan_movement(planner, state, role: str, selected, *, active_bar_id: str,
                   active_bar_rb_name: Optional[str],
                   joint_names_12: Sequence[str], max_time: float,
+                  max_iterations: int = 2000, max_attempts: int = 5,
+                  use_birrt: bool = False,
                   derive_start: bool = True, draw: bool = False):
     """Send one movement to the right planner API for its role.
 
@@ -931,6 +933,10 @@ def plan_movement(planner, state, role: str, selected, *, active_bar_id: str,
             cell (``bar_<id>``), passed to the planner.
         joint_names_12 (Sequence[str]): The twelve arm-joint names, in order.
         max_time (float): Planning time budget in seconds.
+        max_iterations (int): M1 only — RRT iteration cap per attempt.
+        max_attempts (int): M1 only — number of independent RRT restarts.
+        use_birrt (bool): M1 only — bidirectional pose RRT instead of the
+            single start-rooted tree (see --birrt).
         derive_start (bool): M1 only — derive a fresh feasible start instead of
             trusting the cell state's start config.
         draw (bool): M4 only — pass a live search-tree ``draw_fn`` (built by
@@ -976,6 +982,9 @@ def plan_movement(planner, state, role: str, selected, *, active_bar_id: str,
             active_bar_id=active_bar_rb_name,
             goal_ee_frames=goal_ee_frames,
             max_time=max_time,
+            max_iterations=max_iterations,
+            max_attempts=max_attempts,
+            use_birrt=use_birrt,
             derive_start=derive_start,
         )
     if role == "M2" and isinstance(selected, EndEffectorConstrainedDualArmLinearMovement):
@@ -1807,6 +1816,9 @@ def plan_one_action(planner, rcell, clean_action_path: str, args, groups):
             active_bar_rb_name=active_bar_rb_name,
             joint_names_12=joint_names_12,
             max_time=args.max_time,
+            max_iterations=args.max_iterations,
+            max_attempts=args.max_attempts,
+            use_birrt=args.birrt,
             derive_start=args.derive_start,
             draw=args.diagnosis,
         )
@@ -1952,6 +1964,23 @@ def main() -> int:
         help="Motion-planning time budget in seconds, per movement -- how long "
              "the RRT motion planner is allowed to search for a collision-free "
              "path before giving up (default: 60). Not the IK-solve budget.",
+    )
+    parser.add_argument(
+        "--max-iterations", type=int, default=2000,
+        help="M1 only: RRT iteration cap PER ATTEMPT (default 2000). An attempt "
+             "stops at whichever of --max-time / --max-iterations hits first, "
+             "so raise BOTH for hard problems.",
+    )
+    parser.add_argument(
+        "--max-attempts", type=int, default=5,
+        help="M1 only: number of independent RRT restarts (default 5).",
+    )
+    parser.add_argument(
+        "--birrt", action="store_true",
+        help="M1 only: use the BIDIRECTIONAL pose RRT (rrt-connect) instead of "
+             "the single start-rooted tree. Helps when the goal (approach) pose "
+             "sits in a cluttered pocket the forward tree cannot thread into -- "
+             "the goal-rooted tree grows out of the pocket instead.",
     )
     parser.add_argument("--no-replay", action="store_true")
     parser.add_argument(

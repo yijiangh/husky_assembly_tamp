@@ -1227,19 +1227,24 @@ def home_bar_anchor_pose_mb(
     mb_from_bar_goal: PoseLike,
     grasp_bar_from_left: PoseLike,
     grasp_bar_from_right: PoseLike,
+    bar_quat_override: Optional[Tuple[float, float, float, float]] = None,
 ) -> Tuple[Tuple[float, float, float], Tuple[float, float, float, float]]:
-    """The canonical "home" bar anchor pose (mobile-base frame) for start derivation.
+    """The "home" bar anchor pose (mobile-base frame) for start derivation.
 
-    Orientation comes from the grasp geometry (``bar_orientation_from_grasps``);
-    position anchors the GRASP MIDPOINT (not the bar frame origin -- some bar
-    frames live at one grasp end) at ``MOBILE_BASE_FROM_BAR_HOME_POSITION``.
-    ``derive_constrained_start`` sweeps position deltas around this anchor, and
-    the ssik goal/start branch pairing in api.py evaluates branch sets at it.
+    Orientation comes from the grasp geometry (``bar_orientation_from_grasps``)
+    unless ``bar_quat_override`` is given; position anchors the GRASP MIDPOINT
+    (not the bar frame origin -- some bar frames live at one grasp end) at
+    ``MOBILE_BASE_FROM_BAR_HOME_POSITION``. ``derive_constrained_start`` sweeps
+    position deltas around this anchor, and the ssik goal/start branch pairing
+    in api.py evaluates branch sets at it.
 
     Args:
         mb_from_bar_goal (PoseLike): the goal bar pose in the mobile-base frame.
         grasp_bar_from_left (PoseLike): left grasp transform (bar-from-tool).
         grasp_bar_from_right (PoseLike): right grasp transform (bar-from-tool).
+        bar_quat_override (Optional[Tuple]): use this orientation (xyzw) for the
+            home bar instead of the canonical one. The anchored position is
+            recomputed for it (the grasp midpoint moves with the orientation).
 
     Returns:
         Tuple[Tuple[float, float, float], Tuple[float, float, float, float]]:
@@ -1252,7 +1257,10 @@ def home_bar_anchor_pose_mb(
         (mb_from_bar_goal, mb_from_tool0_left_goal),
         (mb_from_bar_goal, mb_from_tool0_right_goal),
     ]
-    home_bar_quat = bar_orientation_from_grasps(grasp_targets_mb)
+    if bar_quat_override is not None:
+        home_bar_quat = tuple(bar_quat_override)
+    else:
+        home_bar_quat = bar_orientation_from_grasps(grasp_targets_mb)
 
     # Anchor the grasp midpoint at the home position. Some bar frames live at
     # one grasp end, so anchoring the frame origin would shift the held bar.
@@ -1271,6 +1279,70 @@ def home_bar_anchor_pose_mb(
     )
     base_pos_mb = np.asarray(MOBILE_BASE_FROM_BAR_HOME_POSITION, dtype=float) - midpoint_in_mb
     return tuple(base_pos_mb.tolist()), home_bar_quat
+
+
+def home_bar_anchor_variants(
+    mb_from_bar_goal: PoseLike,
+    grasp_bar_from_left: PoseLike,
+    grasp_bar_from_right: PoseLike,
+) -> List[Tuple[str, Tuple[Tuple[float, float, float], Tuple[float, float, float, float]]]]:
+    """Candidate home anchor poses: the canonical orientation plus rotated variants.
+
+    Why: with real joint limits, the IK branch sheet that holds the bar at the
+    GOAL pose may simply not extend to the canonical home ORIENTATION (measured
+    on the hard B226 case: every goal branch is ~176 deg away from every
+    canonical-home branch). The home pose is ours to choose -- M1's start is
+    derived, and M0 drives the arms to it -- so when the canonical orientation
+    is unreachable-in-branch, try the same anchor with the bar rotated:
+
+      * ``roll`` -- about the bar's own long axis (local Z): re-poses the
+        wrists while the bar stays put visually; the cheapest branch changer.
+      * ``yaw`` -- about the mobile base's vertical axis: swings the bar
+        heading; changes the shoulder/elbow posture.
+
+    Ordered smallest-rotation-first (canonical, then increasing magnitude), so
+    callers that early-exit prefer the least-surprising home pose.
+
+    Args:
+        mb_from_bar_goal (PoseLike): the goal bar pose in the mobile-base frame.
+        grasp_bar_from_left (PoseLike): left grasp transform (bar-from-tool).
+        grasp_bar_from_right (PoseLike): right grasp transform (bar-from-tool).
+
+    Returns:
+        List[Tuple[str, Tuple[pos, quat]]]: ``(label, (position, quat_xyzw))``
+        anchor candidates in the mobile-base frame, canonical first.
+    """
+    canonical_pos, canonical_quat = home_bar_anchor_pose_mb(
+        mb_from_bar_goal, grasp_bar_from_left, grasp_bar_from_right
+    )
+    variants: List[Tuple[str, Tuple[Tuple[float, float, float], Tuple[float, float, float, float]]]] = [
+        ("canonical", (canonical_pos, canonical_quat)),
+    ]
+
+    def _anchor_for(quat):
+        """Re-anchor the grasp midpoint for a rotated orientation."""
+        return home_bar_anchor_pose_mb(
+            mb_from_bar_goal, grasp_bar_from_left, grasp_bar_from_right,
+            bar_quat_override=quat,
+        )
+
+    # Smallest rotations first; roll before yaw at equal magnitude (wrist-limit
+    # breaks are the common failure and roll targets exactly those).
+    for magnitude_deg in (30, 60, 90, 120, 150, 180):
+        angle = float(np.deg2rad(magnitude_deg))
+        for sign in (1.0, -1.0):
+            if magnitude_deg == 180 and sign < 0:
+                continue  # +180 and -180 are the same rotation
+            # Roll: rotate about the bar's LOCAL long axis (post-multiply).
+            if magnitude_deg <= 90:
+                roll_quat = pybullet.getQuaternionFromAxisAngle((0.0, 0.0, 1.0), sign * angle)
+                quat = pp.multiply(((0.0, 0.0, 0.0), canonical_quat), ((0.0, 0.0, 0.0), roll_quat))[1]
+                variants.append((f"roll{int(sign * magnitude_deg):+d}", _anchor_for(quat)))
+            # Yaw: rotate about the mobile base's vertical axis (pre-multiply).
+            yaw_quat = pybullet.getQuaternionFromAxisAngle((0.0, 0.0, 1.0), sign * angle)
+            quat = pp.multiply(((0.0, 0.0, 0.0), yaw_quat), ((0.0, 0.0, 0.0), canonical_quat))[1]
+            variants.append((f"yaw{int(sign * magnitude_deg):+d}", _anchor_for(quat)))
+    return variants
 
 
 def derive_constrained_start(
@@ -1466,6 +1538,22 @@ def derive_constrained_start_tracked(
     to route around them. Only the arrival (start) config must be
     collision-free, since it becomes a plan endpoint.
 
+    Three escalations for hard cases (all used automatically):
+      1. FREE CORRIDOR: a fully-tracked candidate whose EVERY waypoint is also
+         collision-free is a finished M1 plan by itself -- ``info['corridor']``
+         then carries the whole ``(poses, confs)`` path (goal->home order) and
+         the caller can skip the RRT entirely (direct-connect-first).
+      2. ORIENTATION variants: when no home pose at the canonical orientation
+         tracks, the same anchor is retried with the bar rolled about its own
+         axis / yawed about the base vertical (``home_bar_anchor_variants``) --
+         the goal's branch sheet may reach a rotated home even when the
+         canonical one is out of reach within joint limits.
+      3. PARTIAL start: when nothing fully tracks, the farthest-reaching
+         broken walk donates its last collision-free waypoint as the start --
+         still on the goal's branch sheet, just closer to the goal; M0 (which
+         drives the arms to M1's start) absorbs the difference. ``info`` then
+         carries ``partial=True`` and the start-to-goal distance.
+
     Args:
         robot (int): PyBullet body id.
         arm_joints (Sequence[int]): arm joint indices (both arms).
@@ -1501,68 +1589,191 @@ def derive_constrained_start_tracked(
         world_from_mobile_base = identity_pose
 
     mb_from_bar_goal = pp.multiply(pp.invert(world_from_mobile_base), world_from_bar_goal)
-    base_pos_mb, home_bar_quat = home_bar_anchor_pose_mb(
+    # Home anchor candidates: canonical orientation first, then rotated variants
+    # (roll about the bar axis / yaw about the base vertical). The rotations are
+    # the escape hatch for goals whose branch sheet cannot reach the canonical
+    # home orientation within joint limits (see home_bar_anchor_variants).
+    anchor_variants = home_bar_anchor_variants(
         mb_from_bar_goal, grasp_bar_from_left, grasp_bar_from_right
     )
-    base_pos_mb = np.asarray(base_pos_mb, dtype=float)
 
-    # Nearest-to-anchor deltas first, exactly like the cold sweep.
+    # Nearest-to-anchor deltas first, exactly like the cold sweep. Non-canonical
+    # orientations only sweep the nearest deltas -- the orientation is the knob
+    # being explored there, not the position.
     deltas = sorted(_grid_in_box(bar_sweep_box, bar_sweep_step), key=lambda d: float(np.linalg.norm(d)))
+    max_variant_deltas = 60
 
-    info: Dict[str, Any] = {"tracked_deltas": 0, "track_breaks": 0, "arrival_collisions": 0}
+    # Soft time budget over the WHOLE sweep: with ~13 orientations x dozens of
+    # deltas the worst case is minutes; most breaks happen within a few
+    # waypoints so typical cost is far lower. On expiry we fall through to the
+    # best partial track found so far.
+    max_time = 120.0
+    start_time = time.time()
+
+    info: Dict[str, Any] = {
+        "tracked_deltas": 0,
+        "track_breaks": 0,
+        "arrival_collisions": 0,
+        "blocked_corridors": 0,
+    }
+    # First fully-tracked candidate with a collision-free ARRIVAL: kept as the
+    # start-only answer when no fully collision-free corridor turns up.
+    first_start: Optional[Dict[str, Any]] = None
+    # Best PARTIAL track seen: the one whose last continuous waypoint sits
+    # farthest (in bar position) from the goal. Kept as the last fallback: a
+    # start on the goal's own branch sheet partway toward home still gives the
+    # RRT a branch-consistent, solvable problem (M0 absorbs the difference).
+    best_partial: Optional[Dict[str, Any]] = None
+
     with pp.WorldSaver():
-        for delta in deltas:
-            home_mb = (
-                tuple((base_pos_mb + np.asarray(delta, dtype=float)).tolist()),
-                home_bar_quat,
-            )
-            world_from_bar_home = pp.multiply(world_from_mobile_base, home_mb)
-            info["tracked_deltas"] += 1
-
-            # --- Walk goal -> home with warm per-waypoint IK (backend-dispatched).
-            conf = np.asarray(goal_conf, dtype=float)
-            track_ok = True
-            for pose in list(
-                pp.interpolate_poses(
-                    world_from_bar_goal,
-                    world_from_bar_home,
-                    pos_step_size=max(position_res, 1e-6),
-                    ori_step_size=max(rotation_res, 1e-6),
-                )
-            )[1:]:
-                next_conf = solve_dual_arm_pose_ik(
-                    robot=robot,
-                    arm_joints=arm_joints,
-                    tool_link_left=tool_link_left,
-                    tool_link_right=tool_link_right,
-                    bar_pose=pose,
-                    grasp_bar_from_left=grasp_bar_from_left,
-                    grasp_bar_from_right=grasp_bar_from_right,
-                    seed_conf=conf,
-                    use_angle_normalization=use_angle_normalization,
-                )
-                # Track breaks on IK miss or a branch flip -- try the next delta.
-                if next_conf is None or joint_step_exceeds_threshold(
-                    next_conf, conf, joint_continuity_threshold_rad
-                ):
-                    track_ok = False
+        for variant_label, (base_pos_mb, home_bar_quat) in anchor_variants:
+            base_pos_mb = np.asarray(base_pos_mb, dtype=float)
+            variant_deltas = deltas if variant_label == "canonical" else deltas[:max_variant_deltas]
+            for delta in variant_deltas:
+                if (time.time() - start_time) >= max_time:
+                    logger.warning(
+                        "derive_constrained_start_tracked: time budget (%.0fs) hit at "
+                        "variant %s; falling through to the best candidate so far.",
+                        max_time, variant_label,
+                    )
                     break
-                conf = np.asarray(next_conf, dtype=float)
-            if not track_ok:
+                home_mb = (
+                    tuple((base_pos_mb + np.asarray(delta, dtype=float)).tolist()),
+                    home_bar_quat,
+                )
+                world_from_bar_home = pp.multiply(world_from_mobile_base, home_mb)
+                info["tracked_deltas"] += 1
+
+                # --- Walk goal -> home with warm per-waypoint IK (backend-dispatched).
+                # ``track`` records every accepted (pose, conf) so a broken walk can
+                # still donate its farthest reachable prefix as a partial start.
+                track = [(world_from_bar_goal, np.asarray(goal_conf, dtype=float))]
+                track_ok = True
+                for pose in list(
+                    pp.interpolate_poses(
+                        world_from_bar_goal,
+                        world_from_bar_home,
+                        pos_step_size=max(position_res, 1e-6),
+                        ori_step_size=max(rotation_res, 1e-6),
+                    )
+                )[1:]:
+                    next_conf = solve_dual_arm_pose_ik(
+                        robot=robot,
+                        arm_joints=arm_joints,
+                        tool_link_left=tool_link_left,
+                        tool_link_right=tool_link_right,
+                        bar_pose=pose,
+                        grasp_bar_from_left=grasp_bar_from_left,
+                        grasp_bar_from_right=grasp_bar_from_right,
+                        seed_conf=track[-1][1],
+                        use_angle_normalization=use_angle_normalization,
+                    )
+                    # Track breaks on IK miss or a branch flip -- try the next delta.
+                    if next_conf is None or joint_step_exceeds_threshold(
+                        next_conf, track[-1][1], joint_continuity_threshold_rad
+                    ):
+                        track_ok = False
+                        break
+                    track.append((pose, np.asarray(next_conf, dtype=float)))
+
+                if track_ok:
+                    # --- Arrival config must be collision-free (it is a plan endpoint).
+                    conf = track[-1][1]
+                    if joint_collision_fn is not None and joint_collision_fn(conf):
+                        info["arrival_collisions"] += 1
+                        continue
+                    # --- FREE CORRIDOR check: if every interior waypoint is also
+                    # collision-free, this track IS a finished M1 path -- return
+                    # it and let the caller skip the RRT (direct-connect-first).
+                    # Checked coarse-first (every 3rd waypoint) so blocked
+                    # corridors are rejected at a third of the cost.
+                    first_blocked = None
+                    if joint_collision_fn is not None:
+                        interior = track[1:-1]
+                        for stride_offset in (0, 1, 2):  # coarse pass 0, then the rest
+                            for idx in range(stride_offset, len(interior), 3):
+                                if joint_collision_fn(interior[idx][1]):
+                                    first_blocked = idx + 1  # index within `track`
+                                    break
+                            if first_blocked is not None:
+                                break
+                    if first_blocked is None:
+                        info["delta"] = [float(v) for v in delta]
+                        info["variant"] = variant_label
+                        info["corridor"] = (
+                            [wp_pose for wp_pose, _c in track],
+                            [wp_conf for _p, wp_conf in track],
+                        )
+                        return world_from_bar_home, conf, info
+                    # Corridor blocked mid-way: keep the FIRST such candidate as
+                    # the start-only answer and keep scanning for a free corridor.
+                    # Record WHERE it blocked (fraction along goal->home) -- a
+                    # diagnostic that separates "blocked right at the goal exit"
+                    # (straight corridors hopeless, RRT must detour) from
+                    # "blocked near home" (other deltas/orientations may clear).
+                    info["blocked_corridors"] += 1
+                    blocked_fraction = first_blocked / max(1, len(track) - 1)
+                    info.setdefault("blocked_fractions", []).append(round(blocked_fraction, 2))
+                    if first_start is None:
+                        first_start = {
+                            "pose": world_from_bar_home,
+                            "conf": conf,
+                            "variant": variant_label,
+                            "delta": [float(v) for v in delta],
+                        }
+                    continue
+
                 info["track_breaks"] += 1
-                continue
+                # Remember the farthest-reaching broken walk for the fallback.
+                partial_dist = float(np.linalg.norm(
+                    np.asarray(track[-1][0][0], dtype=float)
+                    - np.asarray(world_from_bar_goal[0], dtype=float)
+                ))
+                if best_partial is None or partial_dist > best_partial["distance"]:
+                    best_partial = {
+                        "distance": partial_dist,
+                        "track": track,
+                        "variant": variant_label,
+                        "delta": [float(v) for v in delta],
+                    }
+            else:
+                continue  # inner loop finished normally -> next variant
+            break  # time budget hit -> stop sweeping variants too
 
-            # --- Arrival config must be collision-free (it is a plan endpoint).
+    # --- No fully collision-free corridor: fall back to the first fully-tracked
+    # start with a clean arrival (the RRT then searches for the detour).
+    if first_start is not None:
+        info["delta"] = first_start["delta"]
+        info["variant"] = first_start["variant"]
+        return first_start["pose"], first_start["conf"], info
+
+    # --- Partial fallback: no home pose fully tracked. Walk the best partial
+    # track back from its farthest waypoint until a collision-free config, and
+    # use THAT as the start (still on the goal's branch sheet by construction).
+    min_partial_distance = 0.02  # m -- below this the "motion" is degenerate
+    if best_partial is not None and best_partial["distance"] >= min_partial_distance:
+        for pose, conf in reversed(best_partial["track"]):
+            dist = float(np.linalg.norm(
+                np.asarray(pose[0], dtype=float) - np.asarray(world_from_bar_goal[0], dtype=float)
+            ))
+            if dist < min_partial_distance:
+                break  # walked back too close to the goal -- give up on partial
             if joint_collision_fn is not None and joint_collision_fn(conf):
-                info["arrival_collisions"] += 1
                 continue
-
-            info["delta"] = [float(v) for v in delta]
-            return world_from_bar_home, conf, info
+            info["variant"] = best_partial["variant"]
+            info["delta"] = best_partial["delta"]
+            info["partial"] = True
+            info["partial_distance_m"] = dist
+            logger.warning(
+                "derive_constrained_start_tracked: no full track to any home; using a "
+                "PARTIAL start %.3f m from the goal (variant %s). M0 will cover the rest.",
+                dist, best_partial["variant"],
+            )
+            return pose, conf, info
 
     logger.warning(
         "derive_constrained_start_tracked: no trackable collision-free home across "
-        "%d deltas (%d track breaks, %d arrival collisions)",
+        "%d delta/orientation candidates (%d track breaks, %d arrival collisions)",
         info["tracked_deltas"], info["track_breaks"], info["arrival_collisions"],
     )
     return None, None, info

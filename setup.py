@@ -26,11 +26,15 @@ setup(
         "video": [
             "imageio[ffmpeg]",
         ],
-        # Analytical IK backend, imported in-process by the offline planner.
-        # Optional because ssik needs Python 3.11+ while this package still
-        # supports 3.8 (Rhino's CPython 3.9 reaches ssik via the sidecar instead).
+        # Analytical IK backend, imported in-process. ssik 4.1+ ships a cp310
+        # wheel and requires Python >= 3.10, so the ROS2 venv (Python 3.10) runs
+        # it NATIVELY -- no sidecar. (The old pin `ssik>=3.0,<4` needed Python
+        # 3.11+, which is why the sidecar existed.) Rhino's CPython 3.9 still
+        # can't install ssik and reaches it via the sidecar instead.
+        # NOTE: ssik pulls numpy>=1.26; on a ROS2 venv keep numpy on the 1.x line
+        # (e.g. 1.26.4), NOT numpy 2.x, to stay ABI-compatible with rclpy/pybullet.
         "ssik": [
-            "ssik>=3.0,<4; python_version >= '3.11'",
+            "ssik>=4.1,<5; python_version >= '3.10'",
         ],
     },
     zip_safe=False,

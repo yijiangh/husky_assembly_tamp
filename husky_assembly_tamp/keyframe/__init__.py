@@ -6,12 +6,13 @@ per-keyframe arm configurations" for one BarAssemblyAction, using only the JSON
 files exported from the design front-end (RobotCell.json, BarActions/<bar>.json,
 WalkableGround.json):
 
-- ``config``          solver tuning constants + ssik sidecar path resolution
-- ``ssik_client``     talks to the ssik analytical-IK sidecar over stdin/stdout
+- ``config``          solver tuning constants + ssik path/backend resolution
+- ``ssik_inprocess``  native in-process ssik solver (offline Py3.10+ venv)
+- ``ssik_client``     ssik entry point: in-process when ssik imports, else the sidecar
 - ``dual_arm_ik``     the dual-arm IK solvers (ssik + gradient backends)
 - ``ik_keyframe``     the chained M1 -> M2 -> M3 keyframe solve
 - ``walkable_ground`` ground meshes, seed-base derivation, expanding base search
-- ``ssik_sidecar/``   the Python 3.11 sidecar server the ssik backend spawns
+- ``ssik_sidecar/``   sidecar server the ssik backend spawns only for Rhino's 3.9
 
 ! Keep this __init__ import-free: the Rhino front-end imports
 ! ``husky_assembly_tamp.keyframe.config`` on every script run, and any re-export

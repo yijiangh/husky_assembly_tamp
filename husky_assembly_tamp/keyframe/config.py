@@ -1,4 +1,4 @@
-"""Solver tuning constants + ssik sidecar wiring for the keyframe solvers.
+"""Solver tuning constants + ssik backend wiring for the keyframe solvers.
 
 Moved here from the design front-end's ``scripts/core/config.py`` so the solver
 owns its own tuning: the Rhino front-end re-imports these values (one
@@ -15,7 +15,8 @@ compas_fab consumes SI, so they are meters / radians as noted inline.
 
 Environment variables (all optional overrides):
   - ``HUSKY_IK_BACKEND``        "ssik" (default) or "gradient"
-  - ``HUSKY_SSIK_VENV_DIR``     folder of the Python 3.11 venv that has ssik
+  - ``HUSKY_SSIK_VENV_DIR``     folder of the sidecar venv that has ssik (Rhino-3.9
+                                fallback only; the offline planner runs ssik in-process)
   - ``HUSKY_SSIK_ARTIFACT_DIR`` folder holding the built <arm>_ik.py modules
 """
 
@@ -63,11 +64,14 @@ IK_TOLERANCE_ORIENTATION = 1e-5  # rad
 # * Which inverse-kinematics engine ``dual_arm_ik.solve_dual_arm_ik`` uses:
 # *   "ssik"     -> DEFAULT. Analytical IK from ssik (github.com/personalrobotics/ssik).
 # *                 ssik builds a closed-form solver straight from our CALIBRATED
-# *                 URDF, so there is nothing to tune. ssik needs Python 3.11+ (Rhino
-# *                 runs 3.9, and offline venvs may differ too), so it lives in a
-# *                 sidecar process we talk to over stdio. One-time venv setup: see
-# *                 ``keyframe/ssik_sidecar/README.md``. Code: ``keyframe.ssik_client``
-# *                 + ``keyframe.dual_arm_ik.solve_dual_arm_ik_ssik``.
+# *                 URDF, so there is nothing to tune. ssik 4.1+ ships a cp310 wheel and
+# *                 supports Python >= 3.10, so the offline planner (this ROS2 Py3.10
+# *                 venv) imports it and solves IN-PROCESS -- no subprocess. Code:
+# *                 ``keyframe.ssik_inprocess`` (native solve) via
+# *                 ``keyframe.dual_arm_ik.solve_dual_arm_ik_ssik``. Rhino's CPython 3.9
+# *                 cannot import ssik, so THERE it falls back to a sidecar process over
+# *                 stdio (``keyframe.ssik_client`` + ``keyframe/ssik_sidecar/``); the
+# *                 client short-circuits to the in-process path whenever ssik imports.
 # *   "gradient" -> the original PyBullet damped-least-squares descent with random
 # *                 restarts. Kept only for benchmarking against ssik and as an
 # *                 archival fallback; not used in the normal workflow.
@@ -93,7 +97,7 @@ SSIK_ARM_BUILD = {
 # ---------------------------------------------------------------------------
 # The built per-arm solver modules are COMMITTED IN THIS REPO at ``asset/ssik``
 # so the package runs standalone (no host repo needed). The ssik sidecar venv
-# (Python 3.11 + ssik installed) is only needed by Rhino's CPython 3.9 and is a
+# (a Python 3.10+ env with ssik installed) is only needed by Rhino's CPython 3.9 and is a
 # machine-local resource in the HOST repo -- the repo that vendors this package
 # as ``external/husky_assembly_tamp`` (the design repo has it at
 # ``external/ssik_env``). Each path is resolved at USE time (never at import
@@ -120,9 +124,11 @@ def _host_repo_root():
 
 
 def get_ssik_venv_python() -> str:
-    """Path of the Python 3.11 interpreter inside the ssik venv.
+    """Path of the interpreter inside the ssik SIDECAR venv (Rhino-3.9 fallback only).
 
-    Resolution order: ``HUSKY_SSIK_VENV_DIR`` env var -> ``<host>/external/ssik_env``
+    Only Rhino's CPython 3.9 needs this: it cannot import ssik, so it shells out to a
+    sidecar venv that can. The offline planner imports ssik in-process and never calls
+    this. Resolution order: ``HUSKY_SSIK_VENV_DIR`` env var -> ``<host>/external/ssik_env``
     -> error. A venv stores its interpreter in a different place per OS (Windows:
     ``Scripts\\python.exe``, macOS/Linux: ``bin/python``), so the right one is
     picked for the current platform.

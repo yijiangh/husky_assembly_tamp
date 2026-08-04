@@ -327,9 +327,11 @@ def _nearest_cfg(cfgs, seed_values):
 # ---------------------------------------------------------------------------
 # ssik analytical IK backend (config.IK_BACKEND == "ssik")
 # ---------------------------------------------------------------------------
-# ssik solves the CALIBRATED URDF directly (single source of truth, no tuning) in
-# a Python 3.11 sidecar; `keyframe.ssik_client` bridges to it. The helpers below
-# feed it (arm-base world frame) and consume its per-arm branch solutions. See
+# ssik solves the CALIBRATED URDF directly (single source of truth, no tuning).
+# `keyframe.ssik_client.solve` is the entry point: in this offline Py3.10+ venv it
+# short-circuits to the in-process solver (`keyframe.ssik_inprocess`, no subprocess);
+# only Rhino's CPython 3.9 falls back to the stdio sidecar. The helpers below feed it
+# (arm-base world frame) and consume its per-arm branch solutions. See
 # `solve_dual_arm_ik_ssik`.
 
 
@@ -369,8 +371,9 @@ def _ssik_branch_data(
         that arm is unreachable), ``group_joint_names[side]`` the 6 joint names in
         group order, and ``targets[side]`` the ``FrameTarget`` for the polish.
     """
-    # Imported here (not at module top) because ssik_client shells out to the
-    # Python 3.11 sidecar and should only load when the ssik backend is actually used.
+    # Imported here (not at module top) because ssik_client pulls in the ssik solver
+    # and should only load when the ssik backend is actually used. In this venv its
+    # solve() runs in-process; on Rhino's 3.9 it shells out to the sidecar instead.
     from husky_assembly_tamp.keyframe import ssik_client
 
     deps = import_compas_stack()

@@ -391,6 +391,8 @@ def _derive_constrained_start_for_plan(
     random_seed,
     max_ik_attempts,
     bar_sweep_box,
+    position_res: Optional[float] = None,
+    rotation_res: Optional[float] = None,
 ):
     """Compute a feasible constrained start (bar pose + 12-vec joint conf).
 
@@ -401,6 +403,15 @@ def _derive_constrained_start_for_plan(
       3. FK at the goal to get the goal bar pose + both grasps,
       4. sample a bar "home" pose and solve dual-arm IK for that grasp via
          :func:`derive_constrained_start`.
+
+    ``position_res`` / ``rotation_res`` set how finely the ssik backward-tracked
+    corridor between the home pose and the goal is sampled (metres / radians).
+    They matter beyond the start pose itself: when that corridor comes back
+    collision-free, the caller returns it AS the M1 path and skips the RRT, so
+    these two values become the spacing of the delivered trajectory. ``None``
+    (the default) leaves them to
+    :func:`~.dual_arm_task_space_rrt.core.derive_constrained_start_tracked`, the
+    single place those defaults live.
 
     Returns ``(start_conf, world_from_bar_start, world_from_bar_goal,
     goal_conf_arr, grasp_bar_from_left, grasp_bar_from_right, info)``. On
@@ -532,6 +543,13 @@ def _derive_constrained_start_for_plan(
         )
         if bar_sweep_box is not None:
             tracked_kwargs["bar_sweep_box"] = bar_sweep_box
+        # Only forward a resolution the caller actually chose, so an unset one
+        # keeps derive_constrained_start_tracked's own default (one source of
+        # truth for the numbers, no second copy of them here).
+        if position_res is not None:
+            tracked_kwargs["position_res"] = position_res
+        if rotation_res is not None:
+            tracked_kwargs["rotation_res"] = rotation_res
         world_from_bar_start, start_conf, tracked_info = derive_constrained_start_tracked(
             robot_puid,
             arm_joints,
@@ -763,6 +781,14 @@ def plan_constrained_dual_arm(
     when the caller has no trustworthy start configuration (e.g. the Rhino
     export leaves M1's start joints as a placeholder).
 
+    ``position_res`` / ``rotation_res`` (metres / radians) are the SE(3) step
+    the search advances the bar by, and they double as the goal-reached
+    tolerance. They reach three places: the RRT's extend step, the shortcut
+    smoother, and -- with ``derive_start=True`` on the ssik backend -- the
+    backward-tracked corridor, which is returned as the path outright whenever
+    it comes back collision-free. Lowering them therefore makes the delivered
+    trajectory denser on every one of those routes.
+
     Stages:
       1 -> pose-only RRT, no IK, no joint-space collision
       2 -> pose RRT + IK in extend
@@ -825,6 +851,11 @@ def plan_constrained_dual_arm(
             random_seed=(start_random_seed if start_random_seed is not None else random_seed),
             max_ik_attempts=start_max_ik_attempts,
             bar_sweep_box=start_bar_sweep_box,
+            # The ssik tracked corridor may BE the returned path (see the
+            # direct-connect shortcut below), so it has to be sampled at the
+            # resolution asked of this plan, not at its own default.
+            position_res=position_res,
+            rotation_res=rotation_res,
         )
         if start_conf is None:
             return None, derive_info

@@ -18,6 +18,11 @@ CLI:
         [--solve-keyframes]   # base+IK keyframe solve instead of motion planning
         [--gui]
         [--max-time 60]
+        [--fm-joint-resolution 0.05]    # M0/M4 joint step (rad)
+        [--cdfm-position-res 0.01]      # M1 bar translation step (m)
+        [--cdfm-rotation-res 0.025]     # M1 bar rotation step (rad)
+        [--max-step-distance 0.005]     # M2/M3 tool0 translation step (m)
+        [--max-step-angle 0.05]         # M2/M3 tool0 rotation step (rad)
         [--no-replay]
         [--probe-endpoints]   # M1: report start/goal feasibility, skip the RRT
         [--diagnosis]         # M4: draw birrt trees live (needs --gui); no
@@ -74,6 +79,7 @@ bootstrap_rhino_site_envs(verbose=False)
 
 import numpy as np  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib.transforms import blended_transform_factory  # noqa: E402
 
 # Cheap canary for the whole compas / compas_fab / pybullet stack: fail with
 # setup instructions instead of a bare ModuleNotFoundError deep in the imports.
@@ -124,6 +130,11 @@ from husky_assembly_tamp.motion_planner.api import (  # noqa: E402
 from husky_assembly_tamp.motion_planner.dual_arm_task_space_rrt.core import (  # noqa: E402
     validate_dual_arm_bar_pose,
 )
+# Constraint-error maths shared with the tamp path validator, so the numbers this
+# script reports mean the same thing as the ones validate_stage_trajectory reports.
+from husky_assembly_tamp.motion_planner.dual_arm_task_space_rrt.path_validation import (  # noqa: E402
+    compute_relative_transform_drift,
+)
 
 # Keyframe-solve mode (base sampling + IK, the headless twin of RSIKKeyframe).
 # Everything comes from the keyframe package in THIS repo -- the design repo's
@@ -144,6 +155,42 @@ from husky_assembly_tamp.keyframe.walkable_ground import (  # noqa: E402
 # DEFAULT_BAR_ACTION = "B226.json"
 DEFAULT_PROBLEM = "2026-05-16_double_kissing_jig_demo"
 DEFAULT_BAR_ACTION = "B6.json"
+
+# --------------------------------------------------------------------------
+# * Planning resolutions -- how finely each movement type is discretized.
+# --------------------------------------------------------------------------
+# These are the step sizes the planners interpolate at, and they are ALSO the
+# collision-checking resolution: nothing in this stack does swept/continuous
+# collision checking, so a collision is only ever seen if some waypoint lands
+# inside it. Smaller = safer and smoother, but more waypoints and slower
+# planning.
+#
+# ! The two CDFM values are deliberately FINER than the planner library's own
+# ! defaults (0.01 m / 0.025 rad in api.plan_constrained_dual_arm), because M1
+# ! carries the bar through the tightest part of the scene. The other three
+# ! repeat their library defaults. Either way these are only the starting
+# ! points -- every one of them is overridable per run from the CLI.
+#
+# ! Naming follows the movement classes: FM = free movement (M0, M4), CDFM =
+# ! constrained dual-arm free movement (M1). The CDFM names match
+# ! husky_assembly_teleop's CDFM_POSITION_RES / CDFM_ROTATION_RES, so the same
+# ! knob is called the same thing on the teleop side.
+DEFAULT_FM_JOINT_RESOLUTION = 0.05   # rad, M0/M4  (api.plan_free_dual_arm)
+DEFAULT_CDFM_POSITION_RES = 0.002     # m,   M1     (api.plan_constrained_dual_arm)
+DEFAULT_CDFM_ROTATION_RES = 0.002    # rad, M1
+DEFAULT_MAX_STEP_DISTANCE = 0.005    # m,   M2/M3  (the linear planners)
+DEFAULT_MAX_STEP_ANGLE = 0.05        # rad, M2/M3
+
+# --------------------------------------------------------------------------
+# * End-effector constraint tolerances -- what counts as "the constraint held".
+# --------------------------------------------------------------------------
+# Judged against the same quantities the tamp path validator uses
+# (path_validation.validate_stage_trajectory's relative_translation_threshold_m
+# and relative_rotation_axis_threshold_deg). The rotation tolerance matches that
+# validator exactly; the position one is deliberately half of its 1 mm, so a plan
+# has to clear this bar with room to spare before it passes there.
+EE_POSITION_TOLERANCE_MM = 0.5
+EE_ROTATION_TOLERANCE_DEG = float(np.degrees(1e-2))
 
 
 def resolve_data_root(cli_value) -> str:
@@ -915,7 +962,12 @@ def plan_movement(planner, state, role: str, selected, *, active_bar_id: str,
                   joint_names_12: Sequence[str], max_time: float,
                   max_iterations: int = 2000, max_attempts: int = 5,
                   use_birrt: bool = True,
-                  derive_start: bool = True, draw: bool = False):
+                  derive_start: bool = True, draw: bool = False,
+                  fm_joint_resolution: float = DEFAULT_FM_JOINT_RESOLUTION,
+                  cdfm_position_res: float = DEFAULT_CDFM_POSITION_RES,
+                  cdfm_rotation_res: float = DEFAULT_CDFM_ROTATION_RES,
+                  max_step_distance: float = DEFAULT_MAX_STEP_DISTANCE,
+                  max_step_angle: float = DEFAULT_MAX_STEP_ANGLE):
     """Send one movement to the right planner API for its role.
 
     For M1, ``derive_start`` (the default) asks the planner to compute a
@@ -935,6 +987,13 @@ def plan_movement(planner, state, role: str, selected, *, active_bar_id: str,
         max_time (float): Planning time budget in seconds.
         max_iterations (int): M1 only — RRT iteration cap per attempt.
         max_attempts (int): M1 only — number of independent RRT restarts.
+        fm_joint_resolution (float): M0/M4 — joint-space step in radians
+            between BiRRT waypoints.
+        cdfm_position_res (float): M1 — bar translation step in metres.
+        cdfm_rotation_res (float): M1 — bar rotation step in radians.
+        max_step_distance (float): M2/M3 — tool0 translation step in metres
+            between linear waypoints.
+        max_step_angle (float): M2/M3 — tool0 rotation step in radians.
         use_birrt (bool): M1 only — bidirectional pose RRT (the default);
             set False for the archival single start-rooted tree (see
             --single-rrt).
@@ -970,7 +1029,10 @@ def plan_movement(planner, state, role: str, selected, *, active_bar_id: str,
                 "config is backfilled into M0.target_configuration."
             )}
         print("[plan] plan_free_dual_arm (M0 -> M1 start config)")
-        return plan_free_dual_arm(planner, state, goal_conf, max_time=max_time)
+        return plan_free_dual_arm(
+            planner, state, goal_conf, max_time=max_time,
+            joint_resolution=fm_joint_resolution,
+        )
     if role == "M1" and isinstance(selected, EndEffectorConstrainedDualArmFreeMovement):
         if not active_bar_id:
             return None, {"failure_reason": "M1 needs active_bar_id on the action."}
@@ -982,6 +1044,8 @@ def plan_movement(planner, state, role: str, selected, *, active_bar_id: str,
             planner, state,
             active_bar_id=active_bar_rb_name,
             goal_ee_frames=goal_ee_frames,
+            position_res=cdfm_position_res,
+            rotation_res=cdfm_rotation_res,
             max_time=max_time,
             max_iterations=max_iterations,
             max_attempts=max_attempts,
@@ -1000,6 +1064,8 @@ def plan_movement(planner, state, role: str, selected, *, active_bar_id: str,
             active_bar_id=active_bar_rb_name,
             goal_conf=goal_conf,
             goal_ee_frames=None if goal_conf is not None else goal_ee_frames,
+            max_step_distance=max_step_distance,
+            max_step_angle=max_step_angle,
         )
         path = _path_from_jt(jt, joint_names_12)
         return path, {"failure_reason": None if jt is not None else "linear-ik failed"}
@@ -1011,6 +1077,8 @@ def plan_movement(planner, state, role: str, selected, *, active_bar_id: str,
             planner, state,
             goal_conf=goal_conf,
             goal_ee_frames=None if goal_conf is not None else goal_ee_frames,
+            max_step_distance=max_step_distance,
+            max_step_angle=max_step_angle,
         )
         path = _path_from_jt(jt, joint_names_12)
         return path, {"failure_reason": None if jt is not None else "linear-ik failed"}
@@ -1044,13 +1112,307 @@ def plan_movement(planner, state, role: str, selected, *, active_bar_id: str,
         else:
             print("[plan] plan_free_dual_arm (goal = M4 target_configuration, "
                   "the authored home)")
-        return plan_free_dual_arm(planner, state, goal_conf, max_time=max_time, **extra)
+        return plan_free_dual_arm(
+            planner, state, goal_conf, max_time=max_time,
+            joint_resolution=fm_joint_resolution, **extra,
+        )
 
     return None, {
         "failure_reason": (
             f"role {role!r} does not match movement type {type(selected).__name__}"
         )
     }
+
+
+def short_joint_name(name: str) -> str:
+    """Shorten a full joint name to the last two words, for plot labels.
+
+    ``'left_ur_arm_shoulder_pan_joint'`` becomes ``'shoulder_pan'`` -- long
+    enough to tell the six arm joints apart, short enough for a legend.
+
+    Args:
+        name (str): the full joint name from the robot cell.
+
+    Returns:
+        str: the shortened label.
+    """
+    base = re.sub(r"_joint$", "", str(name))
+    return "_".join(base.split("_")[-2:])
+
+
+def draw_movement_boundaries(axis, segments, *, at_top: bool,
+                             show_counts: bool, max_index: Optional[int] = None) -> None:
+    """Mark where each movement starts along a concatenated-waypoint x axis.
+
+    Draws a dashed vertical line at every hand-over plus a label naming the
+    movement. Short movements (a five-waypoint mate next to a three-hundred
+    waypoint transfer) start almost on top of each other, so labels that would
+    overprint are stepped down a row instead of being drawn over one another.
+
+    Args:
+        axis: the matplotlib axes to draw on.
+        segments: ``[(role, start_state, path), ...]`` in playback order.
+        at_top (bool): put the labels along the top edge; False puts them along
+            the bottom, which is how the constraint panels keep clear of their
+            legend.
+        show_counts (bool): append each movement's waypoint count to its label.
+        max_index (Optional[int]): stop before this waypoint index, for panels
+            zoomed to part of the path. ``None`` labels every movement.
+
+    Returns:
+        None.
+    """
+    total = sum(len(path) for _role, _state, path in segments)
+    span = max_index if max_index else total
+    # x from the data (waypoint index), y from the axes box, so the rows sit at
+    # a fixed height whatever the data range or log scale does.
+    transform = blended_transform_factory(axis.transData, axis.transAxes)
+    rows = (0.985, 0.945, 0.905, 0.865) if at_top else (0.015, 0.055, 0.095, 0.135)
+
+    row = 0
+    previous_boundary = None
+    boundary = 0
+    for role, _state, path in segments:
+        if max_index is None or boundary < max_index:
+            crowded = (previous_boundary is not None
+                       and (boundary - previous_boundary) < 0.08 * span)
+            row = (row + 1) % len(rows) if crowded else 0
+            axis.axvline(boundary, color="gray", ls="--", lw=1)
+            axis.text(boundary + 0.2, rows[row],
+                      f"{role} ({len(path)})" if show_counts else role,
+                      transform=transform, va="top" if at_top else "bottom",
+                      fontsize=8, color="#333")
+            previous_boundary = boundary
+        boundary += len(path)
+
+
+def measure_grasp_rigidity(planner, path: Sequence[Sequence[float]],
+                           joint_names_12: Sequence[str]) -> Tuple[List[float], List[float]]:
+    """How much the two tool0 frames drift apart along a bar-carrying movement.
+
+    While the bar is held by both arms the transform from the left tool0 to the
+    right tool0 is physically fixed, so any change along the path means the
+    planned motion would fight itself (or drop the bar). This is the constraint
+    M1 and M2 are named after. Measured against the FIRST waypoint of the
+    movement, reusing the tamp path validator's own drift maths so the numbers
+    match what ``validate_stage_trajectory`` reports.
+
+    ! Moves the pybullet robot as it takes forward kinematics; the caller must
+    ! restore the scene afterwards (``planner.set_robot_cell_state``).
+
+    Args:
+        planner: the PyBulletPlanner whose scene holds the robot.
+        path (Sequence[Sequence[float]]): the movement's waypoints, each a 12-vec.
+        joint_names_12 (Sequence[str]): the twelve arm-joint names, in order.
+
+    Returns:
+        Tuple[List[float], List[float]]: per waypoint, the position drift in
+        MILLIMETRES and the worst per-axis rotation drift in DEGREES.
+    """
+    robot_puid = planner.client.robot_puid
+    arm_joints = pp.joints_from_names(robot_puid, joint_names_12)
+    translations_m, rotations_deg = compute_relative_transform_drift(
+        robot_puid, arm_joints,
+        pp.link_from_name(robot_puid, TOOL_LINK_LEFT),
+        pp.link_from_name(robot_puid, TOOL_LINK_RIGHT),
+        [np.asarray(q, dtype=float) for q in path],
+    )
+    position_mm = [float(v) * 1e3 for v in translations_m]
+    # The three per-axis angles answer different questions (which way did the
+    # grasp twist); for a pass/fail curve the worst one is what matters.
+    rotation_deg = [
+        max(rotations_deg["x"][i], rotations_deg["y"][i], rotations_deg["z"][i])
+        for i in range(len(position_mm))
+    ]
+    return position_mm, rotation_deg
+
+
+def measure_ee_constraints(planner, segments, joint_names_12: Sequence[str]) -> List[dict]:
+    """Run the end-effector constraint check on every movement that has one.
+
+    Which movements those are follows from what the movement IS, not from its
+    name: M1 and M2 carry the bar in both grippers, so their grasp must stay
+    rigid (:func:`measure_grasp_rigidity`). M3 releases the bar and M0/M4 are
+    free joint-space motions, so nothing constrains their end-effectors and they
+    are skipped.
+
+    Args:
+        planner: the PyBulletPlanner whose scene holds the robot.
+        segments: ``[(role, start_state, path), ...]`` in playback order, as
+            built by :func:`plan_one_action`.
+        joint_names_12 (Sequence[str]): the twelve arm-joint names, in order.
+
+    Returns:
+        List[dict]: one entry per applicable check, each with ``role``,
+        ``label``, ``offset`` (its first waypoint's index in the concatenated
+        path), ``position_mm`` and ``rotation_deg`` (per-waypoint error lists).
+    """
+    checks = []
+    offset = 0
+    for role, _state, path in segments:
+        if role in ("M1", "M2"):
+            position_mm, rotation_deg = measure_grasp_rigidity(planner, path, joint_names_12)
+            checks.append({
+                "role": role, "label": f"{role} grasp rigidity", "offset": offset,
+                "position_mm": position_mm, "rotation_deg": rotation_deg,
+            })
+        offset += len(path)
+    return checks
+
+
+def print_ee_constraint_summary(checks: Sequence[dict]) -> bool:
+    """Print the worst error of each constraint check, with a pass/fail mark.
+
+    Args:
+        checks (Sequence[dict]): the entries from :func:`measure_ee_constraints`.
+
+    Returns:
+        bool: True when every check stayed inside both tolerances.
+    """
+    if not checks:
+        print("[ee-check] no constrained movements in this plan (M0/M4 are free).")
+        return True
+    print("\n=============== END-EFFECTOR CONSTRAINT CHECK ===============")
+    print(f"  tolerances: {EE_POSITION_TOLERANCE_MM:.3f} mm / "
+          f"{EE_ROTATION_TOLERANCE_DEG:.3f} deg")
+    all_ok = True
+    for check in checks:
+        worst_mm = max(check["position_mm"]) if check["position_mm"] else 0.0
+        worst_deg = max(check["rotation_deg"]) if check["rotation_deg"] else 0.0
+        ok = (worst_mm <= EE_POSITION_TOLERANCE_MM
+              and worst_deg <= EE_ROTATION_TOLERANCE_DEG)
+        all_ok = all_ok and ok
+        print(f"  {check['label']:22s}: worst {worst_mm:9.4f} mm / {worst_deg:8.4f} deg "
+              f"  within tolerance = {_color_bool(ok)}")
+    print("=============================================================")
+    return all_ok
+
+
+def plot_planned_motion(planner, segments, joint_names_12: Sequence[str],
+                        out_path: str, *, title: str = "") -> Optional[List[dict]]:
+    """Save one figure summarising the whole planned motion, and check it.
+
+    Three stacked panels, all against concatenated waypoint index:
+
+      1. every joint's value along the whole path, with a dashed line where each
+         movement hands over to the next (the joint-evolution view from
+         ``replay_bar_action_plan.py``, drawn here so it comes out of the
+         planning run itself);
+      2. end-effector POSITION constraint error in mm;
+      3. end-effector ROTATION constraint error in deg.
+
+    Panels 2 and 3 are zoomed to the movements that actually have an
+    end-effector constraint. The unconstrained tail (the retreat, then the free
+    return home) is normally far longer than everything before it, so without
+    the zoom the curves that matter would be squeezed into a sliver.
+
+    Those two panels use a log scale because a healthy plan sits several orders
+    of magnitude under the tolerance, which a linear axis would flatten to zero.
+    The tolerance is drawn as a red dotted line, so "is this plan good" is just
+    "does every curve stay below the red line".
+
+    Args:
+        planner: the PyBulletPlanner whose scene holds the robot (used for FK).
+        segments: ``[(role, start_state, path), ...]`` in playback order.
+        joint_names_12 (Sequence[str]): the twelve arm-joint names, in order.
+        out_path (str): PNG destination.
+        title (str): extra text for the figure title, e.g. the action id.
+
+    Returns:
+        Optional[List[dict]]: the constraint checks (see
+        :func:`measure_ee_constraints`), or ``None`` when there was nothing to
+        plot.
+    """
+    waypoints = np.asarray([wp for _role, _state, path in segments for wp in path],
+                           dtype=float)
+    if waypoints.size == 0:
+        print("[plot] no waypoints to plot.")
+        return None
+
+    checks = measure_ee_constraints(planner, segments, joint_names_12)
+    # Forward kinematics above left the robot at the last waypoint it evaluated;
+    # put the scene back so whatever runs next (the replay slider) starts clean.
+    if segments:
+        planner.set_robot_cell_state(segments[-1][1])
+
+    fig, (ax_joints, ax_position, ax_rotation) = plt.subplots(
+        3, 1, figsize=(14, 12),
+        gridspec_kw={"height_ratios": [2.0, 1.0, 1.0]},
+    )
+
+    # --- panel 1: joint values along the concatenated path. ---
+    colors = plt.get_cmap("tab20")
+    x_all = np.arange(waypoints.shape[0])
+    for j in range(waypoints.shape[1]):
+        # A dot per waypoint on top of the line: where the dots are spread out
+        # the planner sampled coarsely, where they merge into a solid band it
+        # sampled finely. That density is invisible from the line alone, and it
+        # is the thing the resolution flags control.
+        ax_joints.plot(
+            x_all, waypoints[:, j], lw=1.2, color=colors(j % 20),
+            marker="o", markersize=1.6, markeredgewidth=0.0,
+            label=f"[{'L' if j < 6 else 'R'}] {short_joint_name(joint_names_12[j])}",
+        )
+    # Each label carries its movement's waypoint count: where the per-waypoint
+    # dots are dense enough to merge into a solid line, the number is the only
+    # way to read how many there actually are.
+    draw_movement_boundaries(ax_joints, segments, at_top=True, show_counts=True)
+    ax_joints.set_ylabel("joint value (rad)")
+    ax_joints.set_title(f"Planned trajectory{' -- ' + title if title else ''}")
+    ax_joints.legend(loc="upper right", fontsize=7, ncol=2)
+
+    # --- panels 2 and 3: the end-effector constraint errors. ---
+    # A log axis cannot show an exact zero, and an exactly-rigid waypoint really
+    # does measure 0; floor the curves just under the smallest interesting error
+    # so those points stay visible at the bottom instead of vanishing.
+    floor_mm, floor_deg = 1e-6, 1e-6
+    for axis, key, tolerance, unit in (
+        (ax_position, "position_mm", EE_POSITION_TOLERANCE_MM, "mm"),
+        (ax_rotation, "rotation_deg", EE_ROTATION_TOLERANCE_DEG, "deg"),
+    ):
+        floor = floor_mm if unit == "mm" else floor_deg
+        for check in checks:
+            values = np.maximum(np.asarray(check[key], dtype=float), floor)
+            x_local = np.arange(len(values)) + check["offset"]
+            axis.plot(x_local, values, lw=1.4, label=check["label"])
+        axis.axhline(tolerance, color="red", ls=":", lw=1.2,
+                     label=f"tolerance {tolerance:.3g} {unit}")
+        axis.set_yscale("log")
+        # Movement boundaries, but only for the movements inside the zoom below
+        # -- markers for the unconstrained tail would sit off in dead space.
+        # Labels go at the BOTTOM here (unlike the joint panel) to stay clear of
+        # the legend, which the low-error curves leave room for at the top.
+        last_constrained = (max(c["offset"] + len(c["position_mm"]) for c in checks)
+                            if checks else 0)
+        draw_movement_boundaries(axis, segments, at_top=False, show_counts=False,
+                                 max_index=last_constrained)
+        axis.set_ylabel(f"EE {'position' if unit == 'mm' else 'rotation'} error ({unit})")
+        axis.grid(True, which="both", alpha=0.25)
+        if checks:
+            axis.legend(loc="upper right", fontsize=7, ncol=2)
+            # Zoom to the movements that HAVE a constraint. Without this the
+            # unconstrained tail (the retreat, then the free return home, which
+            # is usually the longest movement by far) stretches the axis and
+            # squeezes the curves that matter into a sliver on the left.
+            margin = max(1.0, 0.02 * last_constrained)
+            axis.set_xlim(-margin, last_constrained - 1 + margin)
+        else:
+            axis.text(0.5, 0.5, "no constrained movements in this plan",
+                      transform=axis.transAxes, ha="center", va="center", color="#777")
+
+    constrained_roles = sorted({c["role"] for c in checks})
+    ax_joints.set_xlabel("waypoint index (concatenated "
+                         + " -> ".join(role for role, _s, _p in segments) + ")")
+    ax_rotation.set_xlabel(
+        "waypoint index -- same axis as above, zoomed to the constrained "
+        f"movement(s) {', '.join(constrained_roles) if constrained_roles else '(none)'}"
+    )
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+    print(f"\n[plot] planned-motion figure saved -> {out_path}")
+    print_ee_constraint_summary(checks)
+    return checks
 
 
 def plot_conf_comparison(joint_names_12, start_conf, goal_conf, out_path, *, show=False):
@@ -1066,10 +1428,7 @@ def plot_conf_comparison(joint_names_12, start_conf, goal_conf, out_path, *, sho
     n = len(joint_names_12)
     x = np.arange(n)
     w = 0.4
-
-    def _short(name):
-        base = re.sub(r"_joint$", "", str(name))
-        return "_".join(base.split("_")[-2:])
+    _short = short_joint_name
 
     fig, ax = plt.subplots(figsize=(13, 6))
     ax.bar(x - w / 2, start, w, label="START", color="#1f6fb2")
@@ -1108,7 +1467,9 @@ def plot_conf_comparison(joint_names_12, start_conf, goal_conf, out_path, *, sho
 
 def probe_endpoints(planner, rcell, action, active_bar_rb_name: Optional[str],
                     joint_names_12: Sequence[str], *, groups, home12,
-                    use_gui: bool = False) -> int:
+                    use_gui: bool = False,
+                    cdfm_position_res: float = DEFAULT_CDFM_POSITION_RES,
+                    cdfm_rotation_res: float = DEFAULT_CDFM_ROTATION_RES) -> int:
     """Report M1 start/goal endpoint feasibility WITHOUT running the RRT.
 
     Runs only the goal-IK plus start-derivation stage of
@@ -1129,6 +1490,10 @@ def probe_endpoints(planner, rcell, action, active_bar_rb_name: Optional[str],
         home12 (np.ndarray | None): the authored home 12-vec from the JSON, used
             only when M1's start config is absent; ``None`` when the export has
             no M4 target (then a missing start config is a hard error).
+        cdfm_position_res (float): M1 bar translation step in metres, passed on
+            so the probe derives the start at the same resolution a real plan
+            would (it changes whether the tracked corridor comes back clear).
+        cdfm_rotation_res (float): M1 bar rotation step in radians, same reason.
 
     Returns:
         int: 0 when both endpoints are feasible, otherwise 2.
@@ -1184,6 +1549,8 @@ def probe_endpoints(planner, rcell, action, active_bar_rb_name: Optional[str],
         random_seed=None,
         max_ik_attempts=20,
         bar_sweep_box=None,
+        position_res=cdfm_position_res,
+        rotation_res=cdfm_rotation_res,
     )
     if start_conf is None:
         print(f"\n[probe] derivation FAILED: {info.get('failure_reason')}")
@@ -1743,11 +2110,20 @@ def plan_one_action(planner, rcell, clean_action_path: str, args, groups):
     # Pre-flight: show what will be planned, in order, before we start.
     print_roster(movements, tag="pre-flight")
 
+    # Echo the resolutions this run uses, so a saved console log always records
+    # what the waypoint density was tuned to (they change waypoint counts and
+    # planning time a lot, and nothing else in the log reveals them).
+    print(f"[plan] resolutions: M0/M4 joint {args.fm_joint_resolution} rad | "
+          f"M1 pos {args.cdfm_position_res} m / rot {args.cdfm_rotation_res} rad | "
+          f"M2/M3 step {args.max_step_distance} m / {args.max_step_angle} rad")
+
     # Endpoint feasibility probe (M1): derive + report start/goal, no RRT.
     if args.probe_endpoints:
         code = probe_endpoints(
             planner, rcell, action, active_bar_rb_name, joint_names_12,
             groups=groups, home12=home12, use_gui=args.gui,
+            cdfm_position_res=args.cdfm_position_res,
+            cdfm_rotation_res=args.cdfm_rotation_res,
         )
         return code == 0, [], joint_names_12, active_bar_id
 
@@ -1822,6 +2198,11 @@ def plan_one_action(planner, rcell, clean_action_path: str, args, groups):
             use_birrt=args.birrt,
             derive_start=args.derive_start,
             draw=args.diagnosis,
+            fm_joint_resolution=args.fm_joint_resolution,
+            cdfm_position_res=args.cdfm_position_res,
+            cdfm_rotation_res=args.cdfm_rotation_res,
+            max_step_distance=args.max_step_distance,
+            max_step_angle=args.max_step_angle,
         )
         plan_t0 = time.time()  # wall clock for this movement's planning call
         if args.diagnosis:
@@ -1892,6 +2273,18 @@ def plan_one_action(planner, rcell, clean_action_path: str, args, groups):
         for role, ok, detail in results:
             mark = "OK  " if ok else "FAIL"
             print(f"  [{mark}] {role}: {detail}")
+
+    # Joint evolution + end-effector constraint check for whatever got planned,
+    # saved next to the motion sidecar so the figure travels with the data it
+    # describes. Drawn here (not in main) so a --all batch gets one per bar, and
+    # so a single-bar run has it on disk BEFORE the blocking replay slider opens.
+    if segments:
+        plot_planned_motion(
+            planner, segments, joint_names_12,
+            os.path.join(os.path.dirname(save_path),
+                         f"{os.path.splitext(bar_file)[0]}_planned_motion.png"),
+            title=f"{action.action_id} ({args.load})",
+        )
 
     all_ok = bool(segments) and all(ok for _, ok, _ in results)
     return all_ok, segments, joint_names_12, active_bar_id
@@ -1975,6 +2368,37 @@ def main() -> int:
     parser.add_argument(
         "--max-attempts", type=int, default=5,
         help="M1 only: number of independent RRT restarts (default 5).",
+    )
+    parser.add_argument(
+        "--fm-joint-resolution", type=float, default=DEFAULT_FM_JOINT_RESOLUTION,
+        help="M0/M4 (free movements): joint-space step in RADIANS between "
+             f"BiRRT waypoints (default {DEFAULT_FM_JOINT_RESOLUTION}). Also the "
+             "collision-checking resolution -- nothing here does swept collision "
+             "checking, so obstacles thinner than one step can be jumped over.",
+    )
+    parser.add_argument(
+        "--cdfm-position-res", type=float, default=DEFAULT_CDFM_POSITION_RES,
+        help="M1 (constrained dual-arm free movement): bar translation step in "
+             f"METRES (default {DEFAULT_CDFM_POSITION_RES}). Sets the RRT extend "
+             "step, the smoother, and the ssik tracked corridor -- and doubles as "
+             "the goal-reached tolerance, so a large value stops short of the goal.",
+    )
+    parser.add_argument(
+        "--cdfm-rotation-res", type=float, default=DEFAULT_CDFM_ROTATION_RES,
+        help="M1: bar rotation step in RADIANS (default "
+             f"{DEFAULT_CDFM_ROTATION_RES}). Same three consumers and the same "
+             "goal-tolerance role as --cdfm-position-res.",
+    )
+    parser.add_argument(
+        "--max-step-distance", type=float, default=DEFAULT_MAX_STEP_DISTANCE,
+        help="M2/M3 (linear movements): tool0 translation step in METRES between "
+             f"waypoints (default {DEFAULT_MAX_STEP_DISTANCE}). Waypoint count is "
+             "whichever of this and --max-step-angle needs more steps.",
+    )
+    parser.add_argument(
+        "--max-step-angle", type=float, default=DEFAULT_MAX_STEP_ANGLE,
+        help="M2/M3: tool0 rotation step in RADIANS between waypoints "
+             f"(default {DEFAULT_MAX_STEP_ANGLE}).",
     )
     parser.add_argument(
         "--single-rrt", dest="birrt", action="store_false", default=True,

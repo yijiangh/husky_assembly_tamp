@@ -23,6 +23,9 @@ CLI:
         [--cdfm-rotation-res 0.025]     # M1 bar rotation step (rad)
         [--max-step-distance 0.005]     # M2/M3 tool0 translation step (m)
         [--max-step-angle 0.05]         # M2/M3 tool0 rotation step (rad)
+        [--no-show-plot]      # don't pop up the planned-motion figure (a
+                              # single-bar run shows it by default and blocks
+                              # on the window; the PNG is saved regardless)
         [--no-replay]
         [--probe-endpoints]   # M1: report start/goal feasibility, skip the RRT
         [--diagnosis]         # M4: draw birrt trees live (needs --gui); no
@@ -112,6 +115,8 @@ from compas_fab.backends import (  # noqa: E402
     PyBulletClient,
     PyBulletPlanner,
 )
+from compas_fab.robots import JointTrajectory, JointTrajectoryPoint  # noqa: E402
+from compas_robots.model import Joint  # noqa: E402
 from husky_assembly_tamp.motion_planner.api import (  # noqa: E402
     _ARM_SUFFIXES,
     TOOL_LINK_LEFT,
@@ -768,7 +773,11 @@ def accept_solved_movement(mv, *, role: str, index: int, movements, rcell,
     # --- motion only: backward continuity check vs the previous trajectory. ---
     if path and index > 0:
         prev_mv = movements[index - 1]
-        prev_path = getattr(prev_mv, "trajectory", None)
+        # The previous movement may have been REUSED straight from a
+        # --load solved_motion sidecar, in which case its trajectory is still
+        # the JointTrajectory that was read off disk rather than a plain list.
+        prev_path = path_from_trajectory(
+            getattr(prev_mv, "trajectory", None), joint_names_12)
         if prev_path:
             diff = float(np.abs(
                 np.asarray(prev_path[-1], dtype=float) - np.asarray(path[0], dtype=float)
@@ -810,48 +819,110 @@ def solved_action_path(clean_action_path: str, kind: str) -> str:
     return f"{stem}.{tag}{ext}"
 
 
-def save_solved_action(action, path: str) -> None:
+def save_solved_action(action, path: str, joint_names_12: Sequence[str]) -> None:
     """Write the current (partly planned) action to its half-solved sidecar.
 
     Called after each movement is planned so a failed run still leaves every
-    already-solved movement on disk. Trajectories are normalized to plain float
-    lists so the JSON is portable and round-trips through ``json_load``.
-    Overwrites any previous sidecar.
+    already-solved movement on disk. Overwrites any previous sidecar.
+
+    Each ``mv.trajectory`` is written as a compas_fab ``JointTrajectory``, the
+    same type the live monitor stores in its own ``<action>.live-solved.json``
+    -- so a sidecar from either producer loads the same way, and every waypoint
+    carries its own joint names instead of relying on positional order.
+
+    ! The wrapping is confined to this function: in memory the planner keeps
+    ! trajectories as plain 12-vec lists (what plotting, collision checking and
+    ! replay consume), so the objects are swapped in only for the dump and
+    ! restored afterwards, even if json_dump raises.
 
     Args:
         action: The BarAssemblyAction being planned (mutated in place as
             movements are solved).
         path (str): Destination sidecar path (see :func:`solved_action_path`).
+        joint_names_12 (Sequence[str]): The twelve arm-joint names, in the same
+            order as each waypoint's values.
 
     Returns:
         None.
     """
-    for mv in action.movements:
-        traj = getattr(mv, "trajectory", None)
-        if traj is not None:
-            mv.trajectory = [[float(v) for v in wp] for wp in traj]
-    json_dump(action, path)
+    original = [getattr(mv, "trajectory", None) for mv in action.movements]
+    try:
+        for mv, traj in zip(action.movements, original):
+            if traj is not None:
+                mv.trajectory = joint_trajectory_from_path(traj, joint_names_12)
+        json_dump(action, path)
+    finally:
+        for mv, traj in zip(action.movements, original):
+            mv.trajectory = traj
     print(f"[save] half-solved BarAction -> {path}")
 
 
-def _path_from_jt(jt, joint_names_12: Sequence[str]) -> Optional[List[List[float]]]:
-    """Convert a JointTrajectory into a list of 12-vecs ordered by names.
+def path_from_trajectory(traj, joint_names_12: Sequence[str]) -> Optional[List[List[float]]]:
+    """Convert a movement trajectory into a list of 12-vecs ordered by names.
+
+    This planner works in plain 12-vec waypoints internally (that is what
+    plotting, collision checking and replay all consume), while the sidecar
+    JSON stores a compas_fab ``JointTrajectory`` -- see
+    :func:`joint_trajectory_from_path`. Reads therefore funnel through here,
+    which accepts either shape:
+
+      * a ``JointTrajectory`` (straight from a planner call, or reloaded from
+        a ``.solved_motion.json`` sidecar), reordered to ``joint_names_12``;
+      * a plain sequence of 12-element sequences, which older sidecars stored
+        directly and which is already in that order.
 
     Args:
-        jt: A compas_fab JointTrajectory, or ``None``.
+        traj: A JointTrajectory, a sequence of 12-element sequences, or None.
         joint_names_12 (Sequence[str]): The twelve arm-joint names to read from
             each trajectory point, in order.
 
     Returns:
-        Optional[List[List[float]]]: One 12-vec per trajectory point, or
-        ``None`` when ``jt`` is ``None``.
+        Optional[List[List[float]]]: One 12-vec per waypoint, or ``None`` when
+        ``traj`` is ``None``.
     """
-    if jt is None:
+    if traj is None:
         return None
+    points = getattr(traj, "points", None)
+    if points is None:
+        # Plain list of 12-vecs: already in the canonical joint order.
+        return [[float(v) for v in wp] for wp in traj]
     return [
         [float(p.joint_values[p.joint_names.index(n)]) for n in joint_names_12]
-        for p in jt.points
+        for p in points
     ]
+
+
+def joint_trajectory_from_path(path, joint_names_12: Sequence[str]):
+    """Wrap a list of 12-vec waypoints into a compas_fab JointTrajectory.
+
+    Inverse of :func:`path_from_trajectory`, used only when writing the
+    sidecar. Storing a real ``JointTrajectory`` (rather than a bare nested
+    list) keeps ``Movement.trajectory`` the same type the live monitor writes
+    into its own ``<action>.live-solved.json``, so one file format serves both
+    producers and every point carries its own joint names.
+
+    Args:
+        path: Waypoints, each a 12-element sequence of joint values, or None.
+        joint_names_12 (Sequence[str]): The twelve arm-joint names, in the same
+            order as each waypoint's values.
+
+    Returns:
+        Optional[JointTrajectory]: The wrapped trajectory, or ``None`` when
+        ``path`` is ``None`` or empty.
+    """
+    if not path:
+        return None
+    names = list(joint_names_12)
+    types = [Joint.REVOLUTE] * len(names)
+    points = []
+    for i, wp in enumerate(path):
+        values = [float(v) for v in wp]
+        if len(values) != len(names):
+            raise ValueError(
+                f"waypoint [{i}] has {len(values)} values, expected {len(names)}")
+        points.append(JointTrajectoryPoint(
+            joint_values=values, joint_types=types, joint_names=names))
+    return JointTrajectory(trajectory_points=points, joint_names=names)
 
 
 def _make_tree_draw_fn(planner, robot_puid, arm_joints, tool_link_left, tool_link_right,
@@ -1067,7 +1138,7 @@ def plan_movement(planner, state, role: str, selected, *, active_bar_id: str,
             max_step_distance=max_step_distance,
             max_step_angle=max_step_angle,
         )
-        path = _path_from_jt(jt, joint_names_12)
+        path = path_from_trajectory(jt, joint_names_12)
         return path, {"failure_reason": None if jt is not None else "linear-ik failed"}
     if role == "M3" and isinstance(selected, IndependentDualArmLinearMovement):
         print("[plan] plan_dual_arm_linear_independent")
@@ -1080,7 +1151,7 @@ def plan_movement(planner, state, role: str, selected, *, active_bar_id: str,
             max_step_distance=max_step_distance,
             max_step_angle=max_step_angle,
         )
-        path = _path_from_jt(jt, joint_names_12)
+        path = path_from_trajectory(jt, joint_names_12)
         return path, {"failure_reason": None if jt is not None else "linear-ik failed"}
     if role == "M4" and isinstance(selected, IndependentDualArmFreeMovement):
         # M4 returns to the fixed dual-arm home AUTHORED INTO THE EXPORT (the
@@ -1138,6 +1209,29 @@ def short_joint_name(name: str) -> str:
     """
     base = re.sub(r"_joint$", "", str(name))
     return "_".join(base.split("_")[-2:])
+
+
+def display_available() -> bool:
+    """Whether an interactive matplotlib window can actually be opened here.
+
+    Showing the planned-motion figure is the default, so this script has to run
+    unattended over SSH or in a container without hanging or dying. Two ways
+    that can go wrong, both checked here:
+
+    - the active backend draws to a file only (Agg and friends), where
+      ``plt.show()`` does nothing but print a warning;
+    - a GUI backend is selected but there is no X / Wayland server to talk to.
+      Qt ABORTS the process in that case rather than raising, so it cannot be
+      caught with try/except -- it has to be ruled out before calling show().
+
+    Returns:
+        bool: True when a figure window can be opened.
+    """
+    if plt.get_backend().lower() in ("agg", "pdf", "ps", "svg", "cairo", "template"):
+        return False
+    if sys.platform.startswith("linux"):
+        return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    return True
 
 
 def draw_movement_boundaries(axis, segments, *, at_top: bool,
@@ -1289,7 +1383,8 @@ def print_ee_constraint_summary(checks: Sequence[dict]) -> bool:
 
 
 def plot_planned_motion(planner, segments, joint_names_12: Sequence[str],
-                        out_path: str, *, title: str = "") -> Optional[List[dict]]:
+                        out_path: str, *, title: str = "",
+                        show: bool = False) -> Optional[List[dict]]:
     """Save one figure summarising the whole planned motion, and check it.
 
     Three stacked panels, all against concatenated waypoint index:
@@ -1317,6 +1412,11 @@ def plot_planned_motion(planner, segments, joint_names_12: Sequence[str],
         joint_names_12 (Sequence[str]): the twelve arm-joint names, in order.
         out_path (str): PNG destination.
         title (str): extra text for the figure title, e.g. the action id.
+        show (bool): open the figure in an interactive matplotlib window and
+            BLOCK until it is closed, so the dense stretches can be zoomed into.
+            The PNG is written first and always shows the full plot, whatever is
+            done in the window afterwards. Needs a display; without one the
+            window is skipped and only the PNG is written.
 
     Returns:
         Optional[List[dict]]: the constraint checks (see
@@ -1408,10 +1508,26 @@ def plot_planned_motion(planner, segments, joint_names_12: Sequence[str],
         f"movement(s) {', '.join(constrained_roles) if constrained_roles else '(none)'}"
     )
     fig.tight_layout()
+
+    # ! Save BEFORE showing. savefig writes the axes as they currently are, so
+    # ! saving after an interactive session would store whatever zoom was left
+    # ! on screen -- one stray scroll and the overview PNG next to the data
+    # ! becomes an unreadable crop. The window's own toolbar has a save button
+    # ! for keeping a zoomed view.
     fig.savefig(out_path, dpi=150)
-    plt.close(fig)
     print(f"\n[plot] planned-motion figure saved -> {out_path}")
     print_ee_constraint_summary(checks)
+
+    if show and not display_available():
+        print("[plot] no display available; figure window skipped "
+              "(pass --no-show-plot to stop asking).")
+    elif show:
+        print("\n[plot] opening the figure window -- zoom/pan as needed; close "
+              "it to continue. The PNG above is already written. "
+              "(--no-show-plot skips this.)")
+        plt.show()
+
+    plt.close(fig)
     return checks
 
 
@@ -1876,7 +1992,7 @@ def solve_keyframes_for_action(planner, action, clean_action_path: str, *,
 
     _write_back_solve(action, used_base, solved, rcell, joint_names_12)
     save_path = solved_action_path(clean_action_path, "keyframe")
-    save_solved_action(action, save_path)
+    save_solved_action(action, save_path, joint_names_12)
     o = used_base[:3, 3]
     return True, f"base ({o[0]:.0f},{o[1]:.0f},{o[2]:.0f})mm -> {os.path.basename(save_path)}"
 
@@ -2150,7 +2266,7 @@ def plan_one_action(planner, rcell, clean_action_path: str, args, groups):
         # --load solved_keyframe (every movement is planned fresh from its base).
         existing_traj = getattr(selected, "trajectory", None)
         if args.load != "clean" and existing_traj:
-            path = [[float(v) for v in wp] for wp in existing_traj]
+            path = path_from_trajectory(existing_traj, joint_names_12)
             print(f"[reuse] {role}: {len(path)} waypoint(s) from half-solved file.")
             segments.append((role, state, path))
             results.append((role, True, f"reused {len(path)} waypoint(s)"))
@@ -2260,7 +2376,7 @@ def plan_one_action(planner, rcell, clean_action_path: str, args, groups):
         results.append((role, True, f"{len(path)} waypoint(s)"))
 
         # Snapshot progress after every solved movement.
-        save_solved_action(action, save_path)
+        save_solved_action(action, save_path, joint_names_12)
 
     # Planning-time breakdown, one line per planned movement + total.
     if plan_times:
@@ -2279,11 +2395,15 @@ def plan_one_action(planner, rcell, clean_action_path: str, args, groups):
     # describes. Drawn here (not in main) so a --all batch gets one per bar, and
     # so a single-bar run has it on disk BEFORE the blocking replay slider opens.
     if segments:
+        # Showing blocks on a window per bar, which would stall a batch, so a
+        # --all run saves the PNGs without stopping to show them. No warning:
+        # showing is the default now, so this would print on every batch run.
         plot_planned_motion(
             planner, segments, joint_names_12,
             os.path.join(os.path.dirname(save_path),
                          f"{os.path.splitext(bar_file)[0]}_planned_motion.png"),
             title=f"{action.action_id} ({args.load})",
+            show=args.show_plot and not args.all_bars,
         )
 
     all_ok = bool(segments) and all(ok for _, ok, _ in results)
@@ -2408,6 +2528,24 @@ def main() -> int:
              "pocket the forward tree cannot thread into -- the goal-rooted tree "
              "grows out of the pocket instead. Use this flag only for comparison.",
     )
+    parser.add_argument(
+        "--no-show-plot", dest="show_plot", action="store_false",
+        help="Do NOT pop up the planned-motion figure; just write the PNG. By "
+             "default a single-bar run opens the figure in an interactive "
+             "matplotlib window when planning finishes (zoom/pan the dense "
+             "stretches) and BLOCKS until it is closed. The PNG is saved first "
+             "either way and always holds the full view; use the window's own "
+             "toolbar to save a zoomed one. The window is skipped automatically "
+             "in a --all batch (it would block on every bar) and on a machine "
+             "with no display. Independent of --gui: no PyBullet window needed.",
+    )
+    # Accepted for symmetry so the flag can be written out explicitly; showing
+    # is already the default, so passing it changes nothing.
+    parser.add_argument(
+        "--show-plot", dest="show_plot", action="store_true",
+        help="Explicitly ask for the figure window (the default already).",
+    )
+    parser.set_defaults(show_plot=True)
     parser.add_argument("--no-replay", action="store_true")
     parser.add_argument(
         "--no-derive-start", dest="derive_start", action="store_false",

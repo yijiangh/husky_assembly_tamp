@@ -195,10 +195,12 @@ def _run_motion(planner, rcell, action, joint_names_12, args) -> int:
     for role in ("M1", "M2", "M3", "M4"):
         mv = H.select_movement(action, role)
         traj = getattr(mv, "trajectory", None) if mv is not None else None
-        n_wp = len(traj) if traj else 0
-        print(f"  {role}: {n_wp} trajectory waypoint(s)")
-        if traj and mv.start_state is not None:
-            segments.append((role, mv.start_state, [list(map(float, wp)) for wp in traj]))
+        # Sidecars store a JointTrajectory; older ones store bare 12-vec lists.
+        # path_from_trajectory takes either and hands back plain waypoints.
+        path = H.path_from_trajectory(traj, joint_names_12) if traj is not None else None
+        print(f"  {role}: {len(path) if path else 0} trajectory waypoint(s)")
+        if path and mv.start_state is not None:
+            segments.append((role, mv.start_state, path))
 
     if not segments:
         print("[!] no planned trajectories in this file; falling back to keyframe view.\n")

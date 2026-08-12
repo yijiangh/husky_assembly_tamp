@@ -263,6 +263,7 @@ def _ssik_pair_goal_branch_with_home(
     grasp_bar_from_right,
     goal_conf_fallback,
     cfab_collision_fn,
+    home_anchors=None,
 ):
     """Re-pick the M1 goal conf on the IK branch pair most compatible with the home pose.
 
@@ -294,6 +295,9 @@ def _ssik_pair_goal_branch_with_home(
         goal_conf_fallback (np.ndarray): the already-solved goal 12-vec to keep
             when pairing cannot improve on it (e.g. anchor pose unreachable).
         cfab_collision_fn: ``conf12 -> bool`` collision predicate (True = hit).
+        home_anchors: ``HOME_BAR_ANCHORS`` carry-mode selection (None/"all" =
+            every anchor) -- must match what the start derivation will sample,
+            so the goal branch is ranked against homes it can actually reach.
 
     Returns:
         np.ndarray: the (possibly re-picked) goal 12-vec.
@@ -307,13 +311,15 @@ def _ssik_pair_goal_branch_with_home(
     if world_from_mobile_base is None:
         world_from_mobile_base = ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
     mb_from_bar_goal = pp.multiply(pp.invert(world_from_mobile_base), world_from_bar_goal)
-    # All candidate home anchors the start derivation may use: canonical
-    # orientation plus the rotated variants. A goal branch counts as
-    # home-compatible if it is near a legal branch at ANY of them.
+    # All candidate home anchors the start derivation may use: the selected
+    # carry anchors' canonical orientations plus their rotated variants. A goal
+    # branch counts as home-compatible if it is near a legal branch at ANY of
+    # them.
     home_poses_world = [
         pp.multiply(world_from_mobile_base, anchor_mb)
         for _label, anchor_mb in home_bar_anchor_variants(
-            mb_from_bar_goal, grasp_bar_from_left, grasp_bar_from_right
+            mb_from_bar_goal, grasp_bar_from_left, grasp_bar_from_right,
+            anchors=home_anchors,
         )
     ]
 
@@ -393,6 +399,7 @@ def _derive_constrained_start_for_plan(
     bar_sweep_box,
     position_res: Optional[float] = None,
     rotation_res: Optional[float] = None,
+    home_anchor: Optional[str] = None,
 ):
     """Compute a feasible constrained start (bar pose + 12-vec joint conf).
 
@@ -408,10 +415,18 @@ def _derive_constrained_start_for_plan(
     corridor between the home pose and the goal is sampled (metres / radians).
     They matter beyond the start pose itself: when that corridor comes back
     collision-free, the caller returns it AS the M1 path and skips the RRT, so
-    these two values become the spacing of the delivered trajectory. ``None``
-    (the default) leaves them to
+    these two values become the spacing of the delivered trajectory. Candidate
+    SCREENING inside the derivation runs at its own coarse step regardless
+    (only a winning corridor is re-tracked at these values), so requesting a
+    fine resolution no longer starves the home-pose sweep. ``None`` (the
+    default) leaves them to
     :func:`~.dual_arm_task_space_rrt.core.derive_constrained_start_tracked`, the
     single place those defaults live.
+
+    ``home_anchor`` restricts the derivation to ONE carry mode from
+    ``HOME_BAR_ANCHORS`` ("horizontal", "vertical" or "back"); ``None`` (the
+    default) samples all of them hierarchically -- again keeping core's own
+    default as the single source of truth.
 
     Returns ``(start_conf, world_from_bar_start, world_from_bar_goal,
     goal_conf_arr, grasp_bar_from_left, grasp_bar_from_right, info)``. On
@@ -421,10 +436,16 @@ def _derive_constrained_start_for_plan(
     from .dual_arm_task_space_rrt.core import (
         derive_constrained_start,
         derive_constrained_start_tracked,
+        resolve_home_anchors,
         solve_endpoint_dual_arm_ik,
     )
 
     _fail = (None, None, None, None, None, None)
+
+    # Validate the anchor label up front (cheap) so a typo fails before the
+    # expensive goal IK below, not minutes into the sweep.
+    home_anchor_selection = [home_anchor] if home_anchor is not None else None
+    resolve_home_anchors(home_anchor_selection)
 
     # 1. goal conf.
     if goal_ee_frames is not None:
@@ -491,6 +512,7 @@ def _derive_constrained_start_for_plan(
             world_from_bar_goal, world_from_mobile_base,
             grasp_bar_from_left, grasp_bar_from_right,
             goal_conf_arr, cfab_collision_fn,
+            home_anchors=home_anchor_selection,
         )
         # cfab probes above left the cache at the last tested conf; reset.
         planner.set_robot_cell_state(start_state)
@@ -529,6 +551,9 @@ def _derive_constrained_start_for_plan(
     )
     if bar_sweep_box is not None:
         derive_kwargs["bar_sweep_box"] = bar_sweep_box
+    # Only forward a chosen anchor; unset keeps core's all-anchors default.
+    if home_anchor_selection is not None:
+        derive_kwargs["anchors"] = home_anchor_selection
 
     world_from_bar_start = start_conf = None
     tracked_info = None  # set by the ssik tracked derivation below
@@ -550,6 +575,8 @@ def _derive_constrained_start_for_plan(
             tracked_kwargs["position_res"] = position_res
         if rotation_res is not None:
             tracked_kwargs["rotation_res"] = rotation_res
+        if home_anchor_selection is not None:
+            tracked_kwargs["anchors"] = home_anchor_selection
         world_from_bar_start, start_conf, tracked_info = derive_constrained_start_tracked(
             robot_puid,
             arm_joints,
@@ -750,6 +777,7 @@ def plan_constrained_dual_arm(
     start_bar_sweep_box: Optional[
         Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]
     ] = None,
+    start_home_anchor: Optional[str] = None,
 ) -> Tuple[Optional[List[np.ndarray]], dict]:
     """Constrained dual-arm SE(3) RRT with a rigid bar grasp.
 
@@ -780,6 +808,12 @@ def plan_constrained_dual_arm(
     ``dual_arm_task_space_rrt.run`` Stage-3 procedure and is the right choice
     when the caller has no trustworthy start configuration (e.g. the Rhino
     export leaves M1's start joints as a placeholder).
+
+    ``start_home_anchor`` picks the carry mode the derived home pose may use:
+    None (default) samples all of ``HOME_BAR_ANCHORS`` hierarchically --
+    "horizontal" (bar across the front, the original behavior), "vertical"
+    (bar upright in front) and "back" (bar fore-aft over the robot) -- while a
+    specific label restricts the derivation to that single anchor.
 
     ``position_res`` / ``rotation_res`` (metres / radians) are the SE(3) step
     the search advances the bar by, and they double as the goal-reached
@@ -851,6 +885,7 @@ def plan_constrained_dual_arm(
             random_seed=(start_random_seed if start_random_seed is not None else random_seed),
             max_ik_attempts=start_max_ik_attempts,
             bar_sweep_box=start_bar_sweep_box,
+            home_anchor=start_home_anchor,
             # The ssik tracked corridor may BE the returned path (see the
             # direct-connect shortcut below), so it has to be sampled at the
             # resolution asked of this plan, not at its own default.

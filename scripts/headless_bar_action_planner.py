@@ -1037,6 +1037,7 @@ def plan_movement(planner, state, role: str, selected, *, active_bar_id: str,
                   fm_joint_resolution: float = DEFAULT_FM_JOINT_RESOLUTION,
                   cdfm_position_res: float = DEFAULT_CDFM_POSITION_RES,
                   cdfm_rotation_res: float = DEFAULT_CDFM_ROTATION_RES,
+                  cdfm_home_anchor: str = "all",
                   max_step_distance: float = DEFAULT_MAX_STEP_DISTANCE,
                   max_step_angle: float = DEFAULT_MAX_STEP_ANGLE):
     """Send one movement to the right planner API for its role.
@@ -1062,6 +1063,9 @@ def plan_movement(planner, state, role: str, selected, *, active_bar_id: str,
             between BiRRT waypoints.
         cdfm_position_res (float): M1 — bar translation step in metres.
         cdfm_rotation_res (float): M1 — bar rotation step in radians.
+        cdfm_home_anchor (str): M1 — which "home bar" carry anchor the derived
+            start may use: "all" (default, sample every anchor hierarchically),
+            "horizontal", "vertical" or "back".
         max_step_distance (float): M2/M3 — tool0 translation step in metres
             between linear waypoints.
         max_step_angle (float): M2/M3 — tool0 rotation step in radians.
@@ -1122,6 +1126,7 @@ def plan_movement(planner, state, role: str, selected, *, active_bar_id: str,
             max_attempts=max_attempts,
             use_birrt=use_birrt,
             derive_start=derive_start,
+            start_home_anchor=None if cdfm_home_anchor == "all" else cdfm_home_anchor,
         )
     if role == "M2" and isinstance(selected, EndEffectorConstrainedDualArmLinearMovement):
         if not active_bar_id:
@@ -1585,7 +1590,8 @@ def probe_endpoints(planner, rcell, action, active_bar_rb_name: Optional[str],
                     joint_names_12: Sequence[str], *, groups, home12,
                     use_gui: bool = False,
                     cdfm_position_res: float = DEFAULT_CDFM_POSITION_RES,
-                    cdfm_rotation_res: float = DEFAULT_CDFM_ROTATION_RES) -> int:
+                    cdfm_rotation_res: float = DEFAULT_CDFM_ROTATION_RES,
+                    cdfm_home_anchor: str = "all") -> int:
     """Report M1 start/goal endpoint feasibility WITHOUT running the RRT.
 
     Runs only the goal-IK plus start-derivation stage of
@@ -1608,8 +1614,12 @@ def probe_endpoints(planner, rcell, action, active_bar_rb_name: Optional[str],
             no M4 target (then a missing start config is a hard error).
         cdfm_position_res (float): M1 bar translation step in metres, passed on
             so the probe derives the start at the same resolution a real plan
-            would (it changes whether the tracked corridor comes back clear).
+            would (it sets the delivered corridor's spacing; candidate
+            screening runs at the derivation's own coarse step either way).
         cdfm_rotation_res (float): M1 bar rotation step in radians, same reason.
+        cdfm_home_anchor (str): M1 home carry anchor selection ("all",
+            "horizontal", "vertical" or "back"), same reason -- the probe must
+            derive from the same anchors a real plan would.
 
     Returns:
         int: 0 when both endpoints are feasible, otherwise 2.
@@ -1667,6 +1677,7 @@ def probe_endpoints(planner, rcell, action, active_bar_rb_name: Optional[str],
         bar_sweep_box=None,
         position_res=cdfm_position_res,
         rotation_res=cdfm_rotation_res,
+        home_anchor=None if cdfm_home_anchor == "all" else cdfm_home_anchor,
     )
     if start_conf is None:
         print(f"\n[probe] derivation FAILED: {info.get('failure_reason')}")
@@ -2231,7 +2242,8 @@ def plan_one_action(planner, rcell, clean_action_path: str, args, groups):
     # planning time a lot, and nothing else in the log reveals them).
     print(f"[plan] resolutions: M0/M4 joint {args.fm_joint_resolution} rad | "
           f"M1 pos {args.cdfm_position_res} m / rot {args.cdfm_rotation_res} rad | "
-          f"M2/M3 step {args.max_step_distance} m / {args.max_step_angle} rad")
+          f"M2/M3 step {args.max_step_distance} m / {args.max_step_angle} rad | "
+          f"M1 home anchor {args.cdfm_home_anchor}")
 
     # Endpoint feasibility probe (M1): derive + report start/goal, no RRT.
     if args.probe_endpoints:
@@ -2240,6 +2252,7 @@ def plan_one_action(planner, rcell, clean_action_path: str, args, groups):
             groups=groups, home12=home12, use_gui=args.gui,
             cdfm_position_res=args.cdfm_position_res,
             cdfm_rotation_res=args.cdfm_rotation_res,
+            cdfm_home_anchor=args.cdfm_home_anchor,
         )
         return code == 0, [], joint_names_12, active_bar_id
 
@@ -2317,6 +2330,7 @@ def plan_one_action(planner, rcell, clean_action_path: str, args, groups):
             fm_joint_resolution=args.fm_joint_resolution,
             cdfm_position_res=args.cdfm_position_res,
             cdfm_rotation_res=args.cdfm_rotation_res,
+            cdfm_home_anchor=args.cdfm_home_anchor,
             max_step_distance=args.max_step_distance,
             max_step_angle=args.max_step_angle,
         )
@@ -2508,6 +2522,17 @@ def main() -> int:
         help="M1: bar rotation step in RADIANS (default "
              f"{DEFAULT_CDFM_ROTATION_RES}). Same three consumers and the same "
              "goal-tolerance role as --cdfm-position-res.",
+    )
+    parser.add_argument(
+        "--cdfm-home-anchor",
+        choices=("all", "horizontal", "vertical", "back"), default="all",
+        help="M1: which 'home bar' carry anchor(s) the derived start may use. "
+             "'all' (default) samples every anchor hierarchically (each "
+             "anchor's canonical pose before any rotated variant); a specific "
+             "label restricts the derivation to that single carry mode: "
+             "horizontal (bar across the front, the original behavior), "
+             "vertical (bar upright in front), back (bar fore-aft over the "
+             "robot).",
     )
     parser.add_argument(
         "--max-step-distance", type=float, default=DEFAULT_MAX_STEP_DISTANCE,

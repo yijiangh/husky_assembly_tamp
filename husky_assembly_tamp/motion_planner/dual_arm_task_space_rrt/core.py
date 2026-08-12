@@ -78,6 +78,68 @@ MOBILE_BASE_FROM_BAR_HOME_POSITION: np.ndarray = np.array(
     [0.3974, -0.0398, 0.8622], dtype=float
 )
 
+# * Discrete "home bar" carry anchors for M1 start derivation, in priority
+# * order (dict insertion order = sampling order). Each anchor is a
+# * bar-independent spec -- bar frames differ per bar (origin can sit at one
+# * tip, local Z may flip), so the actual bar quaternion is still derived per
+# * bar from the grasps at runtime (see bar_orientation_from_grasps):
+# *   midpoint_mb -- where the midpoint of the two tool0 grasps sits (mb frame)
+# *   bar_axis_mb -- target direction for the bar's right->left grasp axis
+# *   forward_mb  -- direction the tool0 Z axes should face (roll-sweep scoring)
+# ? Provenance: authored demo files in
+# ? data_design_study/260812_M1_motion_samples/BarActions (identity base frame,
+# ? so M1 target_ee_frames ARE the carry pose in the mb frame; each file's
+# ? target_configuration proves the pose is IK-feasible):
+# ?   horizontal: B3.json  tool0 L [0.635, 0.33, 0.95] / R [0.535, -0.33, 0.85]
+# ?               (midpoint kept at the pre-existing constant by choice)
+# ?   vertical:   B6.json  tool0 L [0.715, 0.0, 1.17] / R [0.715, 0.0, 0.23]
+# ?   back:       B9.json  tool0 L [0.57, 0.0, 1.04]  / R [-0.37, 0.0, 1.04]
+HOME_BAR_ANCHORS: Dict[str, Dict[str, np.ndarray]] = {
+    # Bar across the robot's front, axis along base-link Y (the original home).
+    "horizontal": dict(
+        midpoint_mb=MOBILE_BASE_FROM_BAR_HOME_POSITION,
+        bar_axis_mb=np.array([0.0, 1.0, 0.0]),
+        forward_mb=np.array([1.0, 0.0, 0.0]),
+    ),
+    # Bar upright in front of the robot, axis along base-link Z.
+    "vertical": dict(
+        midpoint_mb=np.array([0.715, 0.0, 0.70]),
+        bar_axis_mb=np.array([0.0, 0.0, 1.0]),
+        forward_mb=np.array([1.0, 0.0, 0.0]),
+    ),
+    # Bar carried fore-aft over the robot's back, tools facing up.
+    "back": dict(
+        midpoint_mb=np.array([0.10, 0.0, 1.04]),
+        bar_axis_mb=np.array([1.0, 0.0, 0.0]),
+        forward_mb=np.array([0.0, 0.0, 1.0]),
+    ),
+}
+
+
+def resolve_home_anchors(anchors: Optional[Sequence[str]] = None) -> List[str]:
+    """Normalize a home-anchor selection into an ordered list of labels.
+
+    Args:
+        anchors (Optional[Sequence[str]]): None or "all" selects every anchor
+            in ``HOME_BAR_ANCHORS`` priority order; a single label string or a
+            list of labels selects just those (order preserved).
+
+    Returns:
+        List[str]: validated anchor labels to sample, in order.
+
+    Raises:
+        ValueError: if a label is not a key of ``HOME_BAR_ANCHORS``.
+    """
+    if anchors is None or anchors == "all":
+        return list(HOME_BAR_ANCHORS.keys())
+    labels = [anchors] if isinstance(anchors, str) else list(anchors)
+    unknown = [label for label in labels if label not in HOME_BAR_ANCHORS]
+    if unknown:
+        raise ValueError(
+            f"Unknown home anchor label(s) {unknown}; valid: {list(HOME_BAR_ANCHORS)}"
+        )
+    return labels
+
 # Husky dual-arm URDF/SRDF, used by the joint-space collision predicate.
 # Defined here (not imported from ``run``) so this module never needs to import
 # the standalone runner — importing ``run`` would pull in its heavier deps and
@@ -1230,15 +1292,16 @@ def home_bar_anchor_pose_mb(
     grasp_bar_from_left: PoseLike,
     grasp_bar_from_right: PoseLike,
     bar_quat_override: Optional[Tuple[float, float, float, float]] = None,
+    anchor: str = "horizontal",
 ) -> Tuple[Tuple[float, float, float], Tuple[float, float, float, float]]:
-    """The "home" bar anchor pose (mobile-base frame) for start derivation.
+    """A "home" bar anchor pose (mobile-base frame) for start derivation.
 
-    Orientation comes from the grasp geometry (``bar_orientation_from_grasps``)
-    unless ``bar_quat_override`` is given; position anchors the GRASP MIDPOINT
-    (not the bar frame origin -- some bar frames live at one grasp end) at
-    ``MOBILE_BASE_FROM_BAR_HOME_POSITION``. ``derive_constrained_start`` sweeps
-    position deltas around this anchor, and the ssik goal/start branch pairing
-    in api.py evaluates branch sets at it.
+    Orientation comes from the grasp geometry (``bar_orientation_from_grasps``
+    aligned to the anchor's ``bar_axis_mb``) unless ``bar_quat_override`` is
+    given; position anchors the GRASP MIDPOINT (not the bar frame origin --
+    some bar frames live at one grasp end) at the anchor's ``midpoint_mb``.
+    ``derive_constrained_start`` sweeps position deltas around this anchor, and
+    the ssik goal/start branch pairing in api.py evaluates branch sets at it.
 
     Args:
         mb_from_bar_goal (PoseLike): the goal bar pose in the mobile-base frame.
@@ -1247,12 +1310,15 @@ def home_bar_anchor_pose_mb(
         bar_quat_override (Optional[Tuple]): use this orientation (xyzw) for the
             home bar instead of the canonical one. The anchored position is
             recomputed for it (the grasp midpoint moves with the orientation).
+        anchor (str): which ``HOME_BAR_ANCHORS`` carry mode to anchor at
+            (default "horizontal", the original front carry).
 
     Returns:
         Tuple[Tuple[float, float, float], Tuple[float, float, float, float]]:
         the anchor as a ``(position, quaternion_xyzw)`` pair in the mobile-base
         frame.
     """
+    anchor_spec = HOME_BAR_ANCHORS[anchor]
     mb_from_tool0_left_goal = pp.multiply(mb_from_bar_goal, grasp_bar_from_left)
     mb_from_tool0_right_goal = pp.multiply(mb_from_bar_goal, grasp_bar_from_right)
     grasp_targets_mb = [
@@ -1262,7 +1328,9 @@ def home_bar_anchor_pose_mb(
     if bar_quat_override is not None:
         home_bar_quat = tuple(bar_quat_override)
     else:
-        home_bar_quat = bar_orientation_from_grasps(grasp_targets_mb)
+        home_bar_quat = bar_orientation_from_grasps(
+            grasp_targets_mb, target_axis_in_mb=anchor_spec["bar_axis_mb"]
+        )
 
     # Anchor the grasp midpoint at the home position. Some bar frames live at
     # one grasp end, so anchoring the frame origin would shift the held bar.
@@ -1279,7 +1347,7 @@ def home_bar_anchor_pose_mb(
         )[0],
         dtype=float,
     )
-    base_pos_mb = np.asarray(MOBILE_BASE_FROM_BAR_HOME_POSITION, dtype=float) - midpoint_in_mb
+    base_pos_mb = np.asarray(anchor_spec["midpoint_mb"], dtype=float) - midpoint_in_mb
     return tuple(base_pos_mb.tolist()), home_bar_quat
 
 
@@ -1287,14 +1355,15 @@ def home_bar_anchor_variants(
     mb_from_bar_goal: PoseLike,
     grasp_bar_from_left: PoseLike,
     grasp_bar_from_right: PoseLike,
+    anchors: Optional[Sequence[str]] = None,
 ) -> List[Tuple[str, Tuple[Tuple[float, float, float], Tuple[float, float, float, float]]]]:
-    """Candidate home anchor poses: the canonical orientation plus rotated variants.
+    """Candidate home anchor poses: canonical orientations plus rotated variants.
 
     Why: with real joint limits, the IK branch sheet that holds the bar at the
-    GOAL pose may simply not extend to the canonical home ORIENTATION (measured
+    GOAL pose may simply not extend to a canonical home ORIENTATION (measured
     on the hard B226 case: every goal branch is ~176 deg away from every
     canonical-home branch). The home pose is ours to choose -- M1's start is
-    derived, and M0 drives the arms to it -- so when the canonical orientation
+    derived, and M0 drives the arms to it -- so when a canonical orientation
     is unreachable-in-branch, try the same anchor with the bar rotated:
 
       * ``roll`` -- about the bar's own long axis (local Z): re-poses the
@@ -1302,49 +1371,70 @@ def home_bar_anchor_variants(
       * ``yaw`` -- about the mobile base's vertical axis: swings the bar
         heading; changes the shoulder/elbow posture.
 
-    Ordered smallest-rotation-first (canonical, then increasing magnitude), so
-    callers that early-exit prefer the least-surprising home pose.
+    With several carry anchors selected, the per-anchor lists are interleaved
+    round-robin by rotation rank: EVERY anchor's canonical pose comes before
+    ANY rotated variant, and rotations stay smallest-first globally -- so an
+    early-exiting caller reaches a genuinely different carry mode before
+    burning time on large rotations of the first one. Labels are prefixed with
+    the anchor, e.g. ``"horizontal/canonical"``, ``"back/yaw+30"``.
 
     Args:
         mb_from_bar_goal (PoseLike): the goal bar pose in the mobile-base frame.
         grasp_bar_from_left (PoseLike): left grasp transform (bar-from-tool).
         grasp_bar_from_right (PoseLike): right grasp transform (bar-from-tool).
+        anchors (Optional[Sequence[str]]): ``HOME_BAR_ANCHORS`` selection
+            (None/"all" = every anchor, see ``resolve_home_anchors``).
 
     Returns:
         List[Tuple[str, Tuple[pos, quat]]]: ``(label, (position, quat_xyzw))``
-        anchor candidates in the mobile-base frame, canonical first.
+        anchor candidates in the mobile-base frame, canonicals first.
     """
-    canonical_pos, canonical_quat = home_bar_anchor_pose_mb(
-        mb_from_bar_goal, grasp_bar_from_left, grasp_bar_from_right
-    )
-    variants: List[Tuple[str, Tuple[Tuple[float, float, float], Tuple[float, float, float, float]]]] = [
-        ("canonical", (canonical_pos, canonical_quat)),
-    ]
+    anchor_labels = resolve_home_anchors(anchors)
 
-    def _anchor_for(quat):
-        """Re-anchor the grasp midpoint for a rotated orientation."""
-        return home_bar_anchor_pose_mb(
+    def _variants_for_anchor(anchor_label: str):
+        """One anchor's ordered variant list: canonical, then rotations."""
+        canonical_pos, canonical_quat = home_bar_anchor_pose_mb(
             mb_from_bar_goal, grasp_bar_from_left, grasp_bar_from_right,
-            bar_quat_override=quat,
+            anchor=anchor_label,
         )
+        variants: List[Tuple[str, Tuple[Tuple[float, float, float], Tuple[float, float, float, float]]]] = [
+            (f"{anchor_label}/canonical", (canonical_pos, canonical_quat)),
+        ]
 
-    # Smallest rotations first; roll before yaw at equal magnitude (wrist-limit
-    # breaks are the common failure and roll targets exactly those).
-    for magnitude_deg in (30, 60, 90, 120, 150, 180):
-        angle = float(np.deg2rad(magnitude_deg))
-        for sign in (1.0, -1.0):
-            if magnitude_deg == 180 and sign < 0:
-                continue  # +180 and -180 are the same rotation
-            # Roll: rotate about the bar's LOCAL long axis (post-multiply).
-            if magnitude_deg <= 90:
-                roll_quat = pybullet.getQuaternionFromAxisAngle((0.0, 0.0, 1.0), sign * angle)
-                quat = pp.multiply(((0.0, 0.0, 0.0), canonical_quat), ((0.0, 0.0, 0.0), roll_quat))[1]
-                variants.append((f"roll{int(sign * magnitude_deg):+d}", _anchor_for(quat)))
-            # Yaw: rotate about the mobile base's vertical axis (pre-multiply).
-            yaw_quat = pybullet.getQuaternionFromAxisAngle((0.0, 0.0, 1.0), sign * angle)
-            quat = pp.multiply(((0.0, 0.0, 0.0), yaw_quat), ((0.0, 0.0, 0.0), canonical_quat))[1]
-            variants.append((f"yaw{int(sign * magnitude_deg):+d}", _anchor_for(quat)))
-    return variants
+        def _anchor_for(quat):
+            """Re-anchor the grasp midpoint for a rotated orientation."""
+            return home_bar_anchor_pose_mb(
+                mb_from_bar_goal, grasp_bar_from_left, grasp_bar_from_right,
+                bar_quat_override=quat, anchor=anchor_label,
+            )
+
+        # Smallest rotations first; roll before yaw at equal magnitude (wrist-limit
+        # breaks are the common failure and roll targets exactly those).
+        for magnitude_deg in (30, 60, 90, 120, 150, 180):
+            angle = float(np.deg2rad(magnitude_deg))
+            for sign in (1.0, -1.0):
+                if magnitude_deg == 180 and sign < 0:
+                    continue  # +180 and -180 are the same rotation
+                # Roll: rotate about the bar's LOCAL long axis (post-multiply).
+                if magnitude_deg <= 90:
+                    roll_quat = pybullet.getQuaternionFromAxisAngle((0.0, 0.0, 1.0), sign * angle)
+                    quat = pp.multiply(((0.0, 0.0, 0.0), canonical_quat), ((0.0, 0.0, 0.0), roll_quat))[1]
+                    variants.append((f"{anchor_label}/roll{int(sign * magnitude_deg):+d}", _anchor_for(quat)))
+                # Yaw: rotate about the mobile base's vertical axis (pre-multiply).
+                yaw_quat = pybullet.getQuaternionFromAxisAngle((0.0, 0.0, 1.0), sign * angle)
+                quat = pp.multiply(((0.0, 0.0, 0.0), yaw_quat), ((0.0, 0.0, 0.0), canonical_quat))[1]
+                variants.append((f"{anchor_label}/yaw{int(sign * magnitude_deg):+d}", _anchor_for(quat)))
+        return variants
+
+    per_anchor = [_variants_for_anchor(label) for label in anchor_labels]
+    # Round-robin interleave by rotation rank (see docstring). With a single
+    # anchor this is exactly that anchor's own list, i.e. the old ordering.
+    interleaved: List[Tuple[str, Tuple[Tuple[float, float, float], Tuple[float, float, float, float]]]] = []
+    for rank in range(max(len(variants) for variants in per_anchor)):
+        for variants in per_anchor:
+            if rank < len(variants):
+                interleaved.append(variants[rank])
+    return interleaved
 
 
 def derive_constrained_start(
@@ -1371,6 +1461,7 @@ def derive_constrained_start(
     max_ik_attempts: int = 20,
     random_seed: Optional[int] = None,
     shuffle_deltas: bool = False,
+    anchors: Optional[Sequence[str]] = None,
     joint_collision_fn: Optional[Callable[[FullConf], bool]] = None,
 ) -> Tuple[Optional[PoseLike], Optional[np.ndarray]]:
     """Derive a constraint-satisfying start (bar pose, joint conf).
@@ -1379,6 +1470,11 @@ def derive_constrained_start(
     (driven by ``random_seed``) instead of sorted by distance to the home anchor.
     This lets the caller derive *different* starts on different seeds — useful
     for hard problems where the first-IK-feasible home cannot reach the goal.
+
+    ``anchors`` selects which ``HOME_BAR_ANCHORS`` carry modes to sample
+    (None/"all" = every anchor in priority order). Deltas are swept outermost
+    and anchors innermost, so every anchor's near-home poses are tried before
+    any anchor's far ones; the first IK-validated candidate wins.
 
     ``joint_collision_fn`` (``conf_12 -> bool``, True == colliding) lets the
     caller inject a collision predicate. When given it is used as-is; otherwise
@@ -1402,13 +1498,17 @@ def derive_constrained_start(
         (mb_from_bar_goal, mb_from_tool0_right_goal),
     ]
 
-    # Canonical "home" bar anchor (position + orientation in the mobile-base
-    # frame) the delta sweep expands around. Shared helper so the ssik
-    # branch-pairing in api.py can reason about the same anchor pose.
-    base_pos_mb, home_bar_quat = home_bar_anchor_pose_mb(
-        mb_from_bar_goal, grasp_bar_from_left, grasp_bar_from_right
-    )
-    base_pos_mb = np.asarray(base_pos_mb, dtype=float)
+    # "Home" bar anchors (position + orientation in the mobile-base frame) the
+    # delta sweep expands around, one per selected carry mode. Shared helper so
+    # the ssik branch-pairing in api.py can reason about the same anchor poses.
+    anchor_labels = resolve_home_anchors(anchors)
+    anchor_poses: Dict[str, Tuple[np.ndarray, Tuple[float, float, float, float]]] = {}
+    for anchor_label in anchor_labels:
+        anchor_pos, anchor_quat = home_bar_anchor_pose_mb(
+            mb_from_bar_goal, grasp_bar_from_left, grasp_bar_from_right,
+            anchor=anchor_label,
+        )
+        anchor_poses[anchor_label] = (np.asarray(anchor_pos, dtype=float), anchor_quat)
 
     rng = np.random.default_rng(random_seed)
     if joint_collision_fn is None and bar_body is not None:
@@ -1431,57 +1531,65 @@ def derive_constrained_start(
     found: Dict[str, Any] = {"world_from_bar": None, "conf": None}
     chosen_ctx: Optional[Dict[str, Any]] = None
 
+    def ik_validator(bar_pose_mb, _found=found):
+        """Return True if a collision-free dual-arm grasp exists for this bar pose.
+
+        Converts the mobile-base bar pose to world, runs
+        ``solve_endpoint_dual_arm_ik``, and on success stashes the world
+        bar pose + solved config into the captured ``found`` dict.
+
+        Args:
+            bar_pose_mb (PoseLike): candidate bar pose in the mobile-base frame.
+            _found (dict): captured accumulator for the winning pose/config.
+
+        Returns:
+            bool: True if an IK solution was found (and recorded).
+        """
+        world_from_bar = pp.multiply(world_from_mobile_base, bar_pose_mb)
+        conf = solve_endpoint_dual_arm_ik(
+            robot=robot,
+            arm_joints=arm_joints,
+            tool_link_left=tool_link_left,
+            tool_link_right=tool_link_right,
+            bar_pose=world_from_bar,
+            grasp_bar_from_left=grasp_bar_from_left,
+            grasp_bar_from_right=grasp_bar_from_right,
+            seed_conf=np.asarray(seed_conf, dtype=float),
+            rng=rng,
+            max_attempts=max_ik_attempts,
+            collision_fn=joint_collision_fn,
+        )
+        if conf is None:
+            return False
+        _found["world_from_bar"] = world_from_bar
+        _found["conf"] = conf
+        return True
+
     with pp.WorldSaver():
+        # Deltas outermost, anchors innermost: every anchor's poses near its
+        # home get tried before any anchor's far ones. First IK-validated
+        # candidate wins (each candidate also sweeps rotation about the bar
+        # axis inside auto_compute_home_bar_pose).
         for delta in deltas:
-            mb_from_bar_candidate = (
-                tuple((base_pos_mb + np.asarray(delta, dtype=float)).tolist()),
-                home_bar_quat,
-            )
-
-            def ik_validator(bar_pose_mb, _found=found):
-                """Return True if a collision-free dual-arm grasp exists for this bar pose.
-
-                Converts the mobile-base bar pose to world, runs
-                ``solve_endpoint_dual_arm_ik``, and on success stashes the world
-                bar pose + solved config into the captured ``found`` dict.
-
-                Args:
-                    bar_pose_mb (PoseLike): candidate bar pose in the mobile-base frame.
-                    _found (dict): captured accumulator for the winning pose/config.
-
-                Returns:
-                    bool: True if an IK solution was found (and recorded).
-                """
-                world_from_bar = pp.multiply(world_from_mobile_base, bar_pose_mb)
-                conf = solve_endpoint_dual_arm_ik(
-                    robot=robot,
-                    arm_joints=arm_joints,
-                    tool_link_left=tool_link_left,
-                    tool_link_right=tool_link_right,
-                    bar_pose=world_from_bar,
-                    grasp_bar_from_left=grasp_bar_from_left,
-                    grasp_bar_from_right=grasp_bar_from_right,
-                    seed_conf=np.asarray(seed_conf, dtype=float),
-                    rng=rng,
-                    max_attempts=max_ik_attempts,
-                    collision_fn=joint_collision_fn,
+            for anchor_label in anchor_labels:
+                base_pos_mb, home_bar_quat = anchor_poses[anchor_label]
+                mb_from_bar_candidate = (
+                    tuple((base_pos_mb + np.asarray(delta, dtype=float)).tolist()),
+                    home_bar_quat,
                 )
-                if conf is None:
-                    return False
-                _found["world_from_bar"] = world_from_bar
-                _found["conf"] = conf
-                return True
-
-            ctx = auto_compute_home_bar_pose(
-                grasp_targets_mb,
-                mobile_base_from_bar=mb_from_bar_candidate,
-                ik_validator=ik_validator,
-                num_geometric_candidates=num_geometric_candidates,
-                bar_axis_step_rad=bar_axis_step_rad,
-                allow_unvalidated_fallback=False,
-            )
-            if ctx.get("ik_validated", False):
-                chosen_ctx = ctx
+                ctx = auto_compute_home_bar_pose(
+                    grasp_targets_mb,
+                    mobile_base_from_bar=mb_from_bar_candidate,
+                    forward_direction=HOME_BAR_ANCHORS[anchor_label]["forward_mb"],
+                    ik_validator=ik_validator,
+                    num_geometric_candidates=num_geometric_candidates,
+                    bar_axis_step_rad=bar_axis_step_rad,
+                    allow_unvalidated_fallback=False,
+                )
+                if ctx.get("ik_validated", False):
+                    chosen_ctx = ctx
+                    break
+            if chosen_ctx is not None:
                 break
 
     if saved_bar_pose is not None:
@@ -1489,8 +1597,10 @@ def derive_constrained_start(
 
     if chosen_ctx is None or found["conf"] is None:
         logger.warning(
-            "derive_constrained_start: no collision-free home pose across %d deltas (kinematic_only=%s)",
+            "derive_constrained_start: no collision-free home pose across %d deltas x %d anchors (%s, kinematic_only=%s)",
             len(deltas),
+            len(anchor_labels),
+            "/".join(anchor_labels),
             bar_body is None,
         )
         return None, None
@@ -1518,9 +1628,12 @@ def derive_constrained_start_tracked(
     bar_sweep_step: float = 0.1,
     position_res: float = 0.01,
     rotation_res: float = 0.025,
+    screen_position_res: float = 0.01,
+    screen_rotation_res: float = 0.025,
     joint_continuity_threshold_rad: float = DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
     joint_collision_fn: Optional[Callable[[FullConf], bool]] = None,
     use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
+    anchors: Optional[Sequence[str]] = None,
 ) -> Tuple[Optional[PoseLike], Optional[np.ndarray], Dict[str, Any]]:
     """Derive M1's start by TRACKING the goal conf backward to a home pose.
 
@@ -1571,14 +1684,28 @@ def derive_constrained_start_tracked(
         bar_sweep_box: position-delta box swept around the home anchor
             (same convention as :func:`derive_constrained_start`).
         bar_sweep_step (float): grid spacing of the delta sweep, meters.
-        position_res (float): linear interpolation step for tracking, meters
-            (match the RRT's resolution).
-        rotation_res (float): angular interpolation step, radians.
+        position_res (float): linear interpolation step of the DELIVERED
+            corridor, meters (match the RRT's resolution).
+        rotation_res (float): angular step of the delivered corridor, radians.
+        screen_position_res (float): coarse linear step used to SCREEN
+            candidates, meters. Tracking every candidate at a very fine
+            requested resolution burns the whole time budget on a handful of
+            deltas (0.002 rad steps mean 1000+ IK solves per candidate), so
+            candidates are screened at this coarser step and only a winning
+            corridor is re-tracked at ``position_res``/``rotation_res`` for
+            delivery. Screening is never finer than the requested resolution
+            (the coarser of the two wins).
+        screen_rotation_res (float): angular twin of ``screen_position_res``,
+            radians.
         joint_continuity_threshold_rad (float): max per-joint step between
             consecutive tracked waypoints before the track counts as broken.
         joint_collision_fn (Optional[Callable[[FullConf], bool]]): predicate
             for the ARRIVAL config only (True = colliding).
         use_angle_normalization (bool): forwarded to the per-waypoint IK.
+        anchors (Optional[Sequence[str]]): ``HOME_BAR_ANCHORS`` carry-mode
+            selection (None/"all" = every anchor). The time budget is split
+            evenly across the selected anchors so a hopeless first anchor
+            cannot starve the others.
 
     Returns:
         Tuple[Optional[PoseLike], Optional[np.ndarray], Dict[str, Any]]:
@@ -1591,12 +1718,16 @@ def derive_constrained_start_tracked(
         world_from_mobile_base = identity_pose
 
     mb_from_bar_goal = pp.multiply(pp.invert(world_from_mobile_base), world_from_bar_goal)
-    # Home anchor candidates: canonical orientation first, then rotated variants
-    # (roll about the bar axis / yaw about the base vertical). The rotations are
-    # the escape hatch for goals whose branch sheet cannot reach the canonical
-    # home orientation within joint limits (see home_bar_anchor_variants).
+    # Home anchor candidates, interleaved across the selected carry anchors:
+    # every anchor's canonical orientation first, then rotated variants (roll
+    # about the bar axis / yaw about the base vertical) smallest-first. The
+    # rotations are the escape hatch for goals whose branch sheet cannot reach
+    # a canonical home orientation within joint limits (see
+    # home_bar_anchor_variants).
+    anchor_labels = resolve_home_anchors(anchors)
     anchor_variants = home_bar_anchor_variants(
-        mb_from_bar_goal, grasp_bar_from_left, grasp_bar_from_right
+        mb_from_bar_goal, grasp_bar_from_left, grasp_bar_from_right,
+        anchors=anchor_labels,
     )
 
     # Nearest-to-anchor deltas first, exactly like the cold sweep. Non-canonical
@@ -1606,17 +1737,97 @@ def derive_constrained_start_tracked(
     max_variant_deltas = 60
 
     # Soft time budget over the WHOLE sweep: with ~13 orientations x dozens of
-    # deltas the worst case is minutes; most breaks happen within a few
-    # waypoints so typical cost is far lower. On expiry we fall through to the
-    # best partial track found so far.
+    # deltas per anchor the worst case is minutes; most breaks happen within a
+    # few waypoints so typical cost is far lower. The budget is split EVENLY
+    # across the selected anchors (no roll-over, so the total stays bounded and
+    # a hopeless first anchor cannot starve the others); a single selected
+    # anchor keeps the full budget, matching the old single-anchor behavior.
+    # On expiry we fall through to the best partial track found so far.
     max_time = 120.0
-    start_time = time.time()
+    anchor_allowance = max_time / max(1, len(anchor_labels))
+    anchor_spent: Dict[str, float] = {label: 0.0 for label in anchor_labels}
+
+    # Screening runs COARSER than the delivered corridor: candidates are
+    # screened at the screen_* step (cheap, many candidates fit in the budget)
+    # and only a corridor that comes back clean is re-tracked at the requested
+    # position_res/rotation_res for delivery. Screening is never finer than
+    # the request itself, and when the two coincide the re-track is skipped.
+    fine_pos = max(position_res, 1e-6)
+    fine_rot = max(rotation_res, 1e-6)
+    screen_pos = max(fine_pos, screen_position_res)
+    screen_rot = max(fine_rot, screen_rotation_res)
+    needs_fine_retrack = screen_pos > fine_pos or screen_rot > fine_rot
+
+    def _track_to(world_from_bar_home: PoseLike, pos_step: float, rot_step: float):
+        """Walk goal -> home with warm per-waypoint IK at the given steps.
+
+        Args:
+            world_from_bar_home (PoseLike): the candidate home bar pose.
+            pos_step (float): linear interpolation step, meters.
+            rot_step (float): angular interpolation step, radians.
+
+        Returns:
+            Tuple[list, bool]: ``(track, track_ok)`` -- ``track`` is the
+            accepted ``(pose, conf)`` prefix starting at the goal; ``track_ok``
+            is False when the walk broke on an IK miss or a joint-continuity
+            (branch flip) violation, leaving ``track`` as the reachable prefix.
+        """
+        track = [(world_from_bar_goal, np.asarray(goal_conf, dtype=float))]
+        for pose in list(
+            pp.interpolate_poses(
+                world_from_bar_goal,
+                world_from_bar_home,
+                pos_step_size=pos_step,
+                ori_step_size=rot_step,
+            )
+        )[1:]:
+            next_conf = solve_dual_arm_pose_ik(
+                robot=robot,
+                arm_joints=arm_joints,
+                tool_link_left=tool_link_left,
+                tool_link_right=tool_link_right,
+                bar_pose=pose,
+                grasp_bar_from_left=grasp_bar_from_left,
+                grasp_bar_from_right=grasp_bar_from_right,
+                seed_conf=track[-1][1],
+                use_angle_normalization=use_angle_normalization,
+            )
+            # Track breaks on IK miss or a branch flip.
+            if next_conf is None or joint_step_exceeds_threshold(
+                next_conf, track[-1][1], joint_continuity_threshold_rad
+            ):
+                return track, False
+            track.append((pose, np.asarray(next_conf, dtype=float)))
+        return track, True
+
+    def _first_blocked_index(track) -> Optional[int]:
+        """Index (within ``track``) of the first colliding INTERIOR waypoint.
+
+        Checked coarse-first (every 3rd waypoint) so blocked corridors are
+        rejected at a third of the cost; all interior waypoints get covered.
+
+        Args:
+            track (list): the fully-tracked ``(pose, conf)`` waypoints.
+
+        Returns:
+            Optional[int]: index of the first hit found (in scan order), or
+            None when every interior waypoint is collision-free.
+        """
+        if joint_collision_fn is None:
+            return None
+        interior = track[1:-1]
+        for stride_offset in (0, 1, 2):  # coarse pass 0, then the rest
+            for idx in range(stride_offset, len(interior), 3):
+                if joint_collision_fn(interior[idx][1]):
+                    return idx + 1  # index within `track`
+        return None
 
     info: Dict[str, Any] = {
         "tracked_deltas": 0,
         "track_breaks": 0,
         "arrival_collisions": 0,
         "blocked_corridors": 0,
+        "fine_reverify_failures": 0,
     }
     # First fully-tracked candidate with a collision-free ARRIVAL: kept as the
     # start-only answer when no fully collision-free corridor turns up.
@@ -1629,14 +1840,23 @@ def derive_constrained_start_tracked(
 
     with pp.WorldSaver():
         for variant_label, (base_pos_mb, home_bar_quat) in anchor_variants:
+            # Which carry anchor this variant belongs to ("back/yaw+30" -> "back").
+            anchor_label = variant_label.split("/")[0]
+            if anchor_spent[anchor_label] >= anchor_allowance:
+                continue  # this anchor's time share is spent; others carry on
             base_pos_mb = np.asarray(base_pos_mb, dtype=float)
-            variant_deltas = deltas if variant_label == "canonical" else deltas[:max_variant_deltas]
+            variant_deltas = deltas if variant_label.endswith("/canonical") else deltas[:max_variant_deltas]
+            mark = time.time()
             for delta in variant_deltas:
-                if (time.time() - start_time) >= max_time:
+                # Charge the previous iteration to this anchor's time share.
+                now = time.time()
+                anchor_spent[anchor_label] += now - mark
+                mark = now
+                if anchor_spent[anchor_label] >= anchor_allowance:
                     logger.warning(
-                        "derive_constrained_start_tracked: time budget (%.0fs) hit at "
-                        "variant %s; falling through to the best candidate so far.",
-                        max_time, variant_label,
+                        "derive_constrained_start_tracked: anchor %s spent its %.0fs "
+                        "time share at variant %s; moving to the next anchor.",
+                        anchor_label, anchor_allowance, variant_label,
                     )
                     break
                 home_mb = (
@@ -1646,37 +1866,11 @@ def derive_constrained_start_tracked(
                 world_from_bar_home = pp.multiply(world_from_mobile_base, home_mb)
                 info["tracked_deltas"] += 1
 
-                # --- Walk goal -> home with warm per-waypoint IK (backend-dispatched).
-                # ``track`` records every accepted (pose, conf) so a broken walk can
-                # still donate its farthest reachable prefix as a partial start.
-                track = [(world_from_bar_goal, np.asarray(goal_conf, dtype=float))]
-                track_ok = True
-                for pose in list(
-                    pp.interpolate_poses(
-                        world_from_bar_goal,
-                        world_from_bar_home,
-                        pos_step_size=max(position_res, 1e-6),
-                        ori_step_size=max(rotation_res, 1e-6),
-                    )
-                )[1:]:
-                    next_conf = solve_dual_arm_pose_ik(
-                        robot=robot,
-                        arm_joints=arm_joints,
-                        tool_link_left=tool_link_left,
-                        tool_link_right=tool_link_right,
-                        bar_pose=pose,
-                        grasp_bar_from_left=grasp_bar_from_left,
-                        grasp_bar_from_right=grasp_bar_from_right,
-                        seed_conf=track[-1][1],
-                        use_angle_normalization=use_angle_normalization,
-                    )
-                    # Track breaks on IK miss or a branch flip -- try the next delta.
-                    if next_conf is None or joint_step_exceeds_threshold(
-                        next_conf, track[-1][1], joint_continuity_threshold_rad
-                    ):
-                        track_ok = False
-                        break
-                    track.append((pose, np.asarray(next_conf, dtype=float)))
+                # --- SCREEN: walk goal -> home with warm per-waypoint IK at the
+                # coarse screening step. ``track`` records every accepted
+                # (pose, conf) so a broken walk can still donate its farthest
+                # reachable prefix as a partial start.
+                track, track_ok = _track_to(world_from_bar_home, screen_pos, screen_rot)
 
                 if track_ok:
                     # --- Arrival config must be collision-free (it is a plan endpoint).
@@ -1687,19 +1881,43 @@ def derive_constrained_start_tracked(
                     # --- FREE CORRIDOR check: if every interior waypoint is also
                     # collision-free, this track IS a finished M1 path -- return
                     # it and let the caller skip the RRT (direct-connect-first).
-                    # Checked coarse-first (every 3rd waypoint) so blocked
-                    # corridors are rejected at a third of the cost.
-                    first_blocked = None
-                    if joint_collision_fn is not None:
-                        interior = track[1:-1]
-                        for stride_offset in (0, 1, 2):  # coarse pass 0, then the rest
-                            for idx in range(stride_offset, len(interior), 3):
-                                if joint_collision_fn(interior[idx][1]):
-                                    first_blocked = idx + 1  # index within `track`
-                                    break
-                            if first_blocked is not None:
-                                break
+                    first_blocked = _first_blocked_index(track)
                     if first_blocked is None:
+                        # --- DELIVER: re-track only this winner at the requested
+                        # (finer) resolution -- the corridor becomes the M1 path,
+                        # so its spacing must be what the caller asked for, not
+                        # the screening step.
+                        if needs_fine_retrack:
+                            fine_track, fine_ok = _track_to(world_from_bar_home, fine_pos, fine_rot)
+                            if fine_ok and (
+                                joint_collision_fn is None
+                                or not joint_collision_fn(fine_track[-1][1])
+                            ) and _first_blocked_index(fine_track) is None:
+                                track = fine_track
+                                conf = fine_track[-1][1]
+                            else:
+                                # The coarse screen was a false positive at fine
+                                # spacing (continuity, IK or a collision differs
+                                # between the two step sizes). Keep the candidate
+                                # as a start-only answer -- its coarse arrival
+                                # conf is exact IK at the home pose and already
+                                # passed the collision gate -- and keep scanning
+                                # for another corridor.
+                                info["fine_reverify_failures"] += 1
+                                logger.warning(
+                                    "derive_constrained_start_tracked: corridor at %s "
+                                    "failed the fine re-track (%.4f m / %.4f rad); "
+                                    "keeping it as a start-only candidate.",
+                                    variant_label, fine_pos, fine_rot,
+                                )
+                                if first_start is None:
+                                    first_start = {
+                                        "pose": world_from_bar_home,
+                                        "conf": conf,
+                                        "variant": variant_label,
+                                        "delta": [float(v) for v in delta],
+                                    }
+                                continue
                         info["delta"] = [float(v) for v in delta]
                         info["variant"] = variant_label
                         info["corridor"] = (
@@ -1738,9 +1956,9 @@ def derive_constrained_start_tracked(
                         "variant": variant_label,
                         "delta": [float(v) for v in delta],
                     }
-            else:
-                continue  # inner loop finished normally -> next variant
-            break  # time budget hit -> stop sweeping variants too
+            # Charge the last delta iteration too, then move to the next
+            # variant (an anchor whose share is spent gets skipped up top).
+            anchor_spent[anchor_label] += time.time() - mark
 
     # --- No fully collision-free corridor: fall back to the first fully-tracked
     # start with a clean arrival (the RRT then searches for the detour).
@@ -1775,8 +1993,9 @@ def derive_constrained_start_tracked(
 
     logger.warning(
         "derive_constrained_start_tracked: no trackable collision-free home across "
-        "%d delta/orientation candidates (%d track breaks, %d arrival collisions)",
-        info["tracked_deltas"], info["track_breaks"], info["arrival_collisions"],
+        "%d delta/orientation candidates over anchors %s (%d track breaks, %d arrival collisions)",
+        info["tracked_deltas"], "/".join(anchor_labels),
+        info["track_breaks"], info["arrival_collisions"],
     )
     return None, None, info
 

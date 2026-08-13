@@ -183,7 +183,7 @@ DEFAULT_BAR_ACTION = "B6.json"
 DEFAULT_FM_JOINT_RESOLUTION = 0.05   # rad, M0/M4  (api.plan_free_dual_arm)
 DEFAULT_CDFM_POSITION_RES = 0.002     # m,   M1     (api.plan_constrained_dual_arm)
 DEFAULT_CDFM_ROTATION_RES = 0.002    # rad, M1
-DEFAULT_MAX_STEP_DISTANCE = 0.005    # m,   M2/M3  (the linear planners)
+DEFAULT_MAX_STEP_DISTANCE = 0.001    # m,   M2/M3  (the linear planners)
 DEFAULT_MAX_STEP_ANGLE = 0.05        # rad, M2/M3
 
 # --------------------------------------------------------------------------

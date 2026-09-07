@@ -134,6 +134,23 @@ def solve(
     return [(np.asarray(s.q, dtype=float), float(s.fk_residual)) for s in sols]
 
 
+def fk(arm: str, q) -> np.ndarray:
+    """Forward kinematics: tool0 pose in the arm's ``*_ur_arm_base_link`` frame.
+
+    Cheap enough (~16 us/call) for live per-tick use, e.g. streaming the flange
+    pose while an operator free-drives the arm.
+
+    Args:
+        arm (str): "left" or "right".
+        q: 6 joint angles in radians, kinematic base->tool0 order (same order
+            as the driver's reordered joint state, ``arm_joint_pose``).
+
+    Returns:
+        np.ndarray: 4x4 homogeneous transform, meters (calibrated geometry).
+    """
+    return np.asarray(_get_module(arm).fk(np.asarray(q, dtype=float)))
+
+
 def joint_names(arm: str) -> List[str]:
     """The arm's 6 joint names in the solver's (kinematic) order.
 

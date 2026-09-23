@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title data-title>CDFM planner benchmark</title>
+<!--
+  Served as plain files: no build step, no bundler, no network. three.js is
+  vendored under static/vendor and resolved through the import map below; the
+  charts are hand-drawn SVG.
+
+  It must be served over HTTP rather than opened from disk, because browsers
+  refuse both fetch() and JavaScript modules on file:// URLs:
+
+      python -m http.server --directory <this folder> 8000
+-->
+<script type="importmap">
+{
+  "imports": {
+    "three": "./static/vendor/three-r185/build/three.module.min.js",
+    "three/webgpu": "./static/vendor/three-r185/build/three.module.min.js",
+    "three/tsl": "./static/vendor/three-r185/build/three.module.min.js"
+  }
+}
+</script>
+<link rel="stylesheet" href="./static/css/index.css">
+</head>
+<body>
+
+<header class="top">
+  <h1 data-title>CDFM planner benchmark</h1>
+  <nav data-breadcrumb class="breadcrumb"></nav>
+</header>
+
+<div class="stage" hidden>
+  <div class="viewer" data-viewer></div>
+  <p class="caption muted" data-viewer-caption></p>
+</div>
+
+<main data-main></main>
+
+<script type="module" src="./static/js/app.js"></script>
+</body>
+</html>

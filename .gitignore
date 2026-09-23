@@ -29,3 +29,5 @@ temp/*
 husky_assembly_tamp/logs
 
 husky_assembly_tamp/motion_planner/dual_arm_task_space_rrt/temp
+# Benchmark fixtures are regenerated from the data root, not committed.
+benchmark/tests/fixtures/

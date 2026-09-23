@@ -195,6 +195,32 @@ def summarize_group(runs: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def bar_lengths_from_library(run_dir: str, library_name: Optional[str]) -> Dict[str, float]:
+    """Look up each bar's length from the library a batch was planned from.
+
+    Bar length is the main thing results are grouped by, and a run record does
+    not carry it -- it belongs to the problem, not the run.
+
+    Args:
+        run_dir (str): the batch's folder, two levels below the data root.
+        library_name (Optional[str]): which library, from the batch's config.
+
+    Returns:
+        Dict[str, float]: length in metres per bar id; empty when the library
+        cannot be found, since a missing length should not stop a summary.
+    """
+    if not library_name:
+        return {}
+    root = os.path.dirname(os.path.dirname(run_dir))
+    index = os.path.join(root, "library", library_name, "index.json")
+    if not os.path.isfile(index):
+        return {}
+    with open(index, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    return {row["bar_id"]: row.get("bar_length_m", 0.0)
+            for row in payload.get("bars", [])}
+
+
 def summarize_run(run_dir: str) -> Dict[str, Any]:
     """Summarise a whole batch, overall and per bar, goal and start.
 
@@ -211,8 +237,8 @@ def summarize_run(run_dir: str) -> Dict[str, Any]:
         with open(config_path, "r", encoding="utf-8") as handle:
             config = json.load(handle)
 
-    bar_lengths: Dict[str, float] = {}
     library_settings = config.get("library_settings") or {}
+    bar_lengths = bar_lengths_from_library(run_dir, config.get("library"))
 
     by_bar: Dict[str, List[Dict[str, Any]]] = {}
     by_goal: Dict[Any, List[Dict[str, Any]]] = {}

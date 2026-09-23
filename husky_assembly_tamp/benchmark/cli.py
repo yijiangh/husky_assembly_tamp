@@ -8,6 +8,7 @@ Run the stages in order; each reads what the last one wrote::
     plan           say how much work a batch would be, and how long
     run            plan every start-to-goal transfer, several seeds each
     summarize      aggregate the runs into tables
+    export-dashboard  write the files the web dashboard reads
     measure        time the inner loops, to size a batch before committing to it
 
 Every stage takes ``--root``, the folder all benchmark data lives in. Set
@@ -371,6 +372,18 @@ def cmd_summarize(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_export_dashboard(args: argparse.Namespace) -> int:
+    """Write the files the web dashboard reads."""
+    from husky_assembly_tamp.benchmark.export_dashboard import export_run
+
+    root = resolve_root(args.root)
+    export_run(root, args.name, library_name=args.library)
+    print("[export] serve the dashboard with:")
+    print("    python -m http.server --directory "
+          f"{os.path.join(root, 'runs', args.name, 'dashboard')} 8000")
+    return 0
+
+
 def cmd_measure(args: argparse.Namespace) -> int:
     """Time the inner loops so a batch can be sized before it is started."""
     from husky_assembly_tamp.benchmark.measure import measure_costs
@@ -452,6 +465,13 @@ def build_parser() -> argparse.ArgumentParser:
     add_common_arguments(summarize)
     summarize.add_argument("--name", required=True)
     summarize.set_defaults(func=cmd_summarize)
+
+    export = subparsers.add_parser(
+        "export-dashboard", help="write the files the web dashboard reads")
+    add_common_arguments(export)
+    export.add_argument("--name", required=True)
+    export.add_argument("--library", default=DEFAULT_LIBRARY_NAME)
+    export.set_defaults(func=cmd_export_dashboard)
 
     measure = subparsers.add_parser(
         "measure", help="time the inner loops to size a batch")

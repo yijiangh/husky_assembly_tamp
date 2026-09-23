@@ -292,6 +292,7 @@ def auto_compute_home_bar_pose(
     num_geometric_candidates: int = 20,
     allow_unvalidated_fallback: bool = True,
     bar_axis_step_rad: float = float(np.deg2rad(30.0)),
+    exhaustive: bool = False,
 ) -> Dict[str, Any]:
     """Pick a home bar pose by sweeping rotation about the bar's own long axis.
 
@@ -318,6 +319,10 @@ def auto_compute_home_bar_pose(
             geometric candidate if none pass IK; when False, leave the result
             un-validated (the caller inspects ``ik_validated``).
         bar_axis_step_rad (float): angular step (radians) of the bar-axis sweep.
+        exhaustive (bool): keep validating the remaining candidates after a
+            feasible one is found, so an observing validator sees every
+            candidate. The CHOSEN candidate is unchanged -- still the first
+            one that validated. Off by default: production pays nothing.
 
     Returns:
         Dict[str, Any]: the chosen home pose plus metadata, including
@@ -372,10 +377,15 @@ def auto_compute_home_bar_pose(
         for candidate in top_candidates:
             _, _, bar_pose = candidate
             if ik_validator(bar_pose):
-                chosen = candidate
-                ik_validated = True
-                break
-        else:
+                if not ik_validated:
+                    # First one that works wins, exactly as before. Under
+                    # `exhaustive` we keep going only so the validator gets
+                    # to see (and record) the remaining candidates too.
+                    chosen = candidate
+                    ik_validated = True
+                if not exhaustive:
+                    break
+        if not ik_validated:
             if allow_unvalidated_fallback:
                 logger.warning(
                     "No IK-feasible candidate found among top %d geometric candidates; falling back to best geometric candidate.",
@@ -1123,6 +1133,8 @@ def solve_endpoint_dual_arm_ik(
     max_attempts: int,
     use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
     collision_fn: Optional[Callable[[np.ndarray], bool]] = None,
+    exhaustive: bool = False,
+    report: Optional[Dict[str, Any]] = None,
     **_unused_kwargs: Any,
 ) -> Optional[FullConf]:
     """Dual-arm IK for a single pose, with random restarts and optional collision reject.
@@ -1146,6 +1158,15 @@ def solve_endpoint_dual_arm_ik(
         use_angle_normalization (bool): whether to normalize the solved angles.
         collision_fn (Optional[Callable[[np.ndarray], bool]]): optional predicate;
             solutions for which it returns True are rejected.
+        exhaustive (bool): ssik only. Keep testing every remaining branch pair
+            after a good one is found, so ``report`` sees them all. The
+            RETURN VALUE is unchanged -- still the first good pair. Off by
+            default: production pays nothing for this.
+        report (Optional[Dict[str, Any]]): ssik only. When given, it is filled
+            in with why this pose did or did not work: ``reason``, how many
+            branches each arm had, a verdict per branch pair, the colliding
+            body pairs when the predicate exposes them, and timings. Purely
+            observational -- used by the benchmark to explain rejections.
         **_unused_kwargs: ignored (lets callers pass a shared kwargs bag).
 
     Returns:
@@ -1167,6 +1188,8 @@ def solve_endpoint_dual_arm_ik(
             seed_conf=seed_conf,
             collision_fn=collision_fn,
             use_angle_normalization=use_angle_normalization,
+            exhaustive=exhaustive,
+            report=report,
         )
     for attempt in range(max(1, max_attempts)):
         if attempt == 0:
@@ -1191,6 +1214,63 @@ def solve_endpoint_dual_arm_ik(
     return None
 
 
+def _record_branch_pair(
+    report: Optional[Dict[str, Any]],
+    pair_index: int,
+    distance: float,
+    verdict: str,
+    conf: FullConf,
+    collision_pairs: Optional[Sequence[Any]],
+) -> None:
+    """Append one branch-pair verdict to an endpoint-IK report.
+
+    Does nothing when no report was asked for, which is the production path.
+
+    Args:
+        report (Optional[Dict[str, Any]]): the report being filled in, or None.
+        pair_index (int): index of this pair in the seed-distance ordering.
+        distance (float): how far this pair sits from the seed configuration.
+        verdict (str): "feasible", "fk_gate_fail" or "collision".
+        conf (FullConf): the 12-vec this pair produced.
+        collision_pairs (Optional[Sequence[Any]]): the offending body pairs,
+            when the collision predicate exposed them.
+    """
+    if report is None:
+        return
+    entry: Dict[str, Any] = {
+        "pair_index": pair_index,
+        "seed_distance": float(distance),
+        "verdict": verdict,
+        "conf": [float(v) for v in conf],
+    }
+    if collision_pairs:
+        entry["collision_pairs"] = [
+            [str(part) for part in pair] for pair in collision_pairs
+        ]
+    report["pairs"].append(entry)
+
+
+def _endpoint_ik_reason(
+    report: Dict[str, Any], accepted: Optional[FullConf],
+) -> str:
+    """Summarize an endpoint-IK report as one reason string.
+
+    Args:
+        report (Dict[str, Any]): a report whose "pairs" list is already filled.
+        accepted (Optional[FullConf]): the configuration that won, if any.
+
+    Returns:
+        str: "feasible" when one was accepted; otherwise "collision" if at
+        least one pair got as far as the collision check, else
+        "no_valid_branch_pair" (every pair failed the FK gate).
+    """
+    if accepted is not None:
+        return "feasible"
+    if any(entry["verdict"] == "collision" for entry in report["pairs"]):
+        return "collision"
+    return "no_valid_branch_pair"
+
+
 def _solve_endpoint_dual_arm_ik_ssik(
     robot: int,
     arm_joints: Sequence[int],
@@ -1202,6 +1282,8 @@ def _solve_endpoint_dual_arm_ik_ssik(
     seed_conf: FullConf,
     collision_fn: Optional[Callable[[np.ndarray], bool]] = None,
     use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
+    exhaustive: bool = False,
+    report: Optional[Dict[str, Any]] = None,
 ) -> Optional[FullConf]:
     """ssik variant of :func:`solve_endpoint_dual_arm_ik` (cold, single pose).
 
@@ -1223,20 +1305,43 @@ def _solve_endpoint_dual_arm_ik_ssik(
         collision_fn (Optional[Callable[[np.ndarray], bool]]): optional
             predicate; candidates for which it returns True are rejected.
         use_angle_normalization (bool): whether to normalize the solved angles.
+        exhaustive (bool): keep testing the remaining branch pairs after a good
+            one is found, so ``report`` covers all of them. The return value is
+            unchanged (still the first good pair).
+        report (Optional[Dict[str, Any]]): when given, filled in with why this
+            pose did or did not work -- see :func:`solve_endpoint_dual_arm_ik`.
 
     Returns:
         Optional[FullConf]: the best surviving configuration, or ``None`` when
         no branch combination is reachable + valid + collision-free.
     """
     seed = np.asarray(seed_conf, dtype=float)
+    # * Observation bookkeeping. `report` stays None on the production path and
+    # * every write below is guarded, so this costs nothing when unused.
+    ik_t0 = time.time()
     branches_left = ssik_ik.ssik_arm_branches(
         robot, "left", pp.multiply(bar_pose, grasp_bar_from_left), seed[0:6], max_solutions=8
     )
     branches_right = ssik_ik.ssik_arm_branches(
         robot, "right", pp.multiply(bar_pose, grasp_bar_from_right), seed[6:12], max_solutions=8
     )
+    if report is not None:
+        report["t_ik_s"] = time.time() - ik_t0
+        report["n_branches_left"] = len(branches_left)
+        report["n_branches_right"] = len(branches_right)
+        report["pairs"] = []
+        report["t_fk_s"] = 0.0
+        report["t_collision_s"] = 0.0
     if not branches_left or not branches_right:
-        return None  # at least one arm cannot reach its grasp target at all
+        # At least one arm cannot reach its grasp target at all.
+        if report is not None:
+            if not branches_left and not branches_right:
+                report["reason"] = "ik_unreachable_both"
+            elif not branches_left:
+                report["reason"] = "ik_unreachable_left"
+            else:
+                report["reason"] = "ik_unreachable_right"
+        return None
     # * Cross-product of per-arm branches, tried nearest-to-seed first so the
     # * accepted endpoint stays close to where the robot already is.
     candidates = [
@@ -1245,10 +1350,12 @@ def _solve_endpoint_dual_arm_ik_ssik(
         for qr in branches_right
     ]
     candidates.sort(key=lambda pair: pair[0])
-    for _distance, conf in candidates:
+    accepted: Optional[FullConf] = None
+    for pair_index, (distance, conf) in enumerate(candidates):
         conf = maybe_normalize_angles(conf, use_angle_normalization)
         # ! PyBullet FK ground-truth gate (same role as in the gradient path).
-        if not validate_dual_arm_bar_pose(
+        fk_t0 = time.time()
+        fk_ok = validate_dual_arm_bar_pose(
             robot=robot,
             arm_joints=arm_joints,
             tool_link_left=tool_link_left,
@@ -1257,12 +1364,47 @@ def _solve_endpoint_dual_arm_ik_ssik(
             bar_pose=bar_pose,
             grasp_bar_from_left=grasp_bar_from_left,
             grasp_bar_from_right=grasp_bar_from_right,
-        ):
+        )
+        if report is not None:
+            report["t_fk_s"] += time.time() - fk_t0
+        if not fk_ok:
+            _record_branch_pair(report, pair_index, distance, "fk_gate_fail", conf, None)
             continue
-        if collision_fn is not None and collision_fn(np.asarray(conf, dtype=float)):
-            continue
-        return conf
-    return None
+        if collision_fn is not None:
+            collision_t0 = time.time()
+            hit = collision_fn(np.asarray(conf, dtype=float))
+            if report is not None:
+                report["t_collision_s"] += time.time() - collision_t0
+            if hit:
+                _record_branch_pair(
+                    report, pair_index, distance, "collision", conf,
+                    # The benchmark's predicate hangs the offending body pairs
+                    # off itself; production's plain predicate has no such
+                    # attribute, and this is then simply None.
+                    getattr(collision_fn, "last_collision_pairs", None),
+                )
+                continue
+        _record_branch_pair(report, pair_index, distance, "feasible", conf, None)
+        if accepted is None:
+            accepted = conf
+        if not exhaustive:
+            break
+    if report is not None:
+        report["reason"] = _endpoint_ik_reason(report, accepted)
+    return accepted
+
+
+def _pose_as_lists(pose: PoseLike) -> List[List[float]]:
+    """Turn a PyBullet ``(position, quaternion)`` pose into plain lists.
+
+    Args:
+        pose (PoseLike): the pose to convert.
+
+    Returns:
+        List[List[float]]: ``[[x, y, z], [qx, qy, qz, qw]]``, ready for JSON.
+    """
+    position, quaternion = pose
+    return [[float(v) for v in position], [float(v) for v in quaternion]]
 
 
 def _grid_in_box(
@@ -1463,6 +1605,9 @@ def derive_constrained_start(
     shuffle_deltas: bool = False,
     anchors: Optional[Sequence[str]] = None,
     joint_collision_fn: Optional[Callable[[FullConf], bool]] = None,
+    exhaustive: bool = False,
+    exhaustive_branch_pairs: bool = False,
+    report: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[Optional[PoseLike], Optional[np.ndarray]]:
     """Derive a constraint-satisfying start (bar pose, joint conf).
 
@@ -1481,6 +1626,25 @@ def derive_constrained_start(
     one is built from the husky URDF/SRDF via :func:`get_joint_collision_fn`
     (the standalone-runner path). Callers driving a compas_fab planner pass a
     cfab-backed predicate so no URDF file on disk is required.
+
+    ``exhaustive`` turns the sweep from a search into a survey: instead of
+    stopping at the first feasible candidate it visits every anchor, every
+    delta and every roll. The RETURN VALUE is unchanged -- still the first
+    feasible one, i.e. what a normal run would have picked -- so a survey and
+    a normal run agree on the answer. Combined with ``report`` (a list this
+    function appends one record per candidate to: anchor, delta, bar pose,
+    the endpoint-IK report and the config on success) it is how the benchmark
+    measures where feasible starts live and why the rest fail.
+
+    ``exhaustive_branch_pairs`` is a separate, much more expensive question:
+    it makes the endpoint IK keep testing branch pairs even after one has
+    worked, so the report lists every way a candidate could have been
+    grasped rather than just the way production would grasp it. A candidate
+    that FAILS already reports every pair (the IK only stops early on
+    success), so failure diagnosis does not need this. Leave it off unless
+    the alternatives themselves are the subject.
+
+    All three are off by default and cost production nothing.
     """
     if len(seed_conf) != 12:
         raise ValueError("seed_conf must have length 12")
@@ -1530,13 +1694,18 @@ def derive_constrained_start(
     saved_bar_pose = pp.get_pose(bar_body) if bar_body is not None else None
     found: Dict[str, Any] = {"world_from_bar": None, "conf": None}
     chosen_ctx: Optional[Dict[str, Any]] = None
+    # Which (anchor, delta) cell the sweep is currently in. Only read when a
+    # report was asked for; the validator is a closure over it.
+    sweep_state: Dict[str, Any] = {"anchor": None, "delta": (0.0, 0.0, 0.0)}
 
     def ik_validator(bar_pose_mb, _found=found):
         """Return True if a collision-free dual-arm grasp exists for this bar pose.
 
         Converts the mobile-base bar pose to world, runs
         ``solve_endpoint_dual_arm_ik``, and on success stashes the world
-        bar pose + solved config into the captured ``found`` dict.
+        bar pose + solved config into the captured ``found`` dict. When the
+        caller asked for a ``report``, one record per candidate is appended
+        to it whatever the outcome.
 
         Args:
             bar_pose_mb (PoseLike): candidate bar pose in the mobile-base frame.
@@ -1546,6 +1715,8 @@ def derive_constrained_start(
             bool: True if an IK solution was found (and recorded).
         """
         world_from_bar = pp.multiply(world_from_mobile_base, bar_pose_mb)
+        ik_report: Optional[Dict[str, Any]] = {} if report is not None else None
+        candidate_t0 = time.time()
         conf = solve_endpoint_dual_arm_ik(
             robot=robot,
             arm_joints=arm_joints,
@@ -1558,11 +1729,28 @@ def derive_constrained_start(
             rng=rng,
             max_attempts=max_ik_attempts,
             collision_fn=joint_collision_fn,
+            exhaustive=exhaustive_branch_pairs,
+            report=ik_report,
         )
+        if report is not None:
+            record: Dict[str, Any] = {
+                "anchor": sweep_state["anchor"],
+                "delta": [float(v) for v in sweep_state["delta"]],
+                "mobile_base_from_bar": _pose_as_lists(bar_pose_mb),
+                "world_from_bar": _pose_as_lists(world_from_bar),
+                "wall_s": time.time() - candidate_t0,
+                "ik": ik_report,
+            }
+            if conf is not None:
+                record["conf"] = [float(v) for v in conf]
+            report.append(record)
         if conf is None:
             return False
-        _found["world_from_bar"] = world_from_bar
-        _found["conf"] = conf
+        if _found["conf"] is None:
+            # First feasible candidate wins, as always; under `exhaustive`
+            # later ones are recorded but must not overwrite the answer.
+            _found["world_from_bar"] = world_from_bar
+            _found["conf"] = conf
         return True
 
     with pp.WorldSaver():
@@ -1577,6 +1765,10 @@ def derive_constrained_start(
                     tuple((base_pos_mb + np.asarray(delta, dtype=float)).tolist()),
                     home_bar_quat,
                 )
+                # Tell the validator which cell it is being called for, so a
+                # report can say where each candidate came from.
+                sweep_state["anchor"] = anchor_label
+                sweep_state["delta"] = delta
                 ctx = auto_compute_home_bar_pose(
                     grasp_targets_mb,
                     mobile_base_from_bar=mb_from_bar_candidate,
@@ -1585,11 +1777,13 @@ def derive_constrained_start(
                     num_geometric_candidates=num_geometric_candidates,
                     bar_axis_step_rad=bar_axis_step_rad,
                     allow_unvalidated_fallback=False,
+                    exhaustive=exhaustive,
                 )
-                if ctx.get("ik_validated", False):
+                if ctx.get("ik_validated", False) and chosen_ctx is None:
                     chosen_ctx = ctx
+                if chosen_ctx is not None and not exhaustive:
                     break
-            if chosen_ctx is not None:
+            if chosen_ctx is not None and not exhaustive:
                 break
 
     if saved_bar_pose is not None:
@@ -1607,6 +1801,118 @@ def derive_constrained_start(
 
     world_from_bar_start = pp.multiply(world_from_mobile_base, chosen_ctx["mobile_base_from_bar_start"])
     return world_from_bar_start, found["conf"]
+
+
+def track_direct_path(
+    robot: int,
+    arm_joints: Sequence[int],
+    tool_link_left: int,
+    tool_link_right: int,
+    grasp_bar_from_left: PoseLike,
+    grasp_bar_from_right: PoseLike,
+    world_from_bar_from: PoseLike,
+    conf_from: Sequence[float],
+    world_from_bar_to: PoseLike,
+    *,
+    position_res: float,
+    rotation_res: float,
+    joint_continuity_threshold_rad: float = DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
+    use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
+) -> Tuple[List[Tuple[PoseLike, np.ndarray]], bool]:
+    """Walk the straight task-space path between two bar poses with warm IK.
+
+    The bar is interpolated in SE(3) from ``world_from_bar_from`` to
+    ``world_from_bar_to`` at the given steps, and each waypoint is solved with
+    dual-arm IK seeded from the previous waypoint's configuration. This is the
+    "direct path" test: it answers whether one continuous, single-branch joint
+    motion carries the bar straight from one pose to the other. It does NOT
+    check collisions -- use :func:`first_blocked_index` on the returned track
+    for that.
+
+    Args:
+        robot (int): PyBullet body id of the robot.
+        arm_joints (Sequence[int]): the twelve arm joint indices.
+        tool_link_left (int): left tool0 link index.
+        tool_link_right (int): right tool0 link index.
+        grasp_bar_from_left (PoseLike): left grasp transform (bar-from-tool).
+        grasp_bar_from_right (PoseLike): right grasp transform (bar-from-tool).
+        world_from_bar_from (PoseLike): bar pose the walk starts at.
+        conf_from (Sequence[float]): the 12-vec configuration at that pose.
+        world_from_bar_to (PoseLike): bar pose the walk aims for.
+        position_res (float): linear interpolation step, meters.
+        rotation_res (float): angular interpolation step, radians.
+        joint_continuity_threshold_rad (float): the largest joint step (raw
+            L-infinity) allowed between consecutive waypoints; a bigger step
+            means the IK flipped onto another branch and the walk is broken.
+        use_angle_normalization (bool): whether to wrap solved angles.
+
+    Returns:
+        Tuple[List[Tuple[PoseLike, np.ndarray]], bool]: ``(track, track_ok)``.
+        ``track`` is the accepted ``(pose, conf)`` prefix, always starting at
+        ``(world_from_bar_from, conf_from)``. ``track_ok`` is False when the
+        walk broke on an IK miss or a branch flip, leaving ``track`` as the
+        reachable prefix.
+    """
+    track: List[Tuple[PoseLike, np.ndarray]] = [
+        (world_from_bar_from, np.asarray(conf_from, dtype=float))
+    ]
+    for pose in list(
+        pp.interpolate_poses(
+            world_from_bar_from,
+            world_from_bar_to,
+            pos_step_size=position_res,
+            ori_step_size=rotation_res,
+        )
+    )[1:]:
+        next_conf = solve_dual_arm_pose_ik(
+            robot=robot,
+            arm_joints=arm_joints,
+            tool_link_left=tool_link_left,
+            tool_link_right=tool_link_right,
+            bar_pose=pose,
+            grasp_bar_from_left=grasp_bar_from_left,
+            grasp_bar_from_right=grasp_bar_from_right,
+            seed_conf=track[-1][1],
+            use_angle_normalization=use_angle_normalization,
+        )
+        # Track breaks on IK miss or a branch flip.
+        if next_conf is None or joint_step_exceeds_threshold(
+            next_conf, track[-1][1], joint_continuity_threshold_rad
+        ):
+            return track, False
+        track.append((pose, np.asarray(next_conf, dtype=float)))
+    return track, True
+
+
+def first_blocked_index(
+    track: Sequence[Tuple[PoseLike, np.ndarray]],
+    joint_collision_fn: Optional[Callable[[FullConf], bool]],
+) -> Optional[int]:
+    """Index (within ``track``) of the first colliding INTERIOR waypoint.
+
+    Checked coarse-first (every 3rd waypoint) so blocked direct paths are
+    rejected at a third of the cost; all interior waypoints get covered. The
+    two endpoints are skipped -- the caller checks those itself.
+
+    Args:
+        track (Sequence[Tuple[PoseLike, np.ndarray]]): the fully-tracked
+            ``(pose, conf)`` waypoints, as returned by
+            :func:`track_direct_path`.
+        joint_collision_fn (Optional[Callable[[FullConf], bool]]): the
+            collision predicate (True == colliding); None disables the check.
+
+    Returns:
+        Optional[int]: index of the first hit found (in scan order), or None
+        when every interior waypoint is collision-free.
+    """
+    if joint_collision_fn is None:
+        return None
+    interior = track[1:-1]
+    for stride_offset in (0, 1, 2):  # coarse pass 0, then the rest
+        for idx in range(stride_offset, len(interior), 3):
+            if joint_collision_fn(interior[idx][1]):
+                return idx + 1  # index within `track`
+    return None
 
 
 def derive_constrained_start_tracked(
@@ -1759,68 +2065,26 @@ def derive_constrained_start_tracked(
     needs_fine_retrack = screen_pos > fine_pos or screen_rot > fine_rot
 
     def _track_to(world_from_bar_home: PoseLike, pos_step: float, rot_step: float):
-        """Walk goal -> home with warm per-waypoint IK at the given steps.
-
-        Args:
-            world_from_bar_home (PoseLike): the candidate home bar pose.
-            pos_step (float): linear interpolation step, meters.
-            rot_step (float): angular interpolation step, radians.
-
-        Returns:
-            Tuple[list, bool]: ``(track, track_ok)`` -- ``track`` is the
-            accepted ``(pose, conf)`` prefix starting at the goal; ``track_ok``
-            is False when the walk broke on an IK miss or a joint-continuity
-            (branch flip) violation, leaving ``track`` as the reachable prefix.
-        """
-        track = [(world_from_bar_goal, np.asarray(goal_conf, dtype=float))]
-        for pose in list(
-            pp.interpolate_poses(
-                world_from_bar_goal,
-                world_from_bar_home,
-                pos_step_size=pos_step,
-                ori_step_size=rot_step,
-            )
-        )[1:]:
-            next_conf = solve_dual_arm_pose_ik(
-                robot=robot,
-                arm_joints=arm_joints,
-                tool_link_left=tool_link_left,
-                tool_link_right=tool_link_right,
-                bar_pose=pose,
-                grasp_bar_from_left=grasp_bar_from_left,
-                grasp_bar_from_right=grasp_bar_from_right,
-                seed_conf=track[-1][1],
-                use_angle_normalization=use_angle_normalization,
-            )
-            # Track breaks on IK miss or a branch flip.
-            if next_conf is None or joint_step_exceeds_threshold(
-                next_conf, track[-1][1], joint_continuity_threshold_rad
-            ):
-                return track, False
-            track.append((pose, np.asarray(next_conf, dtype=float)))
-        return track, True
+        """Track goal -> this candidate home pose; see ``track_direct_path``."""
+        return track_direct_path(
+            robot=robot,
+            arm_joints=arm_joints,
+            tool_link_left=tool_link_left,
+            tool_link_right=tool_link_right,
+            grasp_bar_from_left=grasp_bar_from_left,
+            grasp_bar_from_right=grasp_bar_from_right,
+            world_from_bar_from=world_from_bar_goal,
+            conf_from=goal_conf,
+            world_from_bar_to=world_from_bar_home,
+            position_res=pos_step,
+            rotation_res=rot_step,
+            joint_continuity_threshold_rad=joint_continuity_threshold_rad,
+            use_angle_normalization=use_angle_normalization,
+        )
 
     def _first_blocked_index(track) -> Optional[int]:
-        """Index (within ``track``) of the first colliding INTERIOR waypoint.
-
-        Checked coarse-first (every 3rd waypoint) so blocked direct paths are
-        rejected at a third of the cost; all interior waypoints get covered.
-
-        Args:
-            track (list): the fully-tracked ``(pose, conf)`` waypoints.
-
-        Returns:
-            Optional[int]: index of the first hit found (in scan order), or
-            None when every interior waypoint is collision-free.
-        """
-        if joint_collision_fn is None:
-            return None
-        interior = track[1:-1]
-        for stride_offset in (0, 1, 2):  # coarse pass 0, then the rest
-            for idx in range(stride_offset, len(interior), 3):
-                if joint_collision_fn(interior[idx][1]):
-                    return idx + 1  # index within `track`
-        return None
+        """First colliding interior waypoint; see ``first_blocked_index``."""
+        return first_blocked_index(track, joint_collision_fn)
 
     info: Dict[str, Any] = {
         "tracked_deltas": 0,

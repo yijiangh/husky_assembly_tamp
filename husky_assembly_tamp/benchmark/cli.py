@@ -151,10 +151,7 @@ def cmd_build_cells(args: argparse.Namespace) -> int:
 
 def cmd_build_library(args: argparse.Namespace) -> int:
     """Sample goal poses and survey the starts they can be reached from."""
-    from husky_assembly_tamp.benchmark.library import (
-        build_bar_library, save_bar_library, write_index,
-    )
-    from husky_assembly_tamp.benchmark.scene import load_trimmed_problem, open_scene
+    from husky_assembly_tamp.benchmark.library import build_library, write_index
 
     root = resolve_root(args.root)
     source_key = resolve_source_key(root, args.source_key)
@@ -166,27 +163,27 @@ def cmd_build_library(args: argparse.Namespace) -> int:
         "library_seed": args.seed,
     }
     print(f"[build-library] {len(bars)} bar(s), {args.goals} goal(s) each, "
-          f"start grid {args.sweep_step} m", flush=True)
+          f"start grid {args.sweep_step} m, {args.workers} worker(s)", flush=True)
 
     t0 = time.time()
-    for bar_id in bars:
-        problem, cell, template = load_trimmed_problem(root, source_key, bar_id)
-        scene = open_scene(cell, template, problem)
-        try:
-            entry = build_bar_library(
-                scene,
-                n_goals=args.goals,
-                library_seed=args.seed,
-                sweep_step_m=args.sweep_step,
-            )
-        finally:
-            scene.close()
-        save_bar_library(root, args.library, entry)
-        print(f"[build-library] {bar_id} done in {entry['wall_s'] / 60:.1f} min",
-              flush=True)
+    results = build_library(
+        root, args.library, bars,
+        source_key=source_key,
+        n_goals=args.goals,
+        library_seed=args.seed,
+        sweep_step_m=args.sweep_step,
+        n_workers=args.workers,
+        force=args.force,
+    )
+    failed = [result["bar_id"] for result in results if not result["ok"]]
+    built = [bar_id for bar_id in bars if bar_id not in failed]
+    if failed:
+        print(f"[build-library] {len(failed)} bar(s) failed: {', '.join(failed)}")
+    if not built:
+        raise SystemExit("No bar was built, so there is no library to index.")
 
     write_index(root, args.library, source_key=source_key,
-                library_seed=args.seed, bar_ids=bars, settings=settings)
+                library_seed=args.seed, bar_ids=built, settings=settings)
     print(f"[build-library] library {args.library!r} written in "
           f"{(time.time() - t0) / 60:.1f} min")
     return 0
@@ -423,6 +420,14 @@ def build_parser() -> argparse.ArgumentParser:
                               "(default %(default)s, production's own). Coarser "
                               "surveys fewer starts and costs proportionally less")
     library.add_argument("--seed", type=int, default=DEFAULT_LIBRARY_SEED)
+    library.add_argument("--workers", type=int, default=1,
+                         help="how many bars to survey at once (default 1). "
+                              "Bars are independent, so this scales nearly "
+                              "linearly up to the core count")
+    library.add_argument("--force", action="store_true",
+                         help="rebuild bars that already have a file; by "
+                              "default they are skipped, so an interrupted "
+                              "build can simply be run again")
     library.set_defaults(func=cmd_build_library)
 
     plan = subparsers.add_parser("plan", help="size a batch without running it")

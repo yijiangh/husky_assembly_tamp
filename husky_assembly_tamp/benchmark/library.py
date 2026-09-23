@@ -137,6 +137,150 @@ def build_bar_library(scene: SceneCtx, *, n_goals: int, library_seed: int,
     }
 
 
+
+def build_one_bar(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Build and save one bar's library. Runs in its own process.
+
+    Bars are independent -- different goals, different scenes, different files
+    -- so the only sane way to use a machine's cores here is one bar per
+    process. Each opens its own simulation, which is also the only way PyBullet
+    can be used in parallel at all.
+
+    Args:
+        arguments (Dict[str, Any]): everything the build needs, passed as one
+            dict because this is called through a process pool.
+
+    Returns:
+        Dict[str, Any]: the bar that was built and how long it took, or the
+        failure if it did not.
+    """
+    # Imported here rather than at module level: this runs in a fresh
+    # interpreter that has not imported the benchmark package yet.
+    import time as _time
+    import traceback
+
+    from husky_assembly_tamp.benchmark.scene import (
+        load_trimmed_problem, open_scene, quiet_planner_logging,
+    )
+
+    quiet_planner_logging()
+    bar_id = arguments["bar_id"]
+    started = _time.time()
+    try:
+        problem, cell, template = load_trimmed_problem(
+            arguments["root"], arguments["source_key"], bar_id)
+        scene = open_scene(cell, template, problem)
+        try:
+            entry = build_bar_library(
+                scene,
+                n_goals=arguments["n_goals"],
+                library_seed=arguments["library_seed"],
+                sweep_step_m=arguments["sweep_step_m"],
+                run_production_check=arguments.get("run_production_check", True),
+                verbose=False,
+            )
+        finally:
+            scene.close()
+        save_bar_library(arguments["root"], arguments["library_name"], entry)
+        return {
+            "bar_id": bar_id,
+            "ok": True,
+            "wall_s": _time.time() - started,
+            "n_goals": len(entry["goals"]),
+            "n_starts": sum(goal["n_starts_found"] for goal in entry["goals"]),
+        }
+    except Exception:  # noqa: BLE001 - one bad bar must not stop the rest
+        return {
+            "bar_id": bar_id,
+            "ok": False,
+            "wall_s": _time.time() - started,
+            "error": traceback.format_exc(limit=6),
+        }
+
+
+def build_library(root: str, library_name: str, bar_ids: Sequence[str], *,
+                  source_key: str, n_goals: int, library_seed: int,
+                  sweep_step_m: float, n_workers: int = 1,
+                  force: bool = False, verbose: bool = True) -> List[Dict[str, Any]]:
+    """Build the library for several bars, in parallel, resumably.
+
+    A library build runs for hours, so it is written one bar at a time and a
+    bar that already has a file is skipped. Stopping and restarting picks up
+    where it left off.
+
+    Args:
+        root (str): the benchmark data root.
+        library_name (str): the library's name.
+        bar_ids (Sequence[str]): which bars to build.
+        source_key (str): which trimmed-scene cache to read.
+        n_goals (int): goals per bar.
+        library_seed (int): the master seed.
+        sweep_step_m (float): spacing of the start-offset grid.
+        n_workers (int): how many bars to build at once.
+        force (bool): rebuild bars that already have a file.
+        verbose (bool): print progress.
+
+    Returns:
+        List[Dict[str, Any]]: one result per bar that was built.
+    """
+    import concurrent.futures
+    import multiprocessing
+
+    todo = [bar_id for bar_id in bar_ids
+            if force or not os.path.isfile(bar_path(root, library_name, bar_id))]
+    skipped = [bar_id for bar_id in bar_ids if bar_id not in todo]
+    if verbose and skipped:
+        print(f"[library] {len(skipped)} bar(s) already built, skipping: "
+              f"{', '.join(skipped)}", flush=True)
+    if not todo:
+        return []
+
+    tasks = [{
+        "root": root, "library_name": library_name, "source_key": source_key,
+        "bar_id": bar_id, "n_goals": n_goals, "library_seed": library_seed,
+        "sweep_step_m": sweep_step_m,
+    } for bar_id in todo]
+
+    started = time.time()
+    results: List[Dict[str, Any]] = []
+    if n_workers <= 1:
+        for task in tasks:
+            results.append(build_one_bar(task))
+            _report(results[-1], len(results), len(tasks), started, verbose)
+        return results
+
+    context = multiprocessing.get_context("spawn")
+    with concurrent.futures.ProcessPoolExecutor(
+            max_workers=n_workers, mp_context=context) as pool:
+        for result in pool.map(build_one_bar, tasks):
+            results.append(result)
+            _report(result, len(results), len(tasks), started, verbose)
+    return results
+
+
+def _report(result: Dict[str, Any], done: int, total: int, started: float,
+            verbose: bool) -> None:
+    """Print one line about a finished bar.
+
+    Args:
+        result (Dict[str, Any]): what the build returned.
+        done (int): how many bars have finished.
+        total (int): how many there are.
+        started (float): when the whole build started.
+        verbose (bool): print at all.
+    """
+    if not verbose:
+        return
+    elapsed = (time.time() - started) / 60.0
+    if result["ok"]:
+        print(f"[library] {result['bar_id']}: {result['n_goals']} goals, "
+              f"{result['n_starts']} starts, {result['wall_s'] / 60:.1f} min "
+              f"({done}/{total} done, {elapsed:.0f} min elapsed)", flush=True)
+    else:
+        print(f"[library] {result['bar_id']}: FAILED after "
+              f"{result['wall_s'] / 60:.1f} min\n{result['error']}", flush=True)
+
+
 def select_starts(starts: Sequence[Dict[str, Any]],
                   max_starts: Optional[int]) -> List[Dict[str, Any]]:
     """Choose which of a goal's starts a batch should plan from.

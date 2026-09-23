@@ -1614,7 +1614,7 @@ def probe_endpoints(planner, rcell, action, active_bar_rb_name: Optional[str],
             no M4 target (then a missing start config is a hard error).
         cdfm_position_res (float): M1 bar translation step in metres, passed on
             so the probe derives the start at the same resolution a real plan
-            would (it sets the delivered corridor's spacing; candidate
+            would (it sets the delivered direct path's spacing; candidate
             screening runs at the derivation's own coarse step either way).
         cdfm_rotation_res (float): M1 bar rotation step in radians, same reason.
         cdfm_home_anchor (str): M1 home carry anchor selection ("all",
@@ -2514,7 +2514,7 @@ def main() -> int:
         "--cdfm-position-res", type=float, default=DEFAULT_CDFM_POSITION_RES,
         help="M1 (constrained dual-arm free movement): bar translation step in "
              f"METRES (default {DEFAULT_CDFM_POSITION_RES}). Sets the RRT extend "
-             "step, the smoother, and the ssik tracked corridor -- and doubles as "
+             "step, the smoother, and the ssik tracked direct path -- and doubles as "
              "the goal-reached tolerance, so a large value stops short of the goal.",
     )
     parser.add_argument(

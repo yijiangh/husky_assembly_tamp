@@ -6,7 +6,7 @@ IK adapter: `husky_assembly_tamp.motion_planner.ssik_ik`
 
 Commits under review:
 - **`5e226c7`** — *in-process ssik analytical IK backend for the offline planner* (foundation)
-- **`55b585a`** — *M1 start-derivation escalations: home variants, corridor shortcut, BiRRT*
+- **`55b585a`** — *M1 start-derivation escalations: home variants, direct path shortcut, BiRRT*
 
 > Note on defaults: `55b585a` added `use_birrt=False`; a later commit (`b603a87`, "make bidirectional RRT-Connect the default pose planner") flipped it, so the **current** signature is `use_birrt=True`. This report describes the code as it stands now.
 
@@ -36,8 +36,8 @@ Changes touching `plan_constrained_dual_arm`'s subtree:
 - **`derive_constrained_start_tracked`** — three automatic escalations (below), a 120 s
   soft budget over the whole sweep, and blocked-fraction diagnostics.
 - **Direct-connect shortcut** (in `plan_constrained_dual_arm`) — when the derivation
-  returns a fully collision-free tracked **corridor**, its reversal *is* the M1 path
-  (`info["planner"]="tracked_corridor"`) and the RRT is skipped entirely.
+  returns a fully collision-free tracked **direct path**, its reversal *is* the M1 path
+  (`info["planner"]="direct_path"`) and the RRT is skipped entirely.
 - **`_ssik_pair_goal_branch_with_home`** now evaluates home branches across **all**
   anchor variants, not just canonical.
 - **NEW `use_birrt` switch** — dispatch to `plan_pose_birrt` (goal-rooted tree grows out
@@ -73,11 +73,11 @@ plan_constrained_dual_arm(planner, start_state, *, active_bar_id, goal_conf|goal
 │   │    ├─ pp.interpolate_poses (backward track goal → home)
 │   │    ├─ core.solve_dual_arm_pose_ik ─► _solve_dual_arm_pose_ik_ssik ─► ssik_arm_branches
 │   │    ├─ core.joint_step_exceeds_threshold (continuity gate)
-│   │    └─ cfab_collision_fn (arrival must be free; coarse corridor scan)
+│   │    └─ cfab_collision_fn (arrival must be free; coarse direct path scan)
 │   └─ core.derive_constrained_start  (cold endpoint sweep — fallback / gradient backend)
 │        └─ auto_compute_home_bar_pose ─► solve_endpoint_dual_arm_ik
 │
-├─ [direct-connect shortcut]  corridor present → reverse → return (planner="tracked_corridor")  [55b585a]
+├─ [direct-connect shortcut]  direct path present → reverse → return (planner="direct_path")  [55b585a]
 │
 ├─ rrt_fn = plan_pose_birrt if use_birrt else plan_pose_rrt      [switch 55b585a]
 │   ├─ build_cfab_pose_collision_fn        (floating-bar pose collision)
@@ -89,7 +89,7 @@ plan_constrained_dual_arm(planner, start_state, *, active_bar_id, goal_conf|goal
 │   ├─ (birrt only) _stitch_forward / _stitch_backward ─► solve_dual_arm_pose_ik
 │   └─ update_debug_tree
 │
-└─ smooth.smooth_dual_arm_pose_path        (enable_smoothing, skipped by the corridor shortcut)
+└─ smooth.smooth_dual_arm_pose_path        (enable_smoothing, skipped by the direct path shortcut)
 ```
 
 ---
@@ -117,11 +117,11 @@ plan_constrained_dual_arm(planner, start_state, *, active_bar_id,
         planner.set_robot_cell_state(start_state)      # restore cfab cache
 
         # DIRECT-CONNECT SHORTCUT [55b585a]:
-        corridor = derive_info.get("corridor")
-        if corridor is not None:
-            poses, confs = corridor                    # goal → home order
+        direct_path = derive_info.get("direct_path")
+        if direct_path is not None:
+            poses, confs = direct_path                    # goal → home order
             return reversed(confs),                    # start → goal path, RRT skipped
-                   {planner:"tracked_corridor", stage, ik_backend, path_poses}
+                   {planner:"direct_path", stage, ik_backend, path_poses}
     else:                                              # trust start_state config
         start_conf = conf12(start_state)
         FK(start) → tool0_L/R ; w_bar_start = pybullet bar pose
@@ -181,7 +181,7 @@ plan_constrained_dual_arm(planner, start_state, *, active_bar_id,
    if start_conf is None: fail "start_derivation_failed"
 
    info = {derived_start_conf}
-   if ssik and "corridor" in tracked_info: info["corridor"] = tracked_info["corridor"]  # [55b585a]
+   if ssik and "direct_path" in tracked_info: info["direct_path"] = tracked_info["direct_path"]  # [55b585a]
    return start_conf, w_bar_start, w_bar_goal, goal_conf_arr, grasp_L, grasp_R, info
 ```
 
@@ -229,13 +229,13 @@ for (label, (base_pos, quat)) in anchor_variants:
             arrival = track[-1].conf
             if cfab_collision_fn(arrival): arrival_collisions++ ; continue
 
-            # ESCALATION 1 — FREE CORRIDOR (coarse-first, every 3rd waypoint)
+            # ESCALATION 1 — FREE DIRECT PATH (coarse-first, every 3rd waypoint)
             first_blocked = scan interior for collision (strides 0,1,2)
             if first_blocked is None:
-                info["corridor"] = (poses, confs)            # finished M1 path
+                info["direct_path"] = (poses, confs)            # finished M1 path
                 return w_bar_home, arrival, info             # → caller skips RRT
             else:
-                blocked_corridors++ ; record blocked_fraction
+                blocked_direct_paths++ ; record blocked_fraction
                 if first_start is None: first_start = {w_bar_home, arrival}
                 continue
         else:
@@ -244,7 +244,7 @@ for (label, (base_pos, quat)) in anchor_variants:
             best_partial = max by partial_dist                # farthest-reaching broken walk
 
 # after the sweep:
-if first_start: return first_start                            # fully tracked, clean arrival, corridor blocked mid-way
+if first_start: return first_start                            # fully tracked, clean arrival, direct path blocked mid-way
 # ESCALATION 3 — PARTIAL start
 if best_partial and best_partial.dist >= 2 cm:
     walk best_partial.track back from its farthest waypoint until a collision-free conf ≥ 2 cm from goal
@@ -409,7 +409,7 @@ the seam so the concatenated path passes the same raw-delta continuity gate the 
 | **±2π re-branching** | `ssik_ik.rebranch_toward_seed` | ssik ranks/dedups with wrap-to-π metrics; UR limits exceed ±π, so a legal 2π-twin (wrap dist 0, raw dist 6.28) would look like a huge jump and kill continuity. Shift each joint toward the seed by k·2π when it stays in-limit. |
 | **Continuity gate** | `joint_step_exceeds_threshold` (raw L∞, ~10°) | rejects IK branch flips between consecutive waypoints — the single invariant every stage enforces (extend, track, stitch). |
 | **FK ground-truth gate** | `validate_dual_arm_bar_pose` | PyBullet FK re-check after ssik, guarding joint-order / frame-convention mismatch. |
-| **Collision** | cfab (`planner.check_collision`) | single source of truth (RobotCell ACM + attached bar); no URDF/SRDF file on disk needed. Along-corridor collisions are ignored during tracking (RRT routes around them); only endpoints/arrival must be free. |
+| **Collision** | cfab (`planner.check_collision`) | single source of truth (RobotCell ACM + attached bar); no URDF/SRDF file on disk needed. Collisions along the direct path are ignored during tracking (RRT routes around them); only endpoints/arrival must be free. |
 | **`allow_rescue=False`** | tracking loops | per-waypoint solves fail fast (~1 ms) instead of ~40 ms numeric rescue whose loose LM solutions can branch-flip. |
 
 ---
@@ -422,7 +422,7 @@ the seam so the concatenated path passes the same raw-delta continuity gate the 
 2. **`profile_out → debug_tree_out` was a real latent bug** (`5e226c7`): before the fix
    `info["profile"]` was always empty, so failure `outcome`/`extend_stop_reasons` never
    surfaced. Anything that parsed `info["profile"]` before this commit saw `{}`.
-3. **Corridor shortcut skips smoothing.** The `tracked_corridor` return path bypasses
+3. **Direct path shortcut skips smoothing.** The `direct_path` return path bypasses
    `smooth_dual_arm_pose_path`. That is fine (it is already a tracked, resolution-dense
    path), but the returned waypoint density differs from the RRT+smoothed path — downstream
    consumers assuming uniform spacing should be checked.
@@ -430,7 +430,7 @@ the seam so the concatenated path passes the same raw-delta continuity gate the 
    *all* ~13 anchor variants and every goal branch is ranked against the full union — an
    O(goal × home) scan per arm. It runs once per M1 plan so cost is minor, but the pairing
    quality depends on the variant list staying small.
-5. **Coarse corridor scan is only a win on rejection.** The stride-(0,1,2) scan visits
-   every interior waypoint when the corridor is clean; the ~⅓ saving materializes only
-   when a corridor is blocked early. Matches the intent, worth keeping in mind for timing.
+5. **Coarse direct path scan is only a win on rejection.** The stride-(0,1,2) scan visits
+   every interior waypoint when the direct path is clean; the ~⅓ saving materializes only
+   when a direct path is blocked early. Matches the intent, worth keeping in mind for timing.
 ```

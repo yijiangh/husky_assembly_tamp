@@ -412,12 +412,12 @@ def _derive_constrained_start_for_plan(
          :func:`derive_constrained_start`.
 
     ``position_res`` / ``rotation_res`` set how finely the ssik backward-tracked
-    corridor between the home pose and the goal is sampled (metres / radians).
-    They matter beyond the start pose itself: when that corridor comes back
+    direct path between the home pose and the goal is sampled (metres / radians).
+    They matter beyond the start pose itself: when that direct path comes back
     collision-free, the caller returns it AS the M1 path and skips the RRT, so
     these two values become the spacing of the delivered trajectory. Candidate
     SCREENING inside the derivation runs at its own coarse step regardless
-    (only a winning corridor is re-tracked at these values), so requesting a
+    (only a winning direct path is re-tracked at these values), so requesting a
     fine resolution no longer starves the home-pose sweep. ``None`` (the
     default) leaves them to
     :func:`~.dual_arm_task_space_rrt.core.derive_constrained_start_tracked`, the
@@ -593,18 +593,18 @@ def _derive_constrained_start_for_plan(
             if tracked_info.get("partial"):
                 partial_note = (f", PARTIAL start {tracked_info.get('partial_distance_m', 0.0):.3f} m "
                                 f"from goal (M0 covers the rest)")
-            corridor_note = ", corridor COLLISION-FREE (RRT will be skipped)" \
-                if "corridor" in tracked_info else ""
+            direct_path_note = ", direct path COLLISION-FREE (RRT will be skipped)" \
+                if "direct_path" in tracked_info else ""
             print(f"[ssik] start derived by backward tracking "
                   f"(home variant {tracked_info.get('variant')}, delta {tracked_info.get('delta')}, "
                   f"max |start-goal| {np.max(np.abs(start_conf - goal_conf_arr)):.3f} rad"
-                  f"{partial_note}{corridor_note})")
-            # Where blocked corridors collided, as fractions along goal->home
+                  f"{partial_note}{direct_path_note})")
+            # Where blocked direct paths collided, as fractions along goal->home
             # (0 = at the goal exit, 1 = at home). Clustered-low means straight
-            # corridors are hopeless and the RRT must find the detour.
+            # direct paths are hopeless and the RRT must find the detour.
             fractions = tracked_info.get("blocked_fractions")
             if fractions:
-                print(f"[ssik]   {len(fractions)} corridors blocked; collision at "
+                print(f"[ssik]   {len(fractions)} direct paths blocked; collision at "
                       f"fraction min {min(fractions):.2f} / median "
                       f"{sorted(fractions)[len(fractions) // 2]:.2f} / max {max(fractions):.2f} "
                       f"of the way goal->home")
@@ -631,11 +631,11 @@ def _derive_constrained_start_for_plan(
         return (*_fail, {"failure_reason": "start_derivation_failed"})
 
     info = {"derived_start_conf": [float(x) for x in start_conf]}
-    # Forward a fully collision-free tracked corridor (goal->home order) when
+    # Forward a fully collision-free tracked direct path (goal->home order) when
     # the ssik derivation found one -- the caller can use it as the finished
     # M1 path and skip the RRT (direct-connect-first).
-    if ssik_ik.ik_backend() == "ssik" and tracked_info is not None and "corridor" in tracked_info:
-        info["corridor"] = tracked_info["corridor"]
+    if ssik_ik.ik_backend() == "ssik" and tracked_info is not None and "direct_path" in tracked_info:
+        info["direct_path"] = tracked_info["direct_path"]
     return (
         np.asarray(start_conf, dtype=float),
         world_from_bar_start,
@@ -819,7 +819,7 @@ def plan_constrained_dual_arm(
     the search advances the bar by, and they double as the goal-reached
     tolerance. They reach three places: the RRT's extend step, the shortcut
     smoother, and -- with ``derive_start=True`` on the ssik backend -- the
-    backward-tracked corridor, which is returned as the path outright whenever
+    backward-tracked direct path, which is returned as the path outright whenever
     it comes back collision-free. Lowering them therefore makes the delivered
     trajectory denser on every one of those routes.
 
@@ -886,7 +886,7 @@ def plan_constrained_dual_arm(
             max_ik_attempts=start_max_ik_attempts,
             bar_sweep_box=start_bar_sweep_box,
             home_anchor=start_home_anchor,
-            # The ssik tracked corridor may BE the returned path (see the
+            # The ssik tracked direct path may BE the returned path (see the
             # direct-connect shortcut below), so it has to be sampled at the
             # resolution asked of this plan, not at its own default.
             position_res=position_res,
@@ -898,19 +898,19 @@ def plan_constrained_dual_arm(
         planner.set_robot_cell_state(start_state)
 
         # * Direct-connect shortcut (ssik): the start derivation may have found
-        # * a fully collision-free tracked corridor goal->home. Reversed, that
+        # * a fully collision-free tracked direct path goal->home. Reversed, that
         # * IS the M1 path -- every waypoint already passed IK continuity + the
         # * stage-3 collision check -- so the RRT search is skipped entirely.
-        corridor = derive_info.get("corridor")
-        if corridor is not None:
-            corridor_poses, corridor_confs = corridor
-            path_poses = list(reversed(corridor_poses))
-            path_confs = [np.asarray(q, dtype=float) for q in reversed(corridor_confs)]
+        direct_path = derive_info.get("direct_path")
+        if direct_path is not None:
+            direct_path_poses, direct_path_confs = direct_path
+            path_poses = list(reversed(direct_path_poses))
+            path_confs = [np.asarray(q, dtype=float) for q in reversed(direct_path_confs)]
             info: Dict[str, Any] = {
                 "stage": stage,
                 "max_time": float(max_time),
                 "ik_backend": ssik_ik.ik_backend(),
-                "planner": "tracked_corridor",
+                "planner": "direct_path",
                 "derived_start_conf": derive_info.get("derived_start_conf"),
                 "path_poses": path_poses,
             }

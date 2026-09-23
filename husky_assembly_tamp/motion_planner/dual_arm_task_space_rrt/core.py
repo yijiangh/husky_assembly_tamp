@@ -1654,8 +1654,8 @@ def derive_constrained_start_tracked(
     collision-free, since it becomes a plan endpoint.
 
     Three escalations for hard cases (all used automatically):
-      1. FREE CORRIDOR: a fully-tracked candidate whose EVERY waypoint is also
-         collision-free is a finished M1 plan by itself -- ``info['corridor']``
+      1. FREE DIRECT PATH: a fully-tracked candidate whose EVERY waypoint is also
+         collision-free is a finished M1 plan by itself -- ``info['direct_path']``
          then carries the whole ``(poses, confs)`` path (goal->home order) and
          the caller can skip the RRT entirely (direct-connect-first).
       2. ORIENTATION variants: when no home pose at the canonical orientation
@@ -1685,14 +1685,14 @@ def derive_constrained_start_tracked(
             (same convention as :func:`derive_constrained_start`).
         bar_sweep_step (float): grid spacing of the delta sweep, meters.
         position_res (float): linear interpolation step of the DELIVERED
-            corridor, meters (match the RRT's resolution).
-        rotation_res (float): angular step of the delivered corridor, radians.
+            direct path, meters (match the RRT's resolution).
+        rotation_res (float): angular step of the delivered direct path, radians.
         screen_position_res (float): coarse linear step used to SCREEN
             candidates, meters. Tracking every candidate at a very fine
             requested resolution burns the whole time budget on a handful of
             deltas (0.002 rad steps mean 1000+ IK solves per candidate), so
             candidates are screened at this coarser step and only a winning
-            corridor is re-tracked at ``position_res``/``rotation_res`` for
+            direct path is re-tracked at ``position_res``/``rotation_res`` for
             delivery. Screening is never finer than the requested resolution
             (the coarser of the two wins).
         screen_rotation_res (float): angular twin of ``screen_position_res``,
@@ -1747,9 +1747,9 @@ def derive_constrained_start_tracked(
     anchor_allowance = max_time / max(1, len(anchor_labels))
     anchor_spent: Dict[str, float] = {label: 0.0 for label in anchor_labels}
 
-    # Screening runs COARSER than the delivered corridor: candidates are
+    # Screening runs COARSER than the delivered direct path: candidates are
     # screened at the screen_* step (cheap, many candidates fit in the budget)
-    # and only a corridor that comes back clean is re-tracked at the requested
+    # and only a direct path that comes back clean is re-tracked at the requested
     # position_res/rotation_res for delivery. Screening is never finer than
     # the request itself, and when the two coincide the re-track is skipped.
     fine_pos = max(position_res, 1e-6)
@@ -1803,7 +1803,7 @@ def derive_constrained_start_tracked(
     def _first_blocked_index(track) -> Optional[int]:
         """Index (within ``track``) of the first colliding INTERIOR waypoint.
 
-        Checked coarse-first (every 3rd waypoint) so blocked corridors are
+        Checked coarse-first (every 3rd waypoint) so blocked direct paths are
         rejected at a third of the cost; all interior waypoints get covered.
 
         Args:
@@ -1826,11 +1826,11 @@ def derive_constrained_start_tracked(
         "tracked_deltas": 0,
         "track_breaks": 0,
         "arrival_collisions": 0,
-        "blocked_corridors": 0,
+        "blocked_direct_paths": 0,
         "fine_reverify_failures": 0,
     }
     # First fully-tracked candidate with a collision-free ARRIVAL: kept as the
-    # start-only answer when no fully collision-free corridor turns up.
+    # start-only answer when no fully collision-free direct path turns up.
     first_start: Optional[Dict[str, Any]] = None
     # Best PARTIAL track seen: the one whose last continuous waypoint sits
     # farthest (in bar position) from the goal. Kept as the last fallback: a
@@ -1878,13 +1878,13 @@ def derive_constrained_start_tracked(
                     if joint_collision_fn is not None and joint_collision_fn(conf):
                         info["arrival_collisions"] += 1
                         continue
-                    # --- FREE CORRIDOR check: if every interior waypoint is also
+                    # --- FREE DIRECT PATH check: if every interior waypoint is also
                     # collision-free, this track IS a finished M1 path -- return
                     # it and let the caller skip the RRT (direct-connect-first).
                     first_blocked = _first_blocked_index(track)
                     if first_blocked is None:
                         # --- DELIVER: re-track only this winner at the requested
-                        # (finer) resolution -- the corridor becomes the M1 path,
+                        # (finer) resolution -- the direct path becomes the M1 path,
                         # so its spacing must be what the caller asked for, not
                         # the screening step.
                         if needs_fine_retrack:
@@ -1902,10 +1902,10 @@ def derive_constrained_start_tracked(
                                 # as a start-only answer -- its coarse arrival
                                 # conf is exact IK at the home pose and already
                                 # passed the collision gate -- and keep scanning
-                                # for another corridor.
+                                # for another direct path.
                                 info["fine_reverify_failures"] += 1
                                 logger.warning(
-                                    "derive_constrained_start_tracked: corridor at %s "
+                                    "derive_constrained_start_tracked: direct path at %s "
                                     "failed the fine re-track (%.4f m / %.4f rad); "
                                     "keeping it as a start-only candidate.",
                                     variant_label, fine_pos, fine_rot,
@@ -1920,18 +1920,18 @@ def derive_constrained_start_tracked(
                                 continue
                         info["delta"] = [float(v) for v in delta]
                         info["variant"] = variant_label
-                        info["corridor"] = (
+                        info["direct_path"] = (
                             [wp_pose for wp_pose, _c in track],
                             [wp_conf for _p, wp_conf in track],
                         )
                         return world_from_bar_home, conf, info
-                    # Corridor blocked mid-way: keep the FIRST such candidate as
-                    # the start-only answer and keep scanning for a free corridor.
+                    # Direct path blocked mid-way: keep the FIRST such candidate as
+                    # the start-only answer and keep scanning for a free direct path.
                     # Record WHERE it blocked (fraction along goal->home) -- a
                     # diagnostic that separates "blocked right at the goal exit"
-                    # (straight corridors hopeless, RRT must detour) from
+                    # (the direct path is hopeless, the RRT must detour) from
                     # "blocked near home" (other deltas/orientations may clear).
-                    info["blocked_corridors"] += 1
+                    info["blocked_direct_paths"] += 1
                     blocked_fraction = first_blocked / max(1, len(track) - 1)
                     info.setdefault("blocked_fractions", []).append(round(blocked_fraction, 2))
                     if first_start is None:
@@ -1960,7 +1960,7 @@ def derive_constrained_start_tracked(
             # variant (an anchor whose share is spent gets skipped up top).
             anchor_spent[anchor_label] += time.time() - mark
 
-    # --- No fully collision-free corridor: fall back to the first fully-tracked
+    # --- No fully collision-free direct path: fall back to the first fully-tracked
     # start with a clean arrival (the RRT then searches for the detour).
     if first_start is not None:
         info["delta"] = first_start["delta"]

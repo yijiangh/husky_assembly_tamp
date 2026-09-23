@@ -30,6 +30,7 @@ missed.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -264,6 +265,7 @@ def _ssik_pair_goal_branch_with_home(
     goal_conf_fallback,
     cfab_collision_fn,
     home_anchors=None,
+    report=None,
 ):
     """Re-pick the M1 goal conf on the IK branch pair most compatible with the home pose.
 
@@ -375,8 +377,12 @@ def _ssik_pair_goal_branch_with_home(
             continue
         print(f"[ssik] goal branch paired with home anchor "
               f"(worst-arm cross distance {np.rad2deg(cross_dist):.1f} deg)")
+        if report is not None:
+            report["cross_distance_deg"] = float(np.rad2deg(cross_dist))
         return np.asarray(conf, dtype=float)
     # No valid combination -- keep the seeded goal rather than failing here.
+    if report is not None:
+        report["cross_distance_deg"] = None
     return goal_conf_fallback
 
 
@@ -447,6 +453,10 @@ def _derive_constrained_start_for_plan(
     home_anchor_selection = [home_anchor] if home_anchor is not None else None
     resolve_home_anchors(home_anchor_selection)
 
+    # Wall time per stage, returned in info["stage_times"] so a slow
+    # derivation can be attributed (goal branch pairing vs the sweep etc.).
+    stage_t: Dict[str, float] = {}
+    t0 = time.perf_counter()
     # 1. goal conf.
     if goal_ee_frames is not None:
         left_goal_frame = goal_ee_frames.get("left")
@@ -462,6 +472,11 @@ def _derive_constrained_start_for_plan(
         planner.set_robot_cell_state(start_state)
     else:
         goal_conf_arr = _conf12_from_target(goal_conf, joint_names_12)
+    stage_t["goal_conf"] = time.perf_counter() - t0
+    # Kept so the diagnostics can say whether (and how far) the ssik branch
+    # pairing below moved the goal off the conf the caller asked for.
+    goal_conf_authored = np.asarray(goal_conf_arr, dtype=float).copy()
+    pairing_report = {}
 
     # 2. rigid grasp from the authored attachment (tool0_from_bar).
     bar_state = (start_state.rigid_body_states or {}).get(active_bar_id)
@@ -506,6 +521,7 @@ def _derive_constrained_start_for_plan(
     # * ssik only: re-pick the goal conf on the branch pair that is compatible
     # * with the home anchor, so a continuous in-limit motion start->goal can
     # * exist at all (see _ssik_pair_goal_branch_with_home for the geometry).
+    t0 = time.perf_counter()
     if ssik_ik.ik_backend() == "ssik":
         goal_conf_arr = _ssik_pair_goal_branch_with_home(
             planner, robot_puid, arm_joints, tool_link_left, tool_link_right,
@@ -513,13 +529,51 @@ def _derive_constrained_start_for_plan(
             grasp_bar_from_left, grasp_bar_from_right,
             goal_conf_arr, cfab_collision_fn,
             home_anchors=home_anchor_selection,
+            report=pairing_report,
         )
         # cfab probes above left the cache at the last tested conf; reset.
         planner.set_robot_cell_state(start_state)
 
+    stage_t["goal_branch_pairing"] = time.perf_counter() - t0
+
+    # * Everything a diagnostics viewer needs to rebuild this derivation's
+    # * scene and describe it in physical terms: the frames the sweep works in,
+    # * the goal it walks back from, and the rigid grasp it must preserve.
+    identity_pose = ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
+    context = {
+        "joint_names_12": list(joint_names_12),
+        "world_from_mobile_base": world_from_mobile_base or identity_pose,
+        "goal_conf_authored": [float(v) for v in goal_conf_authored],
+        "world_from_bar_goal": world_from_bar_goal,
+        "pairing_cross_distance_deg": pairing_report.get("cross_distance_deg"),
+        "grasp_bar_from_left": grasp_bar_from_left,
+        "grasp_bar_from_right": grasp_bar_from_right,
+        "attach_link": attach_link_name,
+        "tool0_from_bar": tool0_from_bar,
+    }
+
+    def _with_context(payload):
+        """Stamp the final goal conf + the context onto a result dict.
+
+        The goal conf is read at call time because the collision gate below may
+        still re-solve it after the context was built.
+
+        Args:
+            payload (dict): the info dict about to be returned.
+
+        Returns:
+            dict: the same dict, with ``context`` filled in.
+        """
+        context["goal_conf"] = [float(v) for v in goal_conf_arr]
+        context["goal_rebranch_max_rad"] = float(
+            np.max(np.abs(np.asarray(goal_conf_arr, dtype=float) - goal_conf_authored)))
+        payload["context"] = context
+        return payload
+
     # Goal must be collision-free too (mirrors dual_arm_task_space_rrt.run): the
     # frame IK above runs with collision off and may return a colliding branch.
     # If so, re-solve at the same bar pose + grasps with random restarts.
+    t0 = time.perf_counter()
     if cfab_collision_fn(goal_conf_arr):
         rng = np.random.default_rng(random_seed)
         resolved_goal = solve_endpoint_dual_arm_ik(
@@ -536,10 +590,14 @@ def _derive_constrained_start_for_plan(
             collision_fn=cfab_collision_fn,
         )
         if resolved_goal is None:
-            return (*_fail, {"failure_reason": "goal_in_collision"})
+            stage_t["goal_cc_resolve"] = time.perf_counter() - t0
+            return (*_fail, _with_context({
+                "failure_reason": "goal_in_collision", "stage_times": stage_t}))
         goal_conf_arr = np.asarray(resolved_goal, dtype=float)
         # cfab probes left the cache at the last sampled conf; reset to start.
         planner.set_robot_cell_state(start_state)
+
+    stage_t["goal_cc_resolve"] = time.perf_counter() - t0
 
     derive_kwargs = dict(
         bar_body=bar_body,
@@ -577,6 +635,7 @@ def _derive_constrained_start_for_plan(
             tracked_kwargs["rotation_res"] = rotation_res
         if home_anchor_selection is not None:
             tracked_kwargs["anchors"] = home_anchor_selection
+        t0 = time.perf_counter()
         world_from_bar_start, start_conf, tracked_info = derive_constrained_start_tracked(
             robot_puid,
             arm_joints,
@@ -588,6 +647,7 @@ def _derive_constrained_start_for_plan(
             goal_conf_arr,
             **tracked_kwargs,
         )
+        stage_t["tracked_sweep"] = time.perf_counter() - t0
         if start_conf is not None:
             partial_note = ""
             if tracked_info.get("partial"):
@@ -615,7 +675,14 @@ def _derive_constrained_start_for_plan(
                   f"{tracked_info.get('arrival_collisions')} arrival collisions); "
                   f"falling back to the cold endpoint sweep.")
 
+    # Everything the sweep recorded except the (large) corridor itself: the
+    # counters, the per-candidate trace and the timing profile.
+    tracked_report = (
+        {k: v for k, v in tracked_info.items() if k != "corridor"}
+        if tracked_info is not None else None
+    )
     if start_conf is None or world_from_bar_start is None:
+        t0 = time.perf_counter()
         world_from_bar_start, start_conf = derive_constrained_start(
             robot_puid,
             arm_joints,
@@ -627,10 +694,19 @@ def _derive_constrained_start_for_plan(
             seed_conf=goal_conf_arr,
             **derive_kwargs,
         )
+        stage_t["cold_sweep"] = time.perf_counter() - t0
     if start_conf is None or world_from_bar_start is None:
-        return (*_fail, {"failure_reason": "start_derivation_failed"})
+        return (*_fail, _with_context({
+            "failure_reason": "start_derivation_failed",
+            "stage_times": stage_t,
+            "tracked": tracked_report,
+        }))
 
-    info = {"derived_start_conf": [float(x) for x in start_conf]}
+    info = _with_context({
+        "derived_start_conf": [float(x) for x in start_conf],
+        "stage_times": stage_t,
+        "tracked": tracked_report,
+    })
     # Forward a fully collision-free tracked corridor (goal->home order) when
     # the ssik derivation found one -- the caller can use it as the finished
     # M1 path and skip the RRT (direct-connect-first).

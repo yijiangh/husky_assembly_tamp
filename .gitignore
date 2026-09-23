@@ -31,3 +31,8 @@ husky_assembly_tamp/logs
 husky_assembly_tamp/motion_planner/dual_arm_task_space_rrt/temp
 # Benchmark fixtures are regenerated from the data root, not committed.
 benchmark/tests/fixtures/
+
+# The repo ignores any folder called "build", which would swallow the vendored
+# three.js runtime the dashboard needs. Keep that one.
+!benchmark/dashboard/static/vendor/three-r185/build/
+!benchmark/dashboard/static/vendor/three-r185/build/**

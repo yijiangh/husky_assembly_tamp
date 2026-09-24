@@ -98,6 +98,12 @@ def quiet_planner_logging() -> None:
             handler.close()
         except Exception:  # noqa: BLE001 - closing a broken handler may throw
             pass
+    # ! A logger with no handlers at all is not silent: Python falls back to
+    # ! its own last-resort handler and prints every warning to stderr. During
+    # ! a start survey that is thousands of lines about candidates that did not
+    # ! work, which is exactly what this function exists to stop. A null
+    # ! handler counts as handling them, so the fallback never fires.
+    logger.addHandler(logging.NullHandler())
     logger.propagate = False
 
 

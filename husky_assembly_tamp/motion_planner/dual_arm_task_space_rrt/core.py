@@ -1672,6 +1672,7 @@ def derive_constrained_start_tracked(
     joint_collision_fn: Optional[Callable[[FullConf], bool]] = None,
     use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
     anchors: Optional[Sequence[str]] = None,
+    max_time: float = 120.0,
 ) -> Tuple[Optional[PoseLike], Optional[np.ndarray], Dict[str, Any]]:
     """Derive M1's start by TRACKING the goal conf backward to a home pose.
 
@@ -1744,6 +1745,10 @@ def derive_constrained_start_tracked(
             selection (None/"all" = every anchor). The time budget is split
             evenly across the selected anchors so a hopeless first anchor
             cannot starve the others.
+        max_time (float): soft wall-clock budget for the whole sweep, seconds.
+            A short budget with ``joint_collision_fn=None`` turns this into a
+            quick reachability probe: it returns at the first home pose the
+            goal can walk to continuously, ignoring clearance.
 
     Returns:
         Tuple[Optional[PoseLike], Optional[np.ndarray], Dict[str, Any]]:
@@ -1781,7 +1786,7 @@ def derive_constrained_start_tracked(
     # a hopeless first anchor cannot starve the others); a single selected
     # anchor keeps the full budget, matching the old single-anchor behavior.
     # On expiry we fall through to the best partial track found so far.
-    max_time = 120.0
+    max_time = float(max_time)
     anchor_allowance = max_time / max(1, len(anchor_labels))
     anchor_spent: Dict[str, float] = {label: 0.0 for label in anchor_labels}
 
@@ -2384,6 +2389,11 @@ def update_debug_tree(
     start_pose: PoseLike,
     goal_pose: PoseLike,
     extend_stop_reasons: Optional[Dict[str, int]] = None,
+    tree_start: Optional[List[TreeNode]] = None,
+    tree_goal: Optional[List[TreeNode]] = None,
+    outcome: Optional[str] = None,
+    elapsed_s: Optional[float] = None,
+    attempts: Optional[int] = None,
 ) -> None:
     """Populate ``debug_tree_out`` in place with the tree + planning outcome.
 
@@ -2401,6 +2411,14 @@ def update_debug_tree(
         goal_pose (PoseLike): the goal bar pose.
         extend_stop_reasons (Optional[Dict[str, int]]): histogram of extend stop
             reasons across the run.
+        tree_start (Optional[List[TreeNode]]): the start-rooted tree on its
+            own, when the planner is bidirectional (``tree1`` merges both).
+        tree_goal (Optional[List[TreeNode]]): the goal-rooted tree on its own.
+        outcome (Optional[str]): why the search stopped -- ``connected``,
+            ``max_time``, ``max_iterations``, ``start_in_collision`` or
+            ``goal_in_collision``.
+        elapsed_s (Optional[float]): wall time of the search, seconds.
+        attempts (Optional[int]): how many restarts were made.
 
     Returns:
         None. Mutates ``debug_tree_out``.
@@ -2417,6 +2435,18 @@ def update_debug_tree(
     # Histogram of `extend_toward` stop_reasons across all RRT iterations.
     # Useful for diagnosing failed plans (e.g. mostly "ik_failure" vs "collision").
     debug_tree_out["extend_stop_reasons"] = dict(extend_stop_reasons) if extend_stop_reasons else {}
+    # * The pieces a diagnostics viewer needs to show WHY a search failed: the
+    # * two trees apart (how far did each get), the stop reason and the time.
+    if tree_start is not None:
+        debug_tree_out["tree_start"] = export_tree(tree_start)
+    if tree_goal is not None:
+        debug_tree_out["tree_goal"] = export_tree(tree_goal)
+    if outcome is not None:
+        debug_tree_out["outcome"] = outcome
+    if elapsed_s is not None:
+        debug_tree_out["elapsed_s"] = float(elapsed_s)
+    if attempts is not None:
+        debug_tree_out["attempts"] = int(attempts)
 
 
 def plan_pose_rrt(
@@ -2693,22 +2723,30 @@ def plan_pose_birrt(
     else:
         collision_fn = _noop_pose_collision_fn
 
+    search_started = time.time()
+
+    def _give_up(outcome: str):
+        """Record an endpoint failure so the caller can tell it from a search failure."""
+        update_debug_tree(debug_tree_out, False, 0, [], start_pose, goal_pose,
+                          outcome=outcome, elapsed_s=time.time() - search_started, attempts=0)
+        return None, None
+
     if joint_collision_fn is not None:
         if start_conf is None or goal_conf is None:
             raise ValueError("Collision-aware planning requires both start_conf and goal_conf.")
         if joint_collision_fn(start_conf):
             logger.warning("Start configuration is in collision.")
-            return None, None
+            return _give_up("start_in_collision")
         if joint_collision_fn(goal_conf):
             logger.warning("Goal configuration is in collision.")
-            return None, None
+            return _give_up("goal_in_collision")
     else:
         if collision_fn(start_pose):
             logger.warning("Start pose is in floating-body collision.")
-            return None, None
+            return _give_up("start_in_collision")
         if collision_fn(goal_pose):
             logger.warning("Goal pose is in floating-body collision.")
-            return None, None
+            return _give_up("goal_in_collision")
 
     def make_tree(root_pose: PoseLike, root_conf: Optional[FullConf]) -> Tuple[List[TreeNode], Dict, Dict]:
         """Create one BiRRT tree rooted at a pose, with its per-node side caches.
@@ -2742,16 +2780,22 @@ def plan_pose_birrt(
 
     extend_stop_reasons: Counter = Counter()
     best_tree: List[TreeNode] = []
+    best_trees: Tuple[List[TreeNode], List[TreeNode]] = ([], [])
     total_iterations = 0
+    # Why the LAST attempt stopped, for the diagnostics: the time budget or
+    # the iteration cap (a connect sets neither and returns directly).
+    stopped_on = "max_iterations"
 
     for attempt in range(max_attempts):
         start_time = time.time()
         nodes_a, confs_a, fvecs_a = make_tree(start_pose, start_conf)
         nodes_b, confs_b, fvecs_b = make_tree(goal_pose, goal_conf)
+        stopped_on = "max_iterations"
 
         for iteration in range(max_iterations):
             total_iterations += 1
             if (time.time() - start_time) >= max_time:
+                stopped_on = "max_time"
                 break
 
             # Alternate which tree extends toward the random sample.
@@ -2960,6 +3004,8 @@ def plan_pose_birrt(
             update_debug_tree(
                 debug_tree_out, True, iteration + 1, nodes_a + nodes_b, start_pose, goal_pose,
                 extend_stop_reasons=extend_stop_reasons,
+                tree_start=nodes_a, tree_goal=nodes_b, outcome="connected",
+                elapsed_s=time.time() - search_started, attempts=attempt + 1,
             )
             logger.info(
                 f"birrt: connected after {iteration + 1} iters; "
@@ -2968,6 +3014,7 @@ def plan_pose_birrt(
             return path_poses, path_confs
 
         best_tree = nodes_a + nodes_b
+        best_trees = (nodes_a, nodes_b)
         logger.info(
             f"birrt attempt {attempt + 1}/{max_attempts}: no path found "
             f"(tree_a={len(nodes_a)}, tree_b={len(nodes_b)})."
@@ -2976,5 +3023,7 @@ def plan_pose_birrt(
     update_debug_tree(
         debug_tree_out, False, total_iterations, best_tree, start_pose, goal_pose,
         extend_stop_reasons=extend_stop_reasons,
+        tree_start=best_trees[0], tree_goal=best_trees[1], outcome=stopped_on,
+        elapsed_s=time.time() - search_started, attempts=max_attempts,
     )
     return None, None

@@ -386,6 +386,61 @@ def _ssik_pair_goal_branch_with_home(
     return goal_conf_fallback
 
 
+# How long the goal-branch probe may spend proving that an authored goal conf
+# can walk to some home pose. Nearly always answered within a second; the cap
+# only matters when the answer is "no".
+GOAL_BRANCH_PROBE_S = 8.0
+
+
+def _planning_context(start_state, active_bar_id, joint_names_12, goal_conf_arr,
+                      world_from_bar_goal, grasp_bar_from_left, grasp_bar_from_right,
+                      goal_conf_authored=None, pairing_report=None):
+    """Everything a diagnostics viewer needs to rebuild one M1 planning scene.
+
+    The frames the planner works in, the goal it aims at (as authored and as
+    actually used), and the rigid grasp it preserves -- gathered once so the
+    derive-only and the full-plan paths describe themselves the same way.
+
+    Args:
+        start_state: the RobotCellState the plan runs on.
+        active_bar_id (str): the held bar's rigid-body name.
+        joint_names_12 (Sequence[str]): the twelve arm joint names, in order.
+        goal_conf_arr: the goal 12-vec the planner uses.
+        world_from_bar_goal: the goal bar pose, pybullet ``(pos, quat)``.
+        grasp_bar_from_left: left grasp transform (bar-from-tool0).
+        grasp_bar_from_right: right grasp transform (bar-from-tool0).
+        goal_conf_authored: the goal 12-vec the caller asked for, when the
+            branch pairing may have moved it; None means "the same".
+        pairing_report (dict | None): what the branch pairing / probe recorded.
+
+    Returns:
+        dict: JSON-able context (poses as pybullet pairs).
+    """
+    identity = ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
+    bar_state = (start_state.rigid_body_states or {}).get(active_bar_id)
+    attachment_frame = getattr(bar_state, "attachment_frame", None)
+    base_frame = getattr(start_state, "robot_base_frame", None)
+    used = np.asarray(goal_conf_arr, dtype=float)
+    authored = used if goal_conf_authored is None else np.asarray(goal_conf_authored, dtype=float)
+    report = pairing_report or {}
+    return {
+        "joint_names_12": list(joint_names_12),
+        "world_from_mobile_base": (_pp_pose_from_frame(base_frame)
+                                   if base_frame is not None else identity),
+        "goal_conf_authored": [float(v) for v in authored],
+        "goal_conf": [float(v) for v in used],
+        "goal_rebranch_max_rad": float(np.max(np.abs(used - authored))),
+        "world_from_bar_goal": world_from_bar_goal,
+        "pairing_cross_distance_deg": report.get("cross_distance_deg"),
+        "goal_branch_probe": report.get("probe"),
+        "grasp_bar_from_left": grasp_bar_from_left,
+        "grasp_bar_from_right": grasp_bar_from_right,
+        "attach_link": getattr(bar_state, "attached_to_link", None),
+        "tool0_from_bar": (_pp_pose_from_frame(attachment_frame)
+                           if attachment_frame is not None else identity),
+    }
+
+
 def _derive_constrained_start_for_plan(
     planner,
     start_state,
@@ -518,11 +573,62 @@ def _derive_constrained_start_for_plan(
     # attached bar), so no husky URDF/SRDF file on disk is required.
     cfab_collision_fn = _build_cfab_collision_fn(planner, start_state, joint_names_12)
 
-    # * ssik only: re-pick the goal conf on the branch pair that is compatible
-    # * with the home anchor, so a continuous in-limit motion start->goal can
-    # * exist at all (see _ssik_pair_goal_branch_with_home for the geometry).
+    # Sweep settings shared by the probe below and the real derivation. Only
+    # values the caller actually chose are forwarded, so an unset one keeps
+    # derive_constrained_start_tracked's own default (one source of truth).
+    walk_kwargs: Dict[str, Any] = {}
+    if bar_sweep_box is not None:
+        walk_kwargs["bar_sweep_box"] = bar_sweep_box
+    if position_res is not None:
+        walk_kwargs["position_res"] = position_res
+    if rotation_res is not None:
+        walk_kwargs["rotation_res"] = rotation_res
+    if home_anchor_selection is not None:
+        walk_kwargs["anchors"] = home_anchor_selection
+
+    # * An AUTHORED goal conf (M2's own start) is kept whenever it can already
+    # * walk to a home pose. The branch pairing below exists for goals stuck on
+    # * a branch no home can reach -- but it also moves M1's end off the conf
+    # * M2 starts from, and on easy scenes that alone was what made every home
+    # * pose fail (B3: 722 of 728 walks broke on a branch flip after the goal
+    # * was moved 215 deg; with the authored conf kept, a clear corridor turned
+    # * up in 36 s). So the pairing is now the exception, decided by the real
+    # * question -- a short walk with collisions off, which returns at the
+    # * first home the goal reaches continuously -- not by a branch-distance
+    # * metric. A goal solved from frames has no authored conf to protect and
+    # * is paired as before.
+    pairing_needed = ssik_ik.ik_backend() == "ssik"
+    if pairing_needed and goal_ee_frames is None:
+        t0 = time.perf_counter()
+        probe_pose, probe_conf, probe_info = derive_constrained_start_tracked(
+            robot_puid, arm_joints, tool_link_left, tool_link_right,
+            grasp_bar_from_left, grasp_bar_from_right, world_from_bar_goal, goal_conf_arr,
+            world_from_mobile_base=world_from_mobile_base,
+            joint_collision_fn=None,          # reachability only, not clearance
+            max_time=GOAL_BRANCH_PROBE_S,
+            **walk_kwargs,
+        )
+        stage_t["goal_branch_probe"] = time.perf_counter() - t0
+        pairing_needed = probe_conf is None
+        pairing_report["probe"] = {
+            "authored_reaches_home": probe_conf is not None,
+            "variant": probe_info.get("variant"),
+            "candidates_walked": len(probe_info.get("candidates") or []),
+            "t_s": stage_t["goal_branch_probe"],
+        }
+        if probe_conf is not None:
+            print(f"[ssik] authored goal conf kept: it walks to home "
+                  f"{probe_info.get('variant')!r} continuously "
+                  f"({stage_t['goal_branch_probe']:.1f} s).")
+        else:
+            print(f"[ssik] authored goal conf reaches no home pose within "
+                  f"{GOAL_BRANCH_PROBE_S:.0f} s -- re-pairing its branch.")
+
+    # * Re-pick the goal conf on the branch pair that is compatible with the
+    # * home anchor, so a continuous in-limit motion start->goal can exist at
+    # * all (see _ssik_pair_goal_branch_with_home for the geometry).
     t0 = time.perf_counter()
-    if ssik_ik.ik_backend() == "ssik":
+    if pairing_needed:
         goal_conf_arr = _ssik_pair_goal_branch_with_home(
             planner, robot_puid, arm_joints, tool_link_left, tool_link_right,
             world_from_bar_goal, world_from_mobile_base,
@@ -536,27 +642,11 @@ def _derive_constrained_start_for_plan(
 
     stage_t["goal_branch_pairing"] = time.perf_counter() - t0
 
-    # * Everything a diagnostics viewer needs to rebuild this derivation's
-    # * scene and describe it in physical terms: the frames the sweep works in,
-    # * the goal it walks back from, and the rigid grasp it must preserve.
-    identity_pose = ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
-    context = {
-        "joint_names_12": list(joint_names_12),
-        "world_from_mobile_base": world_from_mobile_base or identity_pose,
-        "goal_conf_authored": [float(v) for v in goal_conf_authored],
-        "world_from_bar_goal": world_from_bar_goal,
-        "pairing_cross_distance_deg": pairing_report.get("cross_distance_deg"),
-        "grasp_bar_from_left": grasp_bar_from_left,
-        "grasp_bar_from_right": grasp_bar_from_right,
-        "attach_link": attach_link_name,
-        "tool0_from_bar": tool0_from_bar,
-    }
-
     def _with_context(payload):
-        """Stamp the final goal conf + the context onto a result dict.
+        """Stamp the planning context onto a result dict.
 
-        The goal conf is read at call time because the collision gate below may
-        still re-solve it after the context was built.
+        Built at call time because the collision gate below may still re-solve
+        the goal conf after this point.
 
         Args:
             payload (dict): the info dict about to be returned.
@@ -564,10 +654,10 @@ def _derive_constrained_start_for_plan(
         Returns:
             dict: the same dict, with ``context`` filled in.
         """
-        context["goal_conf"] = [float(v) for v in goal_conf_arr]
-        context["goal_rebranch_max_rad"] = float(
-            np.max(np.abs(np.asarray(goal_conf_arr, dtype=float) - goal_conf_authored)))
-        payload["context"] = context
+        payload["context"] = _planning_context(
+            start_state, active_bar_id, joint_names_12, goal_conf_arr,
+            world_from_bar_goal, grasp_bar_from_left, grasp_bar_from_right,
+            goal_conf_authored=goal_conf_authored, pairing_report=pairing_report)
         return payload
 
     # Goal must be collision-free too (mirrors dual_arm_task_space_rrt.run): the
@@ -621,20 +711,10 @@ def _derive_constrained_start_for_plan(
         # * IK branch by construction, so a continuous in-limit joint path
         # * start->goal exists (see derive_constrained_start_tracked).
         tracked_kwargs = dict(
+            walk_kwargs,
             world_from_mobile_base=world_from_mobile_base,
             joint_collision_fn=cfab_collision_fn,
         )
-        if bar_sweep_box is not None:
-            tracked_kwargs["bar_sweep_box"] = bar_sweep_box
-        # Only forward a resolution the caller actually chose, so an unset one
-        # keeps derive_constrained_start_tracked's own default (one source of
-        # truth for the numbers, no second copy of them here).
-        if position_res is not None:
-            tracked_kwargs["position_res"] = position_res
-        if rotation_res is not None:
-            tracked_kwargs["rotation_res"] = rotation_res
-        if home_anchor_selection is not None:
-            tracked_kwargs["anchors"] = home_anchor_selection
         t0 = time.perf_counter()
         world_from_bar_start, start_conf, tracked_info = derive_constrained_start_tracked(
             robot_puid,
@@ -989,7 +1069,14 @@ def plan_constrained_dual_arm(
                 "planner": "tracked_corridor",
                 "derived_start_conf": derive_info.get("derived_start_conf"),
                 "path_poses": path_poses,
+                "start_conf": [float(v) for v in start_conf],
+                "world_from_bar_start": world_from_bar_start,
             }
+            # The derivation's own record rides along, so a run file can show
+            # the sweep that produced this corridor.
+            for key in ("tracked", "context", "stage_times"):
+                if key in derive_info:
+                    info[key] = derive_info[key]
             return path_confs, info
     else:
         start_conf = _conf12_from_state(start_state, joint_names_12)
@@ -1057,8 +1144,19 @@ def plan_constrained_dual_arm(
         # Which search algorithm ran (single-tree rrt vs bidirectional connect).
         "planner": "birrt" if use_birrt else "rrt",
     }
+    info["start_conf"] = [float(v) for v in start_conf]
+    info["world_from_bar_start"] = world_from_bar_start
     if derive_start:
         info["derived_start_conf"] = derive_info.get("derived_start_conf")
+        for key in ("tracked", "context", "stage_times"):
+            if key in derive_info:
+                info[key] = derive_info[key]
+    else:
+        # Planned from a stored start: no sweep to report, but the viewer still
+        # needs the frames and the goal to draw the search.
+        info["context"] = _planning_context(
+            start_state, active_bar_id, joint_names_12, goal_conf_arr,
+            world_from_bar_goal, grasp_bar_from_left, grasp_bar_from_right)
 
     with pp.WorldSaver():
         joint_collision_fn = None

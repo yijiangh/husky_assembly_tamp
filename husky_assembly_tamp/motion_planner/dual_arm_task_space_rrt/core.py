@@ -1245,9 +1245,27 @@ def _record_branch_pair(
     }
     if collision_pairs:
         entry["collision_pairs"] = [
-            [str(part) for part in pair] for pair in collision_pairs
+            [_collision_part_name(part) for part in pair] for pair in collision_pairs
         ]
     report["pairs"].append(entry)
+
+
+def _collision_part_name(part: Any) -> str:
+    """Return a readable name for one side of a reported collision.
+
+    compas_fab reports each side as either a robot ``Link`` object or the name
+    of a tool or rigid body. A ``Link`` must be asked for its ``name``: turning
+    it into a string gives its memory address, which was recorded instead of
+    the link for a whole benchmark library before this was caught.
+
+    Args:
+        part (Any): one side of a collision pair.
+
+    Returns:
+        str: the link, tool or body name.
+    """
+    name = getattr(part, "name", None)
+    return str(name) if name else str(part)
 
 
 def _endpoint_ik_reason(

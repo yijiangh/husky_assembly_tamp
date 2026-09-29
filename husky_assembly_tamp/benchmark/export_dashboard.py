@@ -13,6 +13,7 @@ the renderer.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import os
@@ -281,6 +282,36 @@ def copy_static_site(out_dir: str) -> None:
             shutil.copytree(src, dst, dirs_exist_ok=True)
         else:
             shutil.copy2(src, dst)
+
+    _stamp_asset_versions(out_dir)
+
+
+def _stamp_asset_versions(out_dir: str) -> None:
+    """Make the page ask for its own script and stylesheet by content.
+
+    A browser holds on to a cached script hard, and a fix that is on disk but
+    not in the cache looks exactly like a fix that did not work -- which has
+    cost real debugging time here. Appending a hash of the file's contents to
+    the URL means a changed file is a different URL, so the browser fetches it,
+    and an unchanged one still comes from cache.
+
+    Args:
+        out_dir (str): the dashboard folder whose index.html to rewrite.
+    """
+    index_path = os.path.join(out_dir, "index.html")
+    with open(index_path, "r", encoding="utf-8") as handle:
+        html = handle.read()
+
+    for relative in ("static/css/index.css", "static/js/app.js"):
+        path = os.path.join(out_dir, relative.replace("/", os.sep))
+        if not os.path.isfile(path):
+            continue
+        with open(path, "rb") as handle:
+            digest = hashlib.sha1(handle.read()).hexdigest()[:8]
+        html = html.replace(f'"./{relative}"', f'"./{relative}?v={digest}"')
+
+    with open(index_path, "w", encoding="utf-8") as handle:
+        handle.write(html)
 
 
 def _joint_order(root: str, library_name: str, bar_ids: Sequence[str]) -> List[str]:

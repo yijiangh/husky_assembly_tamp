@@ -31,11 +31,23 @@ body {
 .breadcrumb a:hover { text-decoration: underline; }
 .breadcrumb .sep { margin: 0 6px; color: var(--line); }
 
-.stage { padding: 16px 24px 0; }
+/* The 3D view follows the page down, so the scrubber under it always has the
+   robot in sight. */
+.stage {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding: 12px 24px 8px;
+  background: var(--page);
+  border-bottom: 1px solid var(--line);
+}
 .stage[hidden] { display: none; }
 
+.stage-controls { margin-top: 8px; }
+.stage-controls[hidden] { display: none; }
+
 .viewer {
-  height: 460px;
+  height: 340px;
   border: 1px solid var(--line);
   border-radius: 6px;
   overflow: hidden;
@@ -43,7 +55,7 @@ body {
 }
 .viewer canvas { display: block; }
 
-.caption { margin: 8px 0 0; font-size: 13px; }
+.caption { margin: 6px 0 0; font-size: 12px; }
 
 main { padding: 16px 24px 48px; }
 
@@ -52,8 +64,8 @@ main { padding: 16px 24px 48px; }
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 6px;
-  padding: 16px 18px;
-  margin-bottom: 16px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
 }
 
 .panel h2 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
@@ -67,7 +79,7 @@ main { padding: 16px 24px 48px; }
 .tile strong { font-size: 24px; font-weight: 600; }
 .tile span { font-size: 12px; color: var(--muted); }
 
-.chart { display: block; max-width: 100%; height: auto; }
+.chart { display: block; max-width: 100%; }
 
 .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
 .legend-item { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); }

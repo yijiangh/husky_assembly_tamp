@@ -58,6 +58,9 @@ function makeSvg(width, height) {
     viewBox: `0 0 ${width} ${height}`,
     width: String(width),
     height: String(height),
+    // ! Inline, not in the stylesheet: this is the one rule that must hold, and
+    // ! an inline style cannot be overridden by a stale cached stylesheet.
+    style: `width:${width}px;height:${height}px;max-width:100%`,
     preserveAspectRatio: "xMidYMid meet",
     class: "chart",
   });
@@ -120,9 +123,9 @@ function axes(svg, box, { xLabel = "", yLabel = "", yTicks = [], xTicks = [] }) 
 export function barChart(container, { data, yLabel = "", xLabel = "",
                                       yMax = null, format = (v) => v.toFixed(2),
                                       onClick = null }) {
-  const width = 900;
-  const height = 280;
-  const box = { left: 52, top: 16, width: width - 76, height: height - 82 };
+  const width = 820;
+  const height = 210;
+  const box = { left: 48, top: 12, width: width - 72, height: height - 74 };
   const svg = makeSvg(width, height);
 
   const maximum = yMax != null ? yMax : Math.max(
@@ -185,9 +188,9 @@ export function barChart(container, { data, yLabel = "", xLabel = "",
 export function stackedBarChart(container, { data, keys, colours = {},
                                              yLabel = "", normalize = true,
                                              format = (v) => v.toFixed(2) }) {
-  const width = 900;
-  const height = 280;
-  const box = { left: 52, top: 16, width: width - 76, height: height - 82 };
+  const width = 820;
+  const height = 210;
+  const box = { left: 48, top: 12, width: width - 72, height: height - 74 };
   const svg = makeSvg(width, height);
 
   const totals = data.map((d) => keys.reduce((sum, key) => sum + (d.values[key] || 0), 0));
@@ -246,9 +249,9 @@ function legend(keys, colours = {}) {
 // Box plot of a distribution per category, on a log scale because planning
 // times span orders of magnitude.
 export function boxChart(container, { data, yLabel = "" }) {
-  const width = 900;
-  const height = 280;
-  const box = { left: 52, top: 16, width: width - 76, height: height - 82 };
+  const width = 820;
+  const height = 210;
+  const box = { left: 48, top: 12, width: width - 72, height: height - 74 };
   const svg = makeSvg(width, height);
 
   const values = data.flatMap((d) => [d.p10, d.p50, d.p90, d.max].filter((v) => v > 0));
@@ -303,9 +306,9 @@ export function boxChart(container, { data, yLabel = "" }) {
 // Line chart, used for the restart curve and for joint angles along a path.
 export function lineChart(container, { series, yLabel = "", xLabel = "",
                                        cursor = null, onCursor = null,
-                                       height = 260 }) {
-  const width = 900;
-  const box = { left: 52, top: 16, width: width - 76, height: height - 62 };
+                                       height = 200 }) {
+  const width = 820;
+  const box = { left: 48, top: 12, width: width - 72, height: height - 58 };
   const svg = makeSvg(width, height);
 
   const allY = series.flatMap((s) => s.points.map((p) => p[1]));
@@ -366,7 +369,7 @@ export function lineChart(container, { series, yLabel = "", xLabel = "",
 // Grid of coloured cells, for one slice of the start-offset sweep.
 export function heatmap(container, { cells, xValues, yValues, xLabel, yLabel,
                                      colourOf, titleOf }) {
-  const cellSize = 34;
+  const cellSize = 26;
   const width = 60 + xValues.length * cellSize;
   const height = 40 + yValues.length * cellSize;
   const svg = makeSvg(width, height);

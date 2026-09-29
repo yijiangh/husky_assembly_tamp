@@ -21,6 +21,7 @@ const main = document.querySelector("[data-main]");
 const breadcrumb = document.querySelector("[data-breadcrumb]");
 const viewerHost = document.querySelector("[data-viewer]");
 const viewerCaption = document.querySelector("[data-viewer-caption]");
+const stageControls = document.querySelector("[data-stage-controls]");
 
 let viewer = null;
 let runInfo = null;
@@ -100,6 +101,19 @@ function showViewer(caption) {
 
 function hideViewer() {
   viewerHost.parentElement.hidden = true;
+  clearStageControls();
+}
+
+// Anything that drives the 3D view belongs directly under it, not further down
+// the page: a scrubber you cannot see the robot from is no use.
+function setStageControls(...nodes) {
+  stageControls.replaceChildren(...nodes);
+  stageControls.hidden = nodes.length === 0;
+}
+
+function clearStageControls() {
+  stageControls.replaceChildren();
+  stageControls.hidden = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -243,6 +257,7 @@ function tile(label, value) {
 // ---------------------------------------------------------------------------
 
 async function viewBar(barId) {
+  clearStageControls();
   setBreadcrumb([
     { label: runInfo.run_name, href: "#/" },
     { label: barId },
@@ -314,6 +329,7 @@ function successColour(rate) {
 // ---------------------------------------------------------------------------
 
 async function viewGoal(barId, goalIndex) {
+  clearStageControls();
   setBreadcrumb([
     { label: runInfo.run_name, href: "#/" },
     { label: barId, href: `#/bar/${barId}` },
@@ -619,7 +635,8 @@ async function viewStart(barId, goalIndex, startIndex) {
     return;
   }
 
-  const playbackPanel = panel("Motion", "Scrub to move the robot.");
+  const playbackPanel = panel(
+    "Motion", "The scrubber sits under the robot at the top of the page.");
   const chooser = element("select", {});
   for (const seed of solved) {
     for (const [name, record] of Object.entries(seed.passes)) {
@@ -631,10 +648,10 @@ async function viewStart(barId, goalIndex, startIndex) {
   const slider = element("input", { type: "range", min: "0", max: "1", value: "0" });
   const readout = element("span", { class: "muted" }, "");
   const jointChart = element("div");
-  playbackPanel.append(
-    element("div", { class: "controls" }, [chooser, slider, readout]),
-    jointChart);
+  playbackPanel.append(jointChart);
   main.appendChild(playbackPanel);
+  setStageControls(element("div", { class: "controls" },
+    [chooser, slider, readout]));
 
   let path = null;
   const drawJoints = (index) => {

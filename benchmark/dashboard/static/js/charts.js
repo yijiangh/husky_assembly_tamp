@@ -29,6 +29,37 @@ export const BREAKDOWN_ORDER = [
   "state_sync", "smoothing", "stitching", "other",
 ];
 
+export const BREAKDOWN_LABELS = {
+  collision: "collision checks",
+  ik: "IK while growing the tree",
+  fk_gate: "FK check",
+  interpolation: "interpolation",
+  nearest_node: "nearest-node search",
+  state_sync: "scene sync",
+  smoothing: "smoothing",
+  stitching: "joining the two trees",
+  other: "other",
+};
+
+// The stages of setup, before any motion planning happens.
+export const SETUP_ORDER = [
+  "goal_ik", "start_survey", "straight_line_probes", "planner_start_derivation",
+];
+
+export const SETUP_LABELS = {
+  goal_ik: "goal IK",
+  start_survey: "start survey (IK + collision)",
+  straight_line_probes: "straight-line probes",
+  planner_start_derivation: "planner's own start search",
+};
+
+export const SETUP_COLOURS = {
+  goal_ik: "#1f84bd",
+  start_survey: "#b23a48",
+  straight_line_probes: "#d98324",
+  planner_start_derivation: "#8a6fb0",
+};
+
 const BREAKDOWN_COLOURS = {
   collision: "#b23a48", ik: "#1f84bd", fk_gate: "#2e9e5b",
   interpolation: "#d98324", nearest_node: "#8a6fb0", state_sync: "#6f8ab0",
@@ -186,6 +217,7 @@ export function barChart(container, { data, yLabel = "", xLabel = "",
 
 // Stacked bars, for compositions such as failure reasons or time breakdowns.
 export function stackedBarChart(container, { data, keys, colours = {},
+                                             labels = {},
                                              yLabel = "", normalize = true,
                                              format = (v) => v.toFixed(2) }) {
   const width = 820;
@@ -222,17 +254,18 @@ export function stackedBarChart(container, { data, keys, colours = {},
         height: Math.max(1, yBottom - yTop),
         fill: colours[key] || BREAKDOWN_COLOURS[key] || COLOURS.muted,
       });
-      rect.appendChild(el("title", {}, `${d.label} — ${key}: ${format(raw)}`));
+      rect.appendChild(el("title", {},
+        `${d.label} — ${labels[key] || key}: ${format(raw)}`));
       svg.appendChild(rect);
       cursor += value;
     }
   });
 
-  container.replaceChildren(svg, legend(keys, colours));
+  container.replaceChildren(svg, legend(keys, colours, labels));
   return svg;
 }
 
-function legend(keys, colours = {}) {
+function legend(keys, colours = {}, labels = {}) {
   const wrapper = document.createElement("div");
   wrapper.className = "legend";
   for (const key of keys) {
@@ -240,7 +273,7 @@ function legend(keys, colours = {}) {
     item.className = "legend-item";
     const swatch = document.createElement("i");
     swatch.style.background = colours[key] || BREAKDOWN_COLOURS[key] || COLOURS.muted;
-    item.append(swatch, document.createTextNode(key));
+    item.append(swatch, document.createTextNode(labels[key] || key));
     wrapper.appendChild(item);
   }
   return wrapper;

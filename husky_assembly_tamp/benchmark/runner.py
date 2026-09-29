@@ -175,6 +175,7 @@ def _worker_main(task_queue, result_queue, config: Dict[str, Any]) -> None:
                     profile_dir=config.get("profile_dir"),
                     enable_profiling=config.get("enable_profiling", True),
                     store_paths=config.get("store_paths", True),
+                    tree_dir=config.get("tree_dir"),
                     pass_overrides=config.get("pass_overrides"),
                 )
             except Exception:  # noqa: BLE001 - a bad task must not kill the batch

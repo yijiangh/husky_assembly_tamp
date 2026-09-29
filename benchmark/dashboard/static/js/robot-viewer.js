@@ -67,6 +67,7 @@ export class RobotViewer {
     this.carriedBar = null;
     this.poseClouds = [];
     this.trajectoryLine = null;
+    this.treeObjects = [];
 
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
@@ -188,6 +189,52 @@ export class RobotViewer {
       mesh.dispose();
     }
     this.poseClouds = [];
+  }
+
+  // Draws the two trees a search grew, as the paths of the bar's midpoint.
+  //
+  // Each tree is { midpoints: [[x, y, z]...], edges: [[parent, child]...] }.
+  // The start tree and the goal tree take the colours of the start and goal
+  // bars, so it is plain which end each branch grew from; nodes are dots, so
+  // a tree that barely left its root is still visible.
+  setTrees(trees) {
+    this.clearTrees();
+    for (const { tree, colour } of trees) {
+      if (!tree || !tree.midpoints || !tree.midpoints.length) continue;
+      const positions = [];
+      for (const [a, b] of tree.edges || []) {
+        const p = tree.midpoints[a];
+        const q = tree.midpoints[b];
+        if (p && q) positions.push(p[0], p[1], p[2], q[0], q[1], q[2]);
+      }
+      if (positions.length) {
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute("position",
+          new THREE.Float32BufferAttribute(positions, 3));
+        const lines = new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({
+          color: colour, transparent: true, opacity: 0.75,
+        }));
+        this.scene.add(lines);
+        this.treeObjects.push(lines);
+      }
+      const nodes = new THREE.BufferGeometry();
+      nodes.setAttribute("position",
+        new THREE.Float32BufferAttribute(tree.midpoints.flat(), 3));
+      const dots = new THREE.Points(nodes, new THREE.PointsMaterial({
+        color: colour, size: 0.012,
+      }));
+      this.scene.add(dots);
+      this.treeObjects.push(dots);
+    }
+  }
+
+  clearTrees() {
+    for (const object of this.treeObjects) {
+      this.scene.remove(object);
+      object.geometry.dispose();
+      object.material.dispose();
+    }
+    this.treeObjects = [];
   }
 
   // Draws the path the bar's midpoint takes along a trajectory.

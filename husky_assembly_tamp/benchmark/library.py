@@ -131,6 +131,10 @@ def build_bar_library(scene: SceneCtx, *, n_goals: int, library_seed: int,
         "goals": goals,
         "rejections": sampled["rejections"],
         "n_sampled": sampled["n_sampled"],
+        # How long finding the goals took, on its own. Goal IK is a separate
+        # cost from surveying starts and from motion planning, and without
+        # this it can only be recovered by subtracting everything else.
+        "goal_sampling_wall_s": sampled["wall_s"],
         "sweep_step_m": sweep_step_m,
         "wall_s": time.time() - t0,
         "sweeps": sweeps,

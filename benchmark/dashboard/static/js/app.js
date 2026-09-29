@@ -12,7 +12,8 @@
 
 import { loadJson, loadTrajectory, paths } from "./data.js";
 import {
-  COLOURS, BREAKDOWN_ORDER, barChart, boxChart, heatmap, lineChart,
+  COLOURS, BREAKDOWN_ORDER, BREAKDOWN_LABELS, SETUP_ORDER, SETUP_LABELS,
+  SETUP_COLOURS, barChart, boxChart, heatmap, lineChart,
   stackedBarChart, copyAsCsv,
 } from "./charts.js";
 import { OUTCOME_COLOURS, RobotViewer } from "./robot-viewer.js";
@@ -153,10 +154,18 @@ async function viewOverview() {
   main.replaceChildren();
 
   const totals = summary.totals;
+  const setupTotal = setupSeconds(totals.setup_s_per_goal);
+  // Two different clocks, kept apart on purpose. Motion planning is what the
+  // planner spends finding a motion. Setup is the work done beforehand to
+  // pose the question -- finding the goal and the start poses -- and is not
+  // part of any planning run.
   main.appendChild(element("section", { class: "panel tiles" }, [
     tile("runs", totals.n_runs),
     tile("solved", `${(totals.success_rate * 100).toFixed(0)}%`),
-    tile("median time", `${totals.fine_wall_s.p50.toFixed(1)} s`),
+    tile("motion planning, median of solved runs",
+      `${totals.fine_wall_s.p50.toFixed(0)} s`),
+    tile("setup per goal, before planning",
+      setupTotal ? `${(setupTotal / 60).toFixed(0)} min` : "-"),
     tile("bars", bars.length),
   ]));
 
@@ -188,9 +197,11 @@ async function viewOverview() {
 
   // 2. How long a solved transfer took.
   const timePanel = panel(
-    "Planning time, by bar",
-    "Solved runs only, on a log scale. The box spans the 10th to 90th " +
-    "percentile, the line inside is the median.");
+    "Motion planning time, by bar",
+    "Time inside the planner finding a motion: the fine pass of each solved " +
+    "run, on a log scale. The box spans the 10th to 90th percentile, the line " +
+    "is the median. It does not include finding the goal or start poses; " +
+    "that is setup, shown next.");
   const timeChart = element("div");
   timePanel.appendChild(timeChart);
   main.appendChild(withCsv(timePanel, [
@@ -201,6 +212,33 @@ async function viewOverview() {
   boxChart(timeChart, {
     yLabel: "seconds",
     data: bars.map((b) => ({ label: b.bar_id, ...b.fine_wall_s })),
+  });
+
+  // 2b. Setup: the work done before any motion planning.
+  const setupPanel = panel(
+    "Setup time, by bar (not motion planning)",
+    "Minutes per goal spent posing the benchmark's questions, before any " +
+    "motion planning: goal IK finds a reachable goal pose; the start survey " +
+    "runs IK and collision checks on every candidate carry pose; the " +
+    "straight-line probes test each workable start; and the planner's own " +
+    "start search is run once for comparison. Measured while 16 bars were " +
+    "surveyed in parallel, so roughly 1.5 to 2 times single-core time.");
+  const setupChart = element("div");
+  setupPanel.appendChild(setupChart);
+  main.appendChild(withCsv(setupPanel, [
+    ["bar", ...SETUP_ORDER.map((k) => `${k}_s_per_goal`)],
+    ...bars.map((b) => [b.bar_id,
+      ...SETUP_ORDER.map((k) => (b.setup_s_per_goal || {})[k] || 0)]),
+  ]));
+  stackedBarChart(setupChart, {
+    keys: SETUP_ORDER, labels: SETUP_LABELS, colours: SETUP_COLOURS,
+    normalize: false, yLabel: "minutes per goal",
+    format: (v) => `${v.toFixed(1)}`,
+    data: bars.map((b) => ({
+      label: b.bar_id,
+      values: Object.fromEntries(SETUP_ORDER.map(
+        (k) => [k, ((b.setup_s_per_goal || {})[k] || 0) / 60])),
+    })),
   });
 
   // 3. Does trying again help?
@@ -239,10 +277,12 @@ async function viewOverview() {
     });
   }
 
-  // 5. Where the time went.
+  // 5. Where motion planning time went (inside the planner only).
   const breakdownPanel = panel(
-    "Where the time went",
-    "Mean seconds per run, split by what the planner was doing.");
+    "Where motion planning time went",
+    "Share of time inside the planner, by what it was doing. 'IK while " +
+    "growing the tree' is the arm IK solved at every step of the search; it " +
+    "is not the goal IK, which happens during setup.");
   const breakdownChart = element("div");
   breakdownPanel.appendChild(breakdownChart);
   main.appendChild(withCsv(breakdownPanel, [
@@ -251,21 +291,29 @@ async function viewOverview() {
       ...BREAKDOWN_ORDER.map((k) => (b.mean_breakdown_s || {})[k] || 0)]),
   ]));
   stackedBarChart(breakdownChart, {
-    keys: BREAKDOWN_ORDER, yLabel: "share of time",
+    keys: BREAKDOWN_ORDER, labels: BREAKDOWN_LABELS, yLabel: "share of time",
     data: bars.map((b) => ({ label: b.bar_id, values: b.mean_breakdown_s || {} })),
   });
 
   // 6. The bars themselves, as a table.
   const listPanel = panel("Bars", "Click a row to open it.");
   listPanel.appendChild(table(
-    ["bar", "length", "runs", "solved", "coarse", "median s"],
+    ["bar", "length", "runs", "solved", "coarse only",
+      "planning s, median solved", "setup min per goal"],
     bars.map((b) => [b.bar_id, `${b.bar_length_m.toFixed(2)} m`, b.n_runs,
       `${(b.success_rate * 100).toFixed(0)}%`,
       `${(b.coarse_success_rate * 100).toFixed(0)}%`,
-      b.fine_wall_s.p50.toFixed(1)]),
+      b.n_success ? b.fine_wall_s.p50.toFixed(0) : "-",
+      (setupSeconds(b.setup_s_per_goal) / 60).toFixed(1)]),
     { onRowClick: (row) => { window.location.hash = `#/bar/${row[0]}`; } },
   ));
   main.appendChild(listPanel);
+}
+
+// Total setup seconds from a per-stage breakdown; zero when there is none.
+function setupSeconds(stages) {
+  if (!stages) return 0;
+  return SETUP_ORDER.reduce((sum, key) => sum + (stages[key] || 0), 0);
 }
 
 function tile(label, value) {
@@ -289,11 +337,12 @@ async function viewBar(barId) {
   const problem = bar.problem;
 
   main.replaceChildren();
-  showViewer(`${barId}: ${bar.goals.length} goal poses, coloured by how often `
-    + "they were solved. Click one to open it.");
+  showViewer(`${barId}: ${bar.goals.length} goal poses, coloured by the share `
+    + "of their 30 planning runs that found a motion. Click one to open it.");
 
   const view = await ensureRobot();
   view.clearPoseClouds();
+  view.clearTrees();
   view.clearCarriedBar();
   view.pose(problem.home_conf12);
   view.setTrajectoryLine(null);
@@ -311,6 +360,14 @@ async function viewBar(barId) {
     window.location.hash = `#/bar/${barId}/goal/${goalIndex}`;
   });
 
+  // What the colours mean, with how many goals fall in each band.
+  const bandCounts = SUCCESS_BANDS.map(() => 0);
+  for (const goal of bar.goals) bandCounts[successBand(goal.success_rate)] += 1;
+  setStageControls(element("div", { class: "legend" },
+    SUCCESS_BANDS.map((band, index) => element("span", { class: "legend-item" }, [
+      swatch(band.colour), `${band.label} ${bandCounts[index]}`,
+    ]))));
+
   const summaryPanel = panel(
     `${barId}, ${problem.bar_length_m.toFixed(2)} m`,
     `Held ${describeGrasp(problem)}.`);
@@ -318,19 +375,51 @@ async function viewBar(barId) {
 
   const goalsPanel = panel("Goals", "Click a row to open its start survey.");
   goalsPanel.appendChild(table(
-    ["goal", "runs", "solved", "median s", "starts found", "grasps", "easy starts"],
+    ["goal", "runs", "solved", "planning s", "setup min",
+      "goal IK solutions", "workable starts", "straight-line starts"],
     bar.goals.map((goal) => [
       goal.goal_index, goal.n_runs,
       `${(goal.success_rate * 100).toFixed(0)}%`,
-      goal.median_wall_s ? goal.median_wall_s.toFixed(1) : "-",
-      goal.n_starts_found, goal.n_free_branch_pairs,
+      goal.planning_median_s != null ? goal.planning_median_s.toFixed(0) : "-",
+      goal.setup_s ? (goal.setup_s.total / 60).toFixed(1) : "-",
+      goal.n_free_branch_pairs, goal.n_starts_found,
       (goal.difficulty_counts || {}).free || 0,
     ]),
     { onRowClick: (row) => {
       window.location.hash = `#/bar/${barId}/goal/${row[0]}`;
     } },
   ));
+  goalsPanel.appendChild(columnKey([
+    ["runs", "Planning runs for this goal: 3 start poses, 10 random seeds each."],
+    ["solved", "Share of those runs where both the coarse and the fine pass "
+      + "found a motion."],
+    ["planning s", "Median motion-planning time of the solved runs (fine "
+      + "pass). Only the time inside the planner; setup is not included."],
+    ["setup min", "Time spent on this goal before any planning: goal IK, the "
+      + "start survey, the straight-line probes and the planner's own start "
+      + "search."],
+    ["goal IK solutions", "How many different arm configurations hold the bar "
+      + "at the goal without colliding (pairs of left and right IK branches, "
+      + "at most 64). Planning aims for the one the planner itself would pick."],
+    ["workable starts", "Carry poses the start survey found where both arms "
+      + "can hold the bar without colliding. Meant to be the same for every "
+      + "goal of a bar, since carry poses come from the grasp and the three "
+      + "carry anchors, not from the goal. On 11 of the 16 bars they shift "
+      + "between goals instead, a suspected numerical problem in the "
+      + "planner's carry-pose code; see the analysis."],
+    ["straight-line starts", "Workable starts that a straight motion from the "
+      + "goal reaches with nothing in the way: the easiest problems. This "
+      + "varies a great deal from goal to goal."],
+  ]));
   main.appendChild(goalsPanel);
+}
+
+// A short glossary under a table, one line per column. Column names have to
+// be short to fit; this is where they are spelled out.
+function columnKey(entries) {
+  return element("dl", { class: "key" }, entries.flatMap(([term, text]) => [
+    element("dt", {}, term), element("dd", {}, text),
+  ]));
 }
 
 function describeGrasp(problem) {
@@ -340,11 +429,27 @@ function describeGrasp(problem) {
     + `${Math.abs(right[2]).toFixed(2)} m along its length`;
 }
 
+// Bands for colouring a goal by how often it was solved.
+//
+// Set from the data rather than from round numbers: overall only about one run
+// in six succeeds, so a scale whose top band starts at two thirds leaves
+// nearly every goal the same colour and says nothing.
+const SUCCESS_BANDS = [
+  { label: "never solved", colour: 0xb23a48, below: 1e-9 },
+  { label: "under 10%", colour: 0xd98324, below: 0.10 },
+  { label: "10 to 25%", colour: 0xe0b33a, below: 0.25 },
+  { label: "25 to 50%", colour: 0x8cbf5a, below: 0.50 },
+  { label: "50% or more", colour: 0x2e9e5b, below: Infinity },
+];
+
+function successBand(rate) {
+  const value = rate || 0;
+  return SUCCESS_BANDS.findIndex((band) => value < band.below);
+}
+
 function successColour(rate) {
   if (rate == null) return 0xb8bec2;
-  if (rate >= 0.66) return OUTCOME_COLOURS.free;
-  if (rate > 0) return OUTCOME_COLOURS.blocked;
-  return OUTCOME_COLOURS.broken;
+  return SUCCESS_BANDS[successBand(rate)].colour;
 }
 
 // ---------------------------------------------------------------------------
@@ -369,6 +474,7 @@ async function viewGoal(barId, goalIndex) {
 
   const view = await ensureRobot();
   view.setTrajectoryLine(null);
+  view.clearTrees();
   view.pose(goal.primary_conf);
   view.setCarriedBar({
     length: problem.bar_length_m, radius: problem.bar_radius_m,
@@ -489,10 +595,17 @@ async function viewGoal(barId, goalIndex) {
 
   // Why candidates failed.
   const counts = goal.sweep_counts || {};
+  const setup = goal.setup_s || {};
   const reasonPanel = panel(
-    "The start survey",
-    `${goal.candidates.length} carry poses tried. A pose fails either because `
-    + "an arm cannot reach it, or because holding it would collide.");
+    "The start survey (setup, not motion planning)",
+    `${goal.candidates.length} carry poses tried, each with IK for both arms `
+    + "and a collision check. A pose fails either because an arm cannot reach "
+    + "it, or because holding it would collide."
+    + (setup.start_survey
+      ? ` The survey took ${(setup.start_survey / 60).toFixed(1)} min for this `
+        + `goal; the whole setup took ${(setup.total / 60).toFixed(1)} min, of `
+        + `which goal IK was ${setup.goal_ik.toFixed(0)} s.`
+      : ""));
   const reasonChart = element("div");
   reasonPanel.appendChild(reasonChart);
   main.appendChild(withCsv(reasonPanel,
@@ -610,16 +723,24 @@ async function viewGoal(barId, goalIndex) {
     `${planned.length} of ${goal.starts.length} workable poses were used. `
     + "Click a row to see its runs.");
   startPanel.appendChild(table(
-    ["start", "anchor", "difficulty", "solved", "median s"],
+    ["start", "anchor", "straight line", "solved", "planning s"],
     planned.map((start) => [
-      start.start_index, start.anchor, start.difficulty || "-",
+      start.start_index, start.anchor, DIFFICULTY_LABELS[start.difficulty] || "-",
       `${((start.success_rate || 0) * 100).toFixed(0)}%`,
-      start.median_wall_s ? start.median_wall_s.toFixed(1) : "-",
+      start.planning_median_s != null ? start.planning_median_s.toFixed(0) : "-",
     ]),
     { onRowClick: (row) => {
       window.location.hash = `#/bar/${barId}/goal/${goalIndex}/start/${row[0]}`;
     } },
   ));
+  startPanel.appendChild(columnKey([
+    ["anchor", "Which of the three ways of carrying the bar this start uses."],
+    ["straight line", "What a straight motion from the goal to this start "
+      + "found: clear, blocked by something, or unable to reach it at all."],
+    ["solved", "Share of this start's 10 seeded runs that found a motion."],
+    ["planning s", "Median motion-planning time of the solved runs (fine "
+      + "pass), inside the planner only."],
+  ]));
   main.appendChild(startPanel);
 
   const derivation = goal.production_derivation || {};
@@ -631,8 +752,22 @@ async function viewGoal(barId, goalIndex) {
           + "would have skipped searching entirely."
         : "Found a carry pose, but not one a straight motion reaches, so it "
           + "would have had to search.")
-      : "Found no carry pose at all within its time budget."));
+      : "Found no carry pose at all within its time budget.")
+    + (derivation.wall_s
+      ? ` Its start search took ${derivation.wall_s.toFixed(0)} s; that is `
+        + "setup, and is not counted in any planning time here."
+      : "")));
 }
+
+// Where a transfer begins and ends, drawn faintly on the start page.
+const GHOST_COLOURS = { start: 0x2e9e5b, goal: 0x1f84bd };
+
+// Plain names for what the straight-line probe found.
+const DIFFICULTY_LABELS = {
+  free: "clear",
+  blocked: "blocked",
+  broken: "cannot reach",
+};
 
 function round(value) {
   return Math.round(value * 1000) / 1000;
@@ -667,12 +802,36 @@ async function viewStart(barId, goalIndex, startIndex) {
   const view = await ensureRobot();
   view.clearPoseClouds();
   view.setTrajectoryLine(null);
+  view.clearTrees();
+  // Clicks here must not reach the goal page's handler, which would still be
+  // registered from the previous view.
+  view.onPick(null);
   view.setCarriedBar({
     length: problem.bar_length_m, radius: problem.bar_radius_m,
     linkName: problem.attached_link, grasp: problem.grasp_bar_from_left,
     bar_from_midpoint: problem.bar_from_midpoint,
   });
   if (startRecord && startRecord.conf) view.pose(startRecord.conf);
+
+  // Faint copies of the bar where the transfer begins and ends, as fixed
+  // references while the carried bar moves or the search trees are drawn.
+  const barShape = {
+    length: problem.bar_length_m, radius: problem.bar_radius_m,
+    bar_from_midpoint: problem.bar_from_midpoint, opacity: 0.28,
+  };
+  if (startRecord) {
+    view.addPoseCloud([{ world_from_bar: startRecord.world_from_bar,
+      colour: GHOST_COLOURS.start, id: null }], barShape);
+  }
+  view.addPoseCloud([{ world_from_bar: goal.world_from_bar,
+    colour: GHOST_COLOURS.goal, id: null }], barShape);
+  const ghostLegend = element("div", { class: "legend" }, [
+    element("span", { class: "legend-item" },
+      [swatch(GHOST_COLOURS.start), "start: bar and its tree"]),
+    element("span", { class: "legend-item" },
+      [swatch(GHOST_COLOURS.goal), "goal: bar and its tree"]),
+  ]);
+  setStageControls(ghostLegend);
 
   // The seeds, side by side.
   const seedPanel = panel(
@@ -697,7 +856,11 @@ async function viewStart(barId, goalIndex, startIndex) {
     [["seed", "coarse", "fine", "iterations", "trees", "waypoints"], ...seedRows]));
 
   // Time per seed, coarse against fine.
-  const timePanel = panel("Time per seed", null);
+  const timePanel = panel(
+    "Motion planning time per seed",
+    "Time inside the planner for each seed: c is the coarse pass, f the fine "
+    + "pass (run only when the coarse one succeeds). None of the setup time "
+    + "spent finding this goal and start is included.");
   const timeChart = element("div");
   timePanel.appendChild(timeChart);
   main.appendChild(timePanel);
@@ -722,12 +885,15 @@ async function viewStart(barId, goalIndex, startIndex) {
   });
 
   // Where each seed's time went.
-  const breakdownPanel = panel("Where each seed's time went", null);
+  const breakdownPanel = panel(
+    "Where each seed's motion planning time went",
+    "Share of time inside the planner, by what it was doing. 'IK while "
+    + "growing the tree' is the arm IK at every search step, not goal IK.");
   const breakdownChart = element("div");
   breakdownPanel.appendChild(breakdownChart);
   main.appendChild(breakdownPanel);
   stackedBarChart(breakdownChart, {
-    keys: BREAKDOWN_ORDER, yLabel: "share of time",
+    keys: BREAKDOWN_ORDER, labels: BREAKDOWN_LABELS, yLabel: "share of time",
     data: start.seeds.flatMap((seed) =>
       Object.entries(seed.passes).map(([name, record]) => ({
         label: `${seed.seed}${name[0]}`, values: record.breakdown || {},
@@ -752,9 +918,122 @@ async function viewStart(barId, goalIndex, startIndex) {
     main.appendChild(profilePanel);
   }
 
+  // Everything under the robot: the tree pager, the motion scrubber and the
+  // legend, each present only when there is something for it to show.
+  const stageParts = { trees: null, playback: null };
+  const refreshStage = () => setStageControls(
+    ...[stageParts.trees, stageParts.playback, ghostLegend].filter(Boolean));
+
+  // The search trees, seed by seed. These are what explain a failure: where
+  // each tree got to, and where it stopped.
+  const withTrees = start.seeds.filter((seed) =>
+    seed.trees && seed.trees.passes && Object.keys(seed.trees.passes).length);
+  const treePanel = panel(
+    "Search trees",
+    "The two trees the search grew: one from the start bar, one from the goal "
+    + "bar, drawn as the path of the bar's midpoint. A solved run is where "
+    + "they met. Page through the seeds under the robot.");
+  main.appendChild(treePanel);
+
+  if (!withTrees.length) {
+    const command = `python scripts/benchmark_cdfm.py replay --name ${runInfo.run_name} `
+      + `--bar ${barId} --goal ${goalIndex} --start ${startIndex}`;
+    treePanel.append(
+      element("p", {}, "Not saved for this start. The batch kept only the size "
+        + "of each tree. To see them, re-plan this start with its trees saved "
+        + "(same seeds and settings, a few minutes), then reload:"),
+      element("pre", { class: "command" }, command));
+  } else {
+    const treeInfo = element("p", { class: "tree-info" }, "");
+    treePanel.appendChild(treeInfo);
+    let position = 0;
+    let passName = "coarse";
+
+    const previous = element("button", { type: "button" }, "◀ previous seed");
+    const next = element("button", { type: "button" }, "next seed ▶");
+    const seedLabel = element("span", { class: "muted" }, "");
+    const passButtons = ["coarse", "fine"].map((name) => {
+      const button = element("button", { type: "button" }, `${name} pass`);
+      button.addEventListener("click", () => { passName = name; drawTree(); });
+      return button;
+    });
+    const stageInfo = element("div", { class: "muted tree-stage-info" }, "");
+    stageParts.trees = element("div", {}, [
+      element("div", { class: "controls" }, [
+        element("div", { class: "toggle" }, [previous, next]),
+        seedLabel,
+        element("div", { class: "toggle", role: "group",
+          "aria-label": "which pass" }, passButtons),
+      ]),
+      stageInfo,
+    ]);
+
+    const outcome = (success, wall) =>
+      `${success ? "solved" : "failed"}${wall != null ? ` in ${wall.toFixed(0)} s` : ""}`;
+
+    const drawTree = async () => {
+      const seed = withTrees[position];
+      const passes = seed.trees.passes;
+      if (!passes[passName]) passName = Object.keys(passes)[0];
+      for (const button of passButtons) {
+        const name = button.textContent.split(" ")[0];
+        button.setAttribute("aria-pressed", String(name === passName));
+        button.disabled = !passes[name];
+      }
+      previous.disabled = position === 0;
+      next.disabled = position === withTrees.length - 1;
+      seedLabel.textContent = `seed ${seed.seed} (${position + 1} of ${withTrees.length})`;
+
+      const pass = passes[passName];
+      const replay = seed.trees.source === "replay";
+      const original = seed.passes && seed.passes[passName];
+      const summary = `${passName} pass ${outcome(pass.success, pass.wall_s)}, `
+        + `start tree ${pass.tree_a_nodes ?? "?"} nodes, `
+        + `goal tree ${pass.tree_b_nodes ?? "?"} nodes`;
+      stageInfo.textContent = summary + (replay ? " (replayed)" : "");
+
+      // Where the search spent its extension attempts, largest first.
+      const reasons = Object.entries(pass.extend_stop_reasons || {})
+        .sort((a, b) => b[1] - a[1]);
+      const total = reasons.reduce((sum, [, n]) => sum + n, 0) || 1;
+      treeInfo.textContent = `Seed ${seed.seed}: ${summary}. `
+        + (replay
+          ? `This is a replay: same seed and settings, but the search stops on a `
+            + `wall-clock limit, so it can end differently from the original, which `
+            + `${original ? outcome(original.success, original.wall_s) : "did not run this pass"}. `
+          : "")
+        + (reasons.length
+          ? `Its extensions stopped because of: ${reasons.slice(0, 3)
+            .map(([reason, n]) => `${reason.replace(/_/g, " ")} ${(n / total * 100).toFixed(0)}%`)
+            .join(", ")}.`
+          : "");
+
+      if (pass.tree_error) {
+        view.clearTrees();
+        stageInfo.textContent = `${summary}. Trees not drawn: ${pass.tree_error}`;
+        return;
+      }
+      const tree = await loadJson(pass.tree);
+      if (tree.error) {
+        view.clearTrees();
+        stageInfo.textContent = `${summary}. Trees not drawn: ${tree.error}`;
+        return;
+      }
+      view.setTrees([
+        { tree: tree.forward, colour: GHOST_COLOURS.start },
+        { tree: tree.backward, colour: GHOST_COLOURS.goal },
+      ]);
+    };
+
+    previous.addEventListener("click", () => { position -= 1; drawTree(); });
+    next.addEventListener("click", () => { position += 1; drawTree(); });
+    await drawTree();
+  }
+  refreshStage();
+
   // The motions themselves, scrubbable.
   const solved = start.seeds.filter((seed) =>
-    Object.values(seed.passes).some((record) => record.trajectory));
+    Object.values(seed.passes || {}).some((record) => record.trajectory));
   if (!solved.length) {
     main.appendChild(panel("Motion", "No seed solved this one, so there is "
       + "nothing to play back."));
@@ -776,8 +1055,8 @@ async function viewStart(barId, goalIndex, startIndex) {
   const jointChart = element("div");
   playbackPanel.append(jointChart);
   main.appendChild(playbackPanel);
-  setStageControls(element("div", { class: "controls" },
-    [chooser, slider, readout]));
+  stageParts.playback = element("div", { class: "controls" }, [chooser, slider, readout]);
+  refreshStage();
 
   let path = null;
   const drawJoints = (index) => {
@@ -806,10 +1085,15 @@ async function viewStart(barId, goalIndex, startIndex) {
     path = await loadTrajectory(chooser.value);
     slider.max = String(path.length - 1);
     slider.value = "0";
+    const [mx, my, mz] = problem.bar_from_midpoint;
     const points = path.map((conf) => {
       view.pose(conf);
-      const matrix = view.carriedBar.matrix;
-      return [matrix.elements[12], matrix.elements[13], matrix.elements[14]];
+      const e = view.carriedBar.matrix.elements;  // column-major 4x4
+      return [
+        e[0] * mx + e[4] * my + e[8] * mz + e[12],
+        e[1] * mx + e[5] * my + e[9] * mz + e[13],
+        e[2] * mx + e[6] * my + e[10] * mz + e[14],
+      ];
     });
     view.setTrajectoryLine(points);
     show(0);

@@ -9,6 +9,7 @@ Run the stages in order; each reads what the last one wrote::
     run            plan every start-to-goal transfer, several seeds each
     summarize      aggregate the runs into tables
     export-dashboard  write the files the web dashboard reads
+    replay         re-plan one start with its search trees saved
     measure        time the inner loops, to size a batch before committing to it
 
 Every stage takes ``--root``, the folder all benchmark data lives in. Set
@@ -294,6 +295,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         "profile_dir": profile_dir,
         "enable_profiling": bool(args.profile),
         "store_paths": not args.no_paths,
+        "tree_dir": os.path.join(run_dir, "trees") if args.store_trees else None,
         "pass_overrides": pass_overrides,
     }
     write_run_config(run_dir, args, index, config, n_tasks=len(tasks))
@@ -381,6 +383,69 @@ def cmd_export_dashboard(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_replay(args: argparse.Namespace) -> int:
+    """Re-plan chosen starts with their search trees saved.
+
+    A batch run without ``--store-trees`` keeps only the size of each search
+    tree, which is not enough to see why a search failed. This re-plans the
+    starts in question with the batch's own seeds and settings, saves both
+    trees for every pass, and attaches them to the batch's dashboard.
+
+    A replay is not a byte-for-byte rerun. The search stops on a wall-clock
+    limit, so the same seed can stop at a different point, and occasionally end
+    the other way. Each replay records its own outcome, and the dashboard shows
+    it beside the original's.
+    """
+    from husky_assembly_tamp.benchmark.cdfm import RunTask
+    from husky_assembly_tamp.benchmark.export_dashboard import attach_trees
+    from husky_assembly_tamp.benchmark.library import load_bar_library
+    from husky_assembly_tamp.benchmark.runner import BatchRunner, pending_tasks
+
+    root = resolve_root(args.root)
+    run_dir = os.path.join(root, "runs", args.name)
+    config_path = os.path.join(run_dir, "config.json")
+    if not os.path.isfile(config_path):
+        raise SystemExit(f"No batch called {args.name!r} at {run_dir}.")
+    with open(config_path, "r", encoding="utf-8") as handle:
+        run_config = json.load(handle)
+
+    entry = load_bar_library(root, run_config["library"], args.bar)
+    goal = entry["goals"][args.goal]
+    start = next((s for s in goal["starts"] if s["start_index"] == args.start), None)
+    if start is None:
+        raise SystemExit(
+            f"{args.bar} goal {args.goal} has no workable start {args.start}.")
+    seeds = (run_config.get("seeds") or list(range(10))) if args.seeds == "all" else [
+        int(part) for part in args.seeds.split(",") if part.strip()]
+
+    tasks = [RunTask(bar_id=args.bar, goal_index=args.goal,
+                     start_index=args.start, seed=seed,
+                     goal_conf=goal["primary_conf"], start_conf=start["conf"])
+             for seed in seeds]
+    replay_dir = os.path.join(run_dir, "replays")
+    runs_dir = os.path.join(replay_dir, "runs")
+    todo = tasks if args.force else pending_tasks(tasks, runs_dir)
+    print(f"[replay] {args.bar} goal {args.goal} start {args.start}: "
+          f"{len(tasks)} seed(s), {len(todo)} to plan", flush=True)
+
+    if todo:
+        config = {
+            "root": root,
+            "source_key": run_config["source_key"],
+            "profile_dir": None,
+            "enable_profiling": False,
+            "store_paths": True,
+            "tree_dir": os.path.join(replay_dir, "trees"),
+            # The batch's own settings, so the replay asks the same question.
+            "pass_overrides": run_config.get("pass_overrides") or {},
+        }
+        BatchRunner(todo, runs_dir=runs_dir, config=config,
+                    n_workers=min(args.workers, len(todo))).run()
+
+    attach_trees(root, args.name)
+    return 0
+
+
 def cmd_measure(args: argparse.Namespace) -> int:
     """Time the inner loops so a batch can be sized before it is started."""
     from husky_assembly_tamp.benchmark.measure import measure_costs
@@ -464,6 +529,9 @@ def build_parser() -> argparse.ArgumentParser:
                      help="skip profiling (a few percent faster, no flame graphs)")
     run.add_argument("--no-paths", action="store_true",
                      help="do not store planned trajectories (much smaller results)")
+    run.add_argument("--store-trees", action="store_true",
+                     help="save both search trees of every pass, solved or not, "
+                          "for the dashboard to draw (tens of KB per pass)")
     run.set_defaults(func=cmd_run, profile=True)
 
     summarize = subparsers.add_parser("summarize", help="aggregate a batch")
@@ -477,6 +545,20 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--name", required=True)
     export.add_argument("--library", default=DEFAULT_LIBRARY_NAME)
     export.set_defaults(func=cmd_export_dashboard)
+
+    replay = subparsers.add_parser(
+        "replay", help="re-plan one start with its search trees saved")
+    add_common_arguments(replay)
+    replay.add_argument("--name", required=True, help="the batch to replay from")
+    replay.add_argument("--bar", required=True)
+    replay.add_argument("--goal", type=int, required=True)
+    replay.add_argument("--start", type=int, required=True)
+    replay.add_argument("--seeds", default="all",
+                        help="comma-separated seeds, or all of the batch's (default)")
+    replay.add_argument("--workers", type=int, default=10)
+    replay.add_argument("--force", action="store_true",
+                        help="re-plan seeds that already have a replay")
+    replay.set_defaults(func=cmd_replay)
 
     measure = subparsers.add_parser(
         "measure", help="time the inner loops to size a batch")

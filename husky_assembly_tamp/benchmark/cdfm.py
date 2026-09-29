@@ -26,6 +26,7 @@ solves a looser problem.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import random
@@ -33,12 +34,14 @@ import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
+from unittest.mock import patch
 
 import numpy as np
 
 from husky_assembly_tamp.benchmark.profiling import profiled
 from husky_assembly_tamp.benchmark.scene import SceneCtx, pose_to_lists, state_with_conf12
 from husky_assembly_tamp.motion_planner.api import plan_constrained_dual_arm
+from husky_assembly_tamp.motion_planner.dual_arm_task_space_rrt import core as planner_core
 
 
 # * The two passes. `max_iterations` is set absurdly high on purpose: we want
@@ -129,6 +132,84 @@ class TreeSizeCapture(logging.Handler):
             self.tree_b = int(match.group(2))
 
 
+def rotate(quaternion: Sequence[float], vector: Sequence[float]) -> np.ndarray:
+    """Rotate a vector by an ``(x, y, z, w)`` quaternion.
+
+    Args:
+        quaternion (Sequence[float]): the rotation.
+        vector (Sequence[float]): the vector to rotate.
+
+    Returns:
+        np.ndarray: the rotated vector.
+    """
+    x, y, z, w = (float(v) for v in quaternion)
+    u = np.array([x, y, z])
+    v = np.asarray(vector, dtype=float)
+    return v + 2.0 * np.cross(u, np.cross(u, v) + w * v)
+
+
+def split_trees(tree: Dict[str, Any], quaternions: Optional[List[List[float]]],
+                n_forward: Optional[int], n_backward: Optional[int],
+                bar_from_midpoint: Sequence[float]) -> Dict[str, Any]:
+    """Separate the planner's merged tree export into its two trees.
+
+    The bidirectional search grows one tree from the start and one from the
+    goal, but hands them back as a single list with the start tree first. The
+    only record of where one ends and the other begins is the log line that
+    reports both sizes, so the split is checked against it and refused rather
+    than guessed when the two disagree.
+
+    Each node is the bar's pose at that point of the search. The bar frame sits
+    at one end of the bar, so the midpoint is worked out as well: it is what
+    the dashboard draws, and it is where the bar actually is.
+
+    Args:
+        tree (Dict[str, Any]): the planner's ``{"points", "edges"}`` export.
+        quaternions (Optional[List[List[float]]]): each node's orientation, in
+            the same order, captured alongside the export.
+        n_forward (Optional[int]): nodes in the start tree, from the log.
+        n_backward (Optional[int]): nodes in the goal tree, from the log.
+        bar_from_midpoint (Sequence[float]): the midpoint in bar coordinates.
+
+    Returns:
+        Dict[str, Any]: ``forward`` and ``backward``, each with ``points``
+        (bar frame positions), ``midpoints``, ``quaternions`` and ``edges``
+        indexed within that tree -- or ``error`` saying why it could not be
+        split.
+    """
+    points = tree.get("points") or []
+    edges = tree.get("edges") or []
+    if n_forward is None or n_backward is None:
+        return {"error": "the planner did not log its tree sizes"}
+    if n_forward + n_backward != len(points):
+        return {"error": (f"the log reports {n_forward} + {n_backward} nodes but "
+                          f"the export has {len(points)}; not splitting")}
+    if quaternions is None or len(quaternions) != len(points):
+        return {"error": "node orientations were not captured for every node"}
+
+    def part(lo: int, hi: int) -> Dict[str, Any]:
+        """One tree: nodes lo..hi-1 and the edges between them."""
+        local = [[a - lo, b - lo] for a, b in edges if lo <= a < hi and lo <= b < hi]
+        return {
+            "points": [[round(v, 5) for v in points[i]] for i in range(lo, hi)],
+            "quaternions": [[round(v, 6) for v in quaternions[i]] for i in range(lo, hi)],
+            "midpoints": [[round(float(v), 5) for v in
+                           np.asarray(points[i]) + rotate(quaternions[i], bar_from_midpoint)]
+                          for i in range(lo, hi)],
+            "edges": local,
+        }
+
+    forward = part(0, n_forward)
+    backward = part(n_forward, len(points))
+    crossing = len(edges) - len(forward["edges"]) - len(backward["edges"])
+    result = {"forward": forward, "backward": backward}
+    if crossing:
+        # Each edge joins a node to its parent in the same tree, so this should
+        # never happen; if it does, the split is not what it claims to be.
+        result["error"] = f"{crossing} edge(s) join the two trees; split is suspect"
+    return result
+
+
 def path_lengths(path: Sequence[Sequence[float]]) -> Dict[str, float]:
     """Measure how much motion a path contains.
 
@@ -154,6 +235,7 @@ def plan_one_pass(scene: SceneCtx, task: RunTask, pass_name: str, *,
                   profile_path: Optional[str] = None,
                   enable_profiling: bool = True,
                   store_path: bool = True,
+                  tree_path: Optional[str] = None,
                   overrides: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
     """Run the planner once, at one resolution, and record the result.
 
@@ -164,6 +246,8 @@ def plan_one_pass(scene: SceneCtx, task: RunTask, pass_name: str, *,
         profile_path (Optional[str]): where to write the flame graph.
         enable_profiling (bool): profile this pass at all.
         store_path (bool): keep the planned configurations in the result.
+        tree_path (Optional[str]): when given, save the search's two trees
+            there, whether it solved the problem or not.
         overrides (Optional[Dict[str, float]]): replace individual pass
             settings, e.g. a shorter ``max_time`` for a smoke test.
 
@@ -189,9 +273,26 @@ def plan_one_pass(scene: SceneCtx, task: RunTask, pass_name: str, *,
     planner_logger = logging.getLogger(PLANNER_LOGGER_NAME)
     planner_logger.addHandler(capture)
 
+    # The planner's tree export keeps positions only. Wrapping it -- a pure
+    # pass-through that also notes each node's orientation -- captures the
+    # rest without touching the planner. Only when trees were asked for.
+    captured: Dict[str, Any] = {}
+    original_export_tree = planner_core.export_tree
+
+    def export_tree_with_orientations(nodes):
+        """Call the planner's own export, and remember each node's rotation."""
+        captured["quaternions"] = [
+            [float(v) for v in node.config[1]] for node in nodes]
+        return original_export_tree(nodes)
+
+    tree_patch = (patch.object(planner_core, "export_tree", export_tree_with_orientations)
+                  if tree_path else None)
+
     record: Dict[str, Any] = {"pass": pass_name, "settings": settings}
     t0 = time.perf_counter()
     try:
+        if tree_patch is not None:
+            tree_patch.start()
         with profiled(profile_path, enabled=enable_profiling) as profile:
             path, info = plan_constrained_dual_arm(
                 scene.planner,
@@ -216,6 +317,8 @@ def plan_one_pass(scene: SceneCtx, task: RunTask, pass_name: str, *,
                 derive_start=False,
             )
     finally:
+        if tree_patch is not None:
+            tree_patch.stop()
         planner_logger.removeHandler(capture)
     record["wall_s"] = time.perf_counter() - t0
 
@@ -238,6 +341,22 @@ def plan_one_pass(scene: SceneCtx, task: RunTask, pass_name: str, *,
     record["tree_points"] = len(tree.get("points") or [])
     record["tree_edges"] = len(tree.get("edges") or [])
 
+    if tree_path:
+        trees = split_trees(tree, captured.get("quaternions"),
+                            capture.tree_a, capture.tree_b,
+                            scene.problem.bar_from_midpoint)
+        trees.update({
+            "run_id": task.run_id, "pass": pass_name, "success": path is not None,
+            "start_pose": pose_to_lists(scene.bar_pose_at(task.start_conf)),
+            "goal_pose": pose_to_lists(scene.bar_pose_at(task.goal_conf)),
+        })
+        os.makedirs(os.path.dirname(tree_path), exist_ok=True)
+        with open(tree_path, "w", encoding="utf-8") as handle:
+            json.dump(trees, handle, separators=(",", ":"))
+        record["tree_file"] = os.path.basename(tree_path)
+        if "error" in trees:
+            record["tree_error"] = trees["error"]
+
     if path is not None:
         record["n_waypoints"] = len(path)
         record["path_lengths"] = path_lengths(path)
@@ -253,6 +372,7 @@ def run_one(scene: SceneCtx, task: RunTask, *,
             profile_dir: Optional[str] = None,
             enable_profiling: bool = True,
             store_paths: bool = True,
+            tree_dir: Optional[str] = None,
             pass_overrides: Optional[Dict[str, Dict[str, float]]] = None) -> Dict[str, Any]:
     """Plan one start-to-goal transfer, coarse pass then fine.
 
@@ -262,6 +382,8 @@ def run_one(scene: SceneCtx, task: RunTask, *,
         profile_dir (Optional[str]): folder for the flame graphs.
         enable_profiling (bool): profile the passes at all.
         store_paths (bool): keep the planned configurations in the result.
+        tree_dir (Optional[str]): folder to save each pass's search trees in;
+            not saved when None.
         pass_overrides (Optional[Dict[str, Dict[str, float]]]): per-pass
             setting overrides, e.g. ``{"fine": {"max_time": 10}}``.
 
@@ -291,11 +413,16 @@ def run_one(scene: SceneCtx, task: RunTask, *,
             profile_path = os.path.join(
                 profile_dir, f"{task.bar_id}_{task.file_stem}_{pass_name}.speedscope.json",
             )
+        tree_path = None
+        if tree_dir:
+            tree_path = os.path.join(
+                tree_dir, f"{task.bar_id}_{task.file_stem}_{pass_name}.tree.json")
         record = plan_one_pass(
             scene, task, pass_name,
             profile_path=profile_path,
             enable_profiling=enable_profiling,
             store_path=store_paths,
+            tree_path=tree_path,
             overrides=overrides.get(pass_name),
         )
         result["passes"][pass_name] = record

@@ -104,8 +104,11 @@ def export_run(root: str, run_name: str, *, library_name: str,
     bytes_written = 0
 
     bars_index = []
+    setup_by_bar: Dict[str, Dict[str, float]] = {}
     for bar_id in bar_ids:
         entry = load_bar_library(root, library_name, bar_id)
+        setup = setup_timing(entry)
+        setup_by_bar[bar_id] = setup["per_goal_mean_s"]
         problem = entry["problem"]
         goals_in_run = sorted({run["goal_index"] for run in by_bar[bar_id]})
 
@@ -124,6 +127,8 @@ def export_run(root: str, run_name: str, *, library_name: str,
                 "n_runs": stats["n_runs"],
                 "success_rate": stats["success_rate"],
                 "median_wall_s": stats["median_wall_s"],
+                "planning_median_s": planning_median(stats),
+                "setup_s": setup["per_goal"][goal_index],
             })
 
         write_json(os.path.join(out_dir, "bars", f"{bar_id}.json"), {
@@ -160,6 +165,7 @@ def export_run(root: str, run_name: str, *, library_name: str,
                         by_start[(bar_id, goal_index, start["start_index"])])
                     row["success_rate"] = stats["success_rate"]
                     row["median_wall_s"] = stats["median_wall_s"]
+                    row["planning_median_s"] = planning_median(stats)
                     row["conf"] = start["conf"]
                 start_rows.append(row)
 
@@ -174,6 +180,7 @@ def export_run(root: str, run_name: str, *, library_name: str,
                     "sweep_counts": goal["sweep_counts"],
                     "difficulty_counts": goal.get("difficulty_counts", {}),
                     "production_derivation": goal.get("production_derivation", {}),
+                    "setup_s": setup["per_goal"][goal_index],
                     "candidates": sweep_detail.get(str(goal_index), []),
                     "starts": start_rows,
                 },
@@ -233,6 +240,19 @@ def export_run(root: str, run_name: str, *, library_name: str,
 
     config = summary.get("config", {})
     source_key = config.get("source_key", "")
+    # Setup time -- finding goals and surveying starts, before any motion
+    # planning -- belongs to the library, not to the runs, so summarize never
+    # sees it. It is attached here, beside the planning numbers, so the page
+    # can show both and keep them apart.
+    for row in summary["per_bar"]:
+        row["setup_s_per_goal"] = setup_by_bar.get(row["bar_id"], {})
+    n_goals = {bar["bar_id"]: bar["n_goals"] for bar in bars_index}
+    total_goals = sum(n_goals.values()) or 1
+    summary["totals"]["setup_s_per_goal"] = {
+        stage: sum(setup_by_bar[bar_id].get(stage, 0.0) * n_goals[bar_id]
+                   for bar_id in setup_by_bar) / total_goals
+        for stage in SETUP_STAGES
+    }
     write_json(os.path.join(out_dir, "summary.json"), summary)
     write_json(os.path.join(out_dir, "run.json"), {
         "schema_version": DASHBOARD_SCHEMA_VERSION,
@@ -250,12 +270,85 @@ def export_run(root: str, run_name: str, *, library_name: str,
     copy_static_site(out_dir)
 
     _update_catalog(root, run_name, summary)
+    attach_trees(root, run_name, verbose=verbose)
 
     if verbose:
         print(f"[export] {len(bar_ids)} bar(s), {n_trajectories} trajectory file(s), "
               f"{bytes_written / 1e6:.1f} MB of motion -> {out_dir}")
     return {"n_bars": len(bar_ids), "n_trajectories": n_trajectories,
             "trajectory_bytes": bytes_written, "out_dir": out_dir}
+
+
+def planning_median(stats: Dict[str, Any]) -> Optional[float]:
+    """Median motion-planning time of the solved runs in a group.
+
+    The median over all runs is the wrong number to show: most runs fail the
+    coarse pass at its time limit, so it just reports that limit (about 36 s)
+    for every goal. The solved runs' fine pass is the time it takes the planner
+    to actually find a motion.
+
+    Args:
+        stats (Dict[str, Any]): a group summary from ``summarize_group``.
+
+    Returns:
+        Optional[float]: seconds, or None when nothing in the group was solved.
+    """
+    if not stats.get("n_success"):
+        return None
+    return float(stats["fine_wall_s"]["p50"])
+
+
+# The stages of work done before motion planning, in the order they happen.
+SETUP_STAGES = ("goal_ik", "start_survey", "straight_line_probes",
+                "planner_start_derivation")
+
+
+def setup_timing(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Split one bar's library-building time into its stages.
+
+    None of this is motion planning. It is the work of posing the benchmark's
+    questions: finding reachable goals, surveying the carry poses a transfer
+    could start from, probing whether a straight line joins each start to its
+    goal, and running the planner's own start derivation for comparison. The
+    dashboard reports it separately from planning time so the two are never
+    mistaken for each other.
+
+    Args:
+        entry (Dict[str, Any]): one bar's library entry.
+
+    Returns:
+        Dict[str, Any]: ``per_goal`` -- seconds per stage for each goal index,
+        and ``per_goal_mean_s`` -- the mean of each stage over the bar's goals.
+    """
+    goals = entry["goals"]
+    per_goal: Dict[int, Dict[str, float]] = {}
+    for goal in goals:
+        per_goal[goal["goal_index"]] = {
+            "start_survey": float(goal.get("sweep_wall_s", 0.0)),
+            "straight_line_probes": float(sum(
+                (start.get("direct_path") or {}).get("wall_s", 0.0)
+                for start in goal.get("starts", []))),
+            "planner_start_derivation": float(
+                (goal.get("production_derivation") or {}).get("wall_s", 0.0)),
+        }
+
+    # Goal IK is recorded for the whole bar at once. Libraries built before it
+    # was stored directly only have the bar's total, so there it is what is
+    # left over once every per-goal stage is taken out.
+    if "goal_sampling_wall_s" in entry:
+        goal_ik_total = float(entry["goal_sampling_wall_s"])
+    else:
+        accounted = sum(sum(stages.values()) for stages in per_goal.values())
+        goal_ik_total = max(0.0, float(entry.get("wall_s", 0.0)) - accounted)
+    goal_ik_each = goal_ik_total / max(1, len(goals))
+    for stages in per_goal.values():
+        stages["goal_ik"] = goal_ik_each
+        stages["total"] = sum(stages[stage] for stage in SETUP_STAGES)
+
+    n = max(1, len(per_goal))
+    mean = {stage: sum(stages[stage] for stages in per_goal.values()) / n
+            for stage in SETUP_STAGES + ("total",)}
+    return {"per_goal": per_goal, "per_goal_mean_s": mean}
 
 
 def copy_static_site(out_dir: str) -> None:
@@ -363,3 +456,111 @@ def _update_catalog(root: str, run_name: str, summary: Dict[str, Any]) -> None:
     catalog["runs"].append(entry)
     catalog["runs"].sort(key=lambda row: row.get("created") or 0, reverse=True)
     write_json(path, catalog)
+
+
+def attach_trees(root: str, run_name: str, *, verbose: bool = True) -> int:
+    """Put any saved search trees where the dashboard's start pages find them.
+
+    Trees come from two places. A batch run with ``--store-trees`` saves them
+    for every run. A ``replay`` re-plans chosen starts afterwards, with trees,
+    because the original batch did not keep them. A replay uses the same seed
+    and settings, but the search stops on a wall-clock limit, so it can stop at
+    a different point and even end differently; its own outcome is recorded
+    beside its trees, and the page shows both rather than pretending the replay
+    is the original.
+
+    Args:
+        root (str): the benchmark data root.
+        run_name (str): which batch.
+        verbose (bool): print what was attached.
+
+    Returns:
+        int: how many tree files were attached.
+    """
+    run_dir = os.path.join(root, "runs", run_name)
+    out_dir = os.path.join(run_dir, "dashboard")
+    tree_out = os.path.join(out_dir, "trees")
+
+    # (bar, goal, start, seed) -> {"source", "record", "tree_dir"}
+    found: Dict[Any, Dict[str, Any]] = {}
+    sources = [
+        ("original", os.path.join(run_dir, "runs"), os.path.join(run_dir, "trees")),
+        ("replay", os.path.join(run_dir, "replays", "runs"),
+         os.path.join(run_dir, "replays", "trees")),
+    ]
+    for source, runs_dir, tree_dir in sources:
+        if not os.path.isdir(runs_dir):
+            continue
+        for bar_folder in os.listdir(runs_dir):
+            folder = os.path.join(runs_dir, bar_folder)
+            if not os.path.isdir(folder):
+                continue
+            for name in os.listdir(folder):
+                if not name.endswith(".json"):
+                    continue
+                with open(os.path.join(folder, name), "r", encoding="utf-8") as handle:
+                    record = json.load(handle)
+                if not any(p.get("tree_file") for p in (record.get("passes") or {}).values()):
+                    continue
+                key = (record["bar_id"], record["goal_index"],
+                       record["start_index"], record["seed"])
+                # Trees saved by the original run win over a replay's.
+                if key in found and found[key]["source"] == "original":
+                    continue
+                found[key] = {"source": source, "record": record, "tree_dir": tree_dir}
+
+    by_start: Dict[Any, List[Dict[str, Any]]] = {}
+    for (bar_id, goal_index, start_index, _seed), item in found.items():
+        by_start.setdefault((bar_id, goal_index, start_index), []).append(item)
+
+    attached = 0
+    for (bar_id, goal_index, start_index), items in by_start.items():
+        start_path = os.path.join(out_dir, "bars", bar_id, f"goal{goal_index:03d}",
+                                  f"start{start_index:04d}.json")
+        if not os.path.isfile(start_path):
+            continue  # a start this batch never planned; nothing to attach to
+        with open(start_path, "r", encoding="utf-8") as handle:
+            start_file = json.load(handle)
+        seeds = {row["seed"]: row for row in start_file.get("seeds", [])}
+
+        for item in items:
+            record = item["record"]
+            trees = {}
+            for pass_name, pass_record in (record.get("passes") or {}).items():
+                tree_file = pass_record.get("tree_file")
+                if not tree_file:
+                    continue
+                src = os.path.join(item["tree_dir"], tree_file)
+                if not os.path.isfile(src):
+                    continue
+                os.makedirs(tree_out, exist_ok=True)
+                shutil.copy2(src, os.path.join(tree_out, tree_file))
+                trees[pass_name] = {
+                    "tree": f"trees/{tree_file}",
+                    "success": pass_record.get("success"),
+                    "wall_s": pass_record.get("wall_s"),
+                    "iterations": pass_record.get("iterations"),
+                    "tree_a_nodes": pass_record.get("tree_a_nodes"),
+                    "tree_b_nodes": pass_record.get("tree_b_nodes"),
+                    "extend_stop_reasons": pass_record.get("extend_stop_reasons"),
+                    "tree_error": pass_record.get("tree_error"),
+                }
+                attached += 1
+            if not trees:
+                continue
+            row = seeds.setdefault(record["seed"], {"seed": record["seed"], "passes": {}})
+            row["trees"] = {
+                "source": item["source"],
+                "success": record.get("success"),
+                "failed_pass": record.get("failed_pass"),
+                "passes": trees,
+            }
+
+        start_file["seeds"] = sorted(seeds.values(), key=lambda row: row["seed"])
+        with open(start_path, "w", encoding="utf-8") as handle:
+            json.dump(start_file, handle)
+
+    if verbose:
+        print(f"[export] {attached} search tree file(s) attached across "
+              f"{len(by_start)} start(s)")
+    return attached

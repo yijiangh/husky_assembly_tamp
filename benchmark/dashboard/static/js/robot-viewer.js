@@ -74,7 +74,10 @@ export class RobotViewer {
     this.renderer.domElement.addEventListener("click", (event) => this.handleClick(event));
 
     this.resize();
-    window.addEventListener("resize", () => this.resize());
+    // Follow the box, not just the window. In the split layout the viewer's
+    // height changes whenever the controls under it change, and a canvas
+    // sized once would then be squashed or cropped.
+    new ResizeObserver(() => this.resize()).observe(container);
     this.animate();
   }
 

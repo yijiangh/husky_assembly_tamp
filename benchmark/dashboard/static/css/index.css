@@ -11,7 +11,11 @@
 
 * { box-sizing: border-box; }
 
+html, body { height: 100%; }
+
 body {
+  display: flex;
+  flex-direction: column;
   margin: 0;
   font: 14px/1.5 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   color: var(--text);
@@ -19,6 +23,7 @@ body {
 }
 
 .top {
+  flex: none;
   padding: 18px 24px 10px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
@@ -31,15 +36,37 @@ body {
 .breadcrumb a:hover { text-decoration: underline; }
 .breadcrumb .sep { margin: 0 6px; color: var(--line); }
 
-/* The 3D view follows the page down, so the scrubber under it always has the
-   robot in sight. */
+/* Everything under the header. It fills the window's remaining height and
+   scrolls itself, so the header never scrolls away. */
+.layout {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Two panes side by side: the 3D view on the left, exactly as tall as the
+   space under the header, and the charts on the right scrolling on their own.
+   A pane that is never taller than the window cannot hide its scrubber off the
+   bottom. Only while there is a robot to show -- the overview has none and
+   keeps the full width. */
+.layout.split {
+  display: grid;
+  grid-template-columns: minmax(420px, 44%) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+}
+.layout.split > main {
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .stage {
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  padding: 12px 24px 8px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 12px 8px 12px 24px;
   background: var(--page);
-  border-bottom: 1px solid var(--line);
+  border-right: 1px solid var(--line);
 }
 .stage[hidden] { display: none; }
 
@@ -47,13 +74,47 @@ body {
 .stage-controls[hidden] { display: none; }
 
 .viewer {
-  height: 340px;
+  /* Takes whatever height the controls and caption leave over. */
+  flex: 1;
+  min-height: 0;
   border: 1px solid var(--line);
   border-radius: 6px;
   overflow: hidden;
   background: #eef0f1;
 }
-.viewer canvas { display: block; }
+
+/* A narrow window has no room beside anything: stack instead, with the 3D view
+   still pinned at the top. */
+@media (max-width: 1000px) {
+  html, body { height: auto; }
+  body { display: block; }
+  .layout, .layout.split { display: block; overflow: visible; }
+  .layout.split > main { overflow: visible; }
+  .stage {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    padding: 12px 16px 8px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .viewer { flex: none; height: 300px; }
+}
+
+/* Two-way switch: the pressed button is the mode on screen. */
+.toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+.toggle button {
+  font: inherit; font-size: 12px; padding: 4px 10px;
+  border: 0; background: var(--panel); color: var(--muted); cursor: pointer;
+}
+.toggle button + button { border-left: 1px solid var(--line); }
+.toggle button[aria-pressed="true"] { background: var(--accent); color: white; }
+.stage-controls .controls { flex-wrap: wrap; }
+.stage-controls .legend { margin-top: 0; }
+/* The renderer draws at the screen's pixel density but leaves the display
+   size to us; without this a high-DPI canvas shows at twice its box and
+   the robot is cropped off-centre. */
+.viewer canvas { display: block; width: 100%; height: 100%; }
 
 .caption { margin: 6px 0 0; font-size: 12px; }
 

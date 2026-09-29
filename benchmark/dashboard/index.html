@@ -33,18 +33,20 @@
 </header>
 
 <!--
-  The 3D view sticks to the top of the window, and anything that drives it -- a
-  motion scrubber above all -- goes directly underneath. Putting the scrubber
-  down among the charts meant dragging it while the robot was scrolled off
-  screen, which is useless: the whole point is watching the arm move.
+  The 3D view sits beside the charts, not above them, and stays pinned while
+  the charts scroll. Anything that drives it -- a motion scrubber above all --
+  goes directly underneath it, so the robot is always in sight while you drag.
+  On a narrow window the two stack instead.
 -->
-<div class="stage" hidden>
-  <div class="viewer" data-viewer></div>
-  <div class="stage-controls" data-stage-controls hidden></div>
-  <p class="caption muted" data-viewer-caption></p>
-</div>
+<div class="layout" data-layout>
+  <div class="stage" hidden>
+    <div class="viewer" data-viewer></div>
+    <div class="stage-controls" data-stage-controls hidden></div>
+    <p class="caption muted" data-viewer-caption></p>
+  </div>
 
-<main data-main></main>
+  <main data-main></main>
+</div>
 
 <script type="module" src="./static/js/app.js"></script>
 </body>

@@ -26,6 +26,11 @@ const stageControls = document.querySelector("[data-stage-controls]");
 let viewer = null;
 let runInfo = null;
 let robotReady = null;
+const layout = document.querySelector("[data-layout]");
+
+// Which carry poses the goal page draws: "workable" or "all". Kept for the
+// session, so stepping from goal to goal does not reset the choice.
+let goalPoseMode = "workable";
 
 // ---------------------------------------------------------------------------
 // Small helpers for building the page
@@ -94,14 +99,32 @@ async function ensureRobot() {
 }
 
 function showViewer(caption) {
+  layout.classList.add("split");
   viewerHost.parentElement.hidden = false;
   viewerCaption.textContent = caption;
   if (viewer) viewer.resize();
 }
 
 function hideViewer() {
+  layout.classList.remove("split");
   viewerHost.parentElement.hidden = true;
   clearStageControls();
+}
+
+// Whether a recorded collision pair holds real names.
+//
+// Libraries built before a recording fix stored each robot link as its object
+// address ("<compas_robots.model.link.Link object at 0x...>"), which names
+// nothing. Those are recognised and left out rather than displayed.
+function isReadablePair(pair) {
+  return pair.every((part) => !/ object at 0x[0-9a-f]+>$/i.test(String(part)));
+}
+
+// A small coloured square for a legend entry.
+function swatch(hex) {
+  const node = element("i");
+  node.style.background = cssColour(hex);
+  return node;
 }
 
 // Anything that drives the 3D view belongs directly under it, not further down
@@ -342,11 +365,9 @@ async function viewGoal(barId, goalIndex) {
   const problem = bar.problem;
 
   main.replaceChildren();
-  showViewer(`Goal ${goalIndex} in blue, and every carry pose the survey found `
-    + "workable, coloured by how hard it looks to reach. Click one to open it.");
+  showViewer("");
 
   const view = await ensureRobot();
-  view.clearPoseClouds();
   view.setTrajectoryLine(null);
   view.pose(goal.primary_conf);
   view.setCarriedBar({
@@ -354,19 +375,114 @@ async function viewGoal(barId, goalIndex) {
     linkName: problem.attached_link, grasp: problem.grasp_bar_from_left,
     bar_from_midpoint: problem.bar_from_midpoint,
   });
-  view.addPoseCloud(goal.starts.map((start) => ({
-    world_from_bar: start.world_from_bar,
-    colour: OUTCOME_COLOURS[start.difficulty] || 0xb8bec2,
-    id: start.start_index,
-  })), {
-    length: problem.bar_length_m, radius: problem.bar_radius_m,
-    bar_from_midpoint: problem.bar_from_midpoint, opacity: 0.5,
-  });
-  view.onPick((startIndex) => {
-    const start = goal.starts.find((s) => s.start_index === startIndex);
-    if (start && start.planned) {
-      window.location.hash = `#/bar/${barId}/goal/${goalIndex}/start/${startIndex}`;
-    } else if (start) {
+
+  // Draws the carry poses for the chosen mode, with a legend to match.
+  //
+  // "Workable" shows only poses the arms can hold, coloured by how hard they
+  // look to reach from the goal -- the question is which starts are good.
+  // "All tried" adds every pose the survey rejected, coloured by why -- the
+  // question is where the robot cannot hold the bar at all. The two modes
+  // colour differently on purpose, so each has its own legend.
+  const failed = goal.candidates.filter((c) => c.reason !== "feasible");
+  const drawPoses = () => {
+    view.clearPoseClouds();
+    const shape = {
+      length: problem.bar_length_m, radius: problem.bar_radius_m,
+      bar_from_midpoint: problem.bar_from_midpoint,
+    };
+    let legendItems;
+    if (goalPoseMode === "all") {
+      // Rejected poses are faint, so the workable ones still read on top.
+      view.addPoseCloud(failed.map((c) => ({
+        world_from_bar: c.world_from_bar,
+        colour: OUTCOME_COLOURS[c.reason] || 0xb8bec2,
+        id: { kind: "failed", candidate: c },
+      })), { ...shape, opacity: 0.18 });
+      view.addPoseCloud(goal.starts.map((start) => ({
+        world_from_bar: start.world_from_bar,
+        colour: OUTCOME_COLOURS.feasible,
+        id: { kind: "start", start },
+      })), { ...shape, opacity: 0.6 });
+      const byReason = {};
+      for (const c of failed) byReason[c.reason] = (byReason[c.reason] || 0) + 1;
+      legendItems = [
+        ["workable", OUTCOME_COLOURS.feasible, goal.starts.length],
+        ...Object.entries(byReason)
+          .sort((a, b) => b[1] - a[1])
+          .map(([reason, count]) => [
+            reason.replace("ik_unreachable_", "no reach, "),
+            OUTCOME_COLOURS[reason] || 0xb8bec2, count]),
+      ];
+      viewerCaption.textContent = `Goal ${goalIndex} in blue. All `
+        + `${goal.candidates.length} carry poses the survey tried: workable ones `
+        + "in green, rejected ones faint and coloured by why.";
+    } else {
+      view.addPoseCloud(goal.starts.map((start) => ({
+        world_from_bar: start.world_from_bar,
+        colour: OUTCOME_COLOURS[start.difficulty] || 0xb8bec2,
+        id: { kind: "start", start },
+      })), { ...shape, opacity: 0.5 });
+      const byDifficulty = {};
+      for (const s of goal.starts) {
+        byDifficulty[s.difficulty] = (byDifficulty[s.difficulty] || 0) + 1;
+      }
+      legendItems = [
+        ["straight line clear", OUTCOME_COLOURS.free, byDifficulty.free || 0],
+        ["straight line blocked", OUTCOME_COLOURS.blocked, byDifficulty.blocked || 0],
+        ["straight line breaks", OUTCOME_COLOURS.broken, byDifficulty.broken || 0],
+      ];
+      viewerCaption.textContent = `Goal ${goalIndex} in blue. The `
+        + `${goal.starts.length} carry poses the arms can hold, coloured by `
+        + "whether a straight motion reaches them from the goal. Click a "
+        + "planned one to open its runs.";
+    }
+    legendHost.replaceChildren(...legendItems.map(([label, colour, count]) =>
+      element("span", { class: "legend-item" }, [
+        swatch(colour), `${label} ${count}`,
+      ])));
+  };
+
+  // A two-way switch rather than a checkbox: both states are views in their
+  // own right, and the pressed button says which one is showing.
+  const modeButtons = [["workable", "Workable only"], ["all", "Include failed"]]
+    .map(([mode, label]) => {
+      const button = element("button", {
+        type: "button", "aria-pressed": String(goalPoseMode === mode),
+      }, label);
+      button.addEventListener("click", () => {
+        goalPoseMode = mode;
+        for (const other of modeButtons) {
+          other.setAttribute("aria-pressed", String(other === button));
+        }
+        drawPoses();
+      });
+      return button;
+    });
+  const legendHost = element("div", { class: "legend" });
+  setStageControls(element("div", { class: "controls" }, [
+    element("div", { class: "toggle", role: "group",
+      "aria-label": "which carry poses to show" }, modeButtons),
+    legendHost,
+  ]));
+  drawPoses();
+
+  view.onPick((picked) => {
+    if (!picked) return;
+    if (picked.kind === "failed") {
+      // A rejected pose has no arm configuration to show; say why instead.
+      const c = picked.candidate;
+      viewerCaption.textContent = `Rejected pose, ${c.anchor} anchor: `
+        + `${c.reason.replace(/_/g, " ")}.`
+        + (c.collision_pairs && c.collision_pairs.length
+          && isReadablePair(c.collision_pairs[0])
+          ? ` First collision: ${c.collision_pairs[0].join(" and ")}.` : "");
+      return;
+    }
+    const start = picked.start;
+    if (start.planned) {
+      window.location.hash =
+        `#/bar/${barId}/goal/${goalIndex}/start/${start.start_index}`;
+    } else {
       view.pose(start.conf || goal.primary_conf);
     }
   });
@@ -414,8 +530,10 @@ async function viewGoal(barId, goalIndex) {
 
   // What was in the way, when something was.
   const pairCounts = {};
+  let unreadablePairs = 0;
   for (const candidate of goal.candidates) {
     for (const pair of candidate.collision_pairs || []) {
+      if (!isReadablePair(pair)) { unreadablePairs += 1; continue; }
       const key = pair.join(" ↔ ");
       pairCounts[key] = (pairCounts[key] || 0) + 1;
     }
@@ -426,6 +544,14 @@ async function viewGoal(barId, goalIndex) {
     const pairPanel = panel("What collided most", "Across every rejected pose.");
     pairPanel.appendChild(table(["pair", "times"], topPairs));
     main.appendChild(withCsv(pairPanel, [["pair", "times"], ...topPairs]));
+  } else if (unreadablePairs) {
+    // Say so plainly rather than show a table of memory addresses.
+    main.appendChild(panel(
+      "What collided most",
+      "Not available for this library. The colliding pairs were recorded as "
+      + "object addresses instead of link names, a bug fixed since. Rebuilding "
+      + "the library, or re-checking just its collision rejections, restores "
+      + "them."));
   }
 
   // A slice through the offset grid.
@@ -700,6 +826,8 @@ async function viewStart(barId, goalIndex, startIndex) {
 async function route() {
   const hash = window.location.hash.replace(/^#\/?/, "");
   const parts = hash.split("/").filter(Boolean);
+  main.scrollTop = 0;
+  layout.scrollTop = 0;
   try {
     if (!parts.length) await viewOverview();
     else if (parts[0] === "bar" && parts.length === 2) await viewBar(parts[1]);

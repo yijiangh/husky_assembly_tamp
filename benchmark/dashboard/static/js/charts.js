@@ -46,14 +46,39 @@ function el(name, attributes = {}, text = null) {
   return node;
 }
 
+// An SVG at its natural size, allowed to shrink but never to grow.
+//
+// A width of 100% with a viewBox scales the whole drawing to the container,
+// text included, so on a wide screen an 11px label is rendered at 30px and the
+// chart looks like a poster. Giving real pixel dimensions and capping the width
+// in CSS keeps text at the size it was designed at, and still lets a narrow
+// window scale the chart down.
 function makeSvg(width, height) {
-  const svg = el("svg", {
+  return el("svg", {
     viewBox: `0 0 ${width} ${height}`,
-    width: "100%",
+    width: String(width),
+    height: String(height),
     preserveAspectRatio: "xMidYMid meet",
     class: "chart",
   });
-  return svg;
+}
+
+// Draws a tick label, breaking it into stacked lines on newlines.
+//
+// SVG text ignores newlines, so a two-line label would otherwise render as one
+// long line and collide with its neighbours -- which is what a category label
+// carrying both a name and a measurement does on every chart here.
+function tickLabel(x, y, text, { anchor = "middle", size = 11 } = {}) {
+  const lines = String(text).split("\n");
+  const node = el("text", {
+    x, y, "text-anchor": anchor, "font-size": size, fill: COLOURS.muted,
+  });
+  lines.forEach((line, index) => {
+    node.appendChild(el("tspan", {
+      x, dy: index === 0 ? 0 : size + 2,
+    }, line));
+  });
+  return node;
 }
 
 function axes(svg, box, { xLabel = "", yLabel = "", yTicks = [], xTicks = [] }) {
@@ -73,10 +98,7 @@ function axes(svg, box, { xLabel = "", yLabel = "", yTicks = [], xTicks = [] }) 
     }, tick.label));
   }
   for (const tick of xTicks) {
-    svg.appendChild(el("text", {
-      x: tick.x, y: top + height + 16, "text-anchor": "middle",
-      "font-size": 11, fill: COLOURS.muted,
-    }, tick.label));
+    svg.appendChild(tickLabel(tick.x, top + height + 16, tick.label));
   }
   if (yLabel) {
     svg.appendChild(el("text", {
@@ -87,7 +109,7 @@ function axes(svg, box, { xLabel = "", yLabel = "", yTicks = [], xTicks = [] }) 
   }
   if (xLabel) {
     svg.appendChild(el("text", {
-      x: left + width / 2, y: top + height + 34, "text-anchor": "middle",
+      x: left + width / 2, y: top + height + 48, "text-anchor": "middle",
       "font-size": 11, fill: COLOURS.muted,
     }, xLabel));
   }
@@ -98,9 +120,9 @@ function axes(svg, box, { xLabel = "", yLabel = "", yTicks = [], xTicks = [] }) 
 export function barChart(container, { data, yLabel = "", xLabel = "",
                                       yMax = null, format = (v) => v.toFixed(2),
                                       onClick = null }) {
-  const width = 720;
-  const height = 260;
-  const box = { left: 52, top: 16, width: width - 76, height: height - 62 };
+  const width = 900;
+  const height = 280;
+  const box = { left: 52, top: 16, width: width - 76, height: height - 82 };
   const svg = makeSvg(width, height);
 
   const maximum = yMax != null ? yMax : Math.max(
@@ -163,9 +185,9 @@ export function barChart(container, { data, yLabel = "", xLabel = "",
 export function stackedBarChart(container, { data, keys, colours = {},
                                              yLabel = "", normalize = true,
                                              format = (v) => v.toFixed(2) }) {
-  const width = 720;
-  const height = 260;
-  const box = { left: 52, top: 16, width: width - 76, height: height - 62 };
+  const width = 900;
+  const height = 280;
+  const box = { left: 52, top: 16, width: width - 76, height: height - 82 };
   const svg = makeSvg(width, height);
 
   const totals = data.map((d) => keys.reduce((sum, key) => sum + (d.values[key] || 0), 0));
@@ -224,9 +246,9 @@ function legend(keys, colours = {}) {
 // Box plot of a distribution per category, on a log scale because planning
 // times span orders of magnitude.
 export function boxChart(container, { data, yLabel = "" }) {
-  const width = 720;
-  const height = 260;
-  const box = { left: 52, top: 16, width: width - 76, height: height - 62 };
+  const width = 900;
+  const height = 280;
+  const box = { left: 52, top: 16, width: width - 76, height: height - 82 };
   const svg = makeSvg(width, height);
 
   const values = data.flatMap((d) => [d.p10, d.p50, d.p90, d.max].filter((v) => v > 0));
@@ -282,7 +304,7 @@ export function boxChart(container, { data, yLabel = "" }) {
 export function lineChart(container, { series, yLabel = "", xLabel = "",
                                        cursor = null, onCursor = null,
                                        height = 260 }) {
-  const width = 720;
+  const width = 900;
   const box = { left: 52, top: 16, width: width - 76, height: height - 62 };
   const svg = makeSvg(width, height);
 

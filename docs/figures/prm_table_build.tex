@@ -1,0 +1,21 @@
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{6.8cm} rrrr@{}}
+\toprule
+node budget & 500 & 1000 & 2000 & 4000 \\
+\midrule
+sampled nodes kept: the node budget (count) & 500 & 1000 & 2000 & 4000 \\
+all nodes, anchors included (count) & 581 & 1081 & 2081 & 4081 \\
+driver-arm draws, one IK call each (count) & 2656 & 5344 & 10688 & 21408 \\
+collision checks, sampling and edges together (count) & 11818 & 23969 & 47606 & 89047 \\
+candidate edges measured (count) & 2922 & 6094 & 13028 & 26908 \\
+collision-free edges (count) & 2657 & 5586 & 12000 & 25056 \\
+components: separate islands of the free graph (count) & 71 & 90 & 125 & 173 \\
+nodes in the largest component (count) & 262 & 525 & 1285 & 2557 \\
+goal anchors in the largest component & 3 of 7 & 3 of 7 & 7 of 7 & 7 of 7 \\
+start anchors in the largest component & 24 of 73 & 25 of 73 & 27 of 73 & 27 of 73 \\
+\midrule
+sampling time (s, wall clock) & 12 & 16 & 24 & 40 \\
+edge measuring time (s, wall clock) & 28 & 74 & 103 & 181 \\
+whole build (s, wall clock) & 51 & 100 & 138 & 232 \\
+edge phase speed-up (worker-seconds per wall-second) & 7.4 & 7.8 & 7.9 & 8.0 \\
+\bottomrule
+\end{tabular}

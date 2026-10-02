@@ -1,0 +1,930 @@
+% =============================================================================
+% Technical report: the holding-constraint roadmap (PRM pilot) for the M1
+% two-arm bar carry, as implemented in husky_assembly_tamp.motion_planner.
+% holding_prm.
+%
+% Build:  python docs/figures/make_prm_figures.py      (tables, figures, numbers)
+%         pdflatex holding_prm_report.tex              (run twice for refs)
+% =============================================================================
+\documentclass[11pt,a4paper]{article}
+
+% --- page + fonts ------------------------------------------------------------
+\usepackage[margin=2.2cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+
+% --- maths -------------------------------------------------------------------
+\usepackage{amsmath,amssymb}
+
+% --- pseudocode ---------------------------------------------------------------
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{caption}
+
+% --- tables, figures, colours, links -------------------------------------------
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage[colorlinks=true,linkcolor=blue!60!black,urlcolor=blue!60!black]{hyperref}
+
+% =============================================================================
+% Macros (the same as in cdfm_task_space_birrt_report.tex)
+% =============================================================================
+
+% Code identifiers (underscores are typed as-is thanks to \detokenize).
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+
+% A line of pseudocode that DIFFERS from the task-space BiRRT is printed in red
+% and gets a [P-n] tag at the right margin, pointing to the difference list in
+% Section 7.
+\definecolor{diff}{RGB}{176,32,32}
+\newcommand{\D}[1]{\textcolor{diff}{#1}}
+\newcommand{\dtag}[1]{\hfill\textcolor{diff}{\scriptsize\textsf{[#1]}}}
+
+% Pseudocode comments in grey, to the right.
+\algrenewcommand{\algorithmiccomment}[1]{\hfill\textcolor{gray}{\footnotesize$\triangleright$ #1}}
+\newcommand{\Continue}{\State \textbf{continue}}
+\newcommand{\Break}{\State \textbf{break}}
+
+% Non-floating algorithm block that may break across pages.
+\newenvironment{algo}[2]{%
+  \par\medskip\noindent\rule{\linewidth}{0.8pt}\par
+  \captionof{algorithm}{#1}\label{#2}%
+  \vspace{-4pt}\noindent\rule{\linewidth}{0.4pt}\par\vspace{-2pt}
+  \begin{algorithmic}[1]}%
+ {\end{algorithmic}\vspace{-2pt}\noindent\rule{\linewidth}{0.8pt}\par\medskip}
+
+% Long code names in running text: let a line stretch a little rather than
+% stick out into the margin.
+\setlength{\emergencystretch}{2.5em}
+
+% Maths shorthands.
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\SE}{\mathrm{SE}(3)}
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+\newcommand{\fn}[1]{\textsc{#1}}
+\newcommand{\Graph}{\mathcal{G}}
+
+% Table rows written by docs/figures/make_prm_figures.py. The TeX primitive
+% input is used because LaTeX's \input cannot start a table row.
+\makeatletter\newcommand{\tablerows}[1]{\@@input #1 }\makeatother
+
+% Numbers measured by the pilot (written by docs/figures/make_prm_figures.py).
+\input{figures/prm_macros.tex}
+
+\title{A Holding-Constraint Roadmap for the Two-Arm Bar Carry\\
+       \large A technical report on the PRM pilot (\texttt{holding\_prm}) and its first measurements}
+\author{husky\_assembly\_tamp \texttt{motion\_planner} --- written for Yijiang Huang}
+\date{30 September 2026; second version 1 October 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+The task-space BiRRT that plans the M1 two-arm bar carry
+(\code{plan_constrained_dual_arm}; see \path{docs/cdfm_task_space_birrt_report.tex})
+holds the bar exactly at every waypoint and loses most of its extensions to the
+10-degree joint-continuity gate. This report describes the opposite planner,
+proposed in the meeting of 29 September 2026 and built as a pilot in
+\path{motion_planner/holding_prm/}: a probabilistic roadmap whose nodes hold the
+bar exactly, whose edges are straight lines in joint space (so the joints never
+jump), and whose edge cost is how far the two tool flanges drift from the bar
+along the line. The query searches from a \emph{set} of start configurations to
+a \emph{set} of goal configurations, so the start pose and both branch choices
+are chosen by the search rather than fixed beforehand. The pseudocode is written
+from the code; lines that differ from the BiRRT are printed in \D{red} and tagged
+\D{\textsf{[P-n]}}, collected in Section~\ref{sec:diff}. Section~\ref{sec:data}
+reports the first measurements on bar B18, goal 2 (the goal whose 807 starts
+the BiRRT was run on in full) and on three goals of bar B3.
+
+\smallskip\noindent
+\emph{Second version (1 October 2026).} A refinement turns roadmap routes into
+paths that hold the bar exactly (Section~\ref{sec:refine}): on B18 goal 2 it gives
+an exact path for 34 of the 36 starts within 10\,mm and for 245 starts in all, every
+one of which passes the production repair at 2\,mm steps, against 21 starts the
+BiRRT solved. New experiments: wider edges (E1), every IK branch at equal draws
+(E4), the refinement (E2, E3), a search for better carry poses (E5) and overnight
+precomputation (E6). Terms are defined in \emph{Words used} (Section~\ref{sec:words}).
+\end{abstract}
+
+\tableofcontents
+
+% =============================================================================
+\section{What is being planned, and what changes}
+\label{sec:problem}
+% =============================================================================
+
+The movement is the same as in the BiRRT report: both UR5e arms of the Husky hold
+one bar rigidly and carry it from a carry (home) pose to the approach pose in
+front of the structure; the base does not move. The notation is the same too:
+$q = (q_L, q_R) \in \R^{12}$ are the twelve arm joints; $G_L, G_R \in \SE$ are
+the grasps (the pose of each \code{tool0} flange in the bar frame);
+$\mathrm{FK}_L$, $\mathrm{FK}_R$ are the flange forward kinematics. A
+configuration holds the bar when both flanges agree on one bar pose,
+\begin{equation}
+  \mathrm{FK}_L(q_L)\, G_L^{-1} \;=\; \mathrm{FK}_R(q_R)\, G_R^{-1},
+  \label{eq:holding}
+\end{equation}
+and the set $\mathcal{M}$ of such configurations is a six-dimensional surface in
+the twelve-dimensional joint space.
+
+\paragraph{The two ways to treat the two constraints.}
+A path has to satisfy two things at once: every configuration holds the bar
+(Eq.~\ref{eq:holding}), and consecutive configurations are close in joint space
+(no joint moves more than $\tau = 10^\circ$ between waypoints). The BiRRT makes
+the first one exact and tests the second; its night-1 benchmark measured that
+75\,\% of its extensions stop on the second. The roadmap swaps the roles:
+\begin{center}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+ & task-space BiRRT & holding roadmap (this report) \\
+\midrule
+holding the bar & exact at every waypoint (IK) & exact at nodes; \emph{measured} along edges \\
+joint continuity & tested per waypoint (the gate) & true by construction (straight joint lines) \\
+what a failure means & the tree stops growing & the edge costs more \\
+answer & a path or nothing & the smallest holding error any path needs \\
+\bottomrule
+\end{tabular}
+\end{center}
+The last row is the point of the pilot. The BiRRT cannot tell ``no path exists''
+from ``the planner did not find it''. The roadmap always returns a number: the
+smallest tolerance on the holding error at which some start connects to some
+goal. A small number means near-feasible; a large one means the start and goal
+branch sheets are probably not connected.
+
+\paragraph{Only the goal pose is given.}
+The export fixes the goal bar pose $T_g$ and nothing else: neither the start
+pose nor either configuration. The BiRRT must pick one start configuration and
+one goal configuration before it searches (its difference D-9), and a chain of
+heuristics does that (goal branch pairing with the home anchors, backward
+tracking). The roadmap does not need to choose:
+\begin{itemize}[nosep]
+  \item the \textbf{goal set} is every collision-free analytical branch pair at
+        $T_g$ (up to $8 \times 8$ left-right combinations), each on the
+        library's turn and on the home turn (Section~\ref{sec:turns});
+  \item the \textbf{start set} is every collision-free branch pair at every
+        candidate start pose; the pilot takes the benchmark library's surveyed
+        carry poses (807 for B18 goal 2): the three carry anchors
+        (horizontal, vertical, on the back), each shifted on a grid of
+        $4 \times 4 \times 4$ offsets ($\pm 0.1$ and $\pm 0.3$\,m per axis)
+        and rolled about the bar in twelve $30^\circ$ steps, keeping the poses
+        that can be held without collision (the library has no yaw variants);
+  \item one search runs from a virtual \emph{source}, joined at zero cost to
+        every start node, to a virtual \emph{sink}, joined at zero cost to
+        every goal node. The cheapest path therefore chooses the start pose,
+        the start branch pair and the goal branch pair together, and the report
+        says which it chose.
+\end{itemize}
+Because the grasps are fixed per bar, $\mathcal{M}$ is the same surface for
+every goal of a bar: one roadmap per bar and scene can serve all of its goals,
+and a query only adds its own start and goal nodes.
+
+\subsection*{Words used in this report}
+\label{sec:words}
+
+\begin{center}
+\footnotesize
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{2.9cm} >{\raggedright\arraybackslash}p{13.0cm}@{}}
+\toprule
+word & meaning \\
+\midrule
+branch pair & One of the (up to $8 \times 8$) ways two arms can hold the bar at one pose: each arm's analytical IK has up to eight solutions (shoulder left/right, elbow up/down, wrist flipped or not), and a branch pair is one left solution with one right solution. Different branch pairs are physically different robot postures. \\
+turn & The same posture written with one or more joints shifted by $360^\circ$. Shoulder pan ($\pm 720^\circ$), shoulder lift and the three wrists ($\pm 240$--$270^\circ$) can each reach one angle in two (pan: three) ways. Physically identical; different to a planner that measures raw joint differences. \\
+anchor & A configuration the sampler centres its draws on; anchors are also roadmap nodes. They are the home configuration, the goal's branch pairs and a spread of library start configurations, each on up to two turns (Section~\ref{sec:turns}). \\
+node budget & The number of \emph{sampled} nodes a build keeps (the \code{--nodes} flag). Anchors come on top. \\
+$\beta$ (max branches) & How many of the second arm's IK solutions are kept per draw. $\beta = 1$ keeps only the solution nearest the draw's centre (the default). \\
+difficulty class & The benchmark library's label for a start, from a straight-line probe from the goal to the start: \emph{free} (the straight bar move works and is collision-free), \emph{blocked} (it works but collides on the way), \emph{broken} (the IK breaks or jumps on the way). \\
+carry anchor & Which of the three carry poses a start was derived from: horizontal (bar along $y$ in front of the robot), vertical (bar along $z$ in front) or back (bar along $x$ over the base). \\
+gap (of a node) & The smallest holding tolerance at which this node reaches some goal node through collision-free roadmap edges: the worst edge score on its best route (Section~\ref{sec:query}). A property of the whole route, not of the node's own position. \\
+per-start gap & For one start pose, the smallest gap over all its branch pairs and turns. \\
+component & A set of nodes joined to each other by collision-free edges; two components have no edge between them. ``Largest'' is the node count of the biggest one. \\
+\fn{Collides}$(q)$ & The production full-cell collision check (robot, tools, attached bar, environment); true when $q$ is in collision. \\
+\fn{VerifyGaps} & The loop that collision-checks only the edges on each start's best route, searches again, and repeats until those routes are fully checked (Alg.~\ref{alg:lazy}). \\
+exact gap & (Section~\ref{sec:refine}) The smallest roadmap tolerance at which a start's route can be turned into a path that holds the bar exactly. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% =============================================================================
+\section{Where the code lives}
+\label{sec:where}
+% =============================================================================
+
+\begin{center}
+\footnotesize
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{5.3cm} >{\raggedright\arraybackslash}p{3.2cm} >{\raggedright\arraybackslash}p{7.0cm}@{}}
+\toprule
+\textbf{Function} & \textbf{File} & \textbf{Role} \\
+\midrule
+\code{holding_violation}, \code{violation_from_tools} & \code{holding.py} & the violation measure (Alg.~\ref{alg:viol}) \\
+\code{tool0_world}, \code{build_holding_model} & \code{holding.py} & numpy forward kinematics on the cached arm bases \\
+\code{interpolate_confs}, \code{rebranch12} & \code{holding.py} & joint-space lines; moving a configuration onto a $2\pi$ turn \\
+\code{draw_driver}, \code{lift_draw}, \code{sample_chunk} & \code{sampling.py} & the node sampler (Algs.~\ref{alg:draw}, \ref{alg:sample}) \\
+\code{arm_branches} & \code{sampling.py} & one arm's analytical IK on the cached base \\
+\code{expand_bar_pose} & \code{sampling.py} & every collision-free branch pair at a bar pose (Alg.~\ref{alg:expand}) \\
+\code{make_collision_fn} & \code{sampling.py} & the production full-cell collision check \\
+\code{candidate_pairs}, \code{evaluate_edge} & \code{roadmap.py} & nearest neighbours; measuring one edge (Alg.~\ref{alg:edge}) \\
+\code{edge_cost}, \code{Roadmap} & \code{roadmap.py} & the penalised weight; the node and edge tables \\
+\code{minimax_to_goals}, \code{route_from} & \code{search.py} & every node's gap to the goal set (Alg.~\ref{alg:minimax}) \\
+\code{build_graph}, \code{shortest_between_sets} & \code{search.py} & source/sink search (Dijkstra) \\
+\code{lazy_search}, \code{path_report} & \code{search.py} & lazy collision checking (Alg.~\ref{alg:lazy}); path profiles \\
+\code{WorkerPool}, \code{init_worker}, \code{task_*} & \code{parallel.py} & worker processes (Section~\ref{sec:parallel}) \\
+\code{build_roadmap}, \code{query_roadmap} & \code{pilot.py} & the two drivers (Algs.~\ref{alg:build}, \ref{alg:query}) \\
+\code{save_roadmap}, \code{copy_dashboard} & \code{store.py} & files under \path{<root>/prm/}; the dashboard page \\
+\code{track_edge}, \code{fine_walk}, \code{track_edge_landing} & \code{tracking.py} & the exact tracker (Section~\ref{sec:refine}) \\
+\code{Tracker}, \code{refine_query}, \code{pretrack_roadmap} & \code{refine.py} & exact gaps, assembly, tube rounds; overnight tracking \\
+\code{carry_bar_pose}, \code{score_carry_pose} & \code{carry.py} & carry poses and their scores (Section~\ref{sec:e5}) \\
+\code{plan_seeded_birrt} & \path{dual_arm_task_space_rrt/seeded.py} & the BiRRT seeded with a route (imports the core) \\
+\code{main} & \path{scripts/prm_pilot.py} & command line: \code{build}, \code{query}, \code{refine}, \code{track}, \code{export}, \code{info} \\
+\code{validate}, \code{birrt} & \path{scripts/prm_bridge.py} & the production check; the seeded BiRRT (moves the core's log first) \\
+\code{stage1}, \code{starts}, \code{stage2}, \code{pick} & \path{scripts/prm_carry_search.py} & the carry search \\
+page & \path{benchmark/dashboard/prm.html}, \path{prm-viewer.js} & the roadmap viewer (Section~\ref{sec:dashboard}) \\
+tests & \path{benchmark/tests/test_holding_prm.py} & 23 checks, including one that the package never imports the planner core \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Paths without a folder are in \path{husky_assembly_tamp/motion_planner/holding_prm/}.
+What is reused from the rest of the code base:
+\code{ssik_inprocess.solve} and \code{ssik_inprocess.fk} (the generated
+per-arm solvers and their forward kinematics),
+\code{ssik_ik.rebranch_toward_seed}, \code{ARM_SLICE} and \code{ARM_BASE_LINK},
+and from the benchmark \code{load_trimmed_problem}, \code{open_scene},
+\code{state_with_conf12} and \code{provenance}.
+
+\paragraph{Kept apart from the BiRRT work on purpose.}
+Other sessions were editing the planner core, the benchmark runner and the
+benchmark dashboard while this was written. The pilot therefore lives in new
+files only, writes only under \path{<root>/prm/} (never \path{runs/} or the
+batch catalogue \path{runs.json}), has its own command line, and never imports
+\path{dual_arm_task_space_rrt/core.py}: that module opens its log file in
+\texttt{"w"} mode when imported, which empties a log a running batch may be
+writing. Three places where the benchmark reaches the core indirectly are
+avoided by writing short local versions: the collision check
+(\code{SceneCtx.collision_fn} imports the core for its explain helper), the
+library loader (\code{benchmark.library} imports \code{benchmark.sampling},
+which imports the core) and the static-site copy. A test runs the import in a
+fresh process and asserts no core module is loaded; the log file's size and
+time stamp were unchanged across every pilot run.
+
+% =============================================================================
+\section{Building blocks}
+\label{sec:blocks}
+% =============================================================================
+
+\subsection{The holding violation}
+
+\begin{algo}{\textsc{HoldingViolation} --- \texttt{holding\_violation} / \texttt{violation\_from\_tools}}{alg:viol}
+\Function{HoldingViolation}{$q$}
+  \State $F_L \gets W_L\, \mathrm{fk}_L(q_L)$;\quad $F_R \gets W_R\, \mathrm{fk}_R(q_R)$ \Comment{$W$: arm base in the world, read once per scene}
+  \State $F_R^\star \gets F_L\, G_L^{-1} G_R$ \Comment{where the bar placed by the left flange wants the right one}
+  \State $F_L^\star \gets F_R\, G_R^{-1} G_L$ \Comment{and the other way round}
+  \State $e_p \gets \max\bigl(\norm{p(F_R^\star) - p(F_R)},\ \norm{p(F_L^\star) - p(F_L)}\bigr)$
+  \State $e_r \gets \max\bigl(\angle(F_R^\star, F_R),\ \angle(F_L^\star, F_L)\bigr)$ \Comment{angle by $\operatorname{atan2}(\sin, \cos)$}
+  \State \Return $(e_p, e_r)$
+\EndFunction
+\end{algo}
+
+\noindent
+Three details. (i) $\mathrm{fk}$ is the ssik artifact's own forward kinematics,
+generated from the calibrated URDF like the solver; it takes about
+$30\,\mu$s and agrees with PyBullet to $3.4 \times 10^{-7}$ on every
+transform entry (measured on 45 library configurations of B3). So the measure
+needs no simulator, and the parent process can score whole paths. (ii) Taking
+the larger of the two directions makes the measure independent of which arm is
+the reference: the two angles are equal, the two distances differ by the lever
+arm between the grasps. (iii) The angle of a nearly identity rotation is taken
+from both its sine and cosine; an arc-cosine alone loses about half the digits,
+which on the dashboard showed as a spurious $0.1^\circ$ error at nodes that hold
+the bar exactly. On every library configuration tested (primary goals, goal
+branch pairs, starts) the measure returns $10^{-7}$\,m and $2 \times 10^{-7}$\,rad,
+four hundred times below the production FK gate.
+
+\paragraph{One number for a tolerance.}
+A tolerance is one number $t$ in millimetres. A configuration passes it when
+$e_p \le t$\,mm \emph{and} $e_r \le \rho\, t$ degrees, with
+$\rho = 0.4^\circ$/mm by default (the ``5\,mm and 2 degrees'' pair of the pilot
+plan). Equivalently its \emph{score}
+\begin{equation}
+  s(q) = \max\bigl(1000\, e_p,\ e_r^{\circ} / \rho\bigr) \quad [\text{mm}]
+  \label{eq:score}
+\end{equation}
+is at most $t$. Edges store $e_p$ and $e_r$ separately, so $\rho$ and $t$ can be
+changed without re-measuring anything.
+
+\subsection{Straight lines in joint space, and why continuity is free}
+
+\fn{Interp}$(q_a, q_b; \delta)$ (\code{interpolate_confs}) returns the points of
+the straight joint-space line cut into $\lceil \norm{q_b - q_a}_\infty / \delta
+\rceil$ equal pieces; the difference is taken on raw joint values, the same
+rule as the BiRRT's gate (\code{core.joint_step_deltas}). With $\delta \le
+\tau$, every piece of every edge would pass the production continuity gate, so
+no path the roadmap returns can contain a branch flip. The tests check the
+bound; every path report re-measures the largest step between its dense points.
+
+\subsection{Turns}
+\label{sec:turns}
+
+Four of the six UR joint ranges are wider than one turn (shoulder pan
+$\pm 2\pi$, shoulder lift $\pm 4.71$, wrists $\pm 4.19$), so one physical
+posture can be written as two or three joint vectors $2\pi$ apart. A roadmap
+that measures raw joint differences sees these ``twins'' a full turn apart, and
+an edge between them would be a full-turn swing. \fn{Rebranch}$(q, r)$
+(\code{rebranch12}, which applies \code{ssik_ik.rebranch_toward_seed} per arm)
+moves every joint onto the turn nearest a reference $r$ when that stays in
+limits. The pilot uses two references: the configuration \emph{as given} (the
+library's own turn) and the \emph{home} configuration.
+
+\emph{Which nodes get more than one copy.} A sampled node is stored once: on
+the turn nearest the centre of the draw that made it. Only anchors and query
+endpoints (start and goal branch pairs) are stored on both turns, and only when
+the two copies differ; the query reports which copy a path used. So the
+roadmap does not hold every $2\pi$ copy of every node; it holds at most two
+copies of the few configurations the search has to start or end at.
+
+This matters in practice: for B18 goal 2, start 0's right shoulder pan
+sits at $-319^\circ$ in the library, while the goal's branch pairs sit at
+$+50^\circ$ or $+204^\circ$; its home-turn twin is $+41^\circ$, nine degrees
+from three of them.
+
+\subsection{Collision}
+
+The check is the production one: copy the template cell state, write the twelve
+joints, and let compas\_fab test self-collision, the tools, the attached bar and
+the environment with the scene's allowed-collision lists
+(\code{make_collision_fn}; the same call as \code{api._build_cfab_collision_fn}).
+It costs about 15\,ms and dominates everything else the pilot does: one ssik
+solve is 1.8\,ms, one forward-kinematics pair 60\,$\mu$s. A $2\pi$ twin is the
+same physical pose, so it is never checked twice.
+
+% =============================================================================
+\section{Building the roadmap}
+\label{sec:build}
+% =============================================================================
+
+\subsection{Anchors}
+
+Draws are centred on \emph{anchors} (\code{make_anchors}): the home
+configuration, every collision-free branch pair recorded for the chosen goals
+(\code{free_branch_pairs}), and a spread of library starts per goal (40 by
+default, picked across the three difficulty classes and the three carry anchors
+as the benchmark's \code{select_starts} does), each on its given and its home
+turn. Anchors are also inserted as nodes. For B18 goal 2 there are 81: the home
+configuration, the goal's 7 branch pairs, and 73 from the 40 anchor starts (40
+as given, plus 33 whose home-turn copy differs; the home-turn copies of home and
+of the goal pairs coincide with them). A global box spanned by all anchors is
+available but off: the 81 anchors of B18 goal 2 span $214^\circ$ to $580^\circ$
+per joint (the right shoulder pan the most), i.e.\ the full range, and draws from
+that box are the wound-up arms the pilot plan warned about.
+
+\subsection{Sampling: forward kinematics for one arm, IK for the other}
+
+\begin{algo}{\textsc{DrawDriver} --- \texttt{draw\_driver}}{alg:draw}
+\Function{DrawDriver}{mode, driver}
+  \State $a \gets$ uniform anchor index;\quad $c \gets$ anchor$[a]$ \Comment{$c$: the 12-joint centre of the draw}
+  \If{mode $=$ \code{anchor_box}} $q_d \sim \mathcal{U}(c_d \pm m)$ \Comment{$m = 90^\circ$ per joint}
+  \ElsIf{mode $=$ \code{anchor_gauss}} $q_d \sim \mathcal{N}(c_d, \sigma^2)$ \Comment{$\sigma = 30^\circ$}
+  \ElsIf{mode $=$ \code{anchor_line}}
+    \State $b \gets$ an anchor of a different role (start $\leftrightarrow$ goal) \Comment{a start--goal line when possible}
+    \State $c \gets c + u\,(\text{anchor}[b] - c)$, $u \sim \mathcal{U}(0,1)$;\quad $q_d \sim \mathcal{N}(c_d, \sigma_\ell^2)$ \Comment{$\sigma_\ell = 10^\circ$}
+  \EndIf
+  \State \Return (clip($q_d$, limits), $c$, $a$)
+\EndFunction
+\end{algo}
+
+\begin{algo}{\textsc{SampleChunk} --- \texttt{sample\_chunk} / \texttt{lift\_draw}}{alg:sample}
+\Function{SampleChunk}{seed, $k$, $n$}
+  \State rng $\gets$ \code{SeedSequence}(seed, $k$) \Comment{chunk $k$ gives the same nodes on any worker}
+  \For{$i = 1 \dots n$}
+    \State driver $\gets$ L if $(kn + i)$ even else R;\quad other $\gets$ the other arm \Comment{both arms drive equally often}
+    \State mode $\sim$ mix;\quad $(q_d, c, a) \gets$ \fn{DrawDriver}(mode, driver) \Comment{default mix 0.2 / 0.3 / 0.5}
+    \State \D{$T \gets \mathrm{FK}_{\text{driver}}(q_d)\, G_{\text{driver}}^{-1}$} \Comment{the bar pose this arm implies}\dtag{P-1}
+    \State \D{$B \gets$ \fn{IK}$_{\text{other}}(T\, G_{\text{other}};\ \text{seed} = c_{\text{other}},\ \text{rescue off})$} \Comment{re-branched to $c$, nearest first}\dtag{P-8}
+    \State $B \gets B[1{:}\beta]$ \Comment{$\beta = 1$: the branch nearest the centre}
+    \For{$q_o \in B$}
+      \State $q \gets (q_d, q_o)$;\quad \textbf{assert} \fn{HoldingViolation}$(q) \le 10^{-4}$ \Comment{a failure stops the build}
+      \If{\textbf{not} \fn{Collides}$(q)$} keep $q$ with (mode, driver, $a$, geometry) \EndIf
+    \EndFor
+  \EndFor
+\EndFunction
+\end{algo}
+
+\noindent
+Each draw gives the second arm up to eight IK solutions; $\beta$ is how many
+of them become nodes, nearest the draw's centre first. Keeping only the nearest
+($\beta = 1$) was a measured choice. On a small smoke roadmap (bar B3) with a
+node budget of 300 sampled nodes, keeping every solution split the roadmap into
+103 components: the second arm's median distance to the anchor was
+$182^\circ$, i.e.\ most kept nodes were flipped elbows or wrists that sit far
+from every other node and join nothing. With $\beta = 1$, the same budget of
+300 nodes gave 44 components. The B18 comparison at 2000 nodes is in
+Table~\ref{tab:ablation}, and Section~\ref{sec:e4} repeats it with the same
+number of draws instead of the same number of nodes. Other branch sheets are
+still represented, because every branch pair of the goal is an anchor and draws
+around an anchor are seeded from that anchor.
+
+\subsection{Edges}
+
+\begin{algo}{\textsc{EvaluateEdge} --- \texttt{evaluate\_edge}}{alg:edge}
+\Function{EvaluateEdge}{$q_a$, $q_b$}
+  \State $(e_p^{\max}, e_r^{\max}, t^\star) \gets \max$ of \fn{HoldingViolation} over \fn{Interp}$(q_a, q_b; \delta_v)$ \Comment{$\delta_v = 2.5^\circ$, nearly free}\dtag{P-3}
+  \State $P \gets$ interior points of \fn{Interp}$(q_a, q_b; \delta_c)$ \Comment{$\delta_c = 10^\circ = \tau$}\dtag{P-2}
+  \For{$j$ \textbf{in} bisection order of $P$} \Comment{middle first, then quarters, \dots}
+    \If{\fn{Collides}$(P_j)$} \Return (free $=$ false, $t_{\text{collide}} = j/|P|$, $e_p^{\max}$, $e_r^{\max}$) \EndIf
+  \EndFor
+  \State \Return (free $=$ true, $e_p^{\max}$, $e_r^{\max}$, $t^\star$, $\norm{q_b - q_a}_2$, $\norm{q_b - q_a}_\infty$)
+\EndFunction
+\end{algo}
+
+\noindent
+Candidate pairs (\code{candidate_pairs}) are each node's $k = 10$ nearest
+neighbours in the largest-joint-move metric (a \code{cKDTree} with $p = \infty$)
+no further than $90^\circ$, symmetrised and sorted so the work splits into the
+same chunks every time. The violation is measured four times more finely than
+collision because it costs two forward-kinematics calls per point; collision is
+checked at the continuity step, which is also what the production gate would
+look at. The end nodes are already known to be free.
+
+\begin{algo}{\textsc{BuildRoadmap} --- \texttt{build\_roadmap}}{alg:build}
+\Function{BuildRoadmap}{bar, goals, $N$}
+  \State start the worker pool (one scene per process) \Comment{Section~\ref{sec:parallel}}
+  \State anchors $\gets$ \code{make_anchors}(goals); insert the collision-free ones as nodes
+  \While{fewer than $N$ sampled nodes kept}
+    \State issue chunks $k, k{+}1, \dots$ of \fn{SampleChunk} in parallel \Comment{round size from the measured yield}
+  \EndWhile
+  \State keep the first $N$ sampled nodes in chunk order \Comment{same nodes for any worker count}
+  \State pairs $\gets$ \code{candidate_pairs}(nodes, $k$, radius)
+  \State edges $\gets$ \fn{EvaluateEdge} on every pair, in parallel (collision skipped with \code{--lazy})
+  \State save \path{roadmap.json.gz} and \path{config.json}; add the run to \path{prm/index.json}
+\EndFunction
+\end{algo}
+
+% =============================================================================
+\section{Querying the roadmap}
+\label{sec:query}
+% =============================================================================
+
+\subsection{Endpoints}
+
+\begin{algo}{\textsc{ExpandBarPose} --- \texttt{expand\_bar\_pose}}{alg:expand}
+\Function{ExpandBarPose}{$T$, references}
+  \State $B_L \gets$ \fn{IK}$_L(T G_L)$;\quad $B_R \gets$ \fn{IK}$_R(T G_R)$ \Comment{all branches, rescue on (one-off solve)}
+  \For{$(q_L, q_R) \in B_L \times B_R$} \Comment{up to 64 pairs}\dtag{P-5}
+    \If{\fn{Collides}$(q_L, q_R)$} \Continue \EndIf
+    \For{(name, $r$) \textbf{in} references} \Comment{given: the library configuration; home}
+      \State $q' \gets$ \fn{Rebranch}$((q_L, q_R), r)$; merge with an equal $q'$ already listed, adding the name
+    \EndFor
+  \EndFor
+  \State \Return every distinct $q'$ with its pair index and turn names
+\EndFunction
+\end{algo}
+
+\noindent
+The goal pose and every chosen start pose are expanded in parallel, one pose
+per task. Each start node carries five labels, all different things (see
+\emph{Words used}): its start index (which library start pose), carry anchor
+(horizontal, vertical or back), difficulty class (free, blocked or broken:
+the library's straight-line probe), branch-pair index (which of the up to 64
+postures at that pose) and turn (which $2\pi$ copy of that posture); plus
+whether it is the library's own configuration. The expansion must find the library's \code{free_branch_pairs}
+again (they are the same pairs, solved by the same solver); a test checks this on
+the smoke goal, every query records the count, and every B18 query found all 7
+of goal 2's pairs.
+
+\subsection{The gap of every node}
+
+\begin{algo}{\textsc{MinimaxToGoals} --- \texttt{minimax\_to\_goals}}{alg:minimax}
+\Function{MinimaxToGoals}{$\Graph$, goal set}
+  \State weight every usable edge by its score $s$ (Eq.~\ref{eq:score}); join a sink to every goal node at 0
+  \State $M \gets$ minimum spanning tree of $\Graph$ (Kruskal)
+  \State gap(sink) $\gets 0$
+  \For{each tree edge $(u, v)$ in breadth-first order from the sink}
+    \State gap$(v) \gets \max(\text{gap}(u), s_{uv})$;\quad parent$(v) \gets u$
+  \EndFor
+  \State \Return gap, parent \Comment{gap $= \infty$ for nodes not joined to any goal}
+\EndFunction
+\end{algo}
+
+\noindent
+In a minimum spanning tree, the tree path between two nodes has the smallest
+possible largest edge of any path between them. With the sink joined to the goal
+set, one tree gives \emph{every} node its \emph{gap}: the smallest tolerance at
+which a chain of free edges joins it to some goal node, and the next node on
+that chain. The best start is the start node with the smallest gap; a start
+index's gap is the smallest gap over its branch pairs and turns. On the
+dashboard any clicked node's best route to the goals is simply followed through
+the parent pointers.
+
+\subsection{Lazy collision checking}
+
+Expanding every start of a goal gives thousands of endpoint nodes and tens of
+thousands of candidate endpoint edges; checking all of them for collision would
+cost more than the roadmap. The query measures the holding error of every
+endpoint edge (cheap) but checks collision only where it decides an answer.
+\fn{VerifyGaps} does this for the gaps: it first computes every node's gap as
+if all unchecked edges were free, collision-checks only the edges on each
+start's best route, drops the ones that collide, and repeats until every
+start's best route consists of checked, free edges.
+
+\begin{algo}{\textsc{VerifyGaps} and \textsc{LazySearch} --- \texttt{query\_roadmap} / \texttt{lazy\_search}}{alg:lazy}
+\Function{VerifyGaps}{}
+  \Repeat
+    \State (gap, parent) $\gets$ \fn{MinimaxToGoals} with unchecked edges assumed free \dtag{P-7}
+    \State $U \gets$ unchecked edges on the route (via parent) of each start index's best node
+    \State collision-check $U$ in parallel; mark the colliding ones blocked
+  \Until{$U = \varnothing$}
+\EndFunction
+\Statex
+\Function{LazySearch}{find\_path}
+  \Repeat
+    \State $P \gets$ find\_path(edges free or unchecked) \Comment{filtered or penalised Dijkstra, source $\to$ sink}
+    \State $U \gets$ unchecked edges of $P$; check them in parallel; mark the colliding ones
+  \Until{$P = \textsc{None}$ \textbf{or} $U = \varnothing$}
+  \State \Return $P$
+\EndFunction
+\end{algo}
+
+\noindent
+Both loops are exact, not approximations. Assuming unchecked edges free can only
+lower a gap or shorten a path; when the deciding route comes back with every
+edge checked and free, nothing cheaper exists in the true graph, since the true
+graph is a subset of the optimistic one. For the best node of each start index
+this makes the gap exact; the gaps of other nodes stay optimistic lower bounds
+and are only used for colouring.
+
+\subsection{The questions asked}
+
+\begin{algo}{\textsc{QueryRoadmap} --- \texttt{query\_roadmap}}{alg:query}
+\Function{QueryRoadmap}{roadmap, goal, starts, tolerances}
+  \State goal nodes $\gets$ \fn{ExpandBarPose}($T_g$, \{given: primary, home\}) \dtag{P-5}
+  \State start nodes $\gets \bigcup_s$ \fn{ExpandBarPose}($T_s$, \{given: $q_s$, home\}); reuse roadmap nodes at the same $q$
+  \State endpoint edges $\gets$ \fn{EvaluateEdge} without collision on each new node's $k$ nearest (radius $90^\circ$)
+  \State \fn{VerifyGaps}() \Comment{per-start gap, exact}
+  \State best $\gets$ start node of smallest gap; report its route (the minimax route)
+  \State report the shortest path within the best gap (\fn{LazySearch}, filtered at gap)
+  \For{$t$ \textbf{in} tolerances ($2, 5, 10, 30$\,mm)} \dtag{P-6}
+    \State \emph{filtered}: \fn{LazySearch} over edges with $s \le t$, weight $= \norm{\Delta q}_2$
+    \State \emph{penalised}: \fn{LazySearch} over all free edges, weight $= \norm{\Delta q}_2 + w \max(0, s/t - 1)$
+    \State starts connected $\gets \#\{$start indices with gap $\le t\}$
+  \EndFor
+  \State save the query: endpoint tables, final edge verdicts, every node's gap and parent, the paths with their dense profiles
+\EndFunction
+\end{algo}
+
+\noindent
+Each path report stores the node list, the start and goal it used (start index,
+carry anchor, branch pair, turn; goal pair, turn), the dense joint path at
+$\delta_v$, the holding error at every dense point, where the worst point sits,
+and the largest joint step between dense points (at most $\delta_v$ by
+construction). The penalised weight uses $w = 10$: going one tolerance over
+costs as much as ten radians of joint travel.
+
+% =============================================================================
+\section{Refinement: from a roadmap route to a path that holds the bar exactly}
+\label{sec:refine}
+% =============================================================================
+
+A roadmap route within a tolerance $t$ is a chain of straight joint-space edges
+whose holding error stays under $t$; its nodes hold the bar exactly, the points
+between them do not. The refinement turns such routes into paths that hold the
+bar \emph{exactly}, at every waypoint, without giving up continuity. It is built
+in four layers, each tried only where the one before it fails (code:
+\path{holding_prm/tracking.py}, \path{refine.py}; \path{scripts/prm_bridge.py}
+and \path{dual_arm_task_space_rrt/seeded.py} for the parts that use the planner
+core).
+
+\subsection{Tracking one edge exactly}
+
+\begin{algo}{\textsc{TrackEdge} --- \texttt{tracking.track\_edge}}{alg:track}
+\Function{TrackEdge}{$q_a$, $q_b$; seed $s$ (default $q_a$)}
+  \State knots $k_0 = q_a, \dots, k_m = q_b$ on the joint line, every $2.5^\circ$ of largest joint move
+  \State $T_i \gets$ the bar pose halfway between the two arms' bar poses at $k_i$ \Comment{exact at $q_a$, $q_b$}
+  \State waypoints: $T_i \to T_{i+1}$ cut into $\lceil \max(d/\Delta_p,\ \theta/\Delta_r) \rceil$ equal pieces \Comment{the BiRRT's rule, $\Delta_p = 1$\,cm, $\Delta_r = 0.025$\,rad}
+  \State $p \gets s$
+  \For{each waypoint bar pose $T$, with $g$ = the joint line's configuration at the same place}
+    \For{each arm}
+      \State $B \gets$ \fn{IK}$(T G)$, every branch moved onto $p$'s turn \Comment{rescue off}
+      \State $B' \gets \{q \in B : \norm{q - p}_\infty \le 10^\circ\}$; \textbf{if} empty: \Return continuity (or IK) failure
+      \State take the $q \in B'$ nearest $g$ \Comment{$B'$ usually has one element}
+    \EndFor
+    \If{the step from $p$ moves some joint more than $0.5^\circ$}
+      \State re-walk it at 2\,mm / 0.002\,rad, nearest branch each step; keep where it arrives \Comment{\fn{FineWalk}}
+    \EndIf
+    \State $p \gets$ the solved configuration; append it
+  \EndFor
+  \State \fn{Collides} on the solved waypoints, middle first; \Return the waypoints or the failure and where
+\EndFunction
+\end{algo}
+
+\noindent
+The roadmap's configurations are only seeds and a yardstick: the first solve is
+seeded from the start node, every later one from the waypoint solved just
+before it (as the BiRRT extension does), and nothing requires the chain to
+reproduce a stored node. The joint line's configuration $g$ only breaks ties:
+near a straight elbow or a straight wrist two branches can both lie within the
+gate of the previous waypoint, and then the one on the roadmap's side is taken.
+The waypoints hold the bar to $10^{-7}$\,m, because each one is an IK solution
+of both arms at one bar pose.
+
+\paragraph{Why (nearly) every step is walked again finely.} The gate cannot tell
+a large honest step from a hop between branches: near a straight elbow or wrist
+the two branches can be closer than $10^\circ$. The production check found this
+in four rounds:
+\begin{enumerate}[nosep]
+  \item With 1\,cm steps alone, 31 of 38 exact paths were walked by the production
+        repair to the goal pose but arrived on another branch. On the best path
+        (start 117) the cause was one $9.6^\circ$ step at a $4.8^\circ$ elbow where
+        the chain had hopped to the mirror branch; walked at 2\,mm the arm stays on
+        its branch and arrives $9.4^\circ$ away.
+  \item Re-walking every step above $2^\circ$ at the production's resolution
+        (\fn{FineWalk}: bar frame interpolated at 2\,mm and 0.002\,rad, warm IK
+        nearest the previous solution, the gate at every step) raised the pass
+        rate to 217 of 244 (89\,\%). All 27 failures were collisions, and none
+        was a collision of our own waypoints or of the joint lines between them:
+        the production walk had left our path at a smaller hop ($4^\circ$ at a
+        $2^\circ$ elbow, $8^\circ$ at a $4^\circ$ elbow) on an edge that had been
+        tracked from its far end, and only collided further on.
+  \item Near such a point, which branch a walk keeps depends on the direction it
+        walks in, so waypoints walked from one end and read backwards are not what
+        a walk from the other end gives. Re-walking every step above $0.5^\circ$
+        finely and tracking each edge in both directions (each direction keeping
+        its own waypoints; a route uses an edge only in a direction that worked)
+        left 25 failures in 268, again all collisions.
+  \item The remaining hops sat at nodes: an edge's chain had arrived within the
+        gate of the shared node but on the mirror elbow solution ($-4.3^\circ$
+        against the node's $+4.1^\circ$), and the next edge started from the
+        node's own solution. Now an edge counts as tracked only when its chain
+        ends on its node's own solution (next paragraph).
+\end{enumerate}
+\fn{FineWalk} uses IK only (two solves per 2\,mm step), so it roughly doubles
+the cost of tracking; collision is still checked at the 1\,cm waypoints.
+
+\paragraph{When an edge counts as tracked.} A path is one chain, so where two
+edges meet, the next edge's chain must start where the arriving one ended. The
+next edge was tracked from the shared node, so an edge counts as tracked when
+its chain, started at one node, ends on the other node's own IK solution (both
+are solves at that node's bar pose, so they agree to $10^{-9}$ when they are the
+same solution). ``Within the $10^\circ$ gate'' is not enough: near a straight
+elbow the mirror solution can be closer than that, and switching between two
+solutions at one pose is a branch flip no walk makes. (A seeded chain that
+continues a route from wherever it is need not end on the node; the route's next
+edge is then continued from there in the same way.) Usually an edge's chain does
+end on its node. It does not when the edge's joint line passes
+through a fully stretched elbow, where the two elbow branches meet: the
+corrected path, halfway between what the two arms imply, stays short of that
+point, so the chain cannot cross over and arrives on the mirror branch,
+25--$35^\circ$ from the node on the elbow joint. This happened to 4 of 60
+random B18 edges; neither finer steps nor the tie-break changed it. Such a
+direction is marked as \emph{changing branch}; the edge stays usable in the
+other direction if that one arrives.
+
+\subsection{Exact gaps: tracking routes until they all track}
+
+\begin{algo}{\textsc{ExactGaps} --- \texttt{refine.Tracker.exact\_gaps}}{alg:exactgaps}
+\Function{ExactGaps}{query graph, starts within 30\,mm}
+  \State every collision-usable edge is \emph{untracked} and assumed trackable
+  \Repeat
+    \Repeat
+      \State (gap, parent) $\gets$ \fn{MinimaxToGoals} over the edges not known to fail
+      \State $U \gets$ untracked edges on each start's best route; \fn{TrackEdge} them in parallel; mark failures
+    \Until{$U = \varnothing$}
+    \State assemble each start's route into one chain \Comment{below}
+    \State where a chain cannot continue: drop the edge that left the roadmap's branch
+  \Until{every route assembles}
+  \State \Return each start's \emph{exact gap} (its route's gap) and its exact path
+\EndFunction
+\end{algo}
+
+\noindent
+This is \fn{VerifyGaps} with ``track it'' in place of ``collision-check it'',
+and exact for the same reason: tracking can only remove edges, so a route whose
+edges all track is the best route the graph has left. The \emph{exact gap} of a
+start is therefore the smallest roadmap tolerance at which this roadmap yields
+a path that holds the bar exactly. \emph{Assembly} joins a route's tracked
+edges into one chain and checks the gate at every node. Because every tracked
+edge arrives within the gate of both its nodes, this normally just works; where
+it does not (an edge tracked from its far end arrives a few degrees from the
+node), the next edge is tracked again, seeded from where the chain actually
+is, and if that fails the offending edge is dropped and the routes are searched
+again.
+
+\subsection{Tube draws around a route (way 2)}
+
+For a start whose exact gap is above the target (10\,mm), new nodes are drawn
+around its current best route: a point is picked on the route's joint lines
+(points on edges over the target, or that failed to track, four times as often),
+the driving arm's joints are drawn from a Gaussian of $5^\circ$ around it, and
+the other arm is solved as in Alg.~\ref{alg:sample}. The new nodes join their
+10 nearest neighbours within $30^\circ$ (holding error measured; collision left
+to the tracker), and \fn{ExactGaps} runs again on the enlarged graph. Up to
+three rounds, stopping after two rounds in a row with no start improving.
+
+\subsection{A BiRRT seeded with the route (way 1)}
+
+For a start the roadmap brings within 30\,mm but that has no exact path even
+after the tube rounds (the 24 with the smallest roadmap gaps are tried), a
+task-space BiRRT bridges the failed edges of its original roadmap route
+with the production planner's own extension (\code{core.extend_toward}: warm
+IK, the $10^\circ$ gate, the full collision check). Its two trees do not start
+at the two ends: tree A is the chain of exact waypoints from the start up to
+the first failed edge, tree B the chain from the goal back to the last failed
+edge. Random targets are bar poses in a tube around the route's bar poses
+(5\,cm and $8.6^\circ$ spreads; poses on failed edges four times as often),
+with a 10\,\% chance of aiming at the other tree's tip. A control run starts
+the trees from the two ends only, to separate the value of the exact chains
+from that of the tube.
+
+\subsection{The production check}
+
+Every stored exact path is finally re-solved by the production repair
+(\code{core.repair_joint_path}) at the benchmark's fine resolution (2\,mm and
+0.002\,rad bar steps), with the production solver, gate and collision check.
+A path that passes is one the production planner would accept as is.
+
+% =============================================================================
+\section{Running it in parallel}
+\label{sec:parallel}
+% =============================================================================
+
+Sampling, edge checking and endpoint expansion are the same small computation
+thousands of times over, each independent. \code{WorkerPool} is a
+\code{ProcessPoolExecutor} with the \code{spawn} start method (the pattern of
+the benchmark's parallel library build); each worker opens its own headless
+PyBullet scene once, in its initializer, and keeps it. Processes, not threads:
+\code{pybullet_planning} keeps one global simulation and the collision check
+writes joints into it. Tasks and results are plain lists, so nothing that
+cannot cross a process boundary on Windows ever does; each edge task carries the
+configurations it needs (64 edges, about 12\,kB). Results are re-sorted by chunk
+index, so the roadmap is the same for any worker count, and the parent never
+opens a scene: it does the nearest-neighbour search, the graph searches and the
+file writing. A worker that dies surfaces as a broken pool at once. Each
+worker sets \code{OMP_NUM_THREADS=1} so six or eight of them do not fight a
+running benchmark batch for cores; the default is six workers, eight were used
+for the runs below while no batch was running.
+
+% =============================================================================
+\section{Storage and the dashboard}
+\label{sec:dashboard}
+% =============================================================================
+
+\begin{center}
+\footnotesize
+\begin{tabular}{@{}lp{10.5cm}@{}}
+\toprule
+file & contents \\
+\midrule
+\path{prm/index.json} & every roadmap run (only this tool writes it) \\
+\path{prm/<run>/config.json} & settings, anchors, tallies per phase, timings, provenance (git state of every repository, versions, ssik artifacts) \\
+\path{prm/<run>/roadmap.json.gz} & holding model; nodes as columns (configuration, both flange positions, their midpoint, bar pose, violation, kind, sampling mode, driver, anchor); edges as columns (ends, lengths, checked, free, where it collides, worst position and rotation error, where) \\
+\path{prm/<run>/queries/<tag>.json.gz} & endpoint nodes and edges, the final verdict of every edge, every node's gap and parent, the paths with dense profiles, the per-start table \\
+\path{prm/<run>/dashboard/} & the page (\path{prm.html}, also as \path{index.html}) with the shared scripts \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+The page reuses the benchmark dashboard's robot viewer, loaders and charts
+without changing them. Each node is a ball at the midpoint of the two flanges
+(grey sampled, purple anchors, green starts, blue goals; or coloured by gap).
+Balls are instanced meshes registered in the viewer's list of pickable clouds,
+so the existing click handler reports them. Clicking a ball poses the robot,
+lists the twelve joints, the node's role (anchor, which start or goal pair, which
+turn), its gap, and its edges sorted by holding error, each with a ``walk''
+button. Edges are drawn green within the tolerance slider's value, amber up to
+three times it, red beyond. The best route of the clicked node is drawn and can
+be stepped through; at every step the page recomputes the holding error from the
+posed flanges, and a second, orange bar placed by the right flange shows the
+drift. Serve the data root and open \path{http://localhost:8000/prm/<run>/dashboard/}.
+
+\paragraph{How to run it.} From the repository root, with \code{HUSKY_BENCH_ROOT}
+set to the benchmark data root (PowerShell shown):
+{\footnotesize
+\begin{verbatim}
+.venv\Scripts\python.exe scripts\prm_pilot.py build --name B18_g2_n4000 --library cdfm_v1 `
+    --bar B18 --goals 2 --anchor-starts 40 --nodes 4000 --workers 8
+.venv\Scripts\python.exe scripts\prm_pilot.py query --name B18_g2_n4000 --goal 2 `
+    --starts all --tag all
+.venv\Scripts\python.exe scripts\prm_pilot.py export --name B18_g2_n4000
+.venv\Scripts\python.exe scripts\prm_pilot.py info --name B18_g2_n4000
+python -m http.server --directory $env:HUSKY_BENCH_ROOT 8000
+\end{verbatim}
+}
+\noindent
+\code{--starts} also takes a class list (\code{free,blocked}) or start indices
+(\code{0,12}). Long runs should be started detached (e.g.\ \code{Start-Process}
+with the output sent to a log), not from a Claude Code background shell, which
+stops after ten minutes.
+
+% =============================================================================
+\section{Core differences from the task-space BiRRT}
+\label{sec:diff}
+% =============================================================================
+
+\begin{description}[leftmargin=1.6cm,style=nextline,itemsep=4pt]
+  \item[P-1 \ Nodes are joint configurations that hold the bar.]
+    The BiRRT's nodes are bar poses with an IK side cache (its D-1). Here a node
+    \emph{is} twelve joint values; the bar pose is derived from it. It is made by
+    driving one arm and solving the other, so it holds the bar exactly.
+  \item[P-2 \ No continuity gate.]
+    Edges are straight joint-space lines cut at $\tau$, so continuity holds by
+    construction. The gate that stops 75\,\% of the BiRRT's extensions (D-6b)
+    does not exist.
+  \item[P-3 \ The holding constraint is soft along edges.]
+    It is measured at every $2.5^\circ$ and becomes the edge's score; the
+    search either filters by a tolerance or pays a penalty above it.
+  \item[P-4 \ Distance is the largest joint move.]
+    Nearest neighbours use the raw joint $\infty$-norm, not the bar-corner
+    feature metric (D-2): what matters for an edge is how far the joints move.
+  \item[P-5 \ Sets, not points.]
+    The start and goal are sets of every collision-free branch pair on two turns.
+    The goal/home branch pairing heuristic and the requirement that both
+    endpoints be fixed in advance (D-9) disappear; the search chooses.
+  \item[P-6 \ One graph, many questions.]
+    The graph keeps every alternative and is searched again under any tolerance
+    or weight; there are no restarts (D-8) and no trees thrown away.
+  \item[P-7 \ Collision checked where it decides the answer.]
+    Endpoint edges are checked lazily, and the loops that do so are exact.
+  \item[P-8 \ IK only at nodes.]
+    One analytical solve per draw and 64 pairs per endpoint pose; none along any
+    edge. The BiRRT solves both arms at every waypoint of every extension.
+  \item[P-9 \ Parallel by design.]
+    Sampling, edges and endpoints are split across worker processes, each with
+    its own scene.
+  \item[P-10 \ The answer is a number.]
+    Every start gets a gap (the smallest tolerance at which it connects), so
+    ``near-feasible'' and ``disconnected'' can be told apart.
+\end{description}
+
+% =============================================================================
+\section{Parameters and their defaults}
+\label{sec:params}
+% =============================================================================
+
+\begin{center}
+\footnotesize
+\begin{tabular}{@{}p{3.8cm} p{2.0cm} p{9.2cm}@{}}
+\toprule
+parameter (flag) & default & meaning \\
+\midrule
+\code{--nodes} & 2000 & sampled nodes kept (anchors come on top) \\
+\code{--goals}, \code{--anchor-starts} & all, 40 & goals whose pairs are anchors; library starts per goal used as anchors \\
+\code{--anchor-turns} & both & anchors as given and on the home turn \\
+\code{--mode-mix} & 0.2/0.3/0.5 & \code{anchor_box} / \code{anchor_gauss} / \code{anchor_line} \\
+\code{--box-margin-deg}, \code{--gauss-sigma-deg}, \code{--line-sigma-deg} & 90, 30, 10 & spreads of the three draws \\
+\code{--max-branches} & 1 & other-arm branches kept per draw, nearest the centre \\
+\code{--k}, \code{--radius-deg} & 10, 90 & neighbours per node; longest edge (largest joint move) \\
+\code{--collision-step-deg} & 10 & collision checks along an edge ($= \tau$) \\
+\code{--viol-step-deg} & 2.5 & holding-error points along an edge \\
+\code{--rot-deg-per-mm} & 0.4 & $\rho$ in Eq.~\ref{eq:score} \\
+\code{--k-endpoint}, \code{--radius-endpoint-deg} & 10, 90 & endpoint edges \\
+\code{--tolerances-mm}, \code{--w-hold} & 2,5,10,30; 10 & query tolerances; penalty weight \\
+\code{--endpoint-check} & lazy & collision of endpoint edges \\
+\code{--workers} & 6 & worker processes \\
+\code{--seed} & 0 & random seed \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% =============================================================================
+\section{What the pilot measured}
+\label{sec:data}
+% =============================================================================
+
+\input{holding_prm_results.tex}
+
+% =============================================================================
+\section{Reading guide}
+\label{sec:reading}
+% =============================================================================
+
+Line numbers are from the tree as written on 30 September 2026.
+
+\begin{center}
+\footnotesize
+\begin{tabular}{@{}p{6.0cm} p{5.6cm} p{3.6cm}@{}}
+\toprule
+read & at & this report \\
+\midrule
+\code{violation_from_tools}, \code{holding_violation} & \code{holding.py:295}, \code{:320} & Alg.~\ref{alg:viol} \\
+\code{pose_gap} & \code{holding.py:130} & the angle \\
+\code{interpolate_confs}, \code{rebranch12} & \code{holding.py:387}, \code{:421} & continuity; turns \\
+\code{make_collision_fn} & \code{sampling.py:68} & collision \\
+\code{arm_branches} & \code{sampling.py:148} & IK on the cached base \\
+\code{draw_driver}, \code{lift_draw}, \code{sample_chunk} & \code{sampling.py:278}, \code{:323}, \code{:362} & Algs.~\ref{alg:draw}, \ref{alg:sample} \\
+\code{expand_bar_pose} & \code{sampling.py:413} & Alg.~\ref{alg:expand} \\
+\code{candidate_pairs}, \code{evaluate_edge}, \code{edge_cost} & \code{roadmap.py:55}, \code{:163}, \code{:209} & Alg.~\ref{alg:edge} \\
+\code{minimax_to_goals}, \code{lazy_search} & \code{search.py:169}, \code{:222} & Algs.~\ref{alg:minimax}, \ref{alg:lazy} \\
+\code{WorkerPool.run}, \code{init_worker} & \code{parallel.py:229}, \code{:56} & Section~\ref{sec:parallel} \\
+\code{make_anchors}, \code{build_roadmap} & \code{pilot.py:289}, \code{:409} & Alg.~\ref{alg:build} \\
+\code{query_roadmap} & \code{pilot.py:617} & Alg.~\ref{alg:query} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\end{document}

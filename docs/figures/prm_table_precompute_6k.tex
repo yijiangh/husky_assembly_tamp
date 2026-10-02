@@ -1,0 +1,23 @@
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{6.4cm} rrrrr@{}}
+\toprule
+unseen goal & 2 & 10 & 20 & 31 & 47 \\
+\midrule
+night: nodes, of which anchors (count) & 6248, 248 &  &  &  &  \\
+night: goals the roadmap is anchored on (count) & 17 &  &  &  &  \\
+night: build time (s) & 821 &  &  &  &  \\
+night: collision-free edges, of which within 10 mm (count) & 33582, 1218 &  &  &  &  \\
+night: tracking the edges within 10 mm (s) & 151 &  &  &  &  \\
+night: components of the free graph (count) & 318 &  &  &  &  \\
+\midrule
+online query: start the workers (s) & 9.8 & 10.0 & 9.6 & 10.0 & 10.0 \\
+\quad solve the goal and the 3 carry poses (s) & 1.5 & 1.4 & 1.5 & 1.4 & 1.4 \\
+\quad holding error of their edges (s) & 0.2 & 0.8 & 0.2 & 0.5 & 0.0 \\
+\quad gaps, with lazy collision checks (s) & 0.1 & 0.2 & 0.1 & 0.3 & 0.1 \\
+\quad whole query (s) & 16.5 & 16.4 & 15.4 & 15.9 & 15.2 \\
+online refinement with the night's verdicts (s) & 12.0 & 12.1 & 11.6 & 11.7 & 12.1 \\
+\quad of which starting its workers (s) & 9.9 & 10.1 & 9.7 & 9.8 & 10.0 \\
+\midrule
+best gap from the carry poses to the goal (mm) & 56.2 & 16.6 & 32.5 & 19.0 & $\infty$ \\
+carry poses with an exact path within 10 mm (of 3) & 0 & 0 & 0 & 0 & 0 \\
+\bottomrule
+\end{tabular}

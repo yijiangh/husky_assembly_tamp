@@ -1,0 +1,35 @@
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{6.2cm} rrrrr@{}}
+\toprule
+roadmap & \shortstack{4000 nodes\\$90^\circ$ (ref.)} & \shortstack{4000 nodes\\$160^\circ$ (E1)} & \shortstack{every branch\\2272 draws} & \shortstack{every branch\\10k draws (E4)} & \shortstack{one branch\\10k draws (ref.)} \\
+\midrule
+sampled nodes kept: the node budget (count) & 4000 & 4000 & 2000 & 9400 & 2000 \\
+all nodes, anchors included (count) & 4081 & 4081 & 2081 & 9481 & 2081 \\
+driver-arm draws, one IK call each (count) & 21408 & 21408 & 2272 & 10848 & 10688 \\
+collision checks, sampling and edges together (count) & 89047 & 101487 & 45350 & 232212 & 47606 \\
+candidate edges measured (count) & 26908 & 29089 & 9500 & 56748 & 13028 \\
+collision-free edges (count) & 25056 & 25928 & 8611 & 51717 & 12000 \\
+components: separate islands of the free graph (count) & 173 & 68 & 296 & 533 & 125 \\
+nodes in the largest component (count) & 2557 & 3873 & 755 & 5839 & 1285 \\
+goal anchors in the largest component & 7 of 7 & 7 of 7 & 3 of 7 & 3 of 7 & 7 of 7 \\
+start anchors in the largest component & 27 of 73 & 67 of 73 & 23 of 73 & 49 of 73 & 27 of 73 \\
+\midrule
+sampling time (s, wall clock) & 40 & 35 & 21 & 99 & 24 \\
+edge measuring time (s, wall clock) & 181 & 226 & 78 & 658 & 103 \\
+whole build (s, wall clock) & 232 & 272 & 110 & 769 & 138 \\
+edge phase speed-up (worker-seconds per wall-second) & 8.0 & 6.0 & 7.8 & 6.0 & 7.9 \\
+\midrule
+start 0: gap, best over its branch pairs and turns (mm) & 21.3 & 21.3 & 73.2 & 21.8 & 41.4 \\
+start 0: gap of its library configuration alone (mm) & $\infty$ & 648.9 & $\infty$ & $\infty$ & $\infty$ \\
+start 12: gap, best over its branch pairs and turns (mm) & 4.5 & 4.5 & 5.3 & 4.3 & 5.1 \\
+start 12: gap of its library configuration alone (mm) & 24.2 & 24.2 & 31.1 & 24.2 & 29.2 \\
+\midrule
+all 807 starts: smallest gap (mm) & 2.9 & 2.9 & 5.2 & 3.4 & 4.2 \\
+starts that reach the goal set at all (count of 807) & 657 & 801 & 658 & 713 & 657 \\
+median gap of the starts that reach it (mm) & 24.3 & 25.0 & 44.0 & 23.1 & 30.5 \\
+starts with a gap of at most 2 mm (count) & 0 & 0 & 0 & 0 & 0 \\
+starts with a gap of at most 5 mm (count) & 11 & 11 & 0 & 12 & 1 \\
+starts with a gap of at most 10 mm (count) & 36 & 36 & 16 & 47 & 24 \\
+starts with a gap of at most 30 mm (count) & 462 & 462 & 112 & 471 & 171 \\
+all-starts query time (s, wall clock) & 212 & 553 & 203 & 340 & 229 \\
+\bottomrule
+\end{tabular}

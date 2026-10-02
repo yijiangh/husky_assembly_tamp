@@ -1,0 +1,35 @@
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{6.2cm} rrrrr@{}}
+\toprule
+roadmap & \shortstack{seed 0\\(default)} & seed 1 & seed 2 & \shortstack{every IK\\branch kept} & \shortstack{no line\\draws} \\
+\midrule
+sampled nodes kept: the node budget (count) & 2000 & 2000 & 2000 & 2000 & 2000 \\
+all nodes, anchors included (count) & 2081 & 2081 & 2081 & 2081 & 2081 \\
+driver-arm draws, one IK call each (count) & 10688 & 9280 & 10304 & 2272 & 16768 \\
+collision checks, sampling and edges together (count) & 47606 & 46198 & 46252 & 45350 & 58085 \\
+candidate edges measured (count) & 13028 & 12983 & 12896 & 9500 & 11929 \\
+collision-free edges (count) & 12000 & 11871 & 11909 & 8611 & 10174 \\
+components: separate islands of the free graph (count) & 125 & 139 & 148 & 296 & 200 \\
+nodes in the largest component (count) & 1285 & 1044 & 1034 & 755 & 1460 \\
+goal anchors in the largest component & 7 of 7 & 3 of 7 & 3 of 7 & 3 of 7 & 3 of 7 \\
+start anchors in the largest component & 27 of 73 & 24 of 73 & 24 of 73 & 23 of 73 & 48 of 73 \\
+\midrule
+sampling time (s, wall clock) & 24 & 19 & 24 & 21 & 25 \\
+edge measuring time (s, wall clock) & 103 & 82 & 98 & 78 & 97 \\
+whole build (s, wall clock) & 138 & 114 & 133 & 110 & 132 \\
+edge phase speed-up (worker-seconds per wall-second) & 7.9 & 7.9 & 7.9 & 7.8 & 7.9 \\
+\midrule
+start 0: gap, best over its branch pairs and turns (mm) & 41.4 & 33.0 & 23.5 & 73.2 & 38.2 \\
+start 0: gap of its library configuration alone (mm) & $\infty$ & $\infty$ & $\infty$ & $\infty$ & $\infty$ \\
+start 12: gap, best over its branch pairs and turns (mm) & 5.1 & 3.9 & 5.0 & 5.3 & 13.7 \\
+start 12: gap of its library configuration alone (mm) & 29.2 & 11.2 & 34.1 & 31.1 & 29.1 \\
+\midrule
+all 807 starts: smallest gap (mm) & 4.2 & 3.8 & 5.0 & 5.2 & 13.7 \\
+starts that reach the goal set at all (count of 807) & 657 & 651 & 658 & 658 & 650 \\
+median gap of the starts that reach it (mm) & 30.5 & 24.3 & 24.5 & 44.0 & 25.5 \\
+starts with a gap of at most 2 mm (count) & 0 & 0 & 0 & 0 & 0 \\
+starts with a gap of at most 5 mm (count) & 1 & 4 & 3 & 0 & 0 \\
+starts with a gap of at most 10 mm (count) & 24 & 25 & 27 & 16 & 0 \\
+starts with a gap of at most 30 mm (count) & 171 & 400 & 405 & 112 & 406 \\
+all-starts query time (s, wall clock) & 229 & 236 & 205 & 203 & 188 \\
+\bottomrule
+\end{tabular}

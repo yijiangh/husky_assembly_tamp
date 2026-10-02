@@ -1,0 +1,4 @@
+# Built documents and images are binary: never convert their line endings
+# (core.autocrlf is on here, and git mistook a LaTeX PDF for text).
+*.pdf binary
+*.png binary

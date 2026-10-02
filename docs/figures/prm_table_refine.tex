@@ -1,0 +1,28 @@
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{7.6cm} rrrrr@{}}
+\toprule
+refinement & \shortstack{4000 nodes\\knots $2.5^\circ$} & \shortstack{4000 nodes\\end nodes only} & \shortstack{2000 nodes\\seed 0} & \shortstack{2000 nodes\\seed 1} & \shortstack{2000 nodes\\seed 2} \\
+\midrule
+starts within 30 mm on the roadmap: the ones refined (count) & 462 & 462 & 171 & 400 & 405 \\
+edges tracked (count) & 3329 & 3388 & 1091 & 2373 & 2735 \\
+\quad of which the tracker turned into exact waypoints & 2737 & 2762 & 885 & 1961 & 2304 \\
+\quad failed: no IK solution at some waypoint & 65 & 45 & 14 & 35 & 37 \\
+\quad failed: a joint jumped more than $10^\circ$ & 136 & 119 & 25 & 98 & 104 \\
+\quad failed: a corrected waypoint collides & 19 & 47 & 1 & 16 & 21 \\
+\quad failed: changes elbow branch, so it cannot meet the next edge & 372 & 415 & 166 & 263 & 269 \\
+edges re-tracked from a route's last waypoint at a node (count) & 0 & 0 & 0 & 0 & 0 \\
+edges dropped because a route could not continue (count) & 1 & 2 & 0 & 0 & 0 \\
+\midrule
+starts with an exact path from a route within 2 mm, of those the roadmap brings within 2 mm & 0 of 0 & 0 of 0 & 0 of 0 & 0 of 0 & 0 of 0 \\
+starts with an exact path from a route within 5 mm, of those the roadmap brings within 5 mm & 11 of 11 & 11 of 11 & 1 of 1 & 4 of 4 & 3 of 3 \\
+starts with an exact path from a route within 10 mm, of those the roadmap brings within 10 mm & 34 of 36 & 33 of 36 & 24 of 24 & 25 of 25 & 27 of 27 \\
+starts with an exact path from a route within 30 mm, of those the roadmap brings within 30 mm & 245 of 462 & 169 of 462 & 81 of 171 & 81 of 400 & 129 of 405 \\
+\midrule
+best start: smallest exact gap (mm) & 2.87 & 2.87 & 4.20 & 3.78 & 4.97 \\
+\quad its start index & 117 & 117 & 227 & 313 & 12 \\
+\quad waypoints of its exact path (count) & 178 & 139 & 207 & 125 & 164 \\
+\quad largest joint step between waypoints (deg) & 2.76 & 3.55 & 2.69 & 2.57 & 2.31 \\
+\quad holding error of its waypoints (mm) & 4e-09 & 4e-09 & 4e-09 & 4e-09 & 4e-09 \\
+refinement time (s, wall clock) & 1210 & 1085 & 483 & 858 & 902 \\
+stored exact paths (one per start, plus the best and the shortest ones) passing the production repair at 2 mm steps & 249 of 249 & -- & -- & -- & -- \\
+\bottomrule
+\end{tabular}

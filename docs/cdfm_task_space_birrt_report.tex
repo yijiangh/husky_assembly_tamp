@@ -1,0 +1,1050 @@
+% =============================================================================
+% Technical report: the constrained dual-arm task-space BiRRT (CDFM planner)
+% as implemented in husky_assembly_tamp.motion_planner.
+%
+% Build:  pdflatex cdfm_task_space_birrt_report.tex   (run twice for refs)
+% =============================================================================
+\documentclass[11pt,a4paper]{article}
+
+% --- page + fonts ------------------------------------------------------------
+\usepackage[margin=2.2cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+
+% --- maths -------------------------------------------------------------------
+\usepackage{amsmath,amssymb}
+
+% --- pseudocode ---------------------------------------------------------------
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{caption}
+
+% --- tables, colours, links ---------------------------------------------------
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage[colorlinks=true,linkcolor=blue!60!black,urlcolor=blue!60!black]{hyperref}
+
+% =============================================================================
+% Macros
+% =============================================================================
+
+% Code identifiers (underscores are typed as-is thanks to \detokenize).
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+
+% A line of pseudocode that DIFFERS from the standard BiRRT is printed in red
+% and gets a [D-n] tag at the right margin, pointing to the difference list
+% in Section 5.
+\definecolor{diff}{RGB}{176,32,32}
+\newcommand{\D}[1]{\textcolor{diff}{#1}}
+\newcommand{\dtag}[1]{\hfill\textcolor{diff}{\scriptsize\textsf{[#1]}}}
+
+% Pseudocode comments in grey, to the right.
+\algrenewcommand{\algorithmiccomment}[1]{\hfill\textcolor{gray}{\footnotesize$\triangleright$ #1}}
+\newcommand{\Continue}{\State \textbf{continue}}
+\newcommand{\Break}{\State \textbf{break}}
+
+% Non-floating algorithm block that may break across pages.
+\newenvironment{algo}[2]{%
+  \par\medskip\noindent\rule{\linewidth}{0.8pt}\par
+  \captionof{algorithm}{#1}\label{#2}%
+  \vspace{-4pt}\noindent\rule{\linewidth}{0.4pt}\par\vspace{-2pt}
+  \begin{algorithmic}[1]}%
+ {\end{algorithmic}\vspace{-2pt}\noindent\rule{\linewidth}{0.8pt}\par\medskip}
+
+% Maths shorthands.
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\SE}{\mathrm{SE}(3)}
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+\newcommand{\Tree}{\mathcal{T}}
+\newcommand{\fn}[1]{\textsc{#1}}
+
+\title{The Constrained Dual-Arm Task-Space BiRRT\\
+       \large A technical report on the current CDFM (M1) planner implementation}
+\author{husky\_assembly\_tamp \texttt{motion\_planner} --- written for Yijiang Huang}
+\date{29 September 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+This report explains the bidirectional task-space RRT that plans the M1
+``constrained dual-arm free movement'' (CDFM): both arms of the Husky dual-UR5e
+hold one bar rigidly and carry it from a home (loading) pose to the approach
+pose in front of the structure. The search runs on the \emph{bar pose} in
+$\SE$, and every tree node is lifted to a 12-joint configuration by analytical
+inverse kinematics as the tree grows. The pseudocode below is written directly
+from the code in \code{dual_arm_task_space_rrt/core.py} and
+\code{api.py}; lines that differ from the textbook RRT-Connect of
+Kuffner and LaValle are printed in \D{red} and tagged \D{\textsf{[D-n]}},
+with the list of differences collected in Section~\ref{sec:diff}.
+\end{abstract}
+
+\tableofcontents
+
+% =============================================================================
+\section{What is being planned}
+\label{sec:problem}
+% =============================================================================
+
+\paragraph{The movement.}
+An M1 movement starts with the bar already gripped by both tools and ends with
+the bar at its approach pose next to the partially built structure. Nothing is
+grasped or released along the way, so the two tool frames keep a fixed
+relation to the bar for the whole motion. The robot base does not move.
+
+\paragraph{Variables.}
+\begin{itemize}[nosep]
+  \item $q = (q_L, q_R) \in \R^{12}$: the six left-arm joints followed by the
+        six right-arm joints (canonical UR order).
+  \item $T \in \SE$: the world pose of the bar. In code a pose is a PyBullet
+        pair \code{(pos, quat_xyzw)}.
+  \item $G_L, G_R \in \SE$: the two \emph{grasp transforms}, bar-from-tool0.
+        They are read once from the goal (or start) configuration and never
+        change. The world tool poses implied by a bar pose are
+        $T\,G_L$ and $T\,G_R$.
+  \item $\mathrm{FK}_L(q_L), \mathrm{FK}_R(q_R)$: forward kinematics of each
+        arm to its \code{tool0} link.
+\end{itemize}
+
+\paragraph{The constraint.}
+A configuration is admissible only when both tools sit exactly on the bar:
+\begin{equation}
+  \mathcal{M} \;=\; \bigl\{\, q \in \R^{12} \;:\;
+    \exists\, T \in \SE \text{ with } \mathrm{FK}_L(q_L) = T G_L
+    \text{ and } \mathrm{FK}_R(q_R) = T G_R \,\bigr\}.
+  \label{eq:manifold}
+\end{equation}
+$\mathcal{M}$ is a six-dimensional surface inside the twelve-dimensional joint
+space; a random joint sample lands on it with probability zero. That is why the
+planner does not sample joints at all. It samples the bar pose $T$ (six
+numbers), and \emph{lifts} each $T$ to a $q \in \mathcal{M}$ by solving
+inverse kinematics for both arms. The only freedom hidden inside that lift is
+the choice of IK branch (a UR arm has up to eight for one tool pose), and much
+of the machinery described below exists to keep that choice consistent along a
+path.
+
+\paragraph{What ``solved'' means.}
+The output is a list of bar poses $T_0,\dots,T_n$ with $T_0 = T_{\text{start}}$,
+$T_n = T_{\text{goal}}$, and the matching joint path $q_0,\dots,q_n$ such that
+\begin{enumerate}[nosep,label=(\roman*)]
+  \item every $q_i$ holds the bar at $T_i$ (Eq.~\ref{eq:manifold}, verified by
+        FK to $10^{-4}$),
+  \item consecutive poses are at most one step
+        ($\delta_p$ metres, $\delta_r$ radians) apart,
+  \item consecutive configurations are at most $\tau$ apart per joint,
+        $\norm{q_{i+1}-q_i}_\infty \le \tau$ with $\tau = 10^\circ$
+        (the \emph{continuity gate}), and
+  \item every $q_i$ is collision-free for the whole cell (robot, tools,
+        attached bar, structure, obstacles).
+\end{enumerate}
+
+% =============================================================================
+\section{Where the code lives}
+\label{sec:where}
+% =============================================================================
+
+\begin{center}
+\footnotesize
+\begin{tabular}{@{}llp{7.2cm}@{}}
+\toprule
+\textbf{Function} & \textbf{File} & \textbf{Role} \\
+\midrule
+\code{plan_constrained_dual_arm} & \code{api.py} & public entry point; endpoints, stage switches, calls the search, then the smoother \\
+\code{_derive_constrained_start_for_plan} & \code{api.py} & goal IK, goal/home branch pairing, backward-tracked start, direct-path shortcut \\
+\code{_ssik_pair_goal_branch_with_home} & \code{api.py} & pick the goal IK branch pair that a home pose can reach \\
+\code{plan_pose_birrt} & \code{core.py} & \textbf{the bidirectional search} (Alg.~\ref{alg:birrt}) \\
+\code{extend_toward} & \code{core.py} & greedy walk of one tree toward a pose (Alg.~\ref{alg:extend}) \\
+\code{solve_dual_arm_pose_ik} & \code{core.py} & lift one bar pose to $q$ (Alg.~\ref{alg:ik}) \\
+\code{joint_step_exceeds_threshold} & \code{core.py} & the continuity gate \\
+\code{pose_to_feature_vec}, \code{nearest_node} & \code{core.py} & the metric and the nearest-neighbour scan \\
+\code{sample_pose} & \code{core.py} & the random bar-pose sampler \\
+\code{build_cfab_pose_collision_fn} & \code{core.py} & bar-only collision pre-check (CC.4) \\
+\code{derive_constrained_start_tracked} & \code{core.py} & start derivation by tracking goal$\to$home (Alg.~\ref{alg:tracked}) \\
+\code{smooth_dual_arm_pose_path} & \code{smooth.py} & shortcut smoother in pose space (Alg.~\ref{alg:smooth}) \\
+\code{ssik_arm_branches}, \code{rebranch_toward_seed} & \code{ssik_ik.py} & analytical IK branches, $2\pi$ re-branching (Alg.~\ref{alg:branches}) \\
+\code{ssik_inprocess.solve} & \code{keyframe/} & loads the generated per-arm solver module and forwards the call \\
+artifact \code{solve}, \code{_solve_algebraic} & \code{asset/ssik/} & the generated per-arm ssik solver: candidates, FK gate, dedup, limits (Algs.~\ref{alg:artifact}, \ref{alg:rr}) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+All paths are relative to \path{husky_assembly_tamp/motion_planner/} unless
+they start with \path{keyframe/} or \path{asset/}, which are siblings of
+\path{motion_planner/} inside the package; the RRT files sit in the
+\path{dual_arm_task_space_rrt/} sub-package. Line numbers
+quoted in Section~\ref{sec:reading} refer to the tree at the time of writing.
+An earlier, Markdown-format review of the same code is in
+\path{docs/plan_constrained_dual_arm.md}; the benchmark that measures it is
+described in \path{benchmark/README.md} and \path{benchmark/analysis_night1.md}.
+
+% =============================================================================
+\section{The textbook baseline: RRT-Connect}
+\label{sec:baseline}
+% =============================================================================
+
+For reference, Algorithm~\ref{alg:std} is RRT-Connect as introduced by Kuffner
+and LaValle (ICRA 2000), which is what people usually mean by ``BiRRT''. It
+plans in the configuration space $\mathcal{C}$ with a single validity test
+(\fn{CollisionFree}) and a fixed step $\varepsilon$.
+
+\begin{algo}{Standard RRT-Connect (Kuffner \& LaValle 2000)}{alg:std}
+\Function{RRT-Connect}{$q_{\text{init}}, q_{\text{goal}}$}
+  \State $\Tree_a \gets \{q_{\text{init}}\}$;\quad $\Tree_b \gets \{q_{\text{goal}}\}$
+  \For{$k = 1 \dots K$}
+    \State $q_{\text{rand}} \gets$ \fn{RandomConfig}() \Comment{uniform in $\mathcal{C}$}
+    \If{\fn{Extend}($\Tree_a$, $q_{\text{rand}}$) $\neq$ \textsc{Trapped}}
+      \If{\fn{Connect}($\Tree_b$, $q_{\text{new}}$) $=$ \textsc{Reached}}
+        \State \Return \fn{Path}($\Tree_a$, $\Tree_b$) \Comment{concatenate the two branches at $q_{\text{new}}$}
+      \EndIf
+    \EndIf
+    \State \fn{Swap}($\Tree_a$, $\Tree_b$) \Comment{strict alternation}
+  \EndFor
+  \State \Return \textsc{Failure}
+\EndFunction
+\Statex
+\Function{Extend}{$\Tree$, $q$}
+  \State $q_{\text{near}} \gets$ \fn{Nearest}($\Tree$, $q$) \Comment{Euclidean in $\mathcal{C}$}
+  \State $q_{\text{new}} \gets q_{\text{near}} + \varepsilon\,\dfrac{q - q_{\text{near}}}{\norm{q - q_{\text{near}}}}$ \Comment{one fixed step}
+  \If{\fn{CollisionFree}($q_{\text{near}}, q_{\text{new}}$)}
+    \State add vertex $q_{\text{new}}$ and edge $(q_{\text{near}}, q_{\text{new}})$ to $\Tree$
+    \State \Return \textsc{Reached} if $q_{\text{new}} = q$ else \textsc{Advanced}
+  \EndIf
+  \State \Return \textsc{Trapped}
+\EndFunction
+\Statex
+\Function{Connect}{$\Tree$, $q$}
+  \Repeat
+    \State $S \gets$ \fn{Extend}($\Tree$, $q$)
+  \Until{$S \neq$ \textsc{Advanced}} \Comment{keep stepping until reached or blocked}
+  \State \Return $S$
+\EndFunction
+\end{algo}
+
+\noindent
+Two properties of the baseline matter for the comparison:
+\begin{itemize}[nosep]
+  \item A node \emph{is} a configuration; there is nothing to compute when a
+        node is added, and concatenating the two trees at the meeting node is
+        trivially a valid path.
+  \item Validity is one boolean (collision). There is no notion of a step
+        being \emph{kinematically} inconsistent with the previous one.
+\end{itemize}
+
+% =============================================================================
+\section{The implemented search}
+\label{sec:impl}
+% =============================================================================
+
+\subsection{Building blocks}
+
+\paragraph{Pose interpolation.}
+$\fn{Interp}(T_a, T_b;\ \delta_p, \delta_r)$ (PyBullet-planning
+\code{interpolate_poses}) returns
+$N = \lceil \max(\norm{p_b - p_a}/\delta_p,\ \theta(R_a,R_b)/\delta_r) \rceil$
+intermediate poses with linear position and slerp orientation, followed by
+$T_b$ itself. So the last element of the walk is \emph{exactly} the target
+pose; this is what makes ``the trees meet'' an equality rather than a
+tolerance test in the bidirectional planner.
+
+\paragraph{Feature-point metric.}
+The bar's eight bounding-box corners $c_1,\dots,c_8$ (bar-local; the box is
+$0.03 \times 0.03 \times 1.0$ m by default) are pushed through a pose to give
+a 24-vector
+\begin{equation}
+  \phi(T) = \bigl[\,T c_1;\ T c_2;\ \dots;\ T c_8\,\bigr] \in \R^{24},
+  \qquad
+  d(T_1, T_2) = \norm{\phi(T_1) - \phi(T_2)}_2 .
+  \label{eq:feature}
+\end{equation}
+This single number blends translation and rotation in a way that is scaled by
+the physical size of the bar (rotating a long bar moves its corners a lot),
+which avoids having to pick a weight between metres and radians. $\phi$ is
+cached per node so nearest-neighbour search is a linear scan over cached
+24-vectors.
+
+\paragraph{Continuity gate.}
+\begin{equation}
+  \fn{Jump}(q', q) \;\equiv\; \norm{q' - q}_\infty > \tau,
+  \qquad \tau = \code{DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD} = 10^\circ .
+  \label{eq:gate}
+\end{equation}
+The comparison is on \emph{raw} joint values (no wrapping to $\pm\pi$; the
+unwrapping helper is left in the source but disabled). A step that fails this
+gate is interpreted as the IK having flipped to a different solution branch,
+and is discarded.
+
+\paragraph{Two collision predicates.}
+\begin{itemize}[nosep]
+  \item \code{collision_fn}$(T)$: bar-only. The attached bar is moved to the
+        sampled world pose by rewriting its attachment frame, and only
+        compas\_fab's step CC.4 (attached rigid body vs.\ environment) runs.
+        Cheap pre-reject, used in every stage.
+  \item \code{joint_collision_fn}$(q)$: full cell. Clones the start state,
+        writes the twelve joints, runs the complete compas\_fab check (self,
+        tools, attached bar, environment, ACM). Stage 3 only. Measured cost
+        $\approx 13$ ms per call (Section~\ref{sec:bench}).
+\end{itemize}
+
+\subsection{Lifting a bar pose to joints}
+
+\begin{algo}{\textsc{SolveDualArmPoseIK} --- \texttt{solve\_dual\_arm\_pose\_ik} (ssik backend)}{alg:ik}
+\Function{SolveDualArmPoseIK}{$T$, $q_{\text{seed}}$}
+  \For{$\text{arm} \in \{L, R\}$}
+    \State $X \gets T\,G_{\text{arm}}$ \Comment{world tool0 target}
+    \State $B \gets$ \code{ssik_arm_branches}(arm, $X$, $q_{\text{seed},\text{arm}}$, \code{allow_rescue=False})
+    \Statex \hspace{\algorithmicindent}\hspace{\algorithmicindent}
+      \textcolor{gray}{\footnotesize every analytical branch inside joint limits, each shifted by $k\cdot 2\pi$ per joint toward the seed when that stays in-limit, sorted by $\norm{\cdot - q_{\text{seed},\text{arm}}}_\infty$ (Alg.~\ref{alg:branches}, Section~\ref{sec:ssik})}
+    \If{$B = \varnothing$} \Return \textsc{None} \EndIf \Comment{tool pose unreachable for this arm}
+    \State $q_{\text{arm}} \gets B[0]$ \Comment{nearest branch to the seed}
+  \EndFor
+  \State $q \gets (q_L, q_R)$
+  \If{\textbf{not} \code{validate_dual_arm_bar_pose}($q$, $T$)} \Return \textsc{None} \EndIf
+  \Statex \hspace{\algorithmicindent}\textcolor{gray}{\footnotesize PyBullet FK re-check: both tools within $10^{-4}$ of $T G_L$, $T G_R$, and the two implied bar poses agree}
+  \State \Return $q$
+\EndFunction
+\end{algo}
+
+\noindent
+Two remarks. First, the two arms are independent 6R chains, so the lift is two
+separate analytical solves; nothing about the second arm depends on the first.
+Second, ``nearest branch to the seed'' is the \emph{only} mechanism that keeps
+a walk on one branch sheet. There is no memory of which branch was chosen
+earlier beyond the previous configuration; the continuity gate
+(Eq.~\ref{eq:gate}) is the safety net that catches the cases where nearest
+still means far. What ``branch'' means, and how the list $B$ is produced, is
+the subject of the next subsection.
+
+\subsection{Inside \texttt{ssik\_arm\_branches}: how the IK branches are produced}
+\label{sec:ssik}
+
+Every IK call in the planner goes through one function,
+\code{ssik_ik.ssik_arm_branches}. It is a thin adapter over the analytical
+solver library \emph{ssik} (v3.2.0 in the planner's venv), and the stack it
+sits on has four layers:
+
+\begin{center}
+\footnotesize
+\begin{tabular}{@{}p{1.3cm} p{5.0cm} p{9.2cm}@{}}
+\toprule
+layer & where & what it does \\
+\midrule
+adapter & \path{motion_planner/ssik_ik.py} & world $\to$ arm-base frame, $2\pi$ re-branching toward the seed, raw-distance sort (Alg.~\ref{alg:branches}) \\
+\addlinespace
+loader & \path{keyframe/ssik_inprocess.py} & imports the generated per-arm module once and forwards the call \\
+\addlinespace
+artifact & \path{asset/ssik/left_ur_arm_ik.py}, \path{asset/ssik/right_ur_arm_ik.py} & the generated solver: algebraic candidates, FK check, dedup, limits, seed sort (Alg.~\ref{alg:artifact}) \\
+\addlinespace
+library & \path{ssik/solvers/ikgeo/}, \path{ssik/postprocess.py}, \path{ssik/refinement/} (installed package) & Raghavan--Roth elimination, limit filters, perturbation rescue (Algs.~\ref{alg:rr}, \ref{alg:rescue}) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Why it is not the textbook UR solver.}
+The artifact modules were generated once by \code{ssik build} from the
+\emph{calibrated} URDF, with each arm rooted at its own
+\code{*_ur_arm_base_link} and ending at \code{*_ur_arm_tool0}. The familiar
+closed-form UR inverse kinematics (eight postures: shoulder left/right, elbow
+up/down, wrist flipped/not) relies on the nominal geometry -- axes 2, 3, 4
+exactly parallel, axes 4, 5, 6 pairwise perpendicular and meeting. Calibration
+breaks that. In the left-arm artifact the second joint axis is
+$(2.7\times10^{-6},\ 0.9999998,\ -5.9\times10^{-4})$ and the fourth is
+$(-1.2\times10^{-3},\ 0.99997,\ -7.9\times10^{-3})$: parallel to within about
+half a degree, but not parallel. ssik's dispatcher therefore found ``no tier-0
+(Pieper-class) match'' and emitted its \emph{tier-2 general 6R} solver,
+\code{ikgeo.general_6r}: the Raghavan--Roth elimination with the
+Manocha--Canny eigenvalue formulation. That solver makes no structural
+assumption about the chain and can return up to 16 real solutions for a
+general 6R arm; for a chain this close to the UR geometry one expects the
+usual eight postures among them, but the code never assumes that count. The
+artifact records \code{EXPECTED_MS_MEDIAN = 5.0} ms per solve.
+
+\paragraph{Joint limits that the solver enforces.}
+The artifact carries the URDF limits, in radians: shoulder pan
+$\pm 2\pi$, shoulder lift $\pm 4.712$ ($\pm 270^\circ$), elbow $\pm\pi$, and
+each wrist $\pm 4.189$ ($\pm 240^\circ$). Four of the six ranges are wider
+than one full turn, so the same physical posture can be represented by two
+(pan: up to three) different in-limit joint vectors that differ by $2\pi$. The
+elbow range is exactly one turn, so the elbow never has an in-limit twin. This
+is the root of the $2\pi$ issue handled by the adapter.
+
+\paragraph{Vocabulary.}
+A \emph{branch} is one geometrically distinct solution: two joint vectors that
+agree modulo $2\pi$ on every joint are the same branch. A \emph{$2\pi$ twin}
+is a different representative of the same branch. ssik returns one
+representative per branch; the adapter's job is to pick the representative
+that sits nearest to the seed in \emph{raw} joint values, because that is what
+the planner's continuity gate measures.
+
+\begin{algo}{\textsc{SsikArmBranches} --- \texttt{ssik\_ik.ssik\_arm\_branches} and \texttt{rebranch\_toward\_seed}}{alg:branches}
+\Function{SsikArmBranches}{arm, $X_{\text{world}}$, $q_{\text{seed}}$, \code{max_solutions}, \code{allow_rescue}}
+  \State \textsc{VerifyJointOrder}(robot) \Comment{once per robot: artifact joint order = URDF chain order}
+  \State $W \gets$ world pose of \code{<arm>_ur_arm_base_link}, read live from PyBullet
+  \State $T \gets W^{-1}\, X_{\text{world}}$ \Comment{ssik expects tool0 in the arm-base frame}
+  \State sols $\gets$ \textsc{ArtifactSolve}($T$; \code{max_solutions}, $q_{\text{seed}}$, \code{allow_rescue}) \Comment{Alg.~\ref{alg:artifact}}
+  \State $B \gets [\,q \text{ for } (q, \text{residual}) \in \text{sols}\,]$
+  \If{$q_{\text{seed}} \neq$ \textsc{None}}
+    \State \D{$B \gets [\,\textsc{Rebranch}(q, q_{\text{seed}}, \text{limits}) \text{ for } q \in B\,]$}
+    \State \D{sort $B$ by $\norm{q - q_{\text{seed}}}_\infty$ ascending} \Comment{raw distance, the metric of Eq.~\ref{eq:gate}}
+  \EndIf
+  \State \Return $B$ \Comment{empty = unreachable, or every branch outside the limits}
+\EndFunction
+\Statex
+\Function{Rebranch}{$q$, seed, limits}
+  \For{$i = 1 \dots 6$}
+    \State $k \gets \operatorname{round}\bigl((\text{seed}_i - q_i)/2\pi\bigr)$ \Comment{whole turns that bring $q_i$ onto the seed's turn}
+    \If{$\text{lo}_i \le q_i + 2\pi k \le \text{hi}_i$} $q_i \gets q_i + 2\pi k$ \EndIf \Comment{only when the twin is inside the limits}
+  \EndFor
+  \State \Return $q$
+\EndFunction
+\end{algo}
+
+\noindent
+The two red lines are the whole point of the adapter. ssik already sorts by
+distance to the seed, but with a \emph{wrap-to-$\pi$} metric (its
+\code{seed_metric="wrap_linf"}), under which a joint at $3.0$ rad and its twin
+at $3.0 - 2\pi = -3.28$ rad are at distance zero. The planner's continuity gate
+takes the raw difference, $6.28$ rad, and would reject that step as a branch
+flip. \textsc{Rebranch} moves every joint onto the seed's turn when the limits
+allow it, and the re-sort makes the first element the branch that is nearest
+in the sense the planner will actually test.
+
+\begin{algo}{\textsc{ArtifactSolve} --- the generated \texttt{solve()} in \texttt{asset/ssik/<arm>\_ur\_arm\_ik.py}}{alg:artifact}
+\Function{ArtifactSolve}{$T$; \code{max_solutions}, $q_{\text{seed}}$, \code{allow_rescue}}
+  \State candidates $\gets$ \textsc{SolveAlgebraic}($T$) \Comment{Alg.~\ref{alg:rr}; raw roots, no limits, may be empty}
+  \State verified $\gets [\,]$
+  \For{$q$ \textbf{in} candidates}
+    \If{any entry of $q$ is not finite} \Continue{} \EndIf
+    \State $r \gets \norm{\mathrm{FK}(q) - T}_F$ \Comment{Frobenius norm of the $4\times4$ difference}
+    \If{$r \le 10^{-5}$} append $(q, r)$ to verified \EndIf \Comment{FK-closure gate; near-misses are dropped (no Newton polish)}
+  \EndFor
+  \State deduped $\gets [\,]$
+  \For{$(q, r)$ \textbf{in} verified}
+    \If{some $(q', r') \in$ deduped has $\max_i |\mathrm{wrap}(q_i - q'_i)| \le 10^{-3}$} keep the better one
+    \Else{} append $(q, r)$
+    \EndIf
+  \EndFor \Comment{one representative per branch, $2\pi$ twins collapsed}
+  \If{deduped $= \varnothing$ \textbf{and} \code{allow_rescue} \textbf{and} $\norm{p_T} \le$ reach radius}
+    \State deduped $\gets$ \textsc{RescueViaPerturbation}($T$) \Comment{Alg.~\ref{alg:rescue}; reach radius = sum of link offsets}
+  \EndIf
+  \State sols $\gets$ \textsc{WrapToLimits}(deduped) \Comment{out-of-range joint: try $q_i + 2\pi k$, $k \in \{1,-1,2,-2\}$}
+  \State sols $\gets$ \textsc{RespectLimits}(sols) \Comment{drop any solution with a joint still outside its range}
+  \If{$q_{\text{seed}} \neq$ \textsc{None}} sort sols by $\max_i |\mathrm{wrap}(q_i - q_{\text{seed},i})|$ \EndIf \Comment{wrap-to-$\pi$ metric}
+  \If{\code{max_solutions} given} truncate sols to the first \code{max_solutions} \EndIf
+  \State \Return sols \Comment{each carries $q$, its FK residual, and a flag saying whether the rescue produced it}
+\EndFunction
+\end{algo}
+
+\noindent
+Three consequences of this ordering are worth holding in mind. (i) The limit
+filter runs \emph{after} dedup, so a branch whose only in-limit representative
+is a $2\pi$ twin still survives: \textsc{WrapToLimits} finds that twin. (ii)
+\textsc{WrapToLimits} prefers the smallest $|k|$, i.e.\ it biases toward the
+raw algebraic value, not toward the seed; the adapter's \textsc{Rebranch}
+corrects that afterwards. (iii) With \code{max_solutions} set (the goal solve
+in \code{_ik_dual_arm_at_frames} uses 8), the truncation happens under ssik's
+wrap metric, \emph{before} the adapter re-sorts under the raw metric. Every
+other call site passes \code{None} and receives the full branch set.
+
+\begin{algo}{\textsc{SolveAlgebraic} --- Raghavan--Roth / Manocha--Canny core (\texttt{\_solve\_algebraic})}{alg:rr}
+\Function{SolveAlgebraic}{$T$}
+  \State $T_{\text{dh}} \gets T_{\text{pre}}^{-1}\, T\, T_{\text{post}}^{-1}$ \Comment{URDF (POE) frames $\to$ calibrated DH chain}
+  \State $(P_{\sin}, P_{\cos}, P_{1}, Q) \gets$ \textsc{BuildPQ}($T_{\text{dh}}$) \Comment{$14\times9$ / $14\times8$; DH constants inlined at build time}
+  \State $(E_{\sin}, E_{\cos}, E_{1}) \gets N^{\top} (P_{\sin}, P_{\cos}, P_{1})$ with $N^{\top} Q = 0$ \Comment{removes the $(q_1, q_2)$ terms; $6\times9$}
+  \State $(E_{\text{quad}}, E_{\text{lin}}, E_{\text{const}}) \gets$ half-angle substitution $x_i = \tan(q_i/2)$ for $i = 3,4,5$
+  \State $(M_{\text{quad}}, M_{\text{lin}}, M_{\text{const}}) \gets$ stack the six equations with $x_4$-shifted copies \Comment{$12\times12$ pencil in $x_3$}
+  \State $(\text{roots}, \text{vecs}) \gets$ real eigenvalues of $M_{\text{quad}} x_3^2 + M_{\text{lin}} x_3 + M_{\text{const}}$ \Comment{M\"obius fallback if ill-conditioned}
+  \State out $\gets [\,]$
+  \For{$(x_3, v)$ \textbf{in} zip(roots, vecs)}
+    \State read $q_4, q_5$ from the eigenvector $v$ \Comment{back-substitution starts}
+    \State recover $q_1, q_2$ from the $P/Q$ system, then $q_6$
+    \If{back-substitution failed} \Continue{} \EndIf
+    \State append $q_{\text{dh}} - \theta_{\text{offset}}$ to out \Comment{back to the URDF joint zero}
+  \EndFor
+  \State \Return out \Comment{at most 16 candidates; each is re-checked by FK in Alg.~\ref{alg:artifact}}
+\EndFunction
+\end{algo}
+
+\noindent
+(Joint numbering in Alg.~\ref{alg:rr} is 1-based to match the text; the
+source uses 0-based names such as \code{eliminate_q0_q1}.) The one-time cost
+of choosing which joint to eliminate first was paid at \code{ssik build};
+at run time the whole routine is dense linear algebra on small matrices.
+
+\begin{algo}{\textsc{RescueViaPerturbation} --- \texttt{ssik.refinement.rescue} (only when \texttt{allow\_rescue=True})}{alg:rescue}
+\Function{RescueViaPerturbation}{$T$}
+  \State found $\gets [\,]$;\quad rng $\gets$ fixed seed \Comment{deterministic}
+  \For{$i = 0 \dots 15$}
+    \State $m \gets (1, 2, 4, 10)[i \bmod 4]$ \Comment{escalating scale}
+    \State $\Delta T \gets$ random small motion: translation $\sim 5\,\text{mm} \cdot m$, rotation $\sim 5\,\text{mrad} \cdot m$
+    \For{$q$ \textbf{in} \textsc{ArtifactSolve}($T\,\Delta T$; limits off, rescue off)} \Comment{off the ridge the algebra works}
+      \State $q^{\star} \gets$ LM-refine $q$ toward $T$ (analytic Jacobian, $\le 20$ iterations)
+      \If{$q^{\star}$ failed \textbf{or} $\norm{\mathrm{FK}(q^{\star}) - T} > 10^{-8}$} \Continue{} \EndIf
+      \If{$q^{\star}$ within $10^{-4}$ rad (wrap-to-$\pi$) of something already in found} \Continue{} \EndIf
+      \State append $q^{\star}$ to found, tagged \code{refinement_used="lm"}
+    \EndFor
+  \EndFor
+  \State \Return found
+\EndFunction
+\end{algo}
+
+\noindent
+The rescue exists for a measure-zero situation: a reachable pose at which the
+Raghavan--Roth pencil loses rank, so the algebra extracts nothing even though
+solutions exist arbitrarily close by. It costs about sixteen ordinary solves
+plus refinement, roughly $40\times$ a normal call according to the loader's
+own comment. That is why the planner passes \code{allow_rescue=False} inside
+every per-waypoint loop (tree extension, tracking, stitching, smoothing) and
+leaves it on only for the one-off endpoint solves: in a loop an unreachable
+waypoint should fail in about a millisecond, and a rescued, numerically
+refined solution may sit on a different branch than its neighbours anyway.
+
+\paragraph{What an empty list means.}
+\code{ssik_arm_branches} returns $[\,]$ in exactly three cases: the tool pose
+is outside the arm's reach (no real roots close under FK), every branch has a
+joint outside its limits even after $\pm 2\pi$ wrapping, or -- with rescue off
+-- the pose sits on a rank-deficient ridge. The planner does not distinguish
+these; all three become \code{ik_failure} in the profile counters.
+
+\paragraph{Where each call site sits.}
+\begin{center}
+\footnotesize
+\begin{tabular}{@{}l l l c l@{}}
+\toprule
+caller & used for & seed & \code{max_solutions} & rescue \\
+\midrule
+\code{_solve_dual_arm_pose_ik_ssik} & every waypoint & previous $q$ & all & off \\
+\code{_ik_dual_arm_at_frames} & goal from tool frames & placeholder start & 8 & on \\
+\code{_ssik_pair_goal_branch_with_home} & branch pairing & none & all & on \\
+\code{_solve_endpoint_dual_arm_ik_ssik} & goal repair (Alg.~\ref{alg:endpoint}) & goal $q$ & 8 & on \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Growing one tree toward a pose}
+
+Algorithm~\ref{alg:extend} is used both for the ``extend toward a random
+sample'' step and for the ``connect the other tree'' step. It always walks the
+whole segment; it does not take a single $\varepsilon$ step.
+
+\begin{algo}{\textsc{ExtendToward} --- \texttt{extend\_toward}}{alg:extend}
+\Function{ExtendToward}{$\Tree$, $v_{\text{src}}$, $T_{\text{target}}$}
+  \State $v \gets v_{\text{src}}$;\quad $q \gets \Tree.\text{conf}[v]$;\quad reached $\gets$ \textbf{true};\quad reason $\gets$ ``reached''
+  \State \textbf{define} \fn{Stop}($r$): reason $\gets r$;\ reached $\gets$ \textbf{false};\ leave the loop
+  \For{\D{$T$ \textbf{in} \fn{Interp}($v.\text{pose}$, $T_{\text{target}}$; $\delta_p$, $\delta_r$)}} \dtag{D-5}
+    \If{\D{IK enabled} (stage $\ge 2$)} \dtag{D-6}
+      \State \D{$q' \gets$ \textsc{SolveDualArmPoseIK}($T$, $q$)} \Comment{warm-seeded from the parent}
+      \If{\D{$q' = $ \textsc{None}}} \fn{Stop}(``ik\_failure'') \EndIf
+      \If{\D{\fn{Jump}($q'$, $q$)}} \fn{Stop}(``continuity'') \dtag{D-6} \EndIf
+      \If{\D{stage $= 3$ \textbf{and} \code{joint_collision_fn}($q'$)}} \fn{Stop}(``collision'') \EndIf
+    \EndIf
+    \If{\D{\code{collision_fn}($T$)}} \fn{Stop}(``collision'') \Comment{bar-only check} \EndIf
+    \State \D{$v_{\text{new}} \gets$ new node(pose $T$, parent $v$); add to $\Tree$; cache conf $q'$ and $\phi(T)$} \dtag{D-1}
+    \State $v \gets v_{\text{new}}$;\quad $q \gets q'$
+  \EndFor
+  \State \Return ($v$, reached, reason) \Comment{$v$ is the last node that was accepted}
+\EndFunction
+\end{algo}
+
+\noindent
+Because the loop appends every accepted waypoint before it fails, a blocked
+walk still leaves a chain of nodes reaching to the obstacle. That is the same
+behaviour as the baseline's \fn{Connect} (which calls \fn{Extend} repeatedly),
+but here it is also what the \emph{first} extension does.
+
+\subsection{The bidirectional loop}
+
+\begin{algo}{\textsc{PlanPoseBiRRT} --- \texttt{plan\_pose\_birrt}}{alg:birrt}
+\Function{PlanPoseBiRRT}{$T_s$, $T_g$, $q_s$, $q_g$}
+  \State \D{\textbf{require} $q_s$, $q_g$ hold the bar at $T_s$, $T_g$ and pass \code{joint_collision_fn}} \dtag{D-9}
+  \Statex \hspace{\algorithmicindent}\textcolor{gray}{\footnotesize (stage 1 checks only \code{collision_fn}($T_s$), \code{collision_fn}($T_g$))}
+  \For{attempt $= 1 \dots$ \code{max_attempts}} \dtag{D-8}
+    \State \D{$\Tree_a \gets$ tree rooted at ($T_s$, $q_s$, $\phi(T_s)$);\quad $\Tree_b \gets$ tree rooted at ($T_g$, $q_g$, $\phi(T_g)$)} \dtag{D-1}
+    \For{iter $= 1 \dots$ \code{max_iterations}}
+      \If{elapsed $\ge$ \code{max_time}} \Break \EndIf
+      \State \D{$(\Tree_{\text{grow}}, \Tree_{\text{other}}) \gets (\Tree_a, \Tree_b)$ \textbf{if} $|\Tree_a| \le |\Tree_b|$ \textbf{else} $(\Tree_b, \Tree_a)$} \dtag{D-4}
+      \If{\D{rand() $<$ \code{goal_sample_prob} ($=0.05$)}} \dtag{D-3}
+        \State \D{$T_{\text{rand}} \gets$ root pose of $\Tree_{\text{other}}$} \Comment{cross-bias toward the other tree}
+      \Else
+        \State \D{$T_{\text{rand}} \gets$ \textsc{SamplePose}()} \Comment{uniform box around the base, random Euler angles}
+      \EndIf
+      \State \D{$v_{\text{near}} \gets \arg\min_{v \in \Tree_{\text{grow}}} \norm{\phi(v.\text{pose}) - \phi(T_{\text{rand}})}_2$} \dtag{D-2}
+      \State \D{$(v_{\text{new}}, \_, \text{reason}) \gets$ \textsc{ExtendToward}($\Tree_{\text{grow}}$, $v_{\text{near}}$, $T_{\text{rand}}$)} \dtag{D-5}
+      \State record reason in \code{extend_stop_reasons}
+      \If{$v_{\text{new}} = v_{\text{near}}$} \Continue{} \EndIf \Comment{no progress at all}
+      \State \D{$u_{\text{near}} \gets \arg\min_{u \in \Tree_{\text{other}}} \norm{\phi(u.\text{pose}) - \phi(v_{\text{new}}.\text{pose})}_2$}
+      \State \D{$(u_{\text{new}}, \text{connected}, \_) \gets$ \textsc{ExtendToward}($\Tree_{\text{other}}$, $u_{\text{near}}$, $v_{\text{new}}.\text{pose}$)} \dtag{D-5}
+      \If{\textbf{not} connected} \Continue{} \EndIf
+      \Statex
+      \Statex \hspace{\algorithmicindent}\hspace{\algorithmicindent}\textcolor{gray}{\footnotesize --- the two trees now share the pose $v_{\text{new}}.\text{pose}$; order the path start $\to$ goal ---}
+      \If{$\Tree_{\text{grow}} = \Tree_a$}
+        \State $S \gets$ \fn{Retrace}($v_{\text{new}}$) \Comment{root of $\Tree_a$ (start) $\to$ seam}
+        \State $E \gets$ \fn{Reverse}(\fn{Retrace}($u_{\text{new}}$)) \Comment{seam $\to$ root of $\Tree_b$ (goal)}
+      \Else
+        \State $S \gets$ \fn{Retrace}($u_{\text{new}}$);\quad $E \gets$ \fn{Reverse}(\fn{Retrace}($v_{\text{new}}$))
+      \EndIf
+      \State $E \gets E[1{:}]$ \Comment{drop the duplicated seam node}
+      \State $\text{poses} \gets$ poses of $S$ followed by poses of $E$
+      \If{IK enabled}
+        \State \D{$\text{confs} \gets$ \textsc{Stitch}($S$, $E$, $q_g$)} \dtag{D-7}
+        \If{\D{confs $=$ \textsc{None}}} \Continue{} \EndIf \Comment{seam not joint-continuous; keep searching}
+      \EndIf
+      \State \Return (poses, confs)
+    \EndFor
+    \State \Comment{attempt exhausted: discard both trees and start fresh}
+  \EndFor
+  \State \Return (\textsc{None}, \textsc{None})
+\EndFunction
+\end{algo}
+
+\subsection{Stitching the seam}
+
+Each tree carries its own joint configurations, grown outward from its root by
+warm-seeded IK. The start tree's configurations therefore sit on the branch
+sheet of $q_s$ and the goal tree's on the sheet of $q_g$. Even when the two
+trees meet at the same bar pose, the two configurations at the seam may
+differ by a branch flip. Algorithm~\ref{alg:stitch} repairs this by re-solving
+one side from the other side's seam configuration.
+
+\begin{algo}{\textsc{Stitch} --- inner functions \texttt{\_stitch\_forward} / \texttt{\_stitch\_backward}}{alg:stitch}
+\Function{Stitch}{$S$, $E$, $q_g$}
+  \State $Q_S \gets$ cached confs of $S$;\quad $Q_E \gets$ cached confs of $E$
+  \State \D{$Q_E' \gets$ \textsc{Rewalk}(poses of $E$, seed $= Q_S[-1]$)} \Comment{forward: goal side on the start sheet}
+  \If{$Q_E' \neq$ \textsc{None}} \Return $Q_S \,\Vert\, Q_E'$ \EndIf
+  \State \D{$Q_S' \gets$ \textsc{Reverse}(\textsc{Rewalk}(\textsc{Reverse}(poses of $S$), seed $= Q_E[-1]$))}
+  \Statex \hspace{\algorithmicindent}\textcolor{gray}{\footnotesize backward: start side rebuilt on the goal sheet (the seed falls back to $q_g$ when $E$ is empty, i.e.\ the trees met at the goal root)}
+  \If{$Q_S' = $ \textsc{None} \textbf{or} \fn{Jump}($Q_S'[0]$, $Q_S[0]$)} \Return \textsc{None} \EndIf \Comment{must still end at the given start conf}
+  \State \Return $Q_S' \,\Vert\, Q_E$
+\EndFunction
+\Statex
+\Function{Rewalk}{poses, seed}
+  \State $q \gets$ seed;\quad out $\gets [\,]$
+  \For{$T$ \textbf{in} poses}
+    \State $q' \gets$ \textsc{SolveDualArmPoseIK}($T$, $q$)
+    \If{$q' = $ \textsc{None} \textbf{or} \fn{Jump}($q'$, $q$) \textbf{or} \code{joint_collision_fn}($q'$)} \Return \textsc{None} \EndIf
+    \State append $q'$ to out;\quad $q \gets q'$
+  \EndFor
+  \State \Return out
+\EndFunction
+\end{algo}
+
+\noindent
+Note what a stitch failure does \emph{not} do: it does not remove any node
+from either tree. The iteration simply continues, and the same seam can be hit
+again later from a different frontier. The failure is counted under
+\code{stitch_ik_failure}, \code{stitch_continuity_fail},
+\code{stitch_collision} or \code{stitch_endpoint_mismatch} in the profile.
+
+\subsection{Sampling}
+
+\textsc{SamplePose} (\code{sample_pose} with \code{goal_sample_prob}$=0$ in
+the bidirectional caller) draws the bar position uniformly in a box centred on
+the robot base: $\pm 1.1$ m in $x$ and $y$ (\code{workspace_xy}$=2.2$), and
+$z \in [\max(0.05, z_{\text{base}}),\ \max(0.05, z_{\text{base}}) + 1.2]$.
+Orientation is built from three independent uniform angles in $[-\pi, \pi]$
+(roll, pitch, yaw). This is \emph{not} uniform on the rotation group, but no
+part of the planner depends on it being so. Note that there is no bias toward
+the goal pose in the random branch; the only bias is the 5\,\% cross-bias
+toward the \emph{other tree's root} in Algorithm~\ref{alg:birrt}.
+
+% =============================================================================
+\section{Core differences from the standard BiRRT}
+\label{sec:diff}
+% =============================================================================
+
+The tags below match the red \D{\textsf{[D-n]}} markers in the pseudocode.
+
+\begin{description}[leftmargin=1.6cm,style=nextline,itemsep=4pt]
+  \item[D-1 \ Nodes are bar poses, not configurations.]
+    A tree node stores a pose $T \in \SE$ plus two side caches: the joint
+    configuration that IK produced for it, and its feature vector
+    $\phi(T)$. The search never samples joints. The joint path is a
+    \emph{by-product} that is grown alongside the pose tree, one warm-seeded IK
+    per node.
+
+  \item[D-2 \ Distance is measured on the bar's corners.]
+    Nearest-neighbour search uses $\norm{\phi(\cdot)-\phi(\cdot)}_2$
+    (Eq.~\ref{eq:feature}), a Euclidean distance on eight projected corner
+    points. Translation and rotation are combined through the geometry of the
+    carried object instead of a hand-chosen weight.
+
+  \item[D-3 \ No goal bias; a small cross-bias instead.]
+    Random samples are drawn from a fixed box around the base. With
+    probability $0.05$ the target is replaced by the \emph{other} tree's
+    root, which pulls the two trees toward each other. The single-tree
+    planner (\code{plan_pose_rrt}, archival) used a $0.1$ goal bias.
+
+  \item[D-4 \ The smaller tree grows.]
+    Instead of strict alternation, each iteration extends whichever tree
+    currently has fewer nodes, then asks the other tree to connect. The path
+    is always assembled start $\to$ goal regardless of which tree grew.
+
+  \item[D-5 \ Extend is a full greedy walk with partial progress kept.]
+    Both the extension toward the sample and the connection toward the new
+    frontier walk the entire interpolated segment at resolution
+    ($\delta_p$, $\delta_r$), stopping at the first rejected waypoint and
+    keeping every accepted one. The baseline takes one fixed step for the
+    first move. ``Connected'' therefore means the other tree walked all the
+    way to the exact pose of the new frontier (the last interpolated pose is
+    the target itself), not that it came within a tolerance.
+
+  \item[D-6 \ Four validity gates per waypoint, one of them kinematic.]
+    A waypoint is accepted only if (a) both arms have an analytical IK
+    solution within joint limits, (b) the nearest solution is within $\tau =
+    10^\circ$ per joint of the previous waypoint's configuration, (c) that
+    configuration is collision-free for the whole cell (stage 3), and (d) the
+    bar alone is collision-free at that pose. Gate (b) has no counterpart in
+    the baseline; it is what turns a pose path into a joint path that can be
+    executed without a branch flip, and it is the dominant reason extensions
+    stop (Section~\ref{sec:bench}).
+
+  \item[D-7 \ Meeting at a pose is not enough; the seam is re-solved.]
+    The two trees carry joint configurations from two different roots, so
+    when they meet the joint values may disagree even though the poses are
+    identical. The goal-side configurations are rebuilt from the start-side
+    seam configuration (or, failing that, the start side from the goal
+    branch). If neither rewalk passes the continuity and collision gates, the
+    candidate path is thrown away and the search continues with both trees
+    intact.
+
+  \item[D-8 \ Restarts with fresh trees.]
+    Up to \code{max_attempts} independent attempts, each with its own time
+    budget (\code{max_time}) and iteration cap. Trees are not carried over
+    between attempts; the random generator is.
+
+  \item[D-9 \ Both endpoints must be given as configurations.]
+    The goal tree needs a root configuration, so $q_g$ has to be solved before
+    the search. Because the whole path must stay on one branch sheet, the
+    endpoint IK cannot be chosen independently for start and goal; the
+    pre-processing in Section~\ref{sec:endpoints} exists to make $q_s$ and
+    $q_g$ mutually reachable.
+\end{description}
+
+% =============================================================================
+\section{Around the search: endpoints, stages, smoothing}
+\label{sec:endpoints}
+% =============================================================================
+
+\subsection{Stages}
+
+\code{plan_constrained_dual_arm(stage=...)} switches gates on incrementally,
+which is how the planner was built and how it is still debugged:
+\begin{center}
+\small
+\begin{tabular}{@{}clll@{}}
+\toprule
+stage & IK per waypoint & continuity gate & collision \\
+\midrule
+1 & off & off & bar only (\code{collision_fn}) \\
+2 & on  & on  & bar only \\
+3 & on  & on  & bar + full cell (\code{joint_collision_fn}) \\
+\bottomrule
+\end{tabular}
+\end{center}
+Stage 3 is the production setting. A stage-1 success returns
+\code{info["pose_only_success"]} and no joint path.
+
+\subsection[Getting the two endpoints (derive\_start=True)]{Getting the two endpoints (\texttt{derive\_start=True})}
+
+For the M1 movement the Rhino export carries the goal as two tool0 frames and
+leaves the start joints as a placeholder, so the entry point computes both
+endpoints itself. The order is \emph{goal first}: the goal fixes the grasp
+transforms, then a start is found that the goal can reach.
+
+\begin{enumerate}[nosep]
+  \item \textbf{Goal IK.} Solve each arm at its goal tool frame, nearest
+        analytical branch to the (placeholder) seed; FK at that configuration
+        gives $T_g$ and, with the authored attachment frame, $G_L$ and $G_R$.
+  \item \textbf{Goal/home branch pairing}
+        (\code{_ssik_pair_goal_branch_with_home}). Enumerate all legal IK
+        branches at the goal and at every candidate home pose (three carry
+        anchors $\times$ their roll/yaw variants), rank each goal branch by
+        its $\norm{\cdot}_\infty$ distance to the nearest home branch after
+        $2\pi$ re-branching, and take the first of the top-$4 \times 4$ pairs
+        that is FK-valid and collision-free. Measured on B6, independently
+        picked branches were $104$--$230^\circ$ apart; the best pairing is
+        $38^\circ / 67^\circ$.
+  \item \textbf{Goal collision repair.} If the paired goal collides,
+        \code{solve_endpoint_dual_arm_ik} is asked for a different
+        configuration at the \emph{same} bar pose and grasps. Its signature
+        still carries \code{rng} and \code{max_attempts} from the gradient
+        era, where PyBullet's numeric IK converges to whichever branch basin
+        its seed lands in, so re-seeding at random was the only way to reach
+        another branch. On the ssik backend both arguments are ignored: the
+        branch set is finite and enumerable, so the ssik variant scans it
+        deterministically (Alg.~\ref{alg:endpoint}). ``Re-solve'' therefore
+        means ``walk the list of left$\times$right branch pairs, nearest to
+        the current goal first, and take the first one that holds the bar and
+        is collision-free''. If none does, the plan fails with
+        \code{goal_in_collision}.
+  \item \textbf{Backward-tracked start} (Alg.~\ref{alg:tracked}): walk the
+        bar from $T_g$ toward candidate home poses with the same warm-seeded IK
+        and continuity gate the tree uses. Whatever it arrives at is on the
+        goal's own branch sheet by construction.
+  \item \textbf{Direct-path shortcut.} If one of those walks is also
+        collision-free at every waypoint, its reversal \emph{is} the M1 path
+        and the search is skipped entirely; the returned
+        \code{info["planner"]} then reads \code{"direct_path"}. The smoother
+        is not run in that case.
+  \item \textbf{Cold fallback.} \code{derive_constrained_start}, the older
+        endpoint sweep, is used when tracking finds nothing: it picks a
+        holdable home pose by endpoint IK alone.
+\end{enumerate}
+
+\begin{algo}{\textsc{EndpointIK} --- \texttt{\_solve\_endpoint\_dual\_arm\_ik\_ssik} (goal collision repair)}{alg:endpoint}
+\Function{EndpointIK}{$T$, $G_L$, $G_R$, $q_{\text{seed}}$, \code{collision_fn}}
+  \State $B_L \gets$ \textsc{SsikArmBranches}(L, $T G_L$, $q_{\text{seed},L}$, \code{max_solutions}$=8$, rescue on)
+  \State $B_R \gets$ \textsc{SsikArmBranches}(R, $T G_R$, $q_{\text{seed},R}$, \code{max_solutions}$=8$, rescue on)
+  \If{$B_L = \varnothing$ \textbf{or} $B_R = \varnothing$} \Return \textsc{None} \EndIf \Comment{an arm cannot reach its grasp at all}
+  \State pairs $\gets [\,(q_L, q_R) \text{ for } q_L \in B_L,\ q_R \in B_R\,]$ \Comment{up to $8 \times 8 = 64$ combinations}
+  \State sort pairs by $\norm{(q_L, q_R) - q_{\text{seed}}}_2$ ascending \Comment{stay close to the goal the pairing chose}
+  \For{$(q_L, q_R)$ \textbf{in} pairs}
+    \State $q \gets (q_L, q_R)$
+    \If{\textbf{not} \code{validate_dual_arm_bar_pose}($q$, $T$)} \Continue{} \EndIf \Comment{PyBullet FK gate}
+    \If{\code{collision_fn}($q$)} \Continue{} \EndIf \Comment{full-cell check}
+    \State \Return $q$ \Comment{first pair that is reachable, consistent, and free}
+  \EndFor
+  \State \Return \textsc{None} \Comment{every branch pair is either FK-inconsistent or colliding}
+\EndFunction
+\end{algo}
+
+\noindent
+Two details. The pair order uses the Euclidean norm on the raw 12-vector,
+not the $\norm{\cdot}_\infty$ of the continuity gate, and nothing here checks
+continuity: the repaired goal may sit on a different branch than the one
+\code{_ssik_pair_goal_branch_with_home} chose, in which case the
+backward-tracked start derivation (next step) starts from the repaired goal
+and finds a home on \emph{its} sheet. With the gradient backend the same
+function instead loops \code{max_attempts} times over
+\code{solve_dual_arm_pose_ik}, seeding attempt 0 from $q_{\text{seed}}$ and
+every later attempt from a uniform random 12-vector in $[-\pi, \pi]$.
+
+\begin{algo}{\textsc{DeriveStartTracked} --- \texttt{derive\_constrained\_start\_tracked} (condensed)}{alg:tracked}
+\Function{DeriveStartTracked}{$T_g$, $q_g$}
+  \State variants $\gets$ every selected anchor's canonical orientation, then roll/yaw variants smallest-first
+  \State deltas $\gets$ grid in the sweep box ($\pm0.3$ m, step $0.1$ m), sorted nearest-first
+  \State budget $\gets 120$ s split evenly across the selected anchors;\quad first\_start, best\_partial $\gets$ \textsc{None}
+  \For{(label, $T_{\text{anchor}}$) \textbf{in} variants}
+    \For{$\Delta$ \textbf{in} (all deltas \textbf{if} canonical \textbf{else} first 60)}
+      \If{this anchor's time share is spent} \Break \EndIf
+      \State $T_h \gets T_{\text{anchor}}$ shifted by $\Delta$
+      \State (track, ok) $\gets$ \textsc{TrackDirectPath}($T_g$, $q_g$, $T_h$; screening step $0.01$ m / $0.025$ rad)
+      \Statex \hspace{\algorithmicindent}\hspace{\algorithmicindent}\hspace{\algorithmicindent}
+        \textcolor{gray}{\footnotesize = \textsc{Rewalk} without the collision gate; returns the accepted prefix and whether it reached $T_h$}
+      \If{\textbf{not} ok}
+        \State best\_partial $\gets$ the broken track whose last pose is farthest from $T_g$ \Continue{}
+      \EndIf
+      \If{\code{joint_collision_fn}(track[-1].conf)} \Continue{} \EndIf \Comment{the arrival is a plan endpoint}
+      \If{no interior waypoint of track collides (scanned every 3rd first)}
+        \State re-track at the requested ($\delta_p$, $\delta_r$) if finer than screening; on success
+        \State \Return ($T_h$, arrival conf, \code{direct_path} = track) \Comment{caller skips the search}
+      \EndIf
+      \If{first\_start $=$ \textsc{None}} first\_start $\gets$ ($T_h$, arrival conf) \EndIf \Comment{blocked mid-way; keep as start-only}
+    \EndFor
+  \EndFor
+  \If{first\_start $\neq$ \textsc{None}} \Return first\_start \EndIf
+  \If{best\_partial reaches $\ge 2$ cm from $T_g$} \Comment{M0 will cover the remaining gap}
+    \State \Return its last collision-free waypoint still $\ge 2$ cm from $T_g$, flagged \code{partial}
+  \EndIf
+  \State \Return (\textsc{None}, \textsc{None})
+\EndFunction
+\end{algo}
+
+\subsection{Smoothing}
+
+The raw path is a chain of interpolated waypoints with sharp corners at every
+tree node. The smoother (Algorithm~\ref{alg:smooth}) is a classic random
+shortcut in \emph{pose} space with the joint path re-derived for each accepted
+shortcut, so the same three gates (IK, continuity, collision) hold on the
+result.
+
+\begin{algo}{\textsc{SmoothPosePath} --- \texttt{smooth\_dual\_arm\_pose\_path}}{alg:smooth}
+\Function{SmoothPosePath}{poses, confs}
+  \State cost $\gets \sum_i d(T_i, T_{i+1})$ (Eq.~\ref{eq:feature});\quad corners $\gets$ indices where the feature-vector direction changes
+  \For{iter $= 1 \dots$ \code{smooth_max_iterations} ($=100$), within \code{smooth_max_time} ($=10$ s)}
+    \If{fewer than 3 corners} \Break \EndIf
+    \State pick two corners $i < j$ at least two corners apart
+    \State shortcut $\gets$ \fn{Interp}($T_i$, $T_j$; $\delta_p$, $\delta_r$);\quad candidate $\gets$ poses$[{:}i] \,\Vert\,$ shortcut $\Vert$ poses$[j{+}1{:}]$
+    \If{cost(candidate) $\ge$ cost} \Continue{} \EndIf
+    \State $Q \gets$ \textsc{Rewalk}(candidate$[i{:}]$, seed $=$ confs$[i]$) \Comment{IK + continuity + collision from $i$ to the end}
+    \If{$Q = $ \textsc{None}} \Continue{} \EndIf
+    \State poses $\gets$ candidate;\quad confs $\gets$ confs$[{:}i] \,\Vert\, Q$;\quad recompute cost and corners
+  \EndFor
+  \State \Return (poses, confs)
+\EndFunction
+\end{algo}
+
+\noindent
+The rewalk starts at $i$ and runs to the \emph{end} of the path, not only over
+the shortcut, because the configurations after $j$ were seeded from the old
+waypoints and may no longer be continuous with the new ones.
+
+% =============================================================================
+\section{Parameters and their defaults}
+\label{sec:params}
+% =============================================================================
+
+The same knob often has a different default at each layer. The values below
+are what the code carries today.
+
+\begin{center}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}p{3.6cm} p{2.6cm} p{2.6cm} p{2.8cm} p{3.8cm}@{}}
+\toprule
+parameter & core default & api default & headless M1 & meaning \\
+\midrule
+\code{position_res} $\delta_p$ & 0.05 m & 0.01 m & 0.002 m & extend step; also the goal tolerance \\
+\code{rotation_res} $\delta_r$ & 0.10 rad & 0.025 rad & 0.002 rad & extend step; also the goal tolerance \\
+\code{max_time} & 30 s & 30 s & CLI \code{--max-time} & per attempt \\
+\code{max_iterations} & 2000 & 2000 & --- & per attempt \\
+\code{max_attempts} & 5 & 5 & --- & fresh tree pairs \\
+\code{goal_sample_prob} & 0.05 & (not exposed) & --- & cross-bias to the other root \\
+\code{workspace_xy} / \code{_z} & 2.2 m / 1.2 m & (not exposed) & --- & sampling box \\
+$\tau$ (continuity) & $10^\circ$ & $10^\circ$ & --- & the constant in Eq.~\ref{eq:gate} \\
+\code{dist_metric} & \code{"feature"} & (not exposed) & --- & Eq.~\ref{eq:feature} \\
+smoothing & --- & 100 iters / 10 s & --- & smoother iteration and time caps \\
+tracked-start budget & 120 s & (not exposed) & --- & split evenly across anchors \\
+screening step & 0.01 m / 0.025 rad & (not exposed) & --- & never finer than $\delta_p,\delta_r$ \\
+\code{start_home_anchor} & --- & all & \code{--cdfm-home-anchor} & horizontal / vertical / back \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Here \emph{core} is \code{plan_pose_birrt} (and, for the last three rows,
+\code{derive_constrained_start_tracked}), \emph{api} is
+\code{plan_constrained_dual_arm}, and \emph{headless M1} is what
+\path{scripts/headless_bar_action_planner.py} passes for an M1 movement.
+\medskip
+
+\noindent
+$\delta_p$ and $\delta_r$ reach four places: the tree extension, the connect
+walk, the smoother's shortcuts, and the delivered direct path. Lowering them
+makes every one of those denser; it also makes each extension cost more IK
+solves and collision checks.
+
+% =============================================================================
+\section{What the benchmark measured}
+\label{sec:bench}
+% =============================================================================
+
+These numbers are copied from \code{benchmark/analysis_night1.md} (run
+\code{night1}: 24{,}000 runs over 16 bars, 800 goals, 3 starts per goal, 10
+seeds; each run is a coarse pass at $0.1$ m / $0.1$ rad, 30 s and a fine pass
+at $0.002$ m / $0.002$ rad, 300 s). They are observations, not conclusions,
+and that document states nothing in it has been acted on.
+
+\begin{itemize}[nosep]
+  \item Solved: 16.3\,\% of runs; 28.0\,\% of problems within ten seeds.
+        Median solved time 143 s (fine), 21 s (coarse).
+  \item Why extensions stop: \textbf{continuity 75.4\,\%}, IK failure
+        18.5\,\%, collision 3.7\,\%. The gate in D-6(b) is the main brake,
+        not the environment.
+  \item Where the time goes: collision checking 36.8\,\% (about 12.9 ms per
+        call), IK 33.0\,\%, stitching 13.0\,\%, smoothing 9.8\,\%.
+  \item The tracked start derivation found a collision-free direct path (and
+        skipped the search) for 34.9\,\% of goals and used its whole 120 s
+        budget at the median; the survey found that 73\,\% of goals have at
+        least one straight-line-solvable start.
+  \item On problems where a straight-line motion provably exists, the search
+        still failed 56\,\% of the time, for the same continuity reason.
+\end{itemize}
+
+\paragraph{Where the ``why extensions stop'' numbers come from.}
+The three percentages are lifted from Finding~1 of
+\path{benchmark/analysis_night1.md}; the raw run data behind them
+(\path{runs/night1/summary.json} under the benchmark data root) is not in
+the repository and was not available on the machine this report was written
+on, so the shares could not be recomputed here. What \emph{can} be traced is
+the counter itself:
+\begin{enumerate}[nosep]
+  \item \code{plan_pose_birrt} keeps one \code{Counter} named
+        \code{extend_stop_reasons}. It is incremented \textbf{once per call
+        to \textsc{ExtendToward}}, with the walk's stop reason:
+        \code{reached}, \code{collision}, \code{ik_failure} or
+        \code{continuity} for the growth walk (Alg.~\ref{alg:birrt}
+        line~17), the same names prefixed \code{connect_} for the connect
+        walk, and the four keys
+        \texttt{stitch\_\{ik\_failure, continuity\_fail, collision, endpoint\_mismatch\}}
+        from Alg.~\ref{alg:stitch}.
+  \item \code{update_debug_tree} copies the counter into the caller's
+        \code{debug_tree_out} dict, and the entry point returns that dict as
+        \code{info["profile"]}. The histogram is the entry\newline
+        \code{"extend_stop_reasons"} of that dict.
+  \item The benchmark (\path{benchmark/cdfm.py}) stores that dict on every
+        pass record, and \path{benchmark/summarize.py} adds the dicts of
+        \emph{both} passes (coarse and fine) of \emph{every} run (solved or
+        not) into one histogram per group.
+\end{enumerate}
+Two consequences for reading the table. A ``continuity'' entry is one
+\emph{walk} that ended on the gate, not one waypoint: a walk that added twenty
+nodes and then hit a branch flip counts exactly like one that died on its
+first step. And the analysis document does not say which keys form its
+denominator; the dashboard plots every key as-is, so \code{reached},
+\code{connect_*} and \code{stitch_*} are presumably what ``everything else,
+2.4\,\%'' contains. If so, connect walks are rare, which would mean most
+growth walks make no progress at all before the gate fires. That reading
+should be confirmed against the summary file before anything is built on it.
+
+\paragraph{Reading the numbers against the pseudocode.}
+Every one of the three gates in Algorithm~\ref{alg:extend} is evaluated
+\emph{per waypoint}, so at $\delta = 0.002$ a single extension across the
+workspace is hundreds of IK solves and collision checks, and a single
+rejected waypoint ends it. The continuity share suggests that ``nearest
+branch to the seed'' alone does not keep the walk on one sheet often enough;
+whether that is a threshold question, a sampling question, or an IK question
+is exactly what the stage switches and the profile counters are there to
+separate.
+
+% =============================================================================
+\section{Reading guide}
+\label{sec:reading}
+% =============================================================================
+
+Suggested order for reading the code with this report open. Line numbers are
+from the tree at commit \code{cd239d5} (29 September 2026).
+
+\begin{center}
+\footnotesize
+\begin{tabular}{@{}p{5.8cm} p{6.6cm} p{3.4cm}@{}}
+\toprule
+read & at & this report \\
+\midrule
+\code{joint_step_exceeds_threshold} & \code{core.py:186} & Eq.~\ref{eq:gate} \\
+\code{get_bar_feature_points}, \code{pose_to_feature_vec} & \code{core.py:212}, \code{:412} & Eq.~\ref{eq:feature} \\
+\code{sample_pose}, \code{nearest_node} & \code{core.py:541}, \code{:583} & D-2, D-3 \\
+\code{build_cfab_pose_collision_fn} & \code{core.py:645} & bar-only predicate \\
+\code{validate_dual_arm_bar_pose} & \code{core.py:905} & FK gate in Alg.~\ref{alg:ik} \\
+\code{_solve_dual_arm_pose_ik_ssik} & \code{core.py:1055} & Alg.~\ref{alg:ik} \\
+\code{ssik_arm_branches}, \code{rebranch_toward_seed} & \code{ssik_ik.py:145}, \code{:118} & Alg.~\ref{alg:branches} \\
+\code{ssik_inprocess.solve} & \code{keyframe/ssik_inprocess.py:99} & loader \\
+artifact \code{solve}, \code{_solve_algebraic} & \code{asset/ssik/left_ur_arm_ik.py} \code{:1066}, \code{:817} & Algs.~\ref{alg:artifact}, \ref{alg:rr} \\
+\code{wrap_to_limits}, \code{nearest_to_seed} & \code{ssik/postprocess.py:99}, \code{:157} & limit and seed filters \\
+\code{rescue_via_T_perturbation} & \code{ssik/refinement/rescue.py:57} & Alg.~\ref{alg:rescue} \\
+\code{extend_toward} & \code{core.py:2285} & Alg.~\ref{alg:extend} \\
+\code{plan_pose_birrt} & \code{core.py:2775} & Alg.~\ref{alg:birrt}, \ref{alg:stitch} \\
+\code{_solve_endpoint_dual_arm_ik_ssik} & \code{core.py:1292} & Alg.~\ref{alg:endpoint} \\
+\code{track_direct_path}, \code{first_blocked_index} & \code{core.py:1824}, \code{:1905} & Alg.~\ref{alg:tracked} \\
+\code{derive_constrained_start_tracked} & \code{core.py:1936} & Alg.~\ref{alg:tracked} \\
+\code{reconstruct_joint_path_for_pose_path} & \code{core.py:2448} & \textsc{Rewalk} \\
+\code{update_debug_tree} & \code{core.py:2511} & stop-reason export (Section~\ref{sec:bench}) \\
+\code{smooth_dual_arm_pose_path} & \code{smooth.py:20} & Alg.~\ref{alg:smooth} \\
+\code{_ssik_pair_goal_branch_with_home} & \code{api.py:254} & Section~\ref{sec:endpoints} step 2 \\
+\code{_derive_constrained_start_for_plan} & \code{api.py:383} & Section~\ref{sec:endpoints} \\
+\code{plan_constrained_dual_arm} & \code{api.py:753} & entry point \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Two things the reader should not look for, because they are absent by design:
+there is no goal-region test in the bidirectional planner (the trees meet at
+an exact pose, D-5), and there is no node pruning or rewiring of any kind
+(a failed stitch leaves both trees untouched, D-7).
+
+\end{document}

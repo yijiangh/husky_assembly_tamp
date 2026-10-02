@@ -49,6 +49,7 @@ from compas_robots import RobotModel
 from pybullet_planning.motion_planners.rrt import TreeNode, configs
 
 # * This package (husky_assembly_tamp) — data paths + shared helpers
+from husky_assembly_tamp.keyframe.ssik_inprocess import joint_limits
 from husky_assembly_tamp.motion_planner import ssik_ik
 from husky_assembly_tamp.utils.params import DATA_DIR
 from husky_assembly_tamp.utils.util import calculate_pose_error, normalize_angles, setup_logger
@@ -205,8 +206,29 @@ def joint_step_exceeds_threshold(
     """
     if threshold_rad is None:
         return False
-    step_delta = np.abs(np.asarray(next_conf, dtype=float) - np.asarray(current_conf, dtype=float))
-    return bool(float(np.max(step_delta)) > float(threshold_rad))
+    return bool(float(np.max(joint_step_deltas(next_conf, current_conf))) > float(threshold_rad))
+
+
+def joint_step_deltas(
+    next_conf: Sequence[float] | np.ndarray,
+    current_conf: Sequence[float] | np.ndarray,
+) -> np.ndarray:
+    """How far each joint moved between two configurations, in radians.
+
+    This is the one place the continuity gate's distance is defined, so the
+    gate (:func:`joint_step_exceeds_threshold`) and the failure report that
+    names the offending joint always agree. It is the raw absolute difference:
+    no wrapping by 2*pi, on purpose -- a 2*pi jump is a branch flip for the
+    real arm even though the pose is the same.
+
+    Args:
+        next_conf (Sequence[float] | np.ndarray): the candidate next configuration.
+        current_conf (Sequence[float] | np.ndarray): the previous configuration.
+
+    Returns:
+        np.ndarray: one non-negative value per joint.
+    """
+    return np.abs(np.asarray(next_conf, dtype=float) - np.asarray(current_conf, dtype=float))
 
 
 def get_bar_feature_points(bar_box_dims: Sequence[float] = BAR_BOX_DIMS) -> List[np.ndarray]:
@@ -709,7 +731,64 @@ def build_cfab_pose_collision_fn(planner, start_state, active_bar_id: str) -> Ca
             return True
         return False
 
+    def _explain(world_from_bar_sample: PoseLike) -> List[List[str]]:
+        """Name the parts the bar hits at ``world_from_bar_sample``.
+
+        Runs the same CC.4 check again with the full report switched on. Meant
+        to be called only after ``_pose_collision_fn`` said "collision", so the
+        fast path stays as cheap as before.
+
+        Args:
+            world_from_bar_sample (PoseLike): the world bar pose to test.
+
+        Returns:
+            List[List[str]]: ``[[part, part], ...]``; empty if nothing collides.
+        """
+        attach_pose = pp.multiply(inv_link, world_from_bar_sample)
+        attach_frame = Frame.from_quaternion(
+            [attach_pose[1][3], attach_pose[1][0], attach_pose[1][1], attach_pose[1][2]],
+            point=list(attach_pose[0]),
+        )
+        s = start_state.copy()
+        s.rigid_body_states[active_bar_id].attachment_frame = attach_frame
+        try:
+            planner.check_collision(s, options=dict(pose_cc_opts, full_report=True))
+        except CollisionCheckError as exc:
+            return collision_pair_names(getattr(exc, "collision_pairs", None),
+                                        planner.client.robot_cell)
+        return []
+
+    _pose_collision_fn.explain = _explain
     return _pose_collision_fn
+
+
+def collision_pair_names(
+    collision_pairs: Optional[Sequence[Any]], robot_cell: Any = None,
+) -> List[List[str]]:
+    """Turn compas_fab's reported collision pairs into pairs of plain names.
+
+    A robot link carries its own name. A tool or a rigid body does not: its
+    name is the key it is registered under in the cell, so those are looked
+    up by object identity in ``robot_cell.tool_models`` and
+    ``robot_cell.rigid_body_models``. Without the cell they come out as their
+    class name ("RigidBody"), which says what kind of thing it was but not
+    which one.
+
+    Args:
+        collision_pairs (Optional[Sequence[Any]]): ``exc.collision_pairs`` from
+            a ``CollisionCheckError`` raised with ``full_report`` on; each side
+            is a robot link, a tool or a rigid body.
+        robot_cell (Any): the cell those objects belong to, for the lookup.
+
+    Returns:
+        List[List[str]]: ``[[name, name], ...]``, empty when nothing was given.
+    """
+    by_id: Dict[int, str] = {}
+    for registry in ("tool_models", "rigid_body_models"):
+        for name, model in (getattr(robot_cell, registry, None) or {}).items():
+            by_id[id(model)] = str(name)
+    return [[by_id.get(id(part)) or _collision_part_name(part) for part in pair]
+            for pair in (collision_pairs or [])]
 
 
 def _noop_pose_collision_fn(pose: PoseLike) -> bool:
@@ -966,8 +1045,14 @@ def solve_dual_arm_pose_ik(
     grasp_bar_from_right: PoseLike,
     seed_conf: FullConf,
     use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
+    report: Optional[Dict[str, Any]] = None,
+    ik_options: Optional[Dict[str, Any]] = None,
 ) -> Optional[FullConf]:
     """Solve both arms so they rigidly hold the bar at ``bar_pose``.
+
+    ``ik_options`` (benchmark experiments only; ``None`` in production) picks
+    the ssik solver set and the FK-gate tolerances, see
+    :func:`_solve_dual_arm_pose_ik_ssik`. The gradient backend ignores it.
 
     Tries two solve orders (right-then-left, then left-then-right): within an
     order each arm's IK is warm-started from the running configuration so the
@@ -984,6 +1069,11 @@ def solve_dual_arm_pose_ik(
         grasp_bar_from_right (PoseLike): right grasp transform (bar-from-tool).
         seed_conf (FullConf): the 12-DOF warm-start configuration.
         use_angle_normalization (bool): whether to normalize the solved angles.
+        report (Optional[Dict[str, Any]]): when given and the solve fails, it
+            is filled with why (see :func:`explain_arm_ik_failure`): which
+            arm(s), and whether the pose is unreachable, only reachable past a
+            joint limit, or failed the FK gate. Costs an extra solve or two,
+            so leave it ``None`` (the default) on any time-critical path.
 
     Returns:
         Optional[FullConf]: a validated 12-DOF configuration, or ``None`` if
@@ -1002,7 +1092,13 @@ def solve_dual_arm_pose_ik(
             grasp_bar_from_right=grasp_bar_from_right,
             seed_conf=seed_conf,
             use_angle_normalization=use_angle_normalization,
+            report=report,
+            ik_options=ik_options,
         )
+    # The gradient backend cannot say more than "no solution": it has no
+    # branch list to inspect.
+    if report is not None:
+        report.update({"arm": "unknown", "cause": "unreachable"})
     target_left = pp.multiply(bar_pose, grasp_bar_from_left)
     target_right = pp.multiply(bar_pose, grasp_bar_from_right)
     seed_conf = maybe_normalize_angles(seed_conf, use_angle_normalization)
@@ -1062,6 +1158,8 @@ def _solve_dual_arm_pose_ik_ssik(
     grasp_bar_from_right: PoseLike,
     seed_conf: FullConf,
     use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
+    report: Optional[Dict[str, Any]] = None,
+    ik_options: Optional[Dict[str, Any]] = None,
 ) -> Optional[FullConf]:
     """ssik variant of :func:`solve_dual_arm_pose_ik` (warm, per-waypoint).
 
@@ -1081,11 +1179,21 @@ def _solve_dual_arm_pose_ik_ssik(
         grasp_bar_from_right (PoseLike): right grasp transform (bar-from-tool).
         seed_conf (FullConf): the 12-DOF warm-start configuration.
         use_angle_normalization (bool): whether to normalize the solved angles.
+        report (Optional[Dict[str, Any]]): filled in on failure with the
+            cause, see :func:`solve_dual_arm_pose_ik`. ``None`` = no extra work.
+        ik_options (Optional[Dict[str, Any]]): benchmark-experiment knobs;
+            ``None`` (production) means the calibrated solver and the exact
+            FK gate. Keys: ``artifact_set`` (which solver set answers, see
+            ``keyframe.config.SSIK_ARTIFACT_SETS``), ``fk_pos_tolerance`` and
+            ``fk_ori_tolerance`` (the FK gate against the PyBullet robot; a
+            nominal-geometry solver needs a few mm of slack here).
 
     Returns:
         Optional[FullConf]: a validated 12-DOF configuration, or ``None`` when
         either arm cannot reach its grasp target.
     """
+    options = ik_options or {}
+    artifact_set = options.get("artifact_set")
     seed = np.asarray(maybe_normalize_angles(seed_conf, use_angle_normalization), dtype=float)
     conf = seed.copy()
     targets = {
@@ -1099,13 +1207,21 @@ def _solve_dual_arm_pose_ik_ssik(
         # ! pose must fail fast (~1 ms) instead of burning ~40 ms on ssik's
         # ! numeric rescue -- whose loose LM solutions can also branch-flip.
         branches = ssik_ik.ssik_arm_branches(
-            robot, arm, targets[arm], seed[arm_slice], allow_rescue=False
+            robot, arm, targets[arm], seed[arm_slice], allow_rescue=False,
+            artifact_set=artifact_set,
         )
         if not branches:
-            return None  # this arm cannot reach its tool0 target
+            # This arm cannot reach its tool0 target. Only when someone asked
+            # why: find out whether the other arm would have failed too, and
+            # whether the failure is geometry or a joint limit.
+            if report is not None:
+                report.update(explain_dual_arm_ik_failure(robot, arm, targets, seed))
+            return None
         conf[arm_slice] = branches[0]
     # ! Keep the PyBullet FK ground-truth gate the gradient path used: it guards
-    # ! against any joint-order / frame-convention mismatch with ssik.
+    # ! against any joint-order / frame-convention mismatch with ssik. A
+    # ! solver built for a different (nominal) geometry cannot pass the exact
+    # ! gate, so an experiment may loosen it through ik_options.
     if not validate_dual_arm_bar_pose(
         robot=robot,
         arm_joints=arm_joints,
@@ -1115,9 +1231,188 @@ def _solve_dual_arm_pose_ik_ssik(
         bar_pose=bar_pose,
         grasp_bar_from_left=grasp_bar_from_left,
         grasp_bar_from_right=grasp_bar_from_right,
+        pos_tolerance=float(options.get("fk_pos_tolerance", 1e-4)),
+        ori_tolerance=float(options.get("fk_ori_tolerance", 1e-4)),
     ):
+        if report is not None:
+            # Both arms solved, but PyBullet's FK disagrees with ssik about
+            # where the bar ends up. The configuration is kept so it can be
+            # looked at.
+            report.update({
+                "arm": "both", "cause": "fk_gate",
+                "candidate": [float(v) for v in conf],
+            })
         return None
     return maybe_normalize_angles(conf, use_angle_normalization)
+
+
+# ! Diagnosis helpers for a failed per-waypoint IK solve. Nothing here runs on
+# ! the fast path: they are only called when a caller passed a ``report`` dict,
+# ! which the benchmark does and production planning does not.
+
+def explain_dual_arm_ik_failure(
+    robot: int,
+    failed_arm: str,
+    targets: Dict[str, PoseLike],
+    seed: np.ndarray,
+) -> Dict[str, Any]:
+    """Say why the dual-arm IK had no solution at a bar pose.
+
+    ``_solve_dual_arm_pose_ik_ssik`` stops at the first arm without a branch,
+    so this checks the other arm as well and asks each failed arm the finer
+    question from :func:`explain_arm_ik_failure`.
+
+    Args:
+        robot (int): PyBullet body id.
+        failed_arm (str): the arm that came back with no branch first.
+        targets (Dict[str, PoseLike]): world tool0 targets for "left" and "right".
+        seed (np.ndarray): the 12-vector the solve was warm-started from.
+
+    Returns:
+        Dict[str, Any]: ``arm`` ("left", "right" or "both"), ``cause`` (the
+        worse of the failed arms' causes: "unreachable" beats "joint_limit"),
+        and ``arms``: one :func:`explain_arm_ik_failure` result per failed arm.
+    """
+    other_arm = "right" if failed_arm == "left" else "left"
+    failed = {failed_arm: explain_arm_ik_failure(
+        robot, failed_arm, targets[failed_arm], seed[ssik_ik.ARM_SLICE[failed_arm]])}
+    other_branches = ssik_ik.ssik_arm_branches(
+        robot, other_arm, targets[other_arm], seed[ssik_ik.ARM_SLICE[other_arm]],
+        allow_rescue=False,
+    )
+    if not other_branches:
+        failed[other_arm] = explain_arm_ik_failure(
+            robot, other_arm, targets[other_arm], seed[ssik_ik.ARM_SLICE[other_arm]])
+    causes = {entry["cause"] for entry in failed.values()}
+    return {
+        "arm": "both" if len(failed) == 2 else failed_arm,
+        "cause": "unreachable" if "unreachable" in causes else "joint_limit",
+        "arms": failed,
+    }
+
+
+def explain_arm_ik_failure(
+    robot: int,
+    arm: str,
+    world_tool_pose: PoseLike,
+    seed6: Sequence[float],
+) -> Dict[str, Any]:
+    """Tell "no solution exists" from "solutions exist but break a joint limit".
+
+    Solves once more with the joint limits switched off. If that still finds
+    nothing, the pose is geometrically out of reach. If it finds branches, the
+    nearest one to the seed is reported together with the joints that cannot
+    be brought inside their limits by any whole turn of 2*pi.
+
+    Args:
+        robot (int): PyBullet body id.
+        arm (str): "left" or "right".
+        world_tool_pose (PoseLike): the tool0 target that had no solution.
+        seed6 (Sequence[float]): the arm's 6 seed joint values.
+
+    Returns:
+        Dict[str, Any]: ``cause`` is "unreachable" or "joint_limit". For a
+        joint limit: ``candidate`` (6 raw joint values of the nearest branch),
+        ``n_candidates``, and ``violations`` -- one entry per offending joint
+        with its index in the 12-vector, its value, and the limit it breaks.
+    """
+    unlimited = ssik_ik.ssik_arm_branches(
+        robot, arm, world_tool_pose, seed6, allow_rescue=False, respect_limits=False,
+    )
+    if not unlimited:
+        return {"cause": "unreachable"}
+    limits = joint_limits(arm)
+    first_joint = ssik_ik.ARM_SLICE[arm].start
+    candidate = np.asarray(unlimited[0], dtype=float)
+    violations = []
+    for i, (value, (lower, upper)) in enumerate(zip(candidate, limits)):
+        # A value outside the range may still be fine one turn away; only a
+        # joint with no in-range turn at all is a real violation.
+        turns = np.arange(-3, 4)
+        wrapped = value + 2.0 * np.pi * turns
+        if not np.any((wrapped >= lower) & (wrapped <= upper)):
+            violations.append({
+                "joint": first_joint + i, "value": float(value),
+                "lower": float(lower), "upper": float(upper),
+            })
+    return {
+        "cause": "joint_limit",
+        "candidate": [float(v) for v in candidate],
+        "n_candidates": len(unlimited),
+        "violations": violations,
+    }
+
+
+def explain_continuity_break(
+    robot: int,
+    targets: Dict[str, PoseLike],
+    seed: np.ndarray,
+    next_conf: np.ndarray,
+    artifact_set: Optional[str] = None,
+    nominal_set: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Say why the IK solution jumped between two neighbouring waypoints.
+
+    :func:`explain_arm_ik_failure` answers "why no branch"; this answers "why
+    the wrong branch". The numbers it gathers separate three cases (the
+    benchmark's ``continuity_diag`` does the sorting): the jump is a whole
+    number of turns (a 2pi twin the re-branch step should have folded back),
+    the runner-up branch was almost as close as the chosen one (solver noise),
+    or the nearest branch really is far away (a genuine flip, usually next to
+    a wrist or elbow singularity).
+
+    Args:
+        robot (int): PyBullet body id.
+        targets (Dict[str, PoseLike]): world tool0 targets ("left", "right")
+            at the rejected waypoint.
+        seed (np.ndarray): the 12-vector of the last accepted waypoint.
+        next_conf (np.ndarray): the rejected 12-vector.
+        artifact_set (Optional[str]): the solver set the search used.
+        nominal_set (Optional[str]): when given, also solve the same waypoint
+            with that set and report how far ITS nearest branch is from the
+            seed -- a pre-test of the nominal-solver variant, for free.
+
+    Returns:
+        Dict[str, Any]: ``max_delta_rad``, ``joint``, ``arm``,
+        ``delta_mod_2pi`` (distance of the jump to the nearest whole turn),
+        ``n_branches``, ``nearest_linf``, ``second_nearest_linf`` (raw
+        L-infinity distances of the two closest branches of the jumping arm
+        to its seed), ``sin_q3`` and ``sin_q5`` of the seed on that arm, and
+        ``nominal_delta_max`` when asked for (``None`` if unreachable).
+    """
+    seed = np.asarray(seed, dtype=float)
+    deltas = np.abs(np.asarray(next_conf, dtype=float) - seed)
+    joint = int(np.argmax(deltas))
+    arm = "left" if joint < 6 else "right"
+    arm_slice = ssik_ik.ARM_SLICE[arm]
+    seed6 = seed[arm_slice]
+    delta_max = float(deltas[joint])
+    turns = max(1, int(round(delta_max / (2.0 * np.pi))))
+
+    branches = ssik_ik.ssik_arm_branches(
+        robot, arm, targets[arm], seed6, allow_rescue=False, artifact_set=artifact_set,
+    )
+    distances = sorted(float(np.max(np.abs(q - seed6))) for q in branches)
+    out: Dict[str, Any] = {
+        "max_delta_rad": delta_max,
+        "joint": joint,
+        "arm": arm,
+        "delta_mod_2pi": abs(delta_max - 2.0 * np.pi * turns),
+        "n_branches": len(branches),
+        "nearest_linf": distances[0] if distances else None,
+        "second_nearest_linf": distances[1] if len(distances) > 1 else None,
+        # Joints 3 (elbow) and 5 (wrist 2) drive the arm's singularities.
+        "sin_q3": float(np.sin(seed6[2])),
+        "sin_q5": float(np.sin(seed6[4])),
+    }
+    if nominal_set is not None:
+        nominal = ssik_ik.ssik_arm_branches(
+            robot, arm, targets[arm], seed6, allow_rescue=False, artifact_set=nominal_set,
+        )
+        out["nominal_delta_max"] = (
+            float(np.max(np.abs(nominal[0] - seed6))) if nominal else None
+        )
+    return out
 
 
 def solve_endpoint_dual_arm_ik(
@@ -2300,12 +2595,22 @@ def extend_toward(
     ik_context: Optional[Dict[str, Any]] = None,
     joint_continuity_threshold_rad: Optional[float] = None,
     use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
+    attempt_out: Optional[Dict[str, Any]] = None,
 ) -> Tuple[TreeNode, bool, str]:
     """Extend the RRT tree from ``source`` toward ``target_pose`` one interp step at a time.
 
     Walks the SE(3) line from source.config to target_pose at (position_res, rotation_res)
     granularity. At each intermediate pose: (optionally) solve IK + continuity + joint-collision,
     then pose collision; on failure stop but keep all valid intermediate nodes appended.
+
+    Args:
+        attempt_out (Optional[Dict[str, Any]]): when given and the walk stops
+            short of its target, it is filled with what was rejected and why --
+            the node it grew from, the last accepted waypoint, the rejected
+            waypoint and its configuration, and a ``detail`` dict per reason
+            (the joint that jumped, the arm without an IK solution and why, or
+            the parts that collided). ``None`` (the default) records nothing
+            and costs nothing.
 
     Returns:
         (last_node_added, reached_target, stop_reason)
@@ -2320,6 +2625,12 @@ def extend_toward(
     if enable_ik and (node_confs is None or ik_context is None or current_conf is None):
         return current, False, "ik_failure"
 
+    # What the failure report needs to know about the rejected waypoint.
+    n_added = 0
+    detail: Optional[Dict[str, Any]] = None
+    rejected_pose: Optional[PoseLike] = None
+    rejected_conf: Optional[FullConf] = None
+
     # Discretize the SE(3) segment source -> target into waypoints. Skip index 0 (== source).
     for pose in list(
         pp.interpolate_poses(
@@ -2332,7 +2643,9 @@ def extend_toward(
         next_conf = None
         if enable_ik:
             # --- Stage 2/3: solve dual-arm IK at this pose, seeded by previous step's conf
-            # for warm-start continuity.
+            # for warm-start continuity. The report dict is only handed over when
+            # someone is recording, so the fast path stays a plain solve.
+            ik_report: Optional[Dict[str, Any]] = {} if attempt_out is not None else None
             next_conf = solve_dual_arm_pose_ik(
                 robot=ik_context["robot"],
                 arm_joints=ik_context["arm_joints"],
@@ -2343,12 +2656,16 @@ def extend_toward(
                 grasp_bar_from_right=ik_context["grasp_bar_from_right"],
                 seed_conf=current_conf,
                 use_angle_normalization=use_angle_normalization,
+                report=ik_report,
+                ik_options=ik_context.get("ik_options"),
             )
 
             # IK miss -> can't follow the bar pose; stop extension here.
             if next_conf is None:
                 reached = False
                 stop_reason = "ik_failure"
+                rejected_pose = pose
+                detail = ik_report
                 break
 
             # Unwrap revolute joints to be ±pi-closest to the previous conf, so a step that
@@ -2361,24 +2678,57 @@ def extend_toward(
             if joint_step_exceeds_threshold(next_conf, current_conf, joint_continuity_threshold_rad):
                 reached = False
                 stop_reason = "continuity"
+                rejected_pose, rejected_conf = pose, next_conf
+                if attempt_out is not None:
+                    deltas = joint_step_deltas(next_conf, current_conf)
+                    detail = {
+                        "joint": int(np.argmax(deltas)),
+                        "delta_rad": [float(v) for v in deltas],
+                        "threshold_rad": float(joint_continuity_threshold_rad),
+                    }
+                    # The E0 diagnosis: extra solves per stop, asked for by
+                    # the benchmark variant, never by production.
+                    options = ik_context.get("ik_options") or {}
+                    if options.get("diagnose_continuity"):
+                        targets = {
+                            "left": pp.multiply(pose, ik_context["grasp_bar_from_left"]),
+                            "right": pp.multiply(pose, ik_context["grasp_bar_from_right"]),
+                        }
+                        detail.update(explain_continuity_break(
+                            ik_context["robot"], targets, current_conf, next_conf,
+                            artifact_set=options.get("artifact_set"),
+                            nominal_set=options.get("diagnose_nominal_set"),
+                        ))
+                        detail["pose_step"] = [
+                            float(np.linalg.norm(np.asarray(pose[0]) - np.asarray(current.config[0]))),
+                            float(pp.quat_angle_between(current.config[1], pose[1])),
+                        ]
                 break
 
             # Stage 3: full robot-vs-world / self collision in joint space.
             if joint_collision_fn is not None and joint_collision_fn(next_conf):
                 reached = False
                 stop_reason = "collision"
+                rejected_pose, rejected_conf = pose, next_conf
+                if attempt_out is not None:
+                    detail = {"check": "robot",
+                              "pairs": _explain_collision(joint_collision_fn, next_conf)}
                 break
 
         # Stage 1 (or always-on belt-and-braces): floating bar collision against obstacles.
         if collision_fn(pose):
             reached = False
             stop_reason = "collision"
+            rejected_pose, rejected_conf = pose, next_conf
+            if attempt_out is not None:
+                detail = {"check": "bar_only", "pairs": _explain_collision(collision_fn, pose)}
             break
 
         # this is the version of extension that stops at the first collision of the extend, but still add the valid interp so far into the tree
         # --- Accept this waypoint: append as child of `current` and refresh caches.
         node = TreeNode(pose, parent=current)
         nodes.append(node)
+        n_added += 1
         if enable_ik and node_confs is not None and next_conf is not None:
             node_confs[id(node)] = next_conf
         if dist_metric == "feature":
@@ -2395,7 +2745,110 @@ def extend_toward(
         if next_conf is not None:
             current_conf = next_conf
 
+    if attempt_out is not None and not reached:
+        attempt_out.update({
+            "reason": stop_reason,
+            # Node identities; the recorder turns them into tree indices when
+            # the search is over and the node lists are final.
+            "source_id": id(source),
+            "last_id": id(current),
+            "n_added": n_added,
+            "target": pose_as_lists(target_pose),
+            "rejected_pose": pose_as_lists(rejected_pose) if rejected_pose is not None else None,
+            "rejected_conf": None if rejected_conf is None else [float(v) for v in rejected_conf],
+            "detail": detail or {},
+        })
     return current, reached, stop_reason
+
+
+def _explain_collision(collision_fn: Callable, query: Any) -> Optional[List[List[str]]]:
+    """Ask a collision predicate which parts collided, if it can say.
+
+    The predicates used in planning are plain booleans. The ones built by
+    ``build_cfab_pose_collision_fn`` and ``api._build_cfab_collision_fn``
+    carry an ``explain`` function that reruns the check with the full report
+    on; anything else gets ``None`` for "not available".
+
+    Args:
+        collision_fn (Callable): the predicate that just returned True.
+        query (Any): what it was called with (a bar pose or a configuration).
+
+    Returns:
+        Optional[List[List[str]]]: named pairs, or ``None`` if unavailable.
+    """
+    explain = getattr(collision_fn, "explain", None)
+    if explain is None:
+        return None
+    return explain(query)
+
+
+def pose_as_lists(pose: PoseLike) -> List[List[float]]:
+    """A PyBullet ``(position, quaternion_xyzw)`` pose as two plain lists.
+
+    Args:
+        pose (PoseLike): the pose.
+
+    Returns:
+        List[List[float]]: ``[[x, y, z], [qx, qy, qz, qw]]``.
+    """
+    return [[float(v) for v in pose[0]], [float(v) for v in pose[1]]]
+
+
+class SearchRecorder:
+    """Keeps every failed tree extension of one search, for reading afterwards.
+
+    The planner only counts why extensions stop. With a recorder attached it
+    also keeps, per failed walk, everything :func:`extend_toward` wrote into
+    its ``attempt_out``: where it grew from, what it rejected and why. The
+    benchmark writes this out next to the trees so the dashboard can draw it.
+
+    One recorder covers one planning attempt: :meth:`reset` is called whenever
+    the planner starts fresh trees, so the attempts always belong to the
+    trees that are exported alongside them.
+    """
+
+    def __init__(self) -> None:
+        self.attempts: List[Dict[str, Any]] = []
+
+    def reset(self) -> None:
+        """Forget everything; the planner is about to grow new trees."""
+        self.attempts = []
+
+    def add(self, attempt: Dict[str, Any], *, tree: str, phase: str, iteration: int) -> None:
+        """Keep one failed extension.
+
+        Args:
+            attempt (Dict[str, Any]): what :func:`extend_toward` reported.
+            tree (str): "a" (start tree) or "b" (goal tree) -- the tree the
+                walk tried to grow.
+            phase (str): "extend" (toward a random sample) or "connect"
+                (toward the other tree's new frontier).
+            iteration (int): the search iteration, so attempts can be
+                replayed in order.
+        """
+        attempt.update({"tree": tree, "phase": phase, "iteration": int(iteration)})
+        self.attempts.append(attempt)
+
+    def export(self, index_of: Dict[str, Dict[int, int]]) -> List[Dict[str, Any]]:
+        """The attempts with node identities replaced by tree indices.
+
+        Args:
+            index_of (Dict[str, Dict[int, int]]): per tree name, a map from
+                ``id(node)`` to that node's index in the exported tree.
+
+        Returns:
+            List[Dict[str, Any]]: one dict per attempt, ``source_id`` and
+            ``last_id`` replaced by ``from_node`` and ``last_node``.
+        """
+        out = []
+        for attempt in self.attempts:
+            lookup = index_of.get(attempt["tree"], {})
+            row = {key: value for key, value in attempt.items()
+                   if key not in ("source_id", "last_id")}
+            row["from_node"] = lookup.get(attempt["source_id"])
+            row["last_node"] = lookup.get(attempt["last_id"])
+            out.append(row)
+        return out
 
 
 def summarize_joint_continuity(
@@ -2494,6 +2947,8 @@ def reconstruct_joint_path_for_pose_path(
             grasp_bar_from_right=grasp_bar_from_right,
             seed_conf=current_conf,
             use_angle_normalization=use_angle_normalization,
+            # Which solver and FK gate; None = the calibrated production solver.
+            ik_options=scene.get("ik_options"),
         )
         if next_conf is None:
             return None, f"ik_failure_at_waypoint_{idx}"
@@ -2508,42 +2963,204 @@ def reconstruct_joint_path_for_pose_path(
     return joint_path, None
 
 
+def _reason_stem(reason: Optional[str]) -> Optional[str]:
+    """Strip the ``_at_waypoint_N`` suffix off a re-solve failure reason."""
+    if reason is None:
+        return None
+    return reason.split("_at_waypoint_")[0]
+
+
+def repair_joint_path(
+    scene: Dict[str, Any],
+    pose_path: Sequence[PoseLike],
+    start_conf: FullConf,
+    goal_conf: FullConf,
+    joint_collision_fn: Optional[Callable[[FullConf], bool]] = None,
+    joint_continuity_threshold_rad: Optional[float] = None,
+    use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
+) -> Tuple[Optional[List[FullConf]], Dict[str, Any]]:
+    """Re-solve a searched pose path strictly, so the result can be executed.
+
+    A planner variant may search with a looser solver or with the continuity
+    gate off; what it hands back is then a good *bar* path whose joint values
+    cannot be trusted. This walks that pose path again with the production
+    gates (IK on the solver in ``scene["ik_options"]``, the continuity
+    threshold, full collision) and insists that it lands on the given goal
+    configuration: first forward from ``start_conf``, and if that walk breaks
+    or arrives on a different IK branch, backward from ``goal_conf`` checking
+    the start instead. Both endpoints are then snapped to the given
+    configurations, which they already match to within the threshold, so the
+    delivered path joins its neighbours exactly.
+
+    Args:
+        scene (Dict[str, Any]): solver context (robot, arm_joints, tool links,
+            the two grasp transforms, and optionally ``ik_options``).
+        pose_path (Sequence[PoseLike]): the bar poses, start to goal.
+        start_conf (FullConf): the configuration the path must start at.
+        goal_conf (FullConf): the configuration it must end at.
+        joint_collision_fn (Optional[Callable[[FullConf], bool]]): the full
+            collision predicate (True = colliding).
+        joint_continuity_threshold_rad (Optional[float]): the production
+            continuity gate; ``None`` disables it (not recommended here).
+        use_angle_normalization (bool): forwarded to the IK.
+
+    Returns:
+        Tuple[Optional[List[FullConf]], Dict[str, Any]]: the repaired joint
+        path (``None`` on failure) and an ``info`` dict: ``success``,
+        ``direction`` ("forward"/"backward"), ``reason`` (the short failure
+        cause: ``continuity``, ``ik_failure``, ``collision`` or
+        ``endpoint_mismatch``), the full ``forward_reason`` /
+        ``backward_reason``, ``wall_s``, ``n_waypoints``, ``max_step_rad`` and
+        ``endpoint_delta_rad`` (how far the free end was from its target
+        before snapping).
+    """
+    t0 = time.perf_counter()
+    start = np.asarray(start_conf, dtype=float)
+    goal = np.asarray(goal_conf, dtype=float)
+    info: Dict[str, Any] = {
+        "success": False, "direction": None, "reason": None,
+        "forward_reason": None, "backward_reason": None,
+        "n_waypoints": len(pose_path), "max_step_rad": None, "endpoint_delta_rad": None,
+    }
+    confs: Optional[List[FullConf]] = None
+
+    # --- forward: start -> goal, then the goal end must be on the goal's branch.
+    forward, reason = reconstruct_joint_path_for_pose_path(
+        scene, pose_path, start, joint_collision_fn,
+        joint_continuity_threshold_rad, use_angle_normalization,
+    )
+    if forward is not None:
+        info["endpoint_delta_rad"] = float(np.max(np.abs(np.asarray(forward[-1]) - goal)))
+        if joint_step_exceeds_threshold(forward[-1], goal, joint_continuity_threshold_rad):
+            reason = "endpoint_mismatch"
+        else:
+            confs = [np.asarray(q, dtype=float) for q in forward]
+            confs[-1] = goal.copy()
+            info["direction"] = "forward"
+    info["forward_reason"] = reason
+
+    # --- backward: goal -> start, then the start end must match the start.
+    if confs is None:
+        backward, reason_b = reconstruct_joint_path_for_pose_path(
+            scene, list(reversed(pose_path)), goal, joint_collision_fn,
+            joint_continuity_threshold_rad, use_angle_normalization,
+        )
+        if backward is not None:
+            ordered = [np.asarray(q, dtype=float) for q in reversed(backward)]
+            info["endpoint_delta_rad"] = float(np.max(np.abs(ordered[0] - start)))
+            if joint_step_exceeds_threshold(ordered[0], start, joint_continuity_threshold_rad):
+                reason_b = "endpoint_mismatch"
+            else:
+                confs = ordered
+                confs[0] = start.copy()
+                info["direction"] = "backward"
+        info["backward_reason"] = reason_b
+
+    info["wall_s"] = time.perf_counter() - t0
+    if confs is None:
+        # Report the forward walk's cause: that is the walk the search's own
+        # joint values were closest to.
+        info["reason"] = _reason_stem(info["forward_reason"]) or _reason_stem(info["backward_reason"])
+        return None, info
+
+    info["success"] = True
+    if len(confs) > 1:
+        steps = np.abs(np.diff(np.asarray(confs, dtype=float), axis=0))
+        info["max_step_rad"] = float(steps.max())
+    else:
+        info["max_step_rad"] = 0.0
+    return confs, info
+
+
+def export_tree_full(
+    nodes: List[TreeNode],
+    node_confs: Optional[Dict[int, FullConf]],
+) -> Tuple[Dict[str, Any], Dict[int, int]]:
+    """Flatten one tree with everything a viewer needs to pose the robot at a node.
+
+    Unlike :func:`export_tree`, this keeps each node's full pose and its joint
+    configuration, so a node can be clicked and the robot drawn there.
+
+    Args:
+        nodes (List[TreeNode]): the tree's nodes, root first.
+        node_confs (Optional[Dict[int, FullConf]]): the per-node joint
+            configurations keyed by ``id(node)``; ``None`` when the search ran
+            without IK, in which case every conf is ``None``.
+
+    Returns:
+        Tuple[Dict[str, Any], Dict[int, int]]: the tree as ``{"points",
+        "quaternions", "confs", "edges"}`` (edges are ``[parent, child]``
+        indices into the lists), and the ``id(node) -> index`` map used to
+        resolve attempt records.
+    """
+    index_of: Dict[int, int] = {id(node): i for i, node in enumerate(nodes)}
+    points, quaternions, confs = [], [], []
+    for node in nodes:
+        pose = pose_as_lists(node.config)
+        points.append(pose[0])
+        quaternions.append(pose[1])
+        conf = None if node_confs is None else node_confs.get(id(node))
+        confs.append(None if conf is None else [float(v) for v in conf])
+    edges = [[index_of[id(node.parent)], index_of[id(node)]]
+             for node in nodes if node.parent is not None and id(node.parent) in index_of]
+    return {"points": points, "quaternions": quaternions, "confs": confs, "edges": edges}, index_of
+
+
 def update_debug_tree(
     debug_tree_out: Optional[Dict],
     success: bool,
     iterations: int,
-    nodes: List[TreeNode],
+    nodes_a: List[TreeNode],
     start_pose: PoseLike,
     goal_pose: PoseLike,
     extend_stop_reasons: Optional[Dict[str, int]] = None,
+    nodes_b: Optional[List[TreeNode]] = None,
+    confs_a: Optional[Dict[int, FullConf]] = None,
+    confs_b: Optional[Dict[int, FullConf]] = None,
+    recorder: Optional[SearchRecorder] = None,
 ) -> None:
-    """Populate ``debug_tree_out`` in place with the tree + planning outcome.
+    """Populate ``debug_tree_out`` in place with the trees + planning outcome.
 
     A no-op when ``debug_tree_out`` is ``None``. Records success, iteration
-    count, the exported tree, endpoints, and a histogram of ``extend_toward``
-    stop reasons for offline diagnosis.
+    count, both trees with their joint configurations, endpoints, a histogram
+    of ``extend_toward`` stop reasons, and -- when a recorder was attached --
+    every failed extension.
 
     Args:
         debug_tree_out (Optional[Dict]): the dict to fill (cleared first), or
             ``None`` to skip.
         success (bool): whether a path was found.
         iterations (int): iteration count to record.
-        nodes (List[TreeNode]): the tree to export.
+        nodes_a (List[TreeNode]): the start-rooted tree.
         start_pose (PoseLike): the start bar pose.
         goal_pose (PoseLike): the goal bar pose.
         extend_stop_reasons (Optional[Dict[str, int]]): histogram of extend stop
             reasons across the run.
+        nodes_b (Optional[List[TreeNode]]): the goal-rooted tree; ``None`` for
+            the single-tree planner.
+        confs_a (Optional[Dict[int, FullConf]]): joint configurations of
+            ``nodes_a`` keyed by ``id(node)``.
+        confs_b (Optional[Dict[int, FullConf]]): the same for ``nodes_b``.
+        recorder (Optional[SearchRecorder]): the failed extensions, if kept.
 
     Returns:
         None. Mutates ``debug_tree_out``.
     """
     if debug_tree_out is None:
         return
+    nodes_b = nodes_b or []
     debug_tree_out.clear()
     debug_tree_out["success"] = success
     debug_tree_out["iterations"] = iterations
-    debug_tree_out["tree1"] = export_tree(nodes)
+    # Kept for older readers: both trees merged, positions only.
+    debug_tree_out["tree1"] = export_tree(nodes_a + nodes_b)
     debug_tree_out["tree2"] = {"points": [], "edges": []}
+    tree_a, index_a = export_tree_full(nodes_a, confs_a)
+    tree_b, index_b = export_tree_full(nodes_b, confs_b)
+    debug_tree_out["tree_a"] = tree_a
+    debug_tree_out["tree_b"] = tree_b
+    debug_tree_out["attempts"] = (
+        recorder.export({"a": index_a, "b": index_b}) if recorder is not None else None)
     debug_tree_out["start_pose"] = [float(v) for v in start_pose[0]]
     debug_tree_out["goal_pose"] = [float(v) for v in goal_pose[0]]
     # Histogram of `extend_toward` stop_reasons across all RRT iterations.
@@ -2582,6 +3199,7 @@ def plan_pose_rrt(
     use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
     use_draw: bool = True,
     debug_tree_out: Optional[Dict] = None,
+    recorder: Optional[SearchRecorder] = None,
     **_unused_kwargs: Any,
 ) -> Tuple[Optional[List[PoseLike]], Optional[List[FullConf]]]:
     """Plan a collision-free path in SE(3) pose space using a single-tree RRT.
@@ -2685,9 +3303,12 @@ def plan_pose_rrt(
     # (accumulates across attempts) so callers can see failure-mode breakdown.
     extend_stop_reasons: Counter = Counter()
     best_tree: List[TreeNode] = []
+    best_confs: Dict[int, FullConf] = {}
     total_iterations = 0
     for attempt in range(max_attempts):
         start_time = time.time()
+        if recorder is not None:
+            recorder.reset()
 
         # Root the tree at the start pose. Side caches keyed by id(node):
         #   node_confs   -> full joint config at that node (only when enable_ik)
@@ -2720,6 +3341,7 @@ def plan_pose_rrt(
             # 3) Extend: step from `nearest` toward `target_pose` at (position_res, rotation_res).
             #    Stops on collision, IK fail, or joint-discontinuity; appends every valid
             #    intermediate node into `nodes` and updates node_confs/feature_vecs in-place.
+            attempt_record: Optional[Dict[str, Any]] = {} if recorder is not None else None
             new_last, reached, stop_reason = extend_toward(
                 nodes=nodes,
                 source=nearest,
@@ -2738,8 +3360,11 @@ def plan_pose_rrt(
                 ik_context=ik_context,
                 joint_continuity_threshold_rad=joint_continuity_threshold_rad,
                 use_angle_normalization=use_angle_normalization,
+                attempt_out=attempt_record,
             )
             extend_stop_reasons[stop_reason] += 1
+            if recorder is not None and not reached:
+                recorder.add(attempt_record, tree="a", phase="extend", iteration=iteration)
 
             # Extension stalled before reaching target — keep iterating.
             if not reached:
@@ -2750,6 +3375,7 @@ def plan_pose_rrt(
                 update_debug_tree(
                     debug_tree_out, True, iteration + 1, nodes, start_pose, goal_pose,
                     extend_stop_reasons=extend_stop_reasons,
+                    confs_a=node_confs, recorder=recorder,
                 )
                 # Retrace tree from frontier back to root, then reverse to start->goal order.
                 path_nodes = new_last.retrace()
@@ -2762,12 +3388,14 @@ def plan_pose_rrt(
 
         # Attempt exhausted (time or iteration cap) — remember tree for debug, then restart.
         best_tree = nodes
+        best_confs = node_confs
         logger.info(f"Attempt {attempt + 1}/{max_attempts}: no path found.")
 
     # All attempts failed. Dump last tree for inspection and signal failure.
     update_debug_tree(
         debug_tree_out, False, total_iterations, best_tree, start_pose, goal_pose,
         extend_stop_reasons=extend_stop_reasons,
+        confs_a=best_confs, recorder=recorder,
     )
     return None, None
 
@@ -2803,6 +3431,7 @@ def plan_pose_birrt(
     use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
     use_draw: bool = True,
     debug_tree_out: Optional[Dict] = None,
+    recorder: Optional[SearchRecorder] = None,
     **_unused_kwargs: Any,
 ) -> Tuple[Optional[List[PoseLike]], Optional[List[FullConf]]]:
     """Bidirectional pose-space RRT-Connect with dual-arm IK propagation.
@@ -2812,6 +3441,11 @@ def plan_pose_birrt(
     the other tree to that tree's new frontier. Connection succeeds when the
     two-tree meeting poses match AND the joint configs are continuous (no
     branch flip across the connection).
+
+    ``recorder`` (a :class:`SearchRecorder`) keeps every failed extend and
+    connect walk with its cause; the result lands in ``debug_tree_out``
+    under ``"attempts"``, next to both trees. Stitch failures (re-solving the
+    seam where the trees meet) are only counted, not recorded.
     """
     rng = np.random.default_rng(random_seed)
     feature_points = list(feature_points) if feature_points is not None else get_bar_feature_points()
@@ -2873,11 +3507,18 @@ def plan_pose_birrt(
         return nodes, node_confs, feature_vecs
 
     extend_stop_reasons: Counter = Counter()
-    best_tree: List[TreeNode] = []
+    # How many dual-arm IK solves the whole search made (every waypoint tried
+    # while growing, connecting and stitching), reported with the debug tree
+    # so a profile's IK seconds can be read as milliseconds per solve.
+    n_ik_solves = 0
+    # The last attempt's trees, kept for the debug export when every attempt fails.
+    best_trees: Tuple[List[TreeNode], Dict, List[TreeNode], Dict] = ([], {}, [], {})
     total_iterations = 0
 
     for attempt in range(max_attempts):
         start_time = time.time()
+        if recorder is not None:
+            recorder.reset()
         nodes_a, confs_a, fvecs_a = make_tree(start_pose, start_conf)
         nodes_b, confs_b, fvecs_b = make_tree(goal_pose, goal_conf)
 
@@ -2905,7 +3546,10 @@ def plan_pose_birrt(
                 target_pose, _ = sample_pose(robot, goal_pose, rng, 0.0, workspace_xy, workspace_z)
 
             nearest = nearest_node(tree_grow, target_pose, dist_metric, feature_points, fvecs_grow)
-            new_last, _, stop_reason = extend_toward(
+            grow_name, other_name = ("a", "b") if grow_a_first else ("b", "a")
+            attempt_record: Optional[Dict[str, Any]] = {} if recorder is not None else None
+            n_grow_before = len(tree_grow)
+            new_last, grow_reached, stop_reason = extend_toward(
                 nodes=tree_grow,
                 source=nearest,
                 target_pose=target_pose,
@@ -2923,8 +3567,14 @@ def plan_pose_birrt(
                 ik_context=ik_context,
                 joint_continuity_threshold_rad=joint_continuity_threshold_rad,
                 use_angle_normalization=use_angle_normalization,
+                attempt_out=attempt_record,
             )
             extend_stop_reasons[stop_reason] += 1
+            if enable_ik:
+                # One solve per accepted waypoint, plus the rejected one.
+                n_ik_solves += (len(tree_grow) - n_grow_before) + (0 if grow_reached else 1)
+            if recorder is not None and not grow_reached:
+                recorder.add(attempt_record, tree=grow_name, phase="extend", iteration=iteration)
             if new_last is nearest:
                 # No progress this iteration; move on.
                 continue
@@ -2932,6 +3582,8 @@ def plan_pose_birrt(
             # Connect: try to extend the other tree all the way to `new_last`.
             connect_target = new_last.config
             connect_nearest = nearest_node(tree_other, connect_target, dist_metric, feature_points, fvecs_other)
+            connect_record: Optional[Dict[str, Any]] = {} if recorder is not None else None
+            n_other_before = len(tree_other)
             connect_last, connect_reached, connect_stop = extend_toward(
                 nodes=tree_other,
                 source=connect_nearest,
@@ -2950,8 +3602,13 @@ def plan_pose_birrt(
                 ik_context=ik_context,
                 joint_continuity_threshold_rad=joint_continuity_threshold_rad,
                 use_angle_normalization=use_angle_normalization,
+                attempt_out=connect_record,
             )
             extend_stop_reasons[f"connect_{connect_stop}"] += 1
+            if enable_ik:
+                n_ik_solves += (len(tree_other) - n_other_before) + (0 if connect_reached else 1)
+            if recorder is not None and not connect_reached:
+                recorder.add(connect_record, tree=other_name, phase="connect", iteration=iteration)
 
             if not connect_reached:
                 continue
@@ -2996,9 +3653,11 @@ def plan_pose_birrt(
                         Optional[List[FullConf]]: the goal-side configs in path
                         order, or ``None`` if any step failed.
                     """
+                    nonlocal n_ik_solves
                     out: List[FullConf] = []
                     cur = seed_conf
                     for stitch_pose in goal_side_poses:
+                        n_ik_solves += 1
                         nxt = solve_dual_arm_pose_ik(
                             robot=ik_context["robot"],
                             arm_joints=ik_context["arm_joints"],
@@ -3009,6 +3668,7 @@ def plan_pose_birrt(
                             grasp_bar_from_right=ik_context["grasp_bar_from_right"],
                             seed_conf=cur,
                             use_angle_normalization=use_angle_normalization,
+                            ik_options=ik_context.get("ik_options"),
                         )
                         if nxt is None:
                             extend_stop_reasons["stitch_ik_failure"] += 1
@@ -3040,9 +3700,11 @@ def plan_pose_birrt(
                         order (start -> seam), or ``None`` if any step failed or
                         the start endpoint mismatched.
                     """
+                    nonlocal n_ik_solves
                     out_rev: List[FullConf] = []
                     cur = seed_conf_at_goal
                     for stitch_pose in reversed([n.config for n in start_side_nodes]):
+                        n_ik_solves += 1
                         nxt = solve_dual_arm_pose_ik(
                             robot=ik_context["robot"],
                             arm_joints=ik_context["arm_joints"],
@@ -3053,6 +3715,7 @@ def plan_pose_birrt(
                             grasp_bar_from_right=ik_context["grasp_bar_from_right"],
                             seed_conf=cur,
                             use_angle_normalization=use_angle_normalization,
+                            ik_options=ik_context.get("ik_options"),
                         )
                         if nxt is None:
                             extend_stop_reasons["stitch_ik_failure"] += 1
@@ -3090,23 +3753,30 @@ def plan_pose_birrt(
                     path_confs = rebuilt_start + list(goal_side_confs_raw)
 
             update_debug_tree(
-                debug_tree_out, True, iteration + 1, nodes_a + nodes_b, start_pose, goal_pose,
+                debug_tree_out, True, iteration + 1, nodes_a, start_pose, goal_pose,
                 extend_stop_reasons=extend_stop_reasons,
+                nodes_b=nodes_b, confs_a=confs_a, confs_b=confs_b, recorder=recorder,
             )
+            if debug_tree_out is not None:
+                debug_tree_out["n_ik_solves"] = n_ik_solves
             logger.info(
                 f"birrt: connected after {iteration + 1} iters; "
                 f"tree_a={len(nodes_a)} nodes, tree_b={len(nodes_b)} nodes, path={len(path_poses)} waypoints."
             )
             return path_poses, path_confs
 
-        best_tree = nodes_a + nodes_b
+        best_trees = (nodes_a, confs_a, nodes_b, confs_b)
         logger.info(
             f"birrt attempt {attempt + 1}/{max_attempts}: no path found "
             f"(tree_a={len(nodes_a)}, tree_b={len(nodes_b)})."
         )
 
+    nodes_a, confs_a, nodes_b, confs_b = best_trees
     update_debug_tree(
-        debug_tree_out, False, total_iterations, best_tree, start_pose, goal_pose,
+        debug_tree_out, False, total_iterations, nodes_a, start_pose, goal_pose,
         extend_stop_reasons=extend_stop_reasons,
+        nodes_b=nodes_b, confs_a=confs_a, confs_b=confs_b, recorder=recorder,
     )
+    if debug_tree_out is not None:
+        debug_tree_out["n_ik_solves"] = n_ik_solves
     return None, None

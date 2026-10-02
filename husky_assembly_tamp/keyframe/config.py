@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 import sys
+from importlib.util import find_spec
 
 
 # ---------------------------------------------------------------------------
@@ -197,3 +198,110 @@ def get_ssik_artifact_dir() -> str:
 def get_ssik_sidecar_script() -> str:
     """Path of the sidecar server script (packaged with this code, no env var)."""
     return os.path.join(_KEYFRAME_DIR, "ssik_sidecar", "serve.py")
+
+
+# ---------------------------------------------------------------------------
+# ssik artifact SETS (benchmark experiments)
+# ---------------------------------------------------------------------------
+# * A "set" is one pair of per-arm solver modules. Production only ever uses
+# * the calibrated set above. The benchmark can run the motion search on a
+# * different set (a faster solver built for the NOMINAL arm geometry) and then
+# * re-solve the found path on the calibrated set, so several sets may be
+# * loaded in one process at the same time. ``keyframe.ssik_inprocess`` loads
+# * any non-default set from a file under a unique module name, and then
+# * overrides two things in the loaded module so it behaves like ours:
+# *   joint_names -> our URDF joint names (the prebuilt module has generic ones)
+# *   limits      -> the calibrated URDF's joint limits (the nominal URDF's are
+# *                  tighter and the prebuilt module's are wider; both would
+# *                  filter branches differently from production)
+# * The six joint names of one arm, in kinematic base->tool0 order.
+SSIK_JOINT_SUFFIXES = (
+    "shoulder_pan_joint",
+    "shoulder_lift_joint",
+    "elbow_joint",
+    "wrist_1_joint",
+    "wrist_2_joint",
+    "wrist_3_joint",
+)
+
+SSIK_ARTIFACT_SETS = {
+    # The committed calibrated artifacts, loaded exactly as before.
+    "calibrated": {"kind": "default"},
+    # ssik's own prebuilt closed-form UR5e solver (tier 0, ~1 ms per solve).
+    # Its FK matches the nominal URDF's arm chain; both arms share the module.
+    "nominal": {
+        "kind": "prebuilt",
+        "module": "ssik.prebuilt.ur5e_ik",
+        "joint_names": "husky",
+        "limits": "calibrated",
+    },
+    # Fallback: artifacts built by `ssik build` from the NOMINAL URDF into
+    # asset/ssik_nominal (see benchmark/analysis notes); same overrides.
+    "nominal_built": {
+        "kind": "file",
+        "files": {
+            "left": os.path.join(_TAMP_REPO_ROOT, "asset", "ssik_nominal", "left_ur_arm_ik.py"),
+            "right": os.path.join(_TAMP_REPO_ROOT, "asset", "ssik_nominal", "right_ur_arm_ik.py"),
+        },
+        "joint_names": "husky",
+        "limits": "calibrated",
+    },
+}
+
+
+def husky_joint_names(arm: str) -> list:
+    """Return one arm's six URDF joint names in kinematic order.
+
+    Args:
+        arm (str): "left" or "right".
+
+    Returns:
+        list: for example ``["left_ur_arm_shoulder_pan_joint", ...]``.
+    """
+    return [f"{arm}_ur_arm_{suffix}" for suffix in SSIK_JOINT_SUFFIXES]
+
+
+def get_ssik_artifact_set(name: str) -> dict:
+    """Return one artifact set's description with its module files resolved.
+
+    Resolution happens at USE time (like every other path in this file): the
+    prebuilt module's file is looked up in the installed ssik package, and a
+    file-based set's files are checked to exist, so a missing solver fails
+    here with a readable message instead of deep inside a planning run.
+
+    Args:
+        name (str): a key of ``SSIK_ARTIFACT_SETS``.
+
+    Returns:
+        dict: a copy of the entry; for every kind other than "default" it has a
+        ``files`` dict mapping "left"/"right" to an existing module file.
+
+    Raises:
+        ValueError: for an unknown set name.
+        RuntimeError: when the set's module file cannot be found.
+    """
+    if name not in SSIK_ARTIFACT_SETS:
+        raise ValueError(
+            f"Unknown ssik artifact set {name!r}; known sets: {sorted(SSIK_ARTIFACT_SETS)}"
+        )
+    entry = dict(SSIK_ARTIFACT_SETS[name])
+    entry["name"] = name
+    if entry["kind"] == "default":
+        return entry
+    if entry["kind"] == "prebuilt":
+        spec = find_spec(entry["module"])
+        if spec is None or not spec.origin:
+            raise RuntimeError(
+                f"ssik artifact set {name!r} needs the module {entry['module']!r}, "
+                "which is not installed in this interpreter; install ssik "
+                "(pip install \"ssik>=3.2\") into this env."
+            )
+        entry["files"] = {"left": spec.origin, "right": spec.origin}
+    missing = [path for path in entry["files"].values() if not os.path.isfile(path)]
+    if missing:
+        raise RuntimeError(
+            f"ssik artifact set {name!r}: solver module file(s) not found: {missing}. "
+            "Build them with `ssik build` (see keyframe/ssik_sidecar/README.md) or pick "
+            "another set."
+        )
+    return entry

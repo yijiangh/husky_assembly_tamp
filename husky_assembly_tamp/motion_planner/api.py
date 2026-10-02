@@ -129,8 +129,16 @@ def _build_cfab_collision_fn(planner, template_state, joint_names_12):
 
     Uses ``planner.check_collision`` on a clone of ``template_state`` per call,
     so ACM, attached tools, and attached rigid bodies stay consistent.
+
+    The closure also carries ``explain(conf_12)``, which reruns the check with
+    the full report on and returns the colliding parts by name. It is meant to
+    be called only after the plain check said "collision", so the fast path
+    (no report, stops at the first contact) is unchanged.
     """
+    from .dual_arm_task_space_rrt.core import collision_pair_names
+
     cc_opts = {"verbose": False}
+    explain_opts = {"verbose": False, "full_report": True}
 
     def _fn(conf_12, *_args, **_kw):
         s = _state_with_conf12(template_state, conf_12, joint_names_12)
@@ -140,6 +148,17 @@ def _build_cfab_collision_fn(planner, template_state, joint_names_12):
             return True
         return False
 
+    def _explain(conf_12):
+        """Name every pair of parts that collide at ``conf_12``."""
+        s = _state_with_conf12(template_state, conf_12, joint_names_12)
+        try:
+            planner.check_collision(s, options=explain_opts)
+        except CollisionCheckError as exc:
+            return collision_pair_names(getattr(exc, "collision_pairs", None),
+                                        planner.client.robot_cell)
+        return []
+
+    _fn.explain = _explain
     return _fn
 
 
@@ -778,8 +797,31 @@ def plan_constrained_dual_arm(
         Tuple[Tuple[float, float], Tuple[float, float], Tuple[float, float]]
     ] = None,
     start_home_anchor: Optional[str] = None,
+    record_search: bool = False,
+    ik_options: Optional[Dict[str, Any]] = None,
+    repair: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Optional[List[np.ndarray]], dict]:
     """Constrained dual-arm SE(3) RRT with a rigid bar grasp.
+
+    ``ik_options`` and ``repair`` exist for the benchmark's planner variants
+    and are ``None`` in production. ``ik_options`` is handed to every
+    per-waypoint IK of the search (which ssik solver set, how loose the FK
+    gate is, whether to diagnose continuity stops -- see
+    ``core._solve_dual_arm_pose_ik_ssik``). ``repair`` asks for the found
+    pose path to be re-solved afterwards on the calibrated solver with the
+    production gates (``core.repair_joint_path``); its one key is the
+    ``joint_continuity_threshold_rad`` to enforce there. With repair on, the
+    search result is reported as ``info["search_success"]``, the repair's
+    verdict as ``info["repair"]``, and a path is returned only when the repair
+    succeeded (``failure_reason`` = ``repair_<cause>`` otherwise). Smoothing
+    then runs with the same strict settings, so it keeps the path valid.
+
+    ``record_search=True`` keeps every failed tree extension with its cause
+    (see ``SearchRecorder`` in the planner core) and returns it as
+    ``info["profile"]["attempts"]``, next to both trees with their joint
+    configurations under ``info["profile"]["tree_a"]`` / ``["tree_b"]``. It is
+    off by default: it costs an extra IK or collision probe per failure and
+    a few MB of memory, which the benchmark accepts and production does not.
 
     By default this runs the bidirectional RRT-Connect search
     (``use_birrt=True`` -> ``plan_pose_birrt``), which benchmarking showed to
@@ -836,14 +878,18 @@ def plan_constrained_dual_arm(
         )
     from .dual_arm_task_space_rrt.core import (
         DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
+        SearchRecorder,
         get_bar_feature_points,
         plan_pose_birrt,
         plan_pose_rrt,
+        repair_joint_path,
     )
     from .dual_arm_task_space_rrt.smooth import smooth_dual_arm_pose_path
 
     if stage not in (1, 2, 3):
         raise ValueError(f"stage must be 1, 2, or 3; got {stage}")
+    if repair is not None and stage < 3:
+        raise ValueError("repair needs stage 3 (the repair re-solves with full collision)")
 
     robot_cell = planner.client.robot_cell
     left_names, right_names = _arm_joint_names(robot_cell)
@@ -980,9 +1026,24 @@ def plan_constrained_dual_arm(
         "ik_backend": ssik_ik.ik_backend(),
         # Which search algorithm ran (single-tree rrt vs bidirectional connect).
         "planner": "birrt" if use_birrt else "rrt",
+        # The experiment knobs in force (empty in production).
+        "ik_options": dict(ik_options or {}),
+        "repair_settings": dict(repair or {}),
     }
     if derive_start:
         info["derived_start_conf"] = derive_info.get("derived_start_conf")
+
+    # * The settings every re-solve AFTER the search uses (repair, smoothing).
+    # * With repair on these are the production ones -- calibrated solver,
+    # * exact FK gate, the strict continuity gate -- whatever the search used.
+    if repair is not None:
+        post_ik_options: Dict[str, Any] = {"artifact_set": "calibrated"}
+        post_threshold = repair.get(
+            "joint_continuity_threshold_rad", DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
+        )
+    else:
+        post_ik_options = dict(ik_options or {})
+        post_threshold = joint_continuity_threshold_rad
 
     with pp.WorldSaver():
         joint_collision_fn = None
@@ -1001,6 +1062,8 @@ def plan_constrained_dual_arm(
                 "tool_link_right": tool_link_right,
                 "grasp_bar_from_left": grasp_bar_from_left,
                 "grasp_bar_from_right": grasp_bar_from_right,
+                # Experiment knobs for every IK the search makes (None = production).
+                "ik_options": ik_options,
             }
         planner_profile: Dict[str, Any] = {}
         # * Bidirectional connect is now the default: it handles narrow-passage
@@ -1039,6 +1102,7 @@ def plan_constrained_dual_arm(
             # ! (previously passed as profile_out, which silently landed in
             # ! **_unused_kwargs and left info["profile"] empty).
             debug_tree_out=planner_profile,
+            recorder=SearchRecorder() if record_search else None,
         )
         info["profile"] = planner_profile
         info["path_poses"] = path_poses
@@ -1047,26 +1111,48 @@ def plan_constrained_dual_arm(
             planner.set_robot_cell_state(start_state)
             return None, info
 
+        # The scene every re-solve after the search works in: the same robot
+        # and grasps, the post-search solver settings (see above).
+        post_scene = {
+            "robot": robot_puid,
+            "arm_joints": arm_joints,
+            "tool_link_left": tool_link_left,
+            "tool_link_right": tool_link_right,
+            "grasp_bar_from_left": grasp_bar_from_left,
+            "grasp_bar_from_right": grasp_bar_from_right,
+            "ik_options": post_ik_options,
+        }
+
+        # * Repair (planner variants): the search found a bar path; re-solve
+        # * its joints strictly on the calibrated solver before anything else
+        # * touches it. The verdict is the experiment's measurement, so it is
+        # * recorded whether or not it passes.
+        if repair is not None and path_confs is not None:
+            info["search_success"] = True
+            repaired, repair_info = repair_joint_path(
+                post_scene, path_poses, start_conf, goal_conf_arr,
+                joint_collision_fn=joint_collision_fn,
+                joint_continuity_threshold_rad=post_threshold,
+            )
+            info["repair"] = repair_info
+            if repaired is None:
+                info["failure_reason"] = f"repair_{repair_info.get('reason') or 'failed'}"
+                planner.set_robot_cell_state(start_state)
+                return None, info
+            path_confs = repaired
+
         if enable_smoothing and path_confs is not None:
-            smooth_scene = {
-                "robot": robot_puid,
-                "arm_joints": arm_joints,
-                "tool_link_left": tool_link_left,
-                "tool_link_right": tool_link_right,
-                "grasp_bar_from_left": grasp_bar_from_left,
-                "grasp_bar_from_right": grasp_bar_from_right,
-            }
             smooth_profile: Dict[str, Any] = {}
             path_poses, path_confs = smooth_dual_arm_pose_path(
                 path_poses=path_poses,
                 path_confs=path_confs,
-                scene=smooth_scene,
+                scene=post_scene,
                 pose_collision_fn=None,
                 joint_collision_fn=joint_collision_fn,
                 feature_points=feature_points,
                 position_res=position_res,
                 rotation_res=rotation_res,
-                joint_continuity_threshold_rad=joint_continuity_threshold_rad,
+                joint_continuity_threshold_rad=post_threshold,
                 max_smooth_iterations=smooth_max_iterations,
                 max_time=smooth_max_time,
                 random_seed=random_seed,

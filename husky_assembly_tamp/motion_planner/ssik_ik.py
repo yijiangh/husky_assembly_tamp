@@ -64,34 +64,37 @@ def ik_backend() -> str:
     return keyframe_config.IK_BACKEND
 
 
-def verify_ssik_joint_order(robot: int) -> None:
+def verify_ssik_joint_order(robot: int, artifact_set: Optional[str] = None) -> None:
     """One-time guard: artifact joint order must match the PyBullet URDF chain.
 
     The 6 values ssik returns are in kinematic base->tool0 order; we splice them
     straight into the 12-vector, which is built from the URDF chain order. This
-    asserts (once per robot body id) that every artifact joint name exists in
-    the loaded robot and that their PyBullet joint indices are strictly
-    increasing, i.e. the chain order agrees. The per-solve FK validation
-    downstream would also catch a mismatch, but this fails FAST and with a
-    readable message.
+    asserts (once per robot body id and artifact set) that every artifact joint
+    name exists in the loaded robot and that their PyBullet joint indices are
+    strictly increasing, i.e. the chain order agrees. The per-solve FK
+    validation downstream would also catch a mismatch, but this fails FAST and
+    with a readable message.
 
     Args:
         robot (int): PyBullet body id of the dual-arm robot.
+        artifact_set (Optional[str]): which solver set's joint names to check
+            (``None`` = the calibrated production solver).
 
     Raises:
         AssertionError: when a joint name is missing or the order disagrees.
     """
-    if robot in _JOINT_ORDER_CHECKED:
+    key = (robot, artifact_set or ssik_inprocess.DEFAULT_ARTIFACT_SET)
+    if key in _JOINT_ORDER_CHECKED:
         return
     for arm in ("left", "right"):
-        names = ssik_inprocess.joint_names(arm)
+        names = ssik_inprocess.joint_names(arm, artifact_set)
         # pp.joint_from_name raises if the name is absent from the body.
         indices = [pp.joint_from_name(robot, n) for n in names]
         assert indices == sorted(indices), (
-            f"ssik/{arm}: artifact joint order {names} does not follow the "
+            f"ssik/{arm} ({key[1]}): artifact joint order {names} does not follow the "
             f"URDF chain order in PyBullet (indices {indices})"
         )
-    _JOINT_ORDER_CHECKED.add(robot)
+    _JOINT_ORDER_CHECKED.add(key)
 
 
 def target_in_arm_base(robot: int, arm: str, world_tool_pose) -> np.ndarray:
@@ -149,6 +152,8 @@ def ssik_arm_branches(
     seed6: Optional[Sequence[float]],
     max_solutions: Optional[int] = None,
     allow_rescue: bool = True,
+    respect_limits: bool = True,
+    artifact_set: Optional[str] = None,
 ) -> List[np.ndarray]:
     """All ssik branches for one arm at a world tool0 pose, nearest-seed first.
 
@@ -164,21 +169,31 @@ def ssik_arm_branches(
             for one-off endpoint solves; set False in tracking loops (an
             unreachable waypoint should fail fast, and rescued solutions can
             branch-flip).
+        respect_limits (bool): keep only branches inside the joint limits
+            (the default). False is for diagnosis only: it returns the
+            branches the limits would have thrown away, so a caller can tell
+            "unreachable" from "reachable but past a joint limit".
+        artifact_set (Optional[str]): which solver set answers (``None`` =
+            the calibrated production solver; see
+            ``keyframe.config.SSIK_ARTIFACT_SETS``). The target is always
+            expressed in the arm's base link as PyBullet has it, so a nominal
+            solver here means "the nominal arm on the real base placement".
 
     Returns:
         List[np.ndarray]: 6-vectors in kinematic (== 12-vector slice) order;
         empty list = pose unreachable for this arm.
     """
-    verify_ssik_joint_order(robot)
+    verify_ssik_joint_order(robot, artifact_set)
     target = target_in_arm_base(robot, arm, world_tool_pose)
     seed_arr = None if seed6 is None else np.asarray(seed6, dtype=float)
     solutions = ssik_inprocess.solve(
         arm, target, max_solutions=max_solutions, q_seed=seed_arr,
-        allow_rescue=allow_rescue,
+        allow_rescue=allow_rescue, respect_limits=respect_limits,
+        artifact_set=artifact_set,
     )
     branches = [q for q, _residual in solutions]
     if seed_arr is not None:
-        limits = ssik_inprocess.joint_limits(arm)
+        limits = ssik_inprocess.joint_limits(arm, artifact_set)
         branches = [rebranch_toward_seed(q, seed_arr, limits) for q in branches]
         branches.sort(key=lambda q: float(np.max(np.abs(q - seed_arr))))
     return branches

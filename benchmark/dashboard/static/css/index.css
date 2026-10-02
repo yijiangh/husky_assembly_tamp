@@ -36,6 +36,19 @@ body {
 .breadcrumb a:hover { text-decoration: underline; }
 .breadcrumb .sep { margin: 0 6px; color: var(--line); }
 
+/* The run dropdown at the start of the trail. Sized to sit on the same line
+   as the rest of the trail rather than stand out as a form. */
+.run-picker {
+  font: inherit;
+  color: var(--text);
+  padding: 2px 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  cursor: pointer;
+}
+.breadcrumb .picker-note { color: var(--muted); font-style: italic; }
+
 /* Everything under the header. It fills the window's remaining height and
    scrolls itself, so the header never scrolls away. */
 .layout {
@@ -202,6 +215,42 @@ table.grid tr.clickable:hover td { background: #f7fafc; }
   overflow-x: auto;
   white-space: pre;
 }
+
+/* One-sentence reading of a chart, set apart so it is the first thing seen. */
+.verdict {
+  font-size: 13px;
+  padding: 8px 12px;
+  margin: 0 0 12px;
+  border-left: 3px solid var(--accent);
+  background: var(--page);
+}
+
+/* What was clicked in the search view: a node or a failed attempt, with the
+   buttons that pose the robot and the numbers behind the rejection. */
+.search-detail {
+  font-size: 12px;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel);
+}
+.search-detail[hidden] { display: none; }
+.search-detail p { margin: 0 0 6px; }
+.search-detail .buttons { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.search-detail button {
+  font: inherit; font-size: 11px; padding: 3px 8px;
+  border: 1px solid var(--line); border-radius: 4px;
+  background: var(--panel); color: var(--text); cursor: pointer;
+}
+.search-detail button:hover { border-color: var(--accent); color: var(--accent); }
+.search-detail button:disabled { opacity: 0.4; cursor: default; }
+.search-detail table.grid { font-size: 11px; }
+.search-detail table.grid td, .search-detail table.grid th { padding: 2px 8px 2px 0; }
+.search-detail tr.over td { color: #b23a48; font-weight: 600; }
+/* A colour swatch inside a toggle button, so the toggles double as a legend. */
+.toggle button i { width: 8px; height: 8px; display: inline-block; border-radius: 2px; margin-right: 5px; }
+.toggle button[aria-pressed="false"] i { opacity: 0.35; }
 
 .tree-stage-info { font-size: 12px; margin-top: 4px; }
 .tree-info { font-size: 13px; }

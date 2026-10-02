@@ -49,6 +49,8 @@ COMPONENT_RULES: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
     ("nearest_node", ("nearest_node", "pose_distance", "pose_to_feature_vec")),
     ("smoothing", ("smooth_dual_arm_pose_path",)),
     ("stitching", ("_stitch_forward", "_stitch_backward")),
+    # The re-solve of a found path on the calibrated model (planner variants).
+    ("repair", ("repair_joint_path",)),
 )
 
 

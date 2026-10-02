@@ -164,6 +164,8 @@ def export_run(root: str, run_name: str, *, library_name: str,
                     stats = summarize_group(
                         by_start[(bar_id, goal_index, start["start_index"])])
                     row["success_rate"] = stats["success_rate"]
+                    # So the goal page can tell "coarse pass only" from solved.
+                    row["coarse_success_rate"] = stats.get("coarse_success_rate")
                     row["median_wall_s"] = stats["median_wall_s"]
                     row["planning_median_s"] = planning_median(stats)
                     row["conf"] = start["conf"]
@@ -204,6 +206,12 @@ def export_run(root: str, run_name: str, *, library_name: str,
                                 f"_k{run['seed']:02d}_{pass_name}")
                         pass_row = {
                             "success": record.get("success"),
+                            # Planner-variant experiments: the search's own
+                            # verdict and the strict repair's, when recorded.
+                            "search_success": record.get("search_success"),
+                            "postprocess": record.get("postprocess"),
+                            "variant": record.get("variant"),
+                            "n_ik_solves": record.get("n_ik_solves"),
                             "wall_s": record.get("wall_s"),
                             "iterations": record.get("iterations"),
                             "planner": record.get("planner"),
@@ -258,6 +266,7 @@ def export_run(root: str, run_name: str, *, library_name: str,
         "schema_version": DASHBOARD_SCHEMA_VERSION,
         "run_name": run_name,
         "library": library_name,
+        "variant": config.get("variant"),
         "config": config,
         "bars": bars_index,
         "joint_order": _joint_order(root, library_name, bar_ids),
@@ -446,6 +455,7 @@ def _update_catalog(root: str, run_name: str, summary: Dict[str, Any]) -> None:
         "run_name": run_name,
         "created": config.get("created"),
         "library": config.get("library"),
+        "variant": config.get("variant"),
         "n_runs": summary["totals"]["n_runs"],
         "success_rate": summary["totals"]["success_rate"],
         "path": f"runs/{run_name}/dashboard",
@@ -538,6 +548,8 @@ def attach_trees(root: str, run_name: str, *, verbose: bool = True) -> int:
                 trees[pass_name] = {
                     "tree": f"trees/{tree_file}",
                     "success": pass_record.get("success"),
+                    "search_success": pass_record.get("search_success"),
+                    "postprocess": pass_record.get("postprocess"),
                     "wall_s": pass_record.get("wall_s"),
                     "iterations": pass_record.get("iterations"),
                     "tree_a_nodes": pass_record.get("tree_a_nodes"),
@@ -545,6 +557,13 @@ def attach_trees(root: str, run_name: str, *, verbose: bool = True) -> int:
                     "extend_stop_reasons": pass_record.get("extend_stop_reasons"),
                     "tree_error": pass_record.get("tree_error"),
                 }
+                # The failed attempts travel with the trees, when they were kept.
+                attempts_file = pass_record.get("attempts_file")
+                if attempts_file and os.path.isfile(os.path.join(item["tree_dir"], attempts_file)):
+                    shutil.copy2(os.path.join(item["tree_dir"], attempts_file),
+                                 os.path.join(tree_out, attempts_file))
+                    trees[pass_name]["attempts"] = f"trees/{attempts_file}"
+                    trees[pass_name]["n_attempts"] = pass_record.get("n_attempts")
                 attached += 1
             if not trees:
                 continue

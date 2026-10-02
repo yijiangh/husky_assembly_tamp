@@ -159,10 +159,23 @@ def summarize_group(runs: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
                           if run.get("failed_pass"))
     statuses = Counter(run.get("status", "ok") for run in runs)
 
+    # * "Search success" is the search alone, before the repair that re-solves
+    # * the path on the calibrated model. Batches made before the repair
+    # * existed have no such field; there the search WAS the whole run.
+    n_search_success = sum(
+        1 for run in runs if run.get("search_success", run.get("success"))
+    )
+
     stop_reasons: Counter = Counter()
     planners: Counter = Counter()
     breakdown_totals: Dict[str, float] = {}
     n_breakdowns = 0
+    # Why the repair rejected a searched path, and how long repairs took.
+    postprocess_reasons: Counter = Counter()
+    repair_times: List[float] = []
+    ik_solve_counts: List[int] = []
+    first_step_failures = 0
+    growth_walks_recorded = 0
     for run in runs:
         for record in (run.get("passes") or {}).values():
             stop_reasons.update(record.get("extend_stop_reasons") or {})
@@ -173,10 +186,45 @@ def summarize_group(runs: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
                 n_breakdowns += 1
                 for key, value in breakdown.items():
                     breakdown_totals[key] = breakdown_totals.get(key, 0.0) + float(value)
+            postprocess = record.get("postprocess") or {}
+            if postprocess:
+                repair_times.append(float(postprocess.get("wall_s", 0.0)))
+                if not postprocess.get("success"):
+                    postprocess_reasons[postprocess.get("reason") or "unknown"] += 1
+            if record.get("n_ik_solves") is not None:
+                ik_solve_counts.append(int(record["n_ik_solves"]))
+            if record.get("n_first_step_failures") is not None:
+                first_step_failures += int(record["n_first_step_failures"])
+                growth_walks_recorded += int(record.get("n_growth_walks") or 0)
 
     mean_breakdown = ({key: value / n_breakdowns
                        for key, value in breakdown_totals.items()}
                       if n_breakdowns else {})
+
+    # * How often a growth walk added no node at all (it failed on its first
+    # * waypoint). Exact when the passes counted it; otherwise a lower bound
+    # * from the tree sizes: every node in both trees came from a walk that
+    # * made progress, and every other growth walk made none.
+    growth_walk_keys = ("reached", "continuity", "ik_failure", "collision")
+    growth_walks = sum(stop_reasons.get(key, 0) for key in growth_walk_keys)
+    tree_nodes = sum(
+        int(record.get("tree_a_nodes") or 0) + int(record.get("tree_b_nodes") or 0)
+        for run in runs for record in (run.get("passes") or {}).values()
+    )
+    n_passes = sum(len(run.get("passes") or {}) for run in runs)
+    if growth_walks_recorded:
+        first_step_failure_rate = first_step_failures / growth_walks_recorded
+        first_step_rate_is_bound = False
+    elif growth_walks:
+        # Two root nodes per pass were not grown; the rest were.
+        first_step_failure_rate = max(0.0, 1.0 - (tree_nodes - 2 * n_passes) / growth_walks)
+        first_step_rate_is_bound = True
+    else:
+        first_step_failure_rate = 0.0
+        first_step_rate_is_bound = True
+
+    mean_ik_seconds = mean_breakdown.get("ik", 0.0)
+    mean_ik_solves = (sum(ik_solve_counts) / len(ik_solve_counts)) if ik_solve_counts else 0.0
 
     return {
         "n_runs": n_runs,
@@ -192,6 +240,17 @@ def summarize_group(runs: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "extend_stop_reasons": dict(stop_reasons),
         "planners": dict(planners),
         "mean_breakdown_s": mean_breakdown,
+        # --- planner-variant experiments ---
+        "n_search_success": n_search_success,
+        "search_success_rate": n_search_success / n_runs if n_runs else 0.0,
+        "postprocess_reasons": dict(postprocess_reasons),
+        "repair_wall_s": quantiles(repair_times),
+        "mean_ik_solves": mean_ik_solves,
+        # Milliseconds per IK solve, from the sampled IK seconds and the solve
+        # count; zero when either was not recorded.
+        "ik_ms_per_solve": (1000.0 * mean_ik_seconds / mean_ik_solves) if mean_ik_solves else 0.0,
+        "first_step_failure_rate": first_step_failure_rate,
+        "first_step_failure_rate_is_lower_bound": first_step_rate_is_bound,
     }
 
 
@@ -278,6 +337,9 @@ def summarize_run(run_dir: str) -> Dict[str, Any]:
 
     return {
         "run_name": config.get("name", os.path.basename(run_dir)),
+        # Which planner variant the batch ran (None for batches made before
+        # variants existed, which were all the baseline planner).
+        "variant": config.get("variant"),
         "config": config,
         "library_settings": library_settings,
         "totals": totals,

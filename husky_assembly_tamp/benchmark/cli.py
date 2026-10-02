@@ -24,7 +24,14 @@ import sys
 import time
 from typing import Any, Dict, List, Optional, Sequence
 
+from husky_assembly_tamp.benchmark.compare import compare_runs, write_comparison
+from husky_assembly_tamp.benchmark.continuity_diag import (
+    diagnose_run, format_report, write_diagnosis,
+)
 from husky_assembly_tamp.benchmark.sweep import DEFAULT_SWEEP_STEP_M
+from husky_assembly_tamp.benchmark.variants import (
+    DEFAULT_VARIANT, resolve_variant, variant_names, variant_record,
+)
 
 
 DEFAULT_LIBRARY_NAME = "cdfm_v1"
@@ -190,10 +197,25 @@ def cmd_build_library(args: argparse.Namespace) -> int:
     return 0
 
 
+def parse_goals(text: Optional[str]) -> Optional[List[int]]:
+    """Turn ``--goals 2,7`` into ``[2, 7]``; ``None`` means every goal.
+
+    Args:
+        text (Optional[str]): the comma-separated goal indices, or None.
+
+    Returns:
+        Optional[List[int]]: the indices, or None when nothing was given.
+    """
+    if not text:
+        return None
+    return [int(part) for part in text.split(",") if part.strip()]
+
+
 def collect_tasks(root: str, library_name: str, bars: Sequence[str],
                   *, seeds: Sequence[int],
                   max_starts_per_goal: Optional[int],
-                  max_goals: Optional[int]):
+                  max_goals: Optional[int],
+                  goals: Optional[Sequence[int]] = None):
     """Build the list of planning tasks a batch should work through.
 
     Args:
@@ -204,10 +226,15 @@ def collect_tasks(root: str, library_name: str, bars: Sequence[str],
         max_starts_per_goal (Optional[int]): further limit the starts kept in
             the library.
         max_goals (Optional[int]): only the first this many goals per bar.
+        goals (Optional[Sequence[int]]): only these goal indices, on every
+            bar; ``None`` means all of them. Applied before ``max_goals``.
 
     Returns:
         Tuple[List[RunTask], Dict]: the tasks and, for each, how its start
         ranked in the survey (used to order the batch).
+
+    Raises:
+        ValueError: if a requested goal index does not exist on a bar.
     """
     from husky_assembly_tamp.benchmark.cdfm import RunTask
     from husky_assembly_tamp.benchmark.library import load_bar_library, select_starts
@@ -216,10 +243,18 @@ def collect_tasks(root: str, library_name: str, bars: Sequence[str],
     start_ranks: Dict[Any, int] = {}
     for bar_id in bars:
         entry = load_bar_library(root, library_name, bar_id)
-        goals = entry["goals"]
+        bar_goals = entry["goals"]
+        if goals is not None:
+            by_index = {goal["goal_index"]: goal for goal in bar_goals}
+            missing = [index for index in goals if index not in by_index]
+            if missing:
+                raise ValueError(
+                    f"{bar_id} has no goal(s) {missing}; the library has "
+                    f"goals 0..{max(by_index) if by_index else -1}")
+            bar_goals = [by_index[index] for index in goals]
         if max_goals is not None:
-            goals = goals[:max_goals]
-        for goal in goals:
+            bar_goals = bar_goals[:max_goals]
+        for goal in bar_goals:
             starts = select_starts(goal["starts"], max_starts_per_goal)
             for start in starts:
                 key = (bar_id, goal["goal_index"], start["start_index"])
@@ -248,6 +283,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
     tasks, _ranks = collect_tasks(
         root, args.library, bars, seeds=seeds,
         max_starts_per_goal=args.max_starts_per_goal, max_goals=args.max_goals,
+        goals=parse_goals(args.goals),
     )
     per_run_s = args.assume_run_s
     total_h = len(tasks) * per_run_s / 3600.0
@@ -279,6 +315,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     tasks, start_ranks = collect_tasks(
         root, args.library, bars, seeds=seeds,
         max_starts_per_goal=args.max_starts_per_goal, max_goals=args.max_goals,
+        goals=parse_goals(args.goals),
     )
     tasks = order_tasks(tasks, start_ranks)
     todo = pending_tasks(tasks, runs_dir)
@@ -289,6 +326,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     if args.max_time_fine is not None:
         pass_overrides["fine"] = {"max_time": args.max_time_fine}
 
+    # * The variant's solver sets are loaded HERE, in the parent, before any
+    # * worker starts: a missing solver file then stops the batch with one
+    # * readable error instead of a dozen workers dying and being respawned.
+    artifacts = load_variant_artifacts(args.variant)
+
     config = {
         "root": root,
         "source_key": source_key,
@@ -297,8 +339,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         "store_paths": not args.no_paths,
         "tree_dir": os.path.join(run_dir, "trees") if args.store_trees else None,
         "pass_overrides": pass_overrides,
+        "variant": args.variant,
     }
-    write_run_config(run_dir, args, index, config, n_tasks=len(tasks))
+    write_run_config(run_dir, args, index, config, n_tasks=len(tasks), artifacts=artifacts)
 
     print(f"[run] {len(tasks)} task(s), {len(todo)} still to do, "
           f"{args.workers} worker(s)", flush=True)
@@ -314,8 +357,30 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def load_variant_artifacts(variant: Optional[str]) -> Dict[str, Any]:
+    """Load a variant's solver sets now and describe them for the record.
+
+    Args:
+        variant (Optional[str]): the variant name (``None`` = baseline).
+
+    Returns:
+        Dict[str, Any]: per set name, what ``ssik_inprocess.describe_artifact_set``
+        says about it (files, solver name and tier, limits).
+
+    Raises:
+        ValueError: for an unknown variant name.
+        RuntimeError: when a set's solver module cannot be loaded.
+    """
+    from husky_assembly_tamp.keyframe import ssik_inprocess
+
+    sets = resolve_variant(variant)["artifact_sets"]
+    ssik_inprocess.preload_artifact_sets(sets)
+    return {name: ssik_inprocess.describe_artifact_set(name) for name in sets}
+
+
 def write_run_config(run_dir: str, args: argparse.Namespace, index: Dict[str, Any],
-                     config: Dict[str, Any], *, n_tasks: int) -> None:
+                     config: Dict[str, Any], *, n_tasks: int,
+                     artifacts: Optional[Dict[str, Any]] = None) -> None:
     """Record exactly what a batch was asked to do.
 
     Without this a result file is uninterpretable six months later: the
@@ -328,6 +393,8 @@ def write_run_config(run_dir: str, args: argparse.Namespace, index: Dict[str, An
         index (Dict[str, Any]): the library index it planned from.
         config (Dict[str, Any]): the settings handed to the workers.
         n_tasks (int): how many runs the batch covers.
+        artifacts (Optional[Dict[str, Any]]): the solver sets the variant
+            uses, as :func:`load_variant_artifacts` describes them.
     """
     from husky_assembly_tamp.benchmark.cdfm import PASS_SETTINGS
     from husky_assembly_tamp.benchmark.provenance import provenance
@@ -345,8 +412,12 @@ def write_run_config(run_dir: str, args: argparse.Namespace, index: Dict[str, An
         "pass_settings": PASS_SETTINGS,
         "pass_overrides": config["pass_overrides"],
         "profiling": config["enable_profiling"],
+        # The planner variant, by name and spelled out, so a replay or a
+        # comparison never has to guess what was run.
+        "variant": config.get("variant") or DEFAULT_VARIANT,
+        "variant_settings": variant_record(config.get("variant")),
         "command": " ".join(sys.argv),
-        "provenance": provenance(),
+        "provenance": provenance(artifacts=artifacts),
     }
     os.makedirs(run_dir, exist_ok=True)
     with open(os.path.join(run_dir, "config.json"), "w", encoding="utf-8") as handle:
@@ -429,6 +500,8 @@ def cmd_replay(args: argparse.Namespace) -> int:
           f"{len(tasks)} seed(s), {len(todo)} to plan", flush=True)
 
     if todo:
+        # The batch's own variant, checked and loaded up front as in `run`.
+        load_variant_artifacts(run_config.get("variant"))
         config = {
             "root": root,
             "source_key": run_config["source_key"],
@@ -438,11 +511,44 @@ def cmd_replay(args: argparse.Namespace) -> int:
             "tree_dir": os.path.join(replay_dir, "trees"),
             # The batch's own settings, so the replay asks the same question.
             "pass_overrides": run_config.get("pass_overrides") or {},
+            "variant": run_config.get("variant"),
         }
         BatchRunner(todo, runs_dir=runs_dir, config=config,
                     n_workers=min(args.workers, len(todo))).run()
 
     attach_trees(root, args.name)
+    return 0
+
+
+def cmd_compare(args: argparse.Namespace) -> int:
+    """Compare several batches (planner variants) on their common runs."""
+    root = resolve_root(args.root)
+    run_names = [part.strip() for part in args.runs.split(",") if part.strip()]
+    payload = compare_runs(root, run_names, args.name, baseline=args.baseline)
+    path = write_comparison(root, payload)
+    print(f"[compare] {payload['n_common_runs']} common run(s) over "
+          f"{payload['n_problems']} problem(s), baseline {payload['baseline']}")
+    for entry in payload["variants"]:
+        totals = entry["totals"]
+        paired = entry["paired_vs_baseline"]
+        extra = ""
+        if paired:
+            extra = (f"  vs baseline: +{paired['variant_only']} / -{paired['baseline_only']} "
+                     f"problems (McNemar p={paired['mcnemar_p']:.3f})")
+        print(f"  {entry['run_name']:20s} runs {100 * totals['success_rate']:5.1f}%  "
+              f"problems {entry['n_solved_problems']}/{entry['n_problems']}  "
+              f"search-only {100 * totals['search_success_rate']:5.1f}%{extra}")
+    print(f"[compare] written {path}")
+    return 0
+
+
+def cmd_diagnose_continuity(args: argparse.Namespace) -> int:
+    """Sort a batch's continuity stops into 2pi twins, solver noise and real flips."""
+    root = resolve_root(args.root)
+    run_dir = os.path.join(root, "runs", args.name)
+    diag = diagnose_run(run_dir)
+    print(format_report(diag))
+    print("[diagnose] written", write_diagnosis(run_dir, diag))
     return 0
 
 
@@ -504,6 +610,8 @@ def build_parser() -> argparse.ArgumentParser:
                            "across the carry anchors and difficulty classes "
                            "(default: every feasible start)")
     plan.add_argument("--max-goals", type=int, default=None)
+    plan.add_argument("--goals", default=None,
+                      help="only these goal indices, comma-separated (e.g. 2,7)")
     plan.add_argument("--workers", type=int, default=12)
     plan.add_argument("--assume-run-s", type=float, default=45.0,
                       help="seconds per run to assume (default %(default)s); "
@@ -520,6 +628,8 @@ def build_parser() -> argparse.ArgumentParser:
                           "across the carry anchors and difficulty classes "
                           "(default: every feasible start)")
     run.add_argument("--max-goals", type=int, default=None)
+    run.add_argument("--goals", default=None,
+                     help="only these goal indices, comma-separated (e.g. 2,7)")
     run.add_argument("--workers", type=int, default=12)
     run.add_argument("--max-time-coarse", type=float, default=None,
                      help="override the coarse pass's time budget, seconds")
@@ -529,10 +639,14 @@ def build_parser() -> argparse.ArgumentParser:
                      help="skip profiling (a few percent faster, no flame graphs)")
     run.add_argument("--no-paths", action="store_true",
                      help="do not store planned trajectories (much smaller results)")
-    run.add_argument("--store-trees", action="store_true",
-                     help="save both search trees of every pass, solved or not, "
-                          "for the dashboard to draw (tens of KB per pass)")
-    run.set_defaults(func=cmd_run, profile=True)
+    run.add_argument("--no-trees", dest="store_trees", action="store_false",
+                     help="do not save the search trees and failed attempts of "
+                          "every pass (saved by default: tens of KB per pass, "
+                          "and what the dashboard's start pages draw)")
+    run.add_argument("--variant", default=DEFAULT_VARIANT, choices=variant_names(),
+                     help="which planner variant to run for every pass "
+                          "(default %(default)s); see benchmark/variants.py")
+    run.set_defaults(func=cmd_run, profile=True, store_trees=True)
 
     summarize = subparsers.add_parser("summarize", help="aggregate a batch")
     add_common_arguments(summarize)
@@ -559,6 +673,24 @@ def build_parser() -> argparse.ArgumentParser:
     replay.add_argument("--force", action="store_true",
                         help="re-plan seeds that already have a replay")
     replay.set_defaults(func=cmd_replay)
+
+    compare = subparsers.add_parser(
+        "compare", help="compare several batches (planner variants) on their common runs")
+    add_common_arguments(compare)
+    compare.add_argument("--runs", required=True,
+                         help="comma-separated batch names, e.g. pilot1_v0,pilot1_v2")
+    compare.add_argument("--name", required=True, help="a name for the comparison")
+    compare.add_argument("--baseline", default=None,
+                         help="the batch the others are measured against "
+                              "(default: the first of --runs)")
+    compare.set_defaults(func=cmd_compare)
+
+    diagnose = subparsers.add_parser(
+        "diagnose-continuity",
+        help="explain a batch's continuity stops from its saved attempts")
+    add_common_arguments(diagnose)
+    diagnose.add_argument("--name", required=True, help="the batch to diagnose")
+    diagnose.set_defaults(func=cmd_diagnose_continuity)
 
     measure = subparsers.add_parser(
         "measure", help="time the inner loops to size a batch")

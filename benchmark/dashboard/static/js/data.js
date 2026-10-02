@@ -18,6 +18,29 @@ export async function loadJson(url) {
   return promise;
 }
 
+// Reads a gzipped JSON file, unpacking it in the browser.
+//
+// Python's built-in web server sends a .gz file as plain bytes with no header
+// telling the browser it is compressed, so the page unpacks it itself. The
+// failed-attempt files use this: a coarse pass has a couple of thousand
+// attempts, which gzip shrinks about six times.
+export async function loadJsonGz(url) {
+  if (cache.has(url)) return cache.get(url);
+  const promise = fetch(url).then(async (response) => {
+    if (!response.ok) {
+      throw new Error(`could not load ${url} (HTTP ${response.status})`);
+    }
+    if (typeof DecompressionStream === "undefined") {
+      throw new Error("this browser cannot unpack gzip files "
+        + "(no DecompressionStream); use a recent Chrome, Edge or Firefox");
+    }
+    const unpacked = response.body.pipeThrough(new DecompressionStream("gzip"));
+    return JSON.parse(await new Response(unpacked).text());
+  });
+  cache.set(url, promise);
+  return promise;
+}
+
 // Reads a planned motion from its binary file.
 //
 // The format is four magic bytes, then version, waypoint count and joint count
@@ -57,6 +80,10 @@ export async function loadTrajectory(url) {
 export const paths = {
   run: () => "run.json",
   summary: () => "summary.json",
+  // Comparisons of several batches live at the data root, beside runs.json,
+  // because they belong to no single batch.
+  compareIndex: () => "../../../compare/index.json",
+  compare: (name) => `../../../compare/${name}.json`,
   bar: (barId) => `bars/${barId}.json`,
   goal: (barId, goalIndex) =>
     `bars/${barId}/goal${String(goalIndex).padStart(3, "0")}.json`,

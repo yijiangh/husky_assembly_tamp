@@ -11,7 +11,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "../vendor/three-r185/examples/jsm/controls/OrbitControls.js";
 import { GLTFLoader } from "../vendor/three-r185/examples/jsm/loaders/GLTFLoader.js";
-import { RobotKinematics } from "./kinematics.js";
+import { RobotKinematics, findNode } from "./kinematics.js";
 
 // Colours shared with the charts, so a bar that is orange in a plot is orange
 // in the 3D view too.
@@ -68,6 +68,10 @@ export class RobotViewer {
     this.poseClouds = [];
     this.trajectoryLine = null;
     this.treeObjects = [];
+    // Extra lines drawn over the scene (the failed attempts), and the parts
+    // currently tinted to point at a collision.
+    this.overlays = [];
+    this.highlighted = [];
 
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
@@ -110,8 +114,46 @@ export class RobotViewer {
     ]);
     this.robotRoot = gltf.scene;
     this.scene.add(this.robotRoot);
+    this.kinematicsSpec = kinematics;
     this.kinematics = new RobotKinematics(kinematics, this.robotRoot);
     this.pose(new Array(this.kinematics.joints.length).fill(0));
+  }
+
+  // A second, see-through robot, for showing one configuration next to
+  // another: the rejected waypoint of a continuity stop beside the accepted
+  // one it was supposed to follow. Built once from a copy of the robot; the
+  // joint rest rotations come from kinematics.json, so the copy poses
+  // exactly like the original regardless of how the original stands.
+  showGhost(angles, colour = 0xd98324) {
+    if (!this.robotRoot) return;
+    if (!this.ghostRoot) {
+      this.ghostRoot = this.robotRoot.clone(true);
+      this.ghostRoot.traverse((child) => {
+        if (!child.isMesh) return;
+        child.material = new THREE.MeshStandardMaterial({
+          color: colour, transparent: true, opacity: 0.38, depthWrite: false,
+          roughness: 0.6, metalness: 0.0,
+        });
+      });
+      this.ghostKinematics = new RobotKinematics(this.kinematicsSpec, this.ghostRoot);
+      this.scene.add(this.ghostRoot);
+    }
+    this.ghostRoot.traverse((child) => {
+      if (child.isMesh) child.material.color.setHex(colour);
+    });
+    this.ghostRoot.visible = true;
+    this.ghostKinematics.pose(angles);
+  }
+
+  hideGhost() {
+    if (this.ghostRoot) this.ghostRoot.visible = false;
+  }
+
+  // Recolours one bar of an instanced cloud, e.g. to mark the selected one.
+  setInstanceColour(mesh, index, hex) {
+    if (!mesh || index == null) return;
+    mesh.setColorAt(index, new THREE.Color(hex));
+    mesh.instanceColor.needsUpdate = true;
   }
 
   pose(angles) {
@@ -189,6 +231,84 @@ export class RobotViewer {
       mesh.dispose();
     }
     this.poseClouds = [];
+  }
+
+  // Removes one cloud, leaving the others. Used when a toggle hides one kind
+  // of marker without redrawing everything else.
+  removePoseCloud(mesh) {
+    if (!mesh) return;
+    const index = this.poseClouds.indexOf(mesh);
+    if (index < 0) return;
+    this.poseClouds.splice(index, 1);
+    this.scene.remove(mesh);
+    mesh.geometry.dispose();
+    mesh.dispose();
+  }
+
+  // Draws straight segments over the scene: segments is [[[x,y,z], [x,y,z]], ...].
+  // Returns the object, so it can be removed on its own with removeOverlay.
+  addLines(segments, { colour, opacity = 0.6 }) {
+    if (!segments.length) return null;
+    const positions = [];
+    for (const [p, q] of segments) positions.push(p[0], p[1], p[2], q[0], q[1], q[2]);
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    const lines = new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({
+      color: colour, transparent: opacity < 1, opacity,
+    }));
+    this.scene.add(lines);
+    this.overlays.push(lines);
+    return lines;
+  }
+
+  removeOverlay(object) {
+    if (!object) return;
+    const index = this.overlays.indexOf(object);
+    if (index >= 0) this.overlays.splice(index, 1);
+    this.scene.remove(object);
+    object.geometry.dispose();
+    object.material.dispose();
+  }
+
+  clearOverlays() {
+    for (const object of this.overlays.slice()) this.removeOverlay(object);
+  }
+
+  // Tints robot links so a collision pair stands out. Names are link names as
+  // the planner reports them; the exported robot has a node "L_<name>" per
+  // link. Returns the names that are not links, so the caller can decide
+  // those are the bar or a tool and tint the carried bar instead.
+  highlightParts(names, colour = 0xb23a48) {
+    this.clearHighlight();
+    const missing = [];
+    for (const name of names) {
+      const node = this.robotRoot && findNode(this.robotRoot, `L_${name}`);
+      if (!node) { missing.push(name); continue; }
+      node.traverse((child) => {
+        if (!child.isMesh) return;
+        this.highlighted.push({ mesh: child, material: child.material });
+        child.material = child.material.clone();
+        child.material.emissive = new THREE.Color(colour);
+        child.material.emissiveIntensity = 0.55;
+      });
+    }
+    return missing;
+  }
+
+  highlightCarriedBar(colour = 0xb23a48) {
+    if (!this.carriedBar) return;
+    this.highlighted.push({ mesh: this.carriedBar, material: this.carriedBar.material });
+    this.carriedBar.material = this.carriedBar.material.clone();
+    this.carriedBar.material.emissive = new THREE.Color(colour);
+    this.carriedBar.material.emissiveIntensity = 0.55;
+  }
+
+  clearHighlight() {
+    for (const { mesh, material } of this.highlighted) {
+      mesh.material.dispose();
+      mesh.material = material;
+    }
+    this.highlighted = [];
   }
 
   // Draws the two trees a search grew, as the paths of the bar's midpoint.

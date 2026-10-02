@@ -133,7 +133,33 @@ carry anchors, always including the start the planner itself would have picked.
 The library keeps every feasible start regardless, so the choice can be redone
 without re-running the survey.
 
+Leave `--max-starts-per-goal` out to plan from *every* workable start. To do
+that for one goal only, name it: `--bars B18 --goals 2` plans all of B18's
+goal 2 (807 starts) and nothing else. `--goals` takes a comma-separated list
+and works on `plan` too, so the size of the batch can be checked first.
+
+## What a run leaves behind
+
+Every pass records, besides its outcome and timings, the search itself:
+
+- `trees/<bar>_<stem>_<pass>.tree.json` — both search trees. Each node is the
+  bar's pose and the twelve joint angles that hold it there, with edges from
+  parent to child. This is what the dashboard draws and what lets a node be
+  clicked to pose the robot.
+- `trees/<bar>_<stem>_<pass>.attempts.json.gz` — every extension the search
+  tried and threw away, with its cause: the node it grew from, the waypoint
+  it rejected, the configuration there, and per reason the joint that jumped
+  (and by how much, against the gate), the arm with no IK solution and
+  whether one exists past a joint limit, or the two parts that collided.
+
+Both are on by default and cost tens of KB per pass. `--no-trees` turns them
+off. The planner records them only when asked (`record_search=True` on
+`plan_constrained_dual_arm`), so production planning is unchanged.
+
 ## The dashboard
+
+For a guide to opening the dashboard and reading each page, see
+[`DASHBOARD.md`](DASHBOARD.md).
 
 Four views, all state in the URL:
 
@@ -177,3 +203,48 @@ Each batch writes a `config.json` with the library it planned from, the exact
 planner settings, and the commit and cleanliness of every repository involved.
 A result from a dirty working tree says so, because it cannot be reproduced
 from its commit alone.
+
+## Planner variants and comparisons
+
+A batch runs one *planner variant*: which IK solver the search uses, how
+strict its per-waypoint gates are, and how the found path is re-solved
+afterwards. The variants are plain data in
+`husky_assembly_tamp/benchmark/variants.py`; `run --variant NAME` picks one
+(default `v0_baseline`, today's planner), and the name is written into the
+batch's `config.json` so a replay runs the same thing.
+
+Every variant ends with a *repair*: the found bar path is re-solved on the
+calibrated solver with the production gates (10° continuity, full collision)
+and must land on the goal configuration. A run counts as solved only when
+that passes; the search's own verdict is kept separately as `search_success`,
+and why a repair failed is recorded (`postprocess.reason`).
+
+| variant | what it changes |
+|---|---|
+| `v0_baseline` | nothing; the repair is recorded so a failure there is a finding |
+| `e0_diag` | baseline, plus a diagnosis of every continuity stop (see below) |
+| `v1_nominal` | the search uses ssik's closed-form nominal UR5e solver (`ssik.prebuilt.ur5e_ik`, about 3x faster) with a loosened FK gate; the repair makes the path exact |
+| `v2_nocont` | the continuity gate is off during the search |
+| `v3_nominal_nocont` | both of the above |
+| `v4_coarse_gate30` | the coarse pass's gate widened to 30° to match its 10 cm step |
+
+Variants are compared on the runs their batches have in common:
+
+```bash
+$PYTHON scripts/benchmark_cdfm.py run --name pilot1_v2 --variant v2_nocont ...   # one batch per variant
+$PYTHON scripts/benchmark_cdfm.py compare --runs pilot1_v0,pilot1_v2 --name pilot1 --baseline pilot1_v0
+```
+
+This writes `compare/pilot1.json` at the data root and adds a "Comparisons"
+panel to every batch's overview page, from which `#/compare/pilot1` shows
+success with intervals, a paired per-problem table against the baseline
+(exact McNemar test), planning time on runs both solved (median ratio with a
+bootstrap interval), stop reasons, the time breakdown with the repair as its
+own slice, why repairs failed, and a problem-by-variant matrix.
+
+`diagnose-continuity --name BATCH` sorts a batch's continuity stops, from the
+saved attempts, into 2π twins (a re-branching fault), solver noise (a
+runner-up branch almost as close) and real flips, with the jump-size and
+joint histograms; an `e0_diag` batch records the extra evidence this needs.
+`benchmark/tools/nominal_gap.py` measures the nominal-vs-calibrated tool-pose
+gap that sets `v1_nominal`'s FK-gate tolerances.

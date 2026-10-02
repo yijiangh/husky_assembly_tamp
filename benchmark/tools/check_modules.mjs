@@ -33,7 +33,9 @@ const importMap = mapMatch ? JSON.parse(mapMatch[1]).imports || {} : {};
 
 // Entry points: every module script the page loads.
 const entries = [...html.matchAll(/<script[^>]*type="module"[^>]*src="([^"]+)"/g)]
-  .map((match) => resolve(root, match[1].replace(/^\.\//, "")));
+  // The exporter tags the script URL with a cache-busting "?v=<hash>"; the
+  // server ignores it, so drop it before looking for the file on disk.
+  .map((match) => resolve(root, match[1].replace(/^\.\//, "").replace(/[?#].*$/, "")));
 
 if (!entries.length) {
   console.error("index.html loads no module scripts; nothing to check.");

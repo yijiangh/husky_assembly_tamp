@@ -26,7 +26,7 @@ export const COLOURS = {
 // Time breakdown components, in the order they are stacked.
 export const BREAKDOWN_ORDER = [
   "collision", "ik", "fk_gate", "interpolation", "nearest_node",
-  "state_sync", "smoothing", "stitching", "other",
+  "state_sync", "smoothing", "stitching", "repair", "other",
 ];
 
 export const BREAKDOWN_LABELS = {
@@ -38,6 +38,7 @@ export const BREAKDOWN_LABELS = {
   state_sync: "scene sync",
   smoothing: "smoothing",
   stitching: "joining the two trees",
+  repair: "re-solving the path on the calibrated model",
   other: "other",
 };
 
@@ -63,8 +64,83 @@ export const SETUP_COLOURS = {
 const BREAKDOWN_COLOURS = {
   collision: "#b23a48", ik: "#1f84bd", fk_gate: "#2e9e5b",
   interpolation: "#d98324", nearest_node: "#8a6fb0", state_sync: "#6f8ab0",
-  smoothing: "#4fa3a1", stitching: "#b0a06f", other: "#b8bec2",
+  smoothing: "#4fa3a1", stitching: "#b0a06f", repair: "#c46fa0", other: "#b8bec2",
 };
+
+// ! Why a tree extension stopped.
+// Every attempt to grow a search tree walks toward a target pose and ends for
+// one reason. The planner counts eleven raw keys: the plain reason for the
+// growth walk, the same reason with a `connect_` prefix for the walk that tries
+// to join the other tree, and a `stitch_` prefix for re-solving the seam where
+// the trees meet. Read together they are four things, and those four are what
+// the report's "why extensions stop" line is made of.
+export const STOP_REASON_ORDER = [
+  "continuity", "ik_failure", "collision", "reached", "other",
+];
+
+export const STOP_REASON_LABELS = {
+  continuity: "continuity: the arm solution jumped",
+  ik_failure: "IK failure: a waypoint was unreachable",
+  collision: "collision: something was in the way",
+  reached: "reached its target",
+  other: "other",
+};
+
+export const STOP_REASON_COLOURS = {
+  continuity: "#d98324", ik_failure: "#8a6fb0", collision: "#b23a48",
+  reached: "#2e9e5b", other: "#b8bec2",
+};
+
+// Raw planner key -> one of the four groups above. Anything not listed here
+// counts as "other" (today that is only the rare stitch endpoint mismatch).
+const STOP_REASON_GROUP = {
+  continuity: "continuity",
+  connect_continuity: "continuity",
+  stitch_continuity_fail: "continuity",
+  ik_failure: "ik_failure",
+  connect_ik_failure: "ik_failure",
+  stitch_ik_failure: "ik_failure",
+  collision: "collision",
+  connect_collision: "collision",
+  stitch_collision: "collision",
+  reached: "reached",
+  connect_reached: "reached",
+};
+
+// Folds one or more raw stop-reason histograms into the four groups.
+//
+// Pass several histograms to add them up, e.g. every pass of every seed on a
+// start page. Missing or empty histograms are fine and add nothing.
+export function groupStopReasons(...histograms) {
+  const grouped = Object.fromEntries(STOP_REASON_ORDER.map((key) => [key, 0]));
+  for (const histogram of histograms) {
+    for (const [rawKey, count] of Object.entries(histogram || {})) {
+      grouped[STOP_REASON_GROUP[rawKey] || "other"] += count || 0;
+    }
+  }
+  return grouped;
+}
+
+// One sentence in the style of the report: the three shares that matter, then
+// a verdict on what is holding the search back.
+//
+// The verdict only looks at the three ways a walk can be rejected, so a run
+// where most walks reach their target still names whichever rejection is the
+// most common one.
+export function stopReasonVerdict(grouped) {
+  const total = STOP_REASON_ORDER.reduce((sum, key) => sum + grouped[key], 0);
+  if (!total) return "No extension attempts were recorded.";
+  const share = (key) => `${(grouped[key] / total * 100).toFixed(1)} %`;
+  const rejections = ["continuity", "ik_failure", "collision"];
+  const main = rejections.reduce((best, key) => grouped[key] > grouped[best] ? key : best);
+  const verdict = {
+    continuity: "The continuity gate is the main brake, not the environment.",
+    ik_failure: "Reachability is the main brake: the arms could not solve the waypoints.",
+    collision: "The environment is the main brake: the search kept running into something.",
+  }[main];
+  return `Why extensions stop: continuity ${share("continuity")}, `
+    + `IK failure ${share("ik_failure")}, collision ${share("collision")}. ${verdict}`;
+}
 
 const NS = "http://www.w3.org/2000/svg";
 

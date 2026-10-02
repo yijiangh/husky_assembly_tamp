@@ -64,12 +64,25 @@ def package_versions() -> Dict[str, Optional[str]]:
     return versions
 
 
-def provenance() -> Dict[str, Any]:
+# * Environment variables that change which solver or data a batch used. They
+# * are recorded because a result produced with a different artifact folder or
+# * IK backend is a different planner, even at the same commit.
+RECORDED_ENV_VARS = ("HUSKY_SSIK_ARTIFACT_DIR", "HUSKY_IK_BACKEND", "HUSKY_BENCH_ROOT")
+
+
+def provenance(artifacts: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Return everything needed to say where a set of results came from.
 
+    Args:
+        artifacts (Optional[Dict[str, Any]]): a description of every solver
+            artifact set the batch will use (file, solver name and tier, joint
+            limits), as returned by ``ssik_inprocess.describe_artifact_set``,
+            keyed by set name. ``None`` records nothing about artifacts.
+
     Returns:
-        Dict[str, Any]: the repositories' git state, package versions and the
-        machine the batch ran on.
+        Dict[str, Any]: the repositories' git state, package versions, the
+        machine the batch ran on, the recorded environment variables and the
+        solver artifacts.
     """
     package_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     tamp_repo = os.path.dirname(package_dir)
@@ -94,4 +107,7 @@ def provenance() -> Dict[str, Any]:
             "processor": platform.processor(),
             "cpu_count": os.cpu_count(),
         },
+        # Unset variables are recorded as None so "was it set?" stays answerable.
+        "env": {name: os.environ.get(name) for name in RECORDED_ENV_VARS},
+        "artifacts": dict(artifacts or {}),
     }

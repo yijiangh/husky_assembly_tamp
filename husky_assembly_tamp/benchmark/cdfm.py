@@ -23,25 +23,39 @@ reported alongside the fine one.
 Note that the resolution is not only a step size: the planner also uses it as
 the tolerance for having arrived at the goal, so the coarse pass genuinely
 solves a looser problem.
+
+What a pass leaves on disk, when trees are kept (the default for batches):
+
+    <bar>_<stem>_<pass>.tree.json         both search trees. ``forward`` grew
+        from the start, ``backward`` from the goal; each has ``points``
+        (bar-frame origin), ``quaternions``, ``midpoints`` (what is drawn),
+        ``confs`` (the 12 joint angles holding the bar there) and ``edges``
+        as [parent, child] indices into that tree.
+    <bar>_<stem>_<pass>.attempts.json.gz  every extension that stopped short,
+        gzipped. Per attempt: ``tree`` (a = start tree, b = goal tree),
+        ``phase`` (extend / connect), ``iteration``, ``reason``, ``from_node``
+        and ``last_node`` (indices into that tree), ``n_added``, ``target``,
+        ``rejected_pose``, ``rejected_conf`` and a ``detail`` dict: the joint
+        that jumped and by how much (continuity), the arm without a solution
+        and whether one exists past a joint limit (ik_failure), or the parts
+        that touched (collision).
 """
 from __future__ import annotations
 
+import gzip
 import json
-import logging
 import os
 import random
-import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
-from unittest.mock import patch
 
 import numpy as np
 
 from husky_assembly_tamp.benchmark.profiling import profiled
 from husky_assembly_tamp.benchmark.scene import SceneCtx, pose_to_lists, state_with_conf12
+from husky_assembly_tamp.benchmark.variants import json_safe, resolve_variant
 from husky_assembly_tamp.motion_planner.api import plan_constrained_dual_arm
-from husky_assembly_tamp.motion_planner.dual_arm_task_space_rrt import core as planner_core
 
 
 # * The two passes. `max_iterations` is set absurdly high on purpose: we want
@@ -63,12 +77,19 @@ PASS_SETTINGS: Dict[str, Dict[str, float]] = {
 }
 PASS_ORDER = ("coarse", "fine")
 
-# The planner logs its two tree sizes and nothing else exposes them, so they
-# are read back out of the log line.
-TREE_SIZE_PATTERN = re.compile(r"tree_a=(\d+).*?tree_b=(\d+)")
 
-# The logger the planner's search writes to.
-PLANNER_LOGGER_NAME = "dual_arm_task_space_rrt_core"
+def attempts_path_for(tree_path: str) -> str:
+    """The attempts file that goes with a tree file.
+
+    Args:
+        tree_path (str): ``.../<name>.tree.json``.
+
+    Returns:
+        str: ``.../<name>.attempts.json.gz`` in the same folder.
+    """
+    if not tree_path.endswith(".tree.json"):
+        raise ValueError(f"expected a *.tree.json path, got {tree_path!r}")
+    return tree_path[:-len(".tree.json")] + ".attempts.json.gz"
 
 
 @dataclass
@@ -104,34 +125,6 @@ class RunTask:
                 f"_k{self.seed:02d}")
 
 
-class TreeSizeCapture(logging.Handler):
-    """Collect the planner's tree sizes out of its log lines.
-
-    The search reports how big each of its two trees grew, but only in a log
-    message -- the returned data has the two merged. Rather than change the
-    planner, listen to its logger.
-    """
-
-    def __init__(self):
-        """Start with no sizes captured."""
-        super().__init__(level=logging.INFO)
-        self.tree_a: Optional[int] = None
-        self.tree_b: Optional[int] = None
-        self.lines: List[str] = []
-
-    def emit(self, record: logging.LogRecord) -> None:
-        """Remember any log line that mentions the two tree sizes."""
-        try:
-            message = record.getMessage()
-        except Exception:  # noqa: BLE001 - a bad log line must not fail a run
-            return
-        self.lines.append(message)
-        match = TREE_SIZE_PATTERN.search(message)
-        if match:
-            self.tree_a = int(match.group(1))
-            self.tree_b = int(match.group(2))
-
-
 def rotate(quaternion: Sequence[float], vector: Sequence[float]) -> np.ndarray:
     """Rotate a vector by an ``(x, y, z, w)`` quaternion.
 
@@ -148,66 +141,69 @@ def rotate(quaternion: Sequence[float], vector: Sequence[float]) -> np.ndarray:
     return v + 2.0 * np.cross(u, np.cross(u, v) + w * v)
 
 
-def split_trees(tree: Dict[str, Any], quaternions: Optional[List[List[float]]],
-                n_forward: Optional[int], n_backward: Optional[int],
-                bar_from_midpoint: Sequence[float]) -> Dict[str, Any]:
-    """Separate the planner's merged tree export into its two trees.
+def tree_for_dashboard(tree: Dict[str, Any], bar_from_midpoint: Sequence[float]) -> Dict[str, Any]:
+    """Round one exported tree and add the bar midpoints the dashboard draws.
 
-    The bidirectional search grows one tree from the start and one from the
-    goal, but hands them back as a single list with the start tree first. The
-    only record of where one ends and the other begins is the log line that
-    reports both sizes, so the split is checked against it and refused rather
-    than guessed when the two disagree.
-
-    Each node is the bar's pose at that point of the search. The bar frame sits
-    at one end of the bar, so the midpoint is worked out as well: it is what
-    the dashboard draws, and it is where the bar actually is.
+    Each node is the bar's pose at that point of the search, plus the joint
+    configuration that holds it there. The bar frame sits at one end of the
+    bar, so the midpoint is worked out as well: it is where the bar actually
+    is, and what the tree lines are drawn through.
 
     Args:
-        tree (Dict[str, Any]): the planner's ``{"points", "edges"}`` export.
-        quaternions (Optional[List[List[float]]]): each node's orientation, in
-            the same order, captured alongside the export.
-        n_forward (Optional[int]): nodes in the start tree, from the log.
-        n_backward (Optional[int]): nodes in the goal tree, from the log.
+        tree (Dict[str, Any]): the planner's ``{"points", "quaternions",
+            "confs", "edges"}`` export of one tree.
         bar_from_midpoint (Sequence[float]): the midpoint in bar coordinates.
 
     Returns:
-        Dict[str, Any]: ``forward`` and ``backward``, each with ``points``
-        (bar frame positions), ``midpoints``, ``quaternions`` and ``edges``
-        indexed within that tree -- or ``error`` saying why it could not be
-        split.
+        Dict[str, Any]: the same keys plus ``midpoints``, all rounded.
     """
     points = tree.get("points") or []
-    edges = tree.get("edges") or []
-    if n_forward is None or n_backward is None:
-        return {"error": "the planner did not log its tree sizes"}
-    if n_forward + n_backward != len(points):
-        return {"error": (f"the log reports {n_forward} + {n_backward} nodes but "
-                          f"the export has {len(points)}; not splitting")}
-    if quaternions is None or len(quaternions) != len(points):
-        return {"error": "node orientations were not captured for every node"}
+    quaternions = tree.get("quaternions") or []
+    return {
+        "points": [[round(v, 5) for v in p] for p in points],
+        "quaternions": [[round(v, 6) for v in q] for q in quaternions],
+        "midpoints": [[round(float(v), 5) for v in
+                       np.asarray(p) + rotate(q, bar_from_midpoint)]
+                      for p, q in zip(points, quaternions)],
+        "confs": [None if c is None else [round(v, 4) for v in c]
+                  for c in (tree.get("confs") or [])],
+        "edges": tree.get("edges") or [],
+    }
 
-    def part(lo: int, hi: int) -> Dict[str, Any]:
-        """One tree: nodes lo..hi-1 and the edges between them."""
-        local = [[a - lo, b - lo] for a, b in edges if lo <= a < hi and lo <= b < hi]
-        return {
-            "points": [[round(v, 5) for v in points[i]] for i in range(lo, hi)],
-            "quaternions": [[round(v, 6) for v in quaternions[i]] for i in range(lo, hi)],
-            "midpoints": [[round(float(v), 5) for v in
-                           np.asarray(points[i]) + rotate(quaternions[i], bar_from_midpoint)]
-                          for i in range(lo, hi)],
-            "edges": local,
-        }
 
-    forward = part(0, n_forward)
-    backward = part(n_forward, len(points))
-    crossing = len(edges) - len(forward["edges"]) - len(backward["edges"])
-    result = {"forward": forward, "backward": backward}
-    if crossing:
-        # Each edge joins a node to its parent in the same tree, so this should
-        # never happen; if it does, the split is not what it claims to be.
-        result["error"] = f"{crossing} edge(s) join the two trees; split is suspect"
-    return result
+def rounded(value: Any, places: int = 4) -> Any:
+    """Round every float inside nested lists and dicts, leaving the rest alone.
+
+    Args:
+        value (Any): a number, list, dict, or anything else.
+        places (int): decimal places to keep.
+
+    Returns:
+        Any: the same shape with floats rounded.
+    """
+    if isinstance(value, float):
+        return round(value, places)
+    if isinstance(value, list):
+        return [rounded(v, places) for v in value]
+    if isinstance(value, dict):
+        return {k: rounded(v, places) for k, v in value.items()}
+    return value
+
+
+def write_attempts(path: str, attempts: List[Dict[str, Any]]) -> None:
+    """Write the failed extension attempts of one pass as gzipped JSON.
+
+    A coarse pass makes about two thousand attempts, each with a few poses and
+    a configuration; gzip shrinks that from hundreds of KB to tens. The
+    dashboard unpacks the file itself in the browser.
+
+    Args:
+        path (str): where to write; conventionally ``*.attempts.json.gz``.
+        attempts (List[Dict[str, Any]]): the planner's ``attempts`` export.
+    """
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with gzip.open(path, "wt", encoding="utf-8") as handle:
+        json.dump(rounded(attempts), handle, separators=(",", ":"))
 
 
 def path_lengths(path: Sequence[Sequence[float]]) -> Dict[str, float]:
@@ -236,7 +232,8 @@ def plan_one_pass(scene: SceneCtx, task: RunTask, pass_name: str, *,
                   enable_profiling: bool = True,
                   store_path: bool = True,
                   tree_path: Optional[str] = None,
-                  overrides: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
+                  overrides: Optional[Dict[str, float]] = None,
+                  variant: Optional[str] = None) -> Dict[str, Any]:
     """Run the planner once, at one resolution, and record the result.
 
     Args:
@@ -250,6 +247,8 @@ def plan_one_pass(scene: SceneCtx, task: RunTask, pass_name: str, *,
             there, whether it solved the problem or not.
         overrides (Optional[Dict[str, float]]): replace individual pass
             settings, e.g. a shorter ``max_time`` for a smoke test.
+        variant (Optional[str]): which planner variant to run (see
+            ``benchmark.variants``); ``None`` is the baseline.
 
     Returns:
         Dict[str, Any]: the pass record -- see the module docstring for what
@@ -257,6 +256,9 @@ def plan_one_pass(scene: SceneCtx, task: RunTask, pass_name: str, *,
     """
     settings = dict(PASS_SETTINGS[pass_name])
     settings.update(overrides or {})
+    # The variant's settings for THIS pass (a variant may treat the coarse
+    # and fine resolutions differently, e.g. a wider gate for the big steps).
+    variant_entry = resolve_variant(variant, pass_name)
 
     start_state = state_with_conf12(
         scene.template_state, task.start_conf, scene.problem.joint_names_12,
@@ -269,65 +271,47 @@ def plan_one_pass(scene: SceneCtx, task: RunTask, pass_name: str, *,
     random.seed(task.seed)
     np.random.seed(task.seed % (2 ** 32))
 
-    capture = TreeSizeCapture()
-    planner_logger = logging.getLogger(PLANNER_LOGGER_NAME)
-    planner_logger.addHandler(capture)
-
-    # The planner's tree export keeps positions only. Wrapping it -- a pure
-    # pass-through that also notes each node's orientation -- captures the
-    # rest without touching the planner. Only when trees were asked for.
-    captured: Dict[str, Any] = {}
-    original_export_tree = planner_core.export_tree
-
-    def export_tree_with_orientations(nodes):
-        """Call the planner's own export, and remember each node's rotation."""
-        captured["quaternions"] = [
-            [float(v) for v in node.config[1]] for node in nodes]
-        return original_export_tree(nodes)
-
-    tree_patch = (patch.object(planner_core, "export_tree", export_tree_with_orientations)
-                  if tree_path else None)
-
-    record: Dict[str, Any] = {"pass": pass_name, "settings": settings}
+    record: Dict[str, Any] = {
+        "pass": pass_name, "settings": settings, "variant": variant_entry["name"],
+    }
     t0 = time.perf_counter()
-    try:
-        if tree_patch is not None:
-            tree_patch.start()
-        with profiled(profile_path, enabled=enable_profiling) as profile:
-            path, info = plan_constrained_dual_arm(
-                scene.planner,
-                start_state,
-                active_bar_id=scene.problem.bar_rb_name,
-                # ! A plain list, not an array: the planner accepts either a
-                # ! named configuration or a bare 12-vector, and it tells them
-                # ! apart by indexing with a joint name and catching the error.
-                # ! A numpy array raises a different error there and slips
-                # ! through as neither.
-                goal_conf=[float(value) for value in task.goal_conf],
-                stage=3,
-                position_res=settings["position_res"],
-                rotation_res=settings["rotation_res"],
-                max_time=settings["max_time"],
-                # Wall-clock is the only stop control; see the module docstring.
-                max_iterations=10 ** 7,
-                max_attempts=1,
-                use_birrt=True,
-                enable_smoothing=True,
-                random_seed=task.seed,
-                derive_start=False,
-            )
-    finally:
-        if tree_patch is not None:
-            tree_patch.stop()
-        planner_logger.removeHandler(capture)
+    with profiled(profile_path, enabled=enable_profiling) as profile:
+        path, info = plan_constrained_dual_arm(
+            scene.planner,
+            start_state,
+            active_bar_id=scene.problem.bar_rb_name,
+            # ! A plain list, not an array: the planner accepts either a
+            # ! named configuration or a bare 12-vector, and it tells them
+            # ! apart by indexing with a joint name and catching the error.
+            # ! A numpy array raises a different error there and slips
+            # ! through as neither.
+            goal_conf=[float(value) for value in task.goal_conf],
+            stage=3,
+            position_res=settings["position_res"],
+            rotation_res=settings["rotation_res"],
+            max_time=settings["max_time"],
+            # Wall-clock is the only stop control; see the module docstring.
+            max_iterations=10 ** 7,
+            max_attempts=1,
+            use_birrt=True,
+            enable_smoothing=True,
+            random_seed=task.seed,
+            derive_start=False,
+            # Every failed extension with its cause, when trees are wanted.
+            record_search=bool(tree_path),
+            # The variant's solver, gate and repair settings (see variants.py).
+            **variant_entry["planner_kwargs"],
+        )
     record["wall_s"] = time.perf_counter() - t0
 
     record["success"] = path is not None
+    # * The search alone, before the strict repair of the found path; the
+    # * repair's verdict is what separates the two (see api.plan_constrained_dual_arm).
+    record["search_success"] = bool(info.get("search_success", path is not None))
+    record["postprocess"] = json_safe(info.get("repair"))
     record["failure_reason"] = info.get("failure_reason")
     record["planner"] = info.get("planner")
     record["ik_backend"] = info.get("ik_backend")
-    record["tree_a_nodes"] = capture.tree_a
-    record["tree_b_nodes"] = capture.tree_b
     record["profile"] = {
         "breakdown": profile.get("breakdown", {}),
         "speedscope": (os.path.basename(profile["speedscope"])
@@ -337,25 +321,51 @@ def plan_one_pass(scene: SceneCtx, task: RunTask, pass_name: str, *,
     search_profile = info.get("profile") or {}
     record["iterations"] = search_profile.get("iterations")
     record["extend_stop_reasons"] = dict(search_profile.get("extend_stop_reasons") or {})
-    tree = search_profile.get("tree1") or {}
-    record["tree_points"] = len(tree.get("points") or [])
-    record["tree_edges"] = len(tree.get("edges") or [])
+    # How many dual-arm IK solves the search made (tree growth, connects and
+    # stitches), so the profiler's IK seconds can be turned into ms per solve.
+    record["n_ik_solves"] = search_profile.get("n_ik_solves")
+    # The planner hands back its two trees separately, with every node's joint
+    # configuration. An empty profile means it never got as far as searching
+    # (start or goal already in collision), which is a result, not an error.
+    tree_a = search_profile.get("tree_a") or {"points": [], "edges": []}
+    tree_b = search_profile.get("tree_b") or {"points": [], "edges": []}
+    record["tree_a_nodes"] = len(tree_a["points"])
+    record["tree_b_nodes"] = len(tree_b["points"])
+    record["tree_points"] = record["tree_a_nodes"] + record["tree_b_nodes"]
+    record["tree_edges"] = len(tree_a["edges"]) + len(tree_b["edges"])
 
     if tree_path:
-        trees = split_trees(tree, captured.get("quaternions"),
-                            capture.tree_a, capture.tree_b,
-                            scene.problem.bar_from_midpoint)
-        trees.update({
+        trees = {
+            "version": 2,
+            "forward": tree_for_dashboard(tree_a, scene.problem.bar_from_midpoint),
+            "backward": tree_for_dashboard(tree_b, scene.problem.bar_from_midpoint),
             "run_id": task.run_id, "pass": pass_name, "success": path is not None,
             "start_pose": pose_to_lists(scene.bar_pose_at(task.start_conf)),
             "goal_pose": pose_to_lists(scene.bar_pose_at(task.goal_conf)),
-        })
+        }
         os.makedirs(os.path.dirname(tree_path), exist_ok=True)
         with open(tree_path, "w", encoding="utf-8") as handle:
             json.dump(trees, handle, separators=(",", ":"))
         record["tree_file"] = os.path.basename(tree_path)
-        if "error" in trees:
-            record["tree_error"] = trees["error"]
+
+        # The failed attempts go next to the trees, gzipped: see write_attempts.
+        attempts = search_profile.get("attempts")
+        if attempts is None and search_profile:
+            raise RuntimeError(
+                "The planner searched but recorded no attempts although "
+                "record_search was on; look into plan_constrained_dual_arm.")
+        attempts_path = attempts_path_for(tree_path)
+        write_attempts(attempts_path, attempts or [])
+        record["attempts_file"] = os.path.basename(attempts_path)
+        record["n_attempts"] = len(attempts or [])
+        # * How often a growth walk added no node at all, i.e. failed on its
+        # * very first waypoint. Growth walks are the "extend" attempts plus
+        # * the walks that reached their sample (those are not attempts).
+        grow_attempts = [a for a in (attempts or []) if a.get("phase") == "extend"]
+        record["n_first_step_failures"] = sum(
+            1 for a in grow_attempts if int(a.get("n_added") or 0) == 0)
+        record["n_growth_walks"] = (
+            len(grow_attempts) + int(record["extend_stop_reasons"].get("reached", 0)))
 
     if path is not None:
         record["n_waypoints"] = len(path)
@@ -373,7 +383,8 @@ def run_one(scene: SceneCtx, task: RunTask, *,
             enable_profiling: bool = True,
             store_paths: bool = True,
             tree_dir: Optional[str] = None,
-            pass_overrides: Optional[Dict[str, Dict[str, float]]] = None) -> Dict[str, Any]:
+            pass_overrides: Optional[Dict[str, Dict[str, float]]] = None,
+            variant: Optional[str] = None) -> Dict[str, Any]:
     """Plan one start-to-goal transfer, coarse pass then fine.
 
     Args:
@@ -386,10 +397,13 @@ def run_one(scene: SceneCtx, task: RunTask, *,
             not saved when None.
         pass_overrides (Optional[Dict[str, Dict[str, float]]]): per-pass
             setting overrides, e.g. ``{"fine": {"max_time": 10}}``.
+        variant (Optional[str]): which planner variant to run, for both
+            passes; ``None`` is the baseline.
 
     Returns:
         Dict[str, Any]: the run record -- the identifying fields, ``success``
-        (both passes found a path), ``failed_pass`` when one did not, the two
+        (both passes found a path), ``search_success`` (both searches found
+        one, before the repair), ``failed_pass`` when one did not, the two
         pass records under ``passes``, and the total wall time.
     """
     overrides = pass_overrides or {}
@@ -399,6 +413,7 @@ def run_one(scene: SceneCtx, task: RunTask, *,
         "goal_index": task.goal_index,
         "start_index": task.start_index,
         "seed": task.seed,
+        "variant": resolve_variant(variant)["name"],
         "status": "ok",
         "passes": {},
         "started_at": time.time(),
@@ -424,6 +439,7 @@ def run_one(scene: SceneCtx, task: RunTask, *,
             store_path=store_paths,
             tree_path=tree_path,
             overrides=overrides.get(pass_name),
+            variant=variant,
         )
         result["passes"][pass_name] = record
         if not record["success"]:
@@ -434,5 +450,8 @@ def run_one(scene: SceneCtx, task: RunTask, *,
 
     result["wall_s"] = time.perf_counter() - total_t0
     result["success"] = failed_pass is None
+    result["search_success"] = all(
+        record.get("search_success") for record in result["passes"].values()
+    ) and bool(result["passes"])
     result["failed_pass"] = failed_pass
     return result

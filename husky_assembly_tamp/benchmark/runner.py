@@ -35,9 +35,13 @@ from husky_assembly_tamp.benchmark.cdfm import PASS_SETTINGS, RunTask, run_one
 
 
 # Seconds of slack on top of the planning budget before a worker is assumed
-# hung. The budget is both passes plus smoothing, and the margin covers scene
-# loading and writing results.
-TIMEOUT_MARGIN_S = 120.0
+# hung. The budget is both passes' search time; the margin has to cover what
+# runs after each search -- the strict repair of the found path and the
+# smoothing, each a full walk of the fine path's thousands of waypoints and
+# together up to a couple of minutes -- plus scene loading and writing
+# results. (A planner variant with a wide coarse gate hit the old 120 s
+# margin on a solved run, which was then recorded as a timeout.)
+TIMEOUT_MARGIN_S = 300.0
 
 # How often the parent checks on its workers.
 POLL_INTERVAL_S = 0.5
@@ -177,6 +181,10 @@ def _worker_main(task_queue, result_queue, config: Dict[str, Any]) -> None:
                     store_paths=config.get("store_paths", True),
                     tree_dir=config.get("tree_dir"),
                     pass_overrides=config.get("pass_overrides"),
+                    # Which planner variant the batch runs; None = the baseline.
+                    # Its solver sets were checked in the parent before any
+                    # worker started, so a bad name never reaches here.
+                    variant=config.get("variant"),
                 )
             except Exception:  # noqa: BLE001 - a bad task must not kill the batch
                 result = {

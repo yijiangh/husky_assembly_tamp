@@ -1324,12 +1324,18 @@ def _run_dual_arm_cartesian_ik_loop(
     max_descend_iterations: int = 200,
     skip_env_collisions: bool = True,
     joint_continuity_threshold_rad: Optional[float] = None,
+    report: Optional[Dict[str, Any]] = None,
 ) -> Optional[JointTrajectory]:
     """Per-waypoint synchronized dual-arm IK with continuity check.
 
     Same flow as the previous version of this helper, but the wrapper into
     a JointTrajectory uses the local ``_joint_trajectory_from_path_12``
     instead of pulling the function from the teleop package.
+
+    ``report`` (optional dict) is filled when the loop fails, so the caller can
+    show why: see :func:`_run_dual_arm_cartesian_ik_loop_ssik`. The gradient
+    backend only fills ``waypoint``, ``n_waypoints``, ``reason`` and the two
+    target frames.
     """
     from .dual_arm_task_space_rrt.core import (
         DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
@@ -1351,10 +1357,19 @@ def _run_dual_arm_cartesian_ik_loop(
             right_frames,
             skip_env_collisions=skip_env_collisions,
             joint_continuity_threshold_rad=joint_continuity_threshold_rad,
+            report=report,
         )
 
     left_arm_joints, right_arm_joints = _arm_joint_names(robot_cell)
     joint_names_12 = left_arm_joints + right_arm_joints
+
+    def _failed(i: int, reason: str) -> None:
+        """Note which waypoint failed and why in ``report`` (if given); return None."""
+        if report is not None:
+            report.update(waypoint=i, n_waypoints=len(left_frames), reason=reason,
+                          left_frame=left_frames[i], right_frame=right_frames[i],
+                          skip_env_collisions=skip_env_collisions)
+        return None
 
     ik_options = {
         "max_results": max_results,
@@ -1395,7 +1410,7 @@ def _run_dual_arm_cartesian_ik_loop(
             _dbg_probe_ik_failure(planner, state, left_target, ik_options, LEFT_GROUP,
                                   i, "LEFT", joint_names_12, left_arm_joints, right_arm_joints)
             # === END DEBUG ===
-            return None
+            return _failed(i, "left_unreachable")
         except PlanningGroupNotSupported:
             planner.set_robot_cell_state(state)
             try:
@@ -1406,7 +1421,7 @@ def _run_dual_arm_cartesian_ik_loop(
                 _dbg_probe_ik_failure(planner, state, left_target, ik_options, LEFT_GROUP,
                                       i, "LEFT", joint_names_12, left_arm_joints, right_arm_joints)
                 # === END DEBUG ===
-                return None
+                return _failed(i, "left_unreachable")
         for n in right_arm_joints:
             conf_L[n] = float(state.robot_configuration[n])
         state.robot_configuration = conf_L
@@ -1414,14 +1429,14 @@ def _run_dual_arm_cartesian_ik_loop(
             conf_LR = planner.inverse_kinematics(right_target, state, RIGHT_GROUP, ik_options)
         except (InverseKinematicsError, CollisionCheckError) as e:
             logger.warning(f"[cartesian IK loop] waypoint {i}: RIGHT FAIL: {getattr(e, 'message', e)}")
-            return None
+            return _failed(i, "right_unreachable")
         except PlanningGroupNotSupported:
             planner.set_robot_cell_state(state)
             try:
                 conf_LR = planner.inverse_kinematics(right_target, state, RIGHT_GROUP, ik_options)
             except Exception as e2:
                 logger.warning(f"[cartesian IK loop] waypoint {i}: RIGHT FAIL after retry: {e2}")
-                return None
+                return _failed(i, "right_unreachable")
         for n in left_arm_joints:
             conf_LR[n] = float(state.robot_configuration[n])
         state.robot_configuration = conf_LR
@@ -1435,7 +1450,7 @@ def _run_dual_arm_cartesian_ik_loop(
                 f"[cartesian IK loop] waypoint {i}: joint step {diff:.4f} rad exceeds "
                 f"threshold {float(joint_continuity_threshold_rad):.4f}; rejecting IK branch."
             )
-            return None
+            return _failed(i, "no_candidate")
         path_12.append(next_vec)
 
     return _joint_trajectory_from_path_12(path_12, joint_names_12)
@@ -1450,6 +1465,7 @@ def _run_dual_arm_cartesian_ik_loop_ssik(
     *,
     skip_env_collisions: bool = True,
     joint_continuity_threshold_rad: Optional[float] = None,
+    report: Optional[Dict[str, Any]] = None,
 ) -> Optional[JointTrajectory]:
     """ssik variant of :func:`_run_dual_arm_cartesian_ik_loop` (M2/M3 linear).
 
@@ -1472,6 +1488,19 @@ def _run_dual_arm_cartesian_ik_loop_ssik(
             expected during mate/insertion.
         joint_continuity_threshold_rad (Optional[float]): max raw per-joint
             step between consecutive waypoints (default: the shared RRT value).
+        report (Optional[dict]): the loop adds these only when it fails, so the
+            caller can show why (the linear planners add ``waypoint_frames``
+            before the loop, success or not):
+            ``waypoint`` / ``n_waypoints`` (index of the failing waypoint and
+            the count), ``left_frame`` / ``right_frame`` (its tool0 targets),
+            ``reason`` ('left_unreachable' | 'right_unreachable' |
+            'no_candidate'), ``previous_conf`` (the 12 joints of the waypoint
+            before), ``candidates`` (12-vecs, nearest first), ``rejected_by``
+            (per candidate: 'continuity' | 'collision'), ``max_step`` (per
+            candidate, rad), ``threshold`` (rad), ``first_colliding_state``
+            (RobotCellState of the nearest candidate the collision check
+            rejected, or None), ``skip_env_collisions``.
+            ! Waypoint 0 (the start) is never collision-checked here.
 
     Returns:
         Optional[JointTrajectory]: the synchronized 12-DOF trajectory, or
@@ -1516,6 +1545,14 @@ def _run_dual_arm_cartesian_ik_loop_ssik(
         if not branches_left or not branches_right:
             side = "LEFT" if not branches_left else "RIGHT"
             logger.warning(f"[cartesian IK loop/ssik] waypoint {i}: {side} unreachable")
+            if report is not None:
+                report.update(waypoint=i, n_waypoints=len(left_frames),
+                              left_frame=lf, right_frame=rf,
+                              reason=f"{side.lower()}_unreachable",
+                              previous_conf=previous.tolist(), candidates=[], rejected_by=[],
+                              max_step=[], threshold=float(joint_continuity_threshold_rad),
+                              first_colliding_state=None,
+                              skip_env_collisions=skip_env_collisions)
             return None
         # * Candidate combinations, smallest max-joint-step first: for linear
         # * tracking the nearest pair almost always wins; the rest are fallbacks
@@ -1525,16 +1562,24 @@ def _run_dual_arm_cartesian_ik_loop_ssik(
             key=lambda conf: float(np.max(np.abs(conf - previous))),
         )
         accepted = None
+        # Why each candidate was turned down, kept for ``report`` (cheap: one
+        # string per candidate; the first colliding state is a reference).
+        rejected_by: List[str] = []
+        first_colliding_state = None
         for conf in candidates:
             next_vec = [float(v) for v in conf]
             # Cheap gate first: raw joint-step continuity (same threshold + check
             # as the gradient loop).
             if joint_step_exceeds_threshold(next_vec, path_12[-1], joint_continuity_threshold_rad):
+                rejected_by.append("continuity")
                 continue
             trial_state = _state_with_conf12(state, next_vec, joint_names_12)
             try:
                 planner.check_collision(trial_state, options=cc_opts)
             except CollisionCheckError:
+                rejected_by.append("collision")
+                if first_colliding_state is None:
+                    first_colliding_state = trial_state
                 continue
             accepted = next_vec
             state = trial_state
@@ -1546,6 +1591,16 @@ def _run_dual_arm_cartesian_ik_loop_ssik(
                 f"continuity+collision (nearest max joint step {nearest_step:.4f} rad, "
                 f"threshold {float(joint_continuity_threshold_rad):.4f})."
             )
+            if report is not None:
+                report.update(waypoint=i, n_waypoints=len(left_frames),
+                              left_frame=lf, right_frame=rf, reason="no_candidate",
+                              previous_conf=previous.tolist(),
+                              candidates=[c.tolist() for c in candidates],
+                              rejected_by=rejected_by,
+                              max_step=[float(np.max(np.abs(c - previous))) for c in candidates],
+                              threshold=float(joint_continuity_threshold_rad),
+                              first_colliding_state=first_colliding_state,
+                              skip_env_collisions=skip_env_collisions)
             return None
         path_12.append(accepted)
 
@@ -1565,6 +1620,7 @@ def plan_constrained_dual_arm_linear(
     max_descend_iterations: int = 200,
     skip_env_collisions: bool = True,
     joint_continuity_threshold_rad: Optional[float] = None,
+    report: Optional[Dict[str, Any]] = None,
 ) -> Optional[JointTrajectory]:
     """Linear dual-arm motion with bar held rigidly.
 
@@ -1573,6 +1629,11 @@ def plan_constrained_dual_arm_linear(
     Bar starts at ``start_state.rigid_body_states[active_bar_id].frame``; the
     goal bar pose is derived from ``goal_ee_frames['left']`` + start grasp
     (preferred) or from FK at ``goal_conf`` + start grasp.
+
+    ``report`` (optional dict) is filled when no path is found: see
+    :func:`_run_dual_arm_cartesian_ik_loop_ssik`. Its ``waypoint_frames``
+    (``{"left": [Frame], "right": [Frame]}``, the tool0 waypoints IK follows,
+    waypoint 0 = the start) is filled whenever the waypoint loop runs.
     """
     if (goal_conf is None) == (goal_ee_frames is None):
         raise ValueError(
@@ -1652,6 +1713,11 @@ def plan_constrained_dual_arm_linear(
             Frame.from_transformation(bar_t_tf * Transformation.from_frame(bar_from_right_tool0))
         )
 
+    # The tool0 path IK is asked to follow, kept for the caller's drawing
+    # (filled on success too, unlike the failure fields).
+    if report is not None:
+        report["waypoint_frames"] = {"left": left_frames, "right": right_frames}
+
     return _run_dual_arm_cartesian_ik_loop(
         planner, robot_cell, state,
         left_frames, right_frames,
@@ -1659,6 +1725,7 @@ def plan_constrained_dual_arm_linear(
         max_descend_iterations=max_descend_iterations,
         skip_env_collisions=skip_env_collisions,
         joint_continuity_threshold_rad=joint_continuity_threshold_rad,
+        report=report,
     )
 
 
@@ -1676,6 +1743,7 @@ def plan_dual_arm_linear_independent(
     max_descend_iterations: int = 200,
     skip_env_collisions: bool = True,
     joint_continuity_threshold_rad: Optional[float] = None,
+    report: Optional[Dict[str, Any]] = None,
 ) -> Optional[JointTrajectory]:
     """Linear dual-arm motion with each arm interpolating independently.
 
@@ -1683,6 +1751,11 @@ def plan_dual_arm_linear_independent(
       1. ``target_left_frame`` + ``target_right_frame`` explicitly,
       2. ``goal_ee_frames`` dict with ``'left'`` and ``'right'`` keys,
       3. forward kinematics at ``goal_conf``.
+
+    ``report`` (optional dict) is filled when no path is found: see
+    :func:`_run_dual_arm_cartesian_ik_loop_ssik`. Its ``waypoint_frames``
+    (``{"left": [Frame], "right": [Frame]}``, the tool0 waypoints IK follows,
+    waypoint 0 = the start) is filled whenever the waypoint loop runs.
     """
     from compas_fab.backends.pybullet.backend_features.pybullet_plan_cartesian_motion import (
         FrameInterpolator,
@@ -1736,6 +1809,11 @@ def plan_dual_arm_linear_independent(
         left_frames.append(left_interp.get_interpolated_frame(t))
         right_frames.append(right_interp.get_interpolated_frame(t))
 
+    # The tool0 path IK is asked to follow, kept for the caller's drawing
+    # (filled on success too, unlike the failure fields).
+    if report is not None:
+        report["waypoint_frames"] = {"left": left_frames, "right": right_frames}
+
     return _run_dual_arm_cartesian_ik_loop(
         planner, robot_cell, state,
         left_frames, right_frames,
@@ -1743,4 +1821,5 @@ def plan_dual_arm_linear_independent(
         max_descend_iterations=max_descend_iterations,
         skip_env_collisions=skip_env_collisions,
         joint_continuity_threshold_rad=joint_continuity_threshold_rad,
+        report=report,
     )

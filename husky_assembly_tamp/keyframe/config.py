@@ -86,9 +86,14 @@ if IK_BACKEND not in ("ssik", "gradient"):
 # Per-arm build recipe: (base_link, ee_link, generated module name). Documents the
 # one-time `ssik build <urdf> --base <base_link> --ee <ee_link>` for each arm and
 # tells the client/sidecar which module to import. Each arm is a plain 6R chain.
+# "left" / "right" are Cindy's arms (husky_dual_ur5_e_no_base_joint_All_Calibrated.urdf);
+# "alice" is Alice's single arm (husky_ur5_e_no_base_joint_Alice_Calibrated.urdf, built
+# 2026-10-12 with ssik 4.1.0). Its base link is the monitor's ur_arm_base_link, which is
+# UR's base_link turned 90 deg about z.
 SSIK_ARM_BUILD = {
     "left": ("left_ur_arm_base_link", "left_ur_arm_tool0", "left_ur_arm_ik"),
     "right": ("right_ur_arm_base_link", "right_ur_arm_tool0", "right_ur_arm_ik"),
+    "alice": ("ur_arm_base_link", "ur_arm_tool0", "alice_ur_arm_ik"),
 }
 
 

@@ -70,6 +70,21 @@ external\ssik_env\Scripts\ssik build $urdf `
   --base right_ur_arm_base_link --ee right_ur_arm_tool0 --out $out\right_ur_arm_ik.py
 ```
 
+**Alice** (single arm, Linux, built 2026-10-12): `ssik build` needs the `[urdf]` extra, which the
+ROS 2 venv does not have (and installing it there risks numpy 2.x), so build in a throwaway venv
+with the SAME ssik version the runtime uses (the artifact imports ssik internals):
+
+```bash
+python3 -m venv /tmp/ssik_build_env && /tmp/ssik_build_env/bin/pip install "ssik[urdf]==4.1.0"
+/tmp/ssik_build_env/bin/ssik build \
+  ../../data/husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e_no_base_joint_Alice_Calibrated.urdf \
+  --base ur_arm_base_link --ee ur_arm_tool0 \
+  --out asset/ssik/alice_ur_arm_ik.py --module-name alice_ur_arm_ik
+```
+
+(URDF path relative to this repo when vendored in `husky-assembly-teleop`; the build takes ~90 s,
+100/100 validation poses, max FK error ~1e-11.)
+
 The calibrated UR5e classifies as a **non-Pieper 6R** chain (ssik tier-2,
 `ikgeo.general_6r`), which is exactly what ssik handles; each build validates on
 100 random poses (max FK error ~1e-11) and finishes in a few seconds. The

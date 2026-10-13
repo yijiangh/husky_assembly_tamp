@@ -42,8 +42,9 @@ from husky_assembly_tamp.keyframe import ssik_inprocess
 ARM_BASE_LINK: Dict[str, str] = {
     "left": "left_ur_arm_base_link",
     "right": "right_ur_arm_base_link",
-    # Alice's single arm (support robot): solved in her own robot body.
+    # The support robots' single arms: each solved in its own robot body.
     "alice": "ur_arm_base_link",
+    "belle": "ur_arm_base_link",
 }
 
 # * Where each arm's 6 joints live inside the flat 12-vector (left 6 then right 6).
@@ -107,7 +108,7 @@ def target_in_arm_base(robot: int, arm: str, world_tool_pose) -> np.ndarray:
 
     Args:
         robot (int): PyBullet body id.
-        arm (str): "left", "right" (Cindy) or "alice".
+        arm (str): "left", "right" (Cindy), "alice" or "belle".
         world_tool_pose: PyBullet ``(pos, quat_xyzw)`` world pose of tool0.
 
     Returns:
@@ -158,7 +159,7 @@ def ssik_arm_branches(
 
     Args:
         robot (int): PyBullet body id.
-        arm (str): "left", "right" (Cindy) or "alice".
+        arm (str): "left", "right" (Cindy), "alice" or "belle".
         world_tool_pose: PyBullet ``(pos, quat_xyzw)`` world target for tool0.
         seed6 (Optional[Sequence[float]]): the arm's current 6 joint values;
             when given, results are re-branched toward it and sorted by raw

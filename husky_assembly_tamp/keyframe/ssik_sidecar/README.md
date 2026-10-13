@@ -85,6 +85,17 @@ python3 -m venv /tmp/ssik_build_env && /tmp/ssik_build_env/bin/pip install "ssik
 (URDF path relative to this repo when vendored in `husky-assembly-teleop`; the build takes ~90 s,
 100/100 validation poses, max FK error ~1e-11.)
 
+**Belle** (single arm, Linux, built 2026-10-13): the same, from her own calibrated URDF:
+
+```bash
+/tmp/ssik_build_env/bin/ssik build \
+  ../../data/husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e_no_base_joint_Belle_Calibrated.urdf \
+  --base ur_arm_base_link --ee ur_arm_tool0 \
+  --out asset/ssik/belle_ur_arm_ik.py --module-name belle_ur_arm_ik
+```
+
+(100/100 validation poses, max FK error 1.35e-11.)
+
 The calibrated UR5e classifies as a **non-Pieper 6R** chain (ssik tier-2,
 `ikgeo.general_6r`), which is exactly what ssik handles; each build validates on
 100 random poses (max FK error ~1e-11) and finishes in a few seconds. The

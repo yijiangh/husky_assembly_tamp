@@ -15,6 +15,17 @@
 // best route. Clicking any node therefore also shows its best route to the
 // goals, which the stepper under the 3D view walks through.
 //
+// A query of kind "online" is a plan made by the planner in a real scene
+// (online.plan_on_roadmap): the bodies around the robot are drawn from its
+// scene file, edges the scene blocked show as blocked, and its exact path
+// (the planner's own waypoints) is what the stepper walks by default.
+//
+// The dropdown in the header lists every exported run and its queries
+// (../../dashboards.json, written by `prm_pilot.py export`), so another bar or
+// plan is a click away. The "Computation time" panel shows what the
+// precompute (build phases, pretracking) and the loaded query cost, phase by
+// phase, from the timings the planner recorded.
+//
 // Nothing in the shared dashboard files is changed: this page only imports
 // them. The robot viewer's click handling is reused by registering the balls
 // in its list of pickable clouds.
@@ -25,7 +36,7 @@
 
 import * as THREE from "three";
 import { loadJson, loadJsonGz } from "./data.js";
-import { lineChart } from "./charts.js";
+import { horizontalBarChart, lineChart } from "./charts.js";
 import { RobotViewer, poseToMatrix } from "./robot-viewer.js";
 
 const main = document.querySelector("[data-main]");
@@ -48,6 +59,8 @@ const BALL_RADIUS = { sampled: 0.008, anchor: 0.012, start: 0.011, goal: 0.018 }
 // * Page state. Everything is rebuilt from these on each change.
 const state = {
   info: null,        // prm.json
+  dashboards: null,  // ../../dashboards.json: every exported run and its queries (null until loaded)
+  dashboardsError: null,
   roadmap: null,     // roadmap.json.gz
   query: null,       // the loaded query, or null
   queryTag: null,
@@ -59,9 +72,27 @@ const state = {
   shown: { sampled: true, anchor: true, start: true, goal: true, ok: true, near: true, far: false,
            unknown: false, blocked: false },
   selected: null,    // node id
-  path: null,        // { name, nodes, dense, profile }
+  // The path on show: its node ids, the commanded points (`dense`), the
+  // holding error at each of them (`profile`), and `fine`: the same path
+  // interpolated densely in joint space, the way the robot controller moves
+  // between commanded points, with the holding error measured there too.
+  path: null,        // { name, nodes, dense, profile, fine: { x, confs, profile, stepRad, capped } }
+  pathCharts: [],    // the svgs of the path panel, so the cursor can move without a redraw
   step: 0,
 };
+
+// * Colours of the twelve joints in the joint-angle chart: warm for the left
+// * arm (joints 0-5), cool for the right arm (joints 6-11).
+const JOINT_COLOURS = ["#b23a48", "#d98324", "#e0b030", "#c46fa0", "#8a3f5c", "#e07b5f",
+                       "#1f84bd", "#2e9e5b", "#4fa3a1", "#8a6fb0", "#6f8ab0", "#2b5f8a"];
+
+// * Joint-space step of the dense interpolation, 0.1 degree per joint: the
+// * same as DEFAULT_DENSE_JOINT_VALIDATION_STEP_RAD in the planner's
+// * path_validation.py, so the curve matches what that checker would see.
+const FINE_STEP_RAD = 0.1 * Math.PI / 180;
+// Upper bound on the number of dense points, so a long path cannot freeze the
+// page; the step is widened to fit and the panel says so.
+const FINE_POINTS_CAP = 40000;
 
 let viewer = null;
 let robotReady = null;
@@ -247,6 +278,14 @@ async function ensureRobot() {
   return viewer;
 }
 
+// The bodies around the robot, when the loaded query was planned among some
+// (an online plan); the roadmap alone shows the robot by itself.
+async function syncStaticScene() {
+  const asset = state.query && state.query.scene ? state.query.scene.asset : null;
+  if (asset) await viewer.loadStaticScene(asset);
+  else viewer.clearStaticScene();
+}
+
 function toolLinks() {
   const links = (viewer.kinematicsSpec && viewer.kinematicsSpec.tool_links) || {};
   return { left: links.left || "left_ur_arm_tool0", right: links.right || "right_ur_arm_tool0" };
@@ -398,6 +437,66 @@ function interpolate(a, b, stepRad) {
   return out;
 }
 
+// The holding error score at one configuration, by posing the robot there.
+function holdingScoreAt(conf) {
+  const error = poseAndMeasure(conf);
+  return error ? score(error.pos, error.rot) : 0;
+}
+
+// Interpolates straight in joint space between consecutive commanded points,
+// with at most `stepRad` of joint move per piece, like the robot controller
+// does when it tracks the path. Mirrors refine_joint_path_for_validation in
+// the planner's path_validation.py: every piece of segment k sits at
+// x = k + alpha, so the result shares its x axis with the commanded points
+// (which sit at whole numbers). No angle wrapping: these paths are continuous
+// by construction.
+function densify(dense, stepRad) {
+  const x = [0];
+  const confs = [dense[0]];
+  for (let k = 1; k < dense.length; k += 1) {
+    const a = dense[k - 1];
+    const b = dense[k];
+    const largest = Math.max(...a.map((v, j) => Math.abs(b[j] - v)));
+    const pieces = Math.max(1, Math.ceil(largest / stepRad - 1e-12));
+    for (let s = 1; s <= pieces; s += 1) {
+      const alpha = s / pieces;
+      x.push(k - 1 + alpha);
+      confs.push(a.map((v, j) => v + (b[j] - v) * alpha));
+    }
+  }
+  return { x, confs };
+}
+
+// How many dense points `densify` would make at a given step, without making them.
+function countDensePoints(dense, stepRad) {
+  let count = 1;
+  for (let k = 1; k < dense.length; k += 1) {
+    const largest = Math.max(...dense[k - 1].map((v, j) => Math.abs(dense[k][j] - v)));
+    count += Math.max(1, Math.ceil(largest / stepRad - 1e-12));
+  }
+  return count;
+}
+
+// Finishes a path for display: the holding error at the commanded points, the
+// dense joint-space interpolation and its holding error, then the panel.
+function finishPath(name, nodeIds, dense) {
+  const profile = dense.map(holdingScoreAt);
+  // Widen the step only as much as needed to stay under the point cap.
+  let stepRad = FINE_STEP_RAD;
+  const wanted = countDensePoints(dense, stepRad);
+  const capped = wanted > FINE_POINTS_CAP;
+  if (capped) stepRad *= Math.ceil(wanted / FINE_POINTS_CAP);
+  const fine = densify(dense, stepRad);
+  fine.profile = fine.confs.map(holdingScoreAt);
+  fine.stepRad = stepRad;
+  fine.capped = capped;
+  state.path = { name, nodes: nodeIds, dense, profile, fine };
+  state.step = 0;
+  drawPath();
+  renderPathPanel();
+  showStep(0);
+}
+
 // Sets the path on show: the dense joint path through the given nodes, and
 // its holding error at every point (measured by posing the robot).
 function setPath(name, nodeIds) {
@@ -406,15 +505,14 @@ function setPath(name, nodeIds) {
   const confs = state.nodes.conf;
   let dense = [confs[nodeIds[0]]];
   for (let k = 1; k < nodeIds.length; k += 1) dense = dense.concat(interpolate(confs[nodeIds[k - 1]], confs[nodeIds[k]], step).slice(1));
-  const profile = dense.map((conf) => {
-    const error = poseAndMeasure(conf);
-    return error ? score(error.pos, error.rot) : 0;
-  });
-  state.path = { name, nodes: nodeIds, dense, profile };
-  state.step = 0;
-  drawPath();
-  renderPathPanel();
-  showStep(0);
+  finishPath(name, nodeIds, dense);
+}
+
+// Shows an online plan's exact path: the planner's own waypoints, which hold
+// the bar exactly, so the profile stays near zero at every commanded point.
+// Between them the dense interpolation shows what tracking the path costs.
+function setExactPath(plan) {
+  finishPath(plan.name, plan.nodes, plan.confs);
 }
 
 function drawPath() {
@@ -431,18 +529,55 @@ function showStep(index) {
   const label = stageControls.querySelector("[data-path-label]");
   if (label) label.textContent = `${state.step + 1} / ${state.path.dense.length}`;
   showPose(state.path.dense[state.step], `${state.path.name}, point ${state.step + 1} of ${state.path.dense.length}`);
-  const chart = main.querySelector("[data-path-chart]");
-  if (chart) drawProfile(chart);
+  // Only the cursor moves; the charts themselves stay as drawn.
+  for (const svg of state.pathCharts) svg.setCursor(state.step);
 }
 
-function drawProfile(container) {
+// Draws the three charts of the path panel into their holders:
+//   1. holding error at the commanded points (a dot per point);
+//   2. holding error along the dense joint-space interpolation, with the
+//      commanded points marked, which is close to what the real robot shows
+//      while it tracks the path;
+//   3. the twelve joint angles at the commanded points (a dot per point).
+// All three share the x axis (commanded point index) and the cursor.
+function drawPathCharts() {
   const p = state.path;
-  lineChart(container, {
-    series: [{ points: p.profile.map((v, k) => [k, v]), colour: "#b23a48" },
-             { points: [[0, state.tolerance], [p.profile.length - 1, state.tolerance]], colour: "#2e9e5b", width: 1 }],
+  state.pathCharts = [];
+  const last = p.dense.length - 1;
+  const tolerance = { points: [[0, state.tolerance], [Math.max(1, last), state.tolerance]], colour: "#2e9e5b", width: 1,
+                      label: "tolerance" };
+  const onCursor = (x) => showStep(Math.round(x));
+  const pointsHolder = main.querySelector("[data-chart-points]");
+  const fineHolder = main.querySelector("[data-chart-fine]");
+  const jointsHolder = main.querySelector("[data-chart-joints]");
+  if (!pointsHolder || !fineHolder || !jointsHolder) return;
+
+  state.pathCharts.push(lineChart(pointsHolder, {
+    series: [{ points: p.profile.map((v, k) => [k, v]), colour: "#b23a48", dots: 2.2, label: "at the commanded points" },
+             tolerance],
     yLabel: "holding error score (mm)", xLabel: "point along the path",
-    cursor: state.step, onCursor: (x) => showStep(Math.round(x)), height: 190,
-  });
+    cursor: state.step, onCursor, height: 190,
+  }));
+
+  state.pathCharts.push(lineChart(fineHolder, {
+    series: [{ points: p.fine.x.map((x, k) => [x, p.fine.profile[k]]), colour: "#1f84bd", width: 1.2,
+               label: `dense joint interpolation (${degrees(p.fine.stepRad)} per joint)` },
+             { points: p.profile.map((v, k) => [k, v]), colour: "#b23a48", width: 0, opacity: 0.9, dots: 2.2,
+               label: "commanded points" },
+             tolerance],
+    yLabel: "holding error score (mm)", xLabel: "point along the path",
+    cursor: state.step, onCursor, height: 190,
+  }));
+
+  const jointSeries = [];
+  for (let j = 0; j < 12; j += 1) {
+    jointSeries.push({ points: p.dense.map((conf, k) => [k, conf[j] * 180 / Math.PI]), colour: JOINT_COLOURS[j],
+                       width: 1.2, dots: 1.8, label: shortJointName(j) });
+  }
+  state.pathCharts.push(lineChart(jointsHolder, {
+    series: jointSeries, yLabel: "joint angle (deg)", xLabel: "point along the path",
+    cursor: state.step, onCursor, height: 300, yTickCount: 5, yFormat: (v) => v.toFixed(0),
+  }));
 }
 
 // A node's best route to the goal set, following the query's tree.
@@ -563,15 +698,179 @@ function renderRoadmapPanel() {
   ]);
 }
 
+// ---------------------------------------------------------------------------
+// * Computation time: the precompute (build + pretracking) and the query
+// ---------------------------------------------------------------------------
+
+// Plain-English names for the timing keys the build, the offline query and
+// the online plan record. A key that is not listed is still shown, with its
+// underscores turned into spaces, so a new phase never goes missing.
+const BUILD_PHASES = {
+  pool_startup_s: "start the worker processes",
+  anchors_s: "anchors: IK and collision at the given poses",
+  sample_s: "sampling: IK, holding, collision per node",
+  knn_s: "nearest neighbours",
+  edges_s: "edges: collision and holding error along each",
+};
+const QUERY_PHASES = {
+  // online plan (online.py)
+  load_s: "load the roadmap and its pretracking",
+  worker_start_s: "start the worker processes",
+  scene_setup_s: "write and open the scene for the workers",
+  goal_s: "goal: IK and collision at the goal pose",
+  starts_s: "start set: scene check of the carry nodes",
+  connect_s: "connect the goal nodes to the roadmap",
+  search_s: "search, tracking and scene checks",
+  final_check_s: "final check at the caller's resolution",
+  // offline query (pilot.py query)
+  pool_startup_s: "start the worker processes",
+  endpoints_s: "endpoints: IK and collision",
+  endpoint_edges_s: "endpoint edges",
+  gaps_s: "gaps: the minimax tree",
+  paths_s: "paths at each tolerance",
+  // refinement (refine.py)
+  edge_sample_s: "sampling edges to track",
+  exact_gaps_s: "exact gaps",
+  tube_s: "tube draws",
+  tolerances_s: "tolerance ladder",
+};
+const PHASE_COLOUR = "#1f84bd";
+const TOTAL_COLOUR = "#33383b";
+const TRACKING_COLOUR = "#8a6fb0";
+
+// Turns a timings dictionary into bar rows: every phase in the order recorded,
+// then the total in a darker colour. The phases are wall times of consecutive
+// stages, so they add up to the total up to the little that is not timed.
+function timingRows(timings, labels) {
+  const rows = [];
+  for (const [key, value] of Object.entries(timings || {})) {
+    if (key === "total_s" || value == null) continue;
+    rows.push({ label: labels[key] || key.replace(/_s$/, "").replace(/_/g, " "), value, colour: PHASE_COLOUR });
+  }
+  if (timings && timings.total_s != null) rows.push({ label: "whole run (wall time)", value: timings.total_s, colour: TOTAL_COLOUR });
+  return rows;
+}
+
+const seconds = (v) => (v >= 100 ? `${v.toFixed(0)} s` : `${v.toFixed(1)} s`);
+
+// The build's rows: its phases from prm.json (older exports lack them, so the
+// roadmap file's own copy is the fallback), then each pretracking file.
+function buildRows() {
+  const pre = state.info.precompute || {};
+  const build = pre.build_timings && Object.keys(pre.build_timings).length ? pre.build_timings : state.roadmap.timings;
+  const rows = timingRows(build, BUILD_PHASES);
+  for (const t of pre.tracking || []) {
+    rows.push({ label: `pretracking of edges up to ${t.max_score_mm} mm (${t.n_records} edges)`,
+                value: t.wall_s, colour: TRACKING_COLOUR });
+  }
+  return rows;
+}
+
+// The panel's text and chart holders; drawTimingCharts fills the holders once
+// they are in the document.
+function renderTimingPanel() {
+  const pre = state.info.precompute || {};
+  const workers = pre.workers != null ? pre.workers : state.roadmap.config.workers;
+  const children = [
+    element("h3", {}, `Precompute, once per bar (${workers} workers)`),
+    element("p", { class: "muted" }, "Wall time of each build phase, then the whole build. Pretracking "
+      + "(solving every edge's exact path, usually overnight) is listed under it when the run has it."),
+    element("div", { class: "chart", "data-chart-build": "" }),
+  ];
+  const q = state.query;
+  if (q && q.timings) {
+    const what = q.kind === "online" ? "The online plan" : "The query";
+    children.push(element("h3", {}, `${what} ${state.queryTag} (${q.settings && q.settings.workers != null ? q.settings.workers : "?"} workers)`));
+    children.push(element("p", { class: "muted" }, q.kind === "online"
+      ? "What the planner spent at plan time, phase by phase. Starting the workers and writing the scene "
+        + "for them is paid once per process; the search includes the tracking of edges not pretracked and the "
+        + "scene checks of the route."
+      : "Wall time of each query phase."));
+    children.push(element("div", { class: "chart", "data-chart-query": "" }));
+  } else {
+    children.push(element("p", { class: "muted" }, "Choose a query to see what its plan cost."));
+  }
+  return panel("Computation time", children);
+}
+
+function drawTimingCharts() {
+  const buildHolder = main.querySelector("[data-chart-build]");
+  if (!buildHolder) return;
+  horizontalBarChart(buildHolder, { data: buildRows(), format: seconds, xLabel: "seconds (wall time)", labelWidth: 300 });
+  const queryHolder = main.querySelector("[data-chart-query]");
+  if (queryHolder && state.query && state.query.timings) {
+    horizontalBarChart(queryHolder, { data: timingRows(state.query.timings, QUERY_PHASES), format: seconds,
+                                      xLabel: "seconds (wall time)", labelWidth: 300 });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// * The run and plan dropdown in the header
+// ---------------------------------------------------------------------------
+
+// Every exported run and each of its queries, as one dropdown: choosing a
+// line opens that run's page at that query. The list comes from
+// ../../dashboards.json, which `prm_pilot.py export` writes; runs exported
+// before that file existed are listed once they are exported again.
+function renderRunPicker() {
+  const current = state.info.run_name;
+  if (!state.dashboards) {
+    return element("span", { class: "picker-note", title: state.dashboardsError || "" },
+      ` (no run list: ${state.dashboardsError || "still loading"}; export a run to write prm/dashboards.json)`);
+  }
+  const queryLabel = (q) => (q.kind === "online"
+    ? `${q.tag}: online plan, ${q.found ? "path found" : "no path"}`
+    : `${q.tag}: goal ${q.goal_index}, ${q.n_starts} starts${q.best_gap_mm != null ? `, gap ${q.best_gap_mm.toFixed(1)} mm` : ""}`);
+  const groups = [];
+  const runs = state.dashboards.dashboards.slice().sort((a, b) => a.run_name.localeCompare(b.run_name));
+  for (const run of runs) {
+    const base = run.run_name === current ? "" : `../../${encodeURIComponent(run.run_name)}/dashboard/`;
+    const options = [element("option", { value: `${base}#/` }, "roadmap only")];
+    for (const q of run.queries || []) options.push(element("option", { value: `${base}#/query/${encodeURIComponent(q.tag)}` }, queryLabel(q)));
+    groups.push(element("optgroup", { label: `${run.run_name} (bar ${run.bar_id})` }, options));
+  }
+  const select = element("select", { class: "run-picker", "aria-label": "Roadmap run and plan to show" }, groups);
+  select.value = state.queryTag ? `#/query/${encodeURIComponent(state.queryTag)}` : "#/";
+  select.addEventListener("change", () => {
+    // Inside this run only the hash changes; another run is another folder,
+    // so the browser loads its page.
+    if (select.value.startsWith("#")) window.location.hash = select.value;
+    else window.location.href = select.value;
+  });
+  return select;
+}
+
 function renderQueryPanel() {
+  const label = (q) => (q.kind === "online"
+    ? `${q.tag} (online plan, ${q.found ? "path found" : "no path"})`
+    : `${q.tag} (goal ${q.goal_index}, ${q.n_starts} starts)`);
   const choices = [element("option", { value: "" }, "roadmap only")].concat(
-    state.info.queries.map((q) => element("option", { value: q.tag }, `${q.tag} (goal ${q.goal_index}, ${q.n_starts} starts)`)));
+    state.info.queries.map((q) => element("option", { value: q.tag }, label(q))));
   const select = element("select", {}, choices);
   select.value = state.queryTag || "";
   select.addEventListener("change", () => { window.location.hash = select.value ? `#/query/${select.value}` : "#/"; });
   const children = [element("div", { class: "controls" }, [element("label", {}, "Query "), select])];
   const q = state.query;
-  if (q) {
+  if (q && q.kind === "online") {
+    const t = q.timings || {};
+    const seconds = (key) => (t[key] == null ? "—" : `${t[key].toFixed(1)} s`);
+    const summary = (q.failure_reason
+      ? `No path: ${q.failure_reason}. `
+      : `A path was found from one of ${q.n_start_nodes} carry-pose nodes to one of ${q.goal.n_goal_nodes} goal postures. `)
+      + `Edges looked at: ${q.edges_looked_at ?? "—"} (${Object.entries(q.edge_verdicts || {}).map(([k, v]) => `${k} ${v}`).join(", ")}); `
+      + `blocked by the scene: ${q.scene_blocked_edges ?? "—"}. Search ${seconds("search_s")}, final check ${seconds("final_check_s")}, `
+      + `whole plan ${seconds("total_s")}.`
+      + (q.scene && q.scene.asset ? " The bodies drawn around the robot are the scene this plan was made in." : "");
+    children.push(element("p", {}, summary));
+    const rows = (q.plans || []).map((plan) => [plan.name, mm(plan.tolerance_mm), plan.nodes.length, plan.n_points,
+      element("button", { type: "button", onclick: () => setExactPath(plan) }, "show")]);
+    if (q.headline.minimax_route) {
+      const r = q.headline.minimax_route;
+      rows.push(["best route left (nodes only)", mm(q.headline.best_gap_mm), r.nodes.length, "—",
+        element("button", { type: "button", onclick: () => setPath("best route", r.nodes) }, "show")]);
+    }
+    children.push(table(["path", "tolerance", "nodes", "points", ""], rows));
+  } else if (q) {
     const h = q.headline;
     children.push(element("p", {}, h.best_gap_mm == null
       ? "No start reaches the goal set through free edges at any tolerance."
@@ -626,15 +925,33 @@ function renderPathPanel() {
     return;
   }
   const p = state.path;
-  const worst = Math.max(...p.profile);
-  const chart = element("div", { class: "chart", "data-path-chart": "" });
+  // Plain loops, not Math.max(...array): the dense profile can hold tens of
+  // thousands of values, more than a spread call accepts.
+  const largestOf = (values) => values.reduce((best, v) => (v > best ? v : best), 0);
+  const worst = largestOf(p.profile);
+  const worstFine = largestOf(p.fine.profile);
+  // The largest joint move between two commanded points, in any joint.
+  let largestStep = 0;
+  for (let k = 1; k < p.dense.length; k += 1) {
+    for (let j = 0; j < p.dense[k].length; j += 1) largestStep = Math.max(largestStep, Math.abs(p.dense[k][j] - p.dense[k - 1][j]));
+  }
+  const fineNote = p.fine.capped
+    ? ` The step was widened from ${degrees(FINE_STEP_RAD)} to ${degrees(p.fine.stepRad)} to keep under ${FINE_POINTS_CAP} points.`
+    : "";
   holder.replaceChildren(panel(`Path: ${p.name}`, [
-    element("p", {}, `${p.nodes.length} nodes, ${p.dense.length} points. Worst holding error along it: ${mm(worst)} `
-      + `(green line: the tolerance). Joint moves between points are at most `
-      + `${degrees(state.roadmap.config.edge_settings.viol_step_rad)} per joint by construction.`),
-    chart,
+    element("p", {}, `${p.nodes.length} nodes, ${p.dense.length} commanded points; the largest joint move between two `
+      + `of them is ${degrees(largestStep)}. Worst holding error at the commanded points: ${mm(worst)}; `
+      + `along the dense joint interpolation (${p.fine.confs.length} points, ${degrees(p.fine.stepRad)} per joint, `
+      + `how the controller moves between commanded points): ${mm(worstFine)}.${fineNote} `
+      + `Green line: the tolerance. Click a chart to jump the stepper there.`),
+    element("h3", {}, "Holding error at the commanded points"),
+    element("div", { class: "chart", "data-chart-points": "" }),
+    element("h3", {}, "Holding error along the dense joint interpolation (what tracking the path on the robot costs)"),
+    element("div", { class: "chart", "data-chart-fine": "" }),
+    element("h3", {}, "Joint angles at the commanded points"),
+    element("div", { class: "chart", "data-chart-joints": "" }),
   ]));
-  drawProfile(chart);
+  drawPathCharts();
 }
 
 function renderStageControls() {
@@ -643,7 +960,8 @@ function renderStageControls() {
   slider.value = String(Math.round(((Math.log10(state.tolerance) + 0.3) / 2.3) * 100));
   const label = element("span", {}, `${state.tolerance.toFixed(1)} mm`);
   slider.addEventListener("input", () => { state.tolerance = toMm(slider.value); label.textContent = `${state.tolerance.toFixed(1)} mm`; });
-  slider.addEventListener("change", () => { draw(); if (state.path) { const c = main.querySelector("[data-path-chart]"); if (c) drawProfile(c); } });
+  // A new tolerance moves the green line, so the charts are drawn again.
+  slider.addEventListener("change", () => { draw(); if (state.path) drawPathCharts(); });
 
   const mode = element("select", {}, [element("option", { value: "kind" }, "colour nodes by kind"),
     element("option", { value: "gap" }, "colour nodes by gap to goals")]);
@@ -683,14 +1001,17 @@ function renderPage() {
   // replaceChildren would print a null as the text "null", so only real parts go in.
   const crumbs = [element("a", { href: "#/" }, `prm / ${state.info.run_name}`)];
   if (state.queryTag) crumbs.push(element("span", {}, ` / ${state.queryTag}`));
+  crumbs.push(element("span", { class: "sep" }, " "), renderRunPicker());
   breadcrumb.replaceChildren(...crumbs);
   main.replaceChildren(
     renderRoadmapPanel(),
     renderQueryPanel(),
+    renderTimingPanel(),
     element("div", { "data-path": "" }),
     element("div", { "data-node": "" }),
     renderStartsPanel(),
   );
+  drawTimingCharts();
   renderNodePanel();
   renderPathPanel();
 }
@@ -710,9 +1031,11 @@ async function route() {
   try {
     await loadQuery(tag);
     await ensureRobot();
+    await syncStaticScene();
     renderPage();
     draw();
     if (node != null && node < state.nodes.conf.length) selectNode(node);
+    else if (state.query && state.query.plans && state.query.plans.length) setExactPath(state.query.plans[0]);
     else if (state.query && state.query.headline.minimax_route) setPath("best route", state.query.headline.minimax_route.nodes);
     else showPose(state.roadmap.model.home_conf12, "the home configuration");
   } catch (error) {
@@ -725,10 +1048,17 @@ async function route() {
 // __prm.state is the page state, __prm.selectNode(id) selects a node,
 // __prm.viewer() is the 3D viewer.
 window.__prm = { state, selectNode: (id) => selectNode(id), setPath: (name, ids) => setPath(name, ids),
-                 viewer: () => viewer };
+                 setExactPath: (plan) => setExactPath(plan), viewer: () => viewer };
 
 async function start() {
   state.info = await loadJson("prm.json");
+  // The run list is a convenience: a missing file must not stop the page, so
+  // the error is kept and shown next to the trail instead of thrown.
+  try {
+    state.dashboards = await loadJson("../../dashboards.json");
+  } catch (error) {
+    state.dashboardsError = String(error && error.message ? error.message : error);
+  }
   state.roadmap = await loadJsonGz(state.info.roadmap);
   document.title = `Roadmap ${state.info.run_name}`;
   for (const node of document.querySelectorAll("[data-title]")) node.textContent = `Roadmap pilot — ${state.info.run_name}`;

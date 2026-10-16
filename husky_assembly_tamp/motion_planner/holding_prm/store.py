@@ -5,11 +5,13 @@ own ``runs/`` folder, so a roadmap run can never overwrite a planner batch or
 the batch catalogue (``runs.json``) that the benchmark dashboard reads:
 
     <root>/prm/index.json                    every roadmap run (only this tool writes it)
+    <root>/prm/dashboards.json               every exported page and its queries (the page's run dropdown)
     <root>/prm/<run>/config.json             build settings, anchors, tallies, timings, provenance
     <root>/prm/<run>/roadmap.json.gz         the roadmap: model, nodes, edges
     <root>/prm/<run>/queries/index.json      one line per query that was run
     <root>/prm/<run>/queries/<tag>.json.gz   one query: endpoints, their edges, gaps, paths
-    <root>/prm/<run>/dashboard/              the roadmap page and its scripts
+    <root>/prm/<run>/dashboard/              the roadmap page and its scripts; prm.json carries the
+                                             precompute timings (build phases, pretracking wall time)
 
 Every write goes to a temporary file first and is then renamed into place,
 so a reader (the dashboard, a sync client) never sees half a file.

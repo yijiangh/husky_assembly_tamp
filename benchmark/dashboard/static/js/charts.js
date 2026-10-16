@@ -291,6 +291,53 @@ export function barChart(container, { data, yLabel = "", xLabel = "",
   return svg;
 }
 
+// Horizontal bars, one per row, with the row's label on the left and its
+// value written at the end of the bar. Used for time breakdowns by phase,
+// where the labels are sentences ("edges: collision and holding error") that
+// would not fit under a vertical bar. Rows are { label, value, colour, note }:
+// `note` is extra text after the value (a count, a percentage).
+export function horizontalBarChart(container, { data, xLabel = "",
+                                                format = (v) => v.toFixed(1),
+                                                labelWidth = 230, rowHeight = 22 }) {
+  const width = 820;
+  const height = rowHeight * Math.max(1, data.length) + 44;
+  const box = { left: labelWidth, top: 8, width: width - labelWidth - 90, height: rowHeight * data.length };
+  const svg = makeSvg(width, height);
+
+  const maximum = Math.max(0.001, ...data.map((d) => d.value || 0));
+  const toX = (value) => box.left + (value / maximum) * box.width;
+
+  // Light vertical grid at quarter steps, labelled under the axis.
+  for (const fraction of [0, 0.25, 0.5, 0.75, 1]) {
+    const x = toX(fraction * maximum);
+    svg.appendChild(el("line", { x1: x, y1: box.top, x2: x, y2: box.top + box.height,
+                                 stroke: COLOURS.grid, "stroke-width": 1 }));
+    svg.appendChild(tickLabel(x, box.top + box.height + 16, format(fraction * maximum)));
+  }
+  if (xLabel) {
+    svg.appendChild(el("text", { x: box.left + box.width / 2, y: height - 4, "text-anchor": "middle",
+                                 "font-size": 11, fill: COLOURS.muted }, xLabel));
+  }
+
+  data.forEach((d, index) => {
+    const y = box.top + rowHeight * index;
+    const barHeight = rowHeight * 0.64;
+    const value = d.value || 0;
+    svg.appendChild(el("text", { x: box.left - 8, y: y + rowHeight / 2 + 4, "text-anchor": "end",
+                                 "font-size": 11, fill: COLOURS.text }, d.label));
+    const rect = el("rect", { x: box.left, y: y + (rowHeight - barHeight) / 2,
+                              width: Math.max(1, toX(value) - box.left), height: barHeight,
+                              fill: d.colour || COLOURS.fine, rx: 2 });
+    rect.appendChild(el("title", {}, `${d.label}: ${format(value)}${d.note ? ` ${d.note}` : ""}`));
+    svg.appendChild(rect);
+    svg.appendChild(el("text", { x: toX(value) + 6, y: y + rowHeight / 2 + 4, "font-size": 11,
+                                 fill: COLOURS.text }, `${format(value)}${d.note ? ` ${d.note}` : ""}`));
+  });
+
+  container.replaceChildren(svg);
+  return svg;
+}
+
 // Stacked bars, for compositions such as failure reasons or time breakdowns.
 export function stackedBarChart(container, { data, keys, colours = {},
                                              labels = {},
@@ -412,29 +459,50 @@ export function boxChart(container, { data, yLabel = "" }) {
   return svg;
 }
 
-// Line chart, used for the restart curve and for joint angles along a path.
+// Line chart, used for the restart curve and for the curves along a path
+// (holding error, joint angles).
+//
+// Each series is { points: [[x, y], ...], colour, width, opacity, dots, label }.
+// `dots` (a radius in px) also marks every data point with a filled circle, so
+// the reader can see how dense the data is and where the line is only a guess
+// between two points. `label` puts the series in a legend under the chart.
+// `yTickCount` and `yFormat` shape the y axis labels (joint angles want whole
+// degrees, errors want two decimals).
+//
+// The returned svg carries `setCursor(x)`, which moves the vertical cursor
+// without redrawing the chart: with a thousand dots per series a full redraw
+// on every slider tick would make the stepper sluggish.
 export function lineChart(container, { series, yLabel = "", xLabel = "",
                                        cursor = null, onCursor = null,
-                                       height = 200 }) {
+                                       height = 200, yTickCount = 3,
+                                       yFormat = (v) => v.toFixed(2) }) {
   const width = 820;
   const box = { left: 48, top: 12, width: width - 72, height: height - 58 };
   const svg = makeSvg(width, height);
 
-  const allY = series.flatMap((s) => s.points.map((p) => p[1]));
-  const allX = series.flatMap((s) => s.points.map((p) => p[0]));
-  const yMin = Math.min(0, ...allY);
-  const yMax = Math.max(0.001, ...allY);
-  const xMin = Math.min(...allX, 0);
-  const xMax = Math.max(...allX, 1);
+  // The data range, found with plain loops: spreading tens of thousands of
+  // points into Math.min/Math.max overflows the call stack.
+  let yMin = 0; let yMax = 0.001; let xMin = 0; let xMax = 1;
+  for (const s of series) {
+    for (const p of s.points) {
+      if (p[0] < xMin) xMin = p[0];
+      if (p[0] > xMax) xMax = p[0];
+      if (p[1] < yMin) yMin = p[1];
+      if (p[1] > yMax) yMax = p[1];
+    }
+  }
   const toX = (value) => box.left + ((value - xMin) / (xMax - xMin || 1)) * box.width;
   const toY = (value) => box.top + box.height
     - ((value - yMin) / (yMax - yMin || 1)) * box.height;
 
+  // Evenly spaced y ticks from the bottom to the top of the data.
+  const yFractions = [];
+  for (let k = 0; k < yTickCount; k += 1) yFractions.push(k / Math.max(1, yTickCount - 1));
   axes(svg, box, {
     yLabel, xLabel,
-    yTicks: [0, 0.5, 1].map((f) => ({
+    yTicks: yFractions.map((f) => ({
       y: toY(yMin + f * (yMax - yMin)),
-      label: (yMin + f * (yMax - yMin)).toFixed(2),
+      label: yFormat(yMin + f * (yMax - yMin)),
     })),
     xTicks: [0, 0.5, 1].map((f) => ({
       x: toX(xMin + f * (xMax - xMin)),
@@ -444,23 +512,42 @@ export function lineChart(container, { series, yLabel = "", xLabel = "",
 
   for (const line of series) {
     if (!line.points.length) continue;
-    const path = line.points
-      .map((p, i) => `${i ? "L" : "M"}${toX(p[0]).toFixed(1)},${toY(p[1]).toFixed(1)}`)
-      .join(" ");
-    svg.appendChild(el("path", {
-      d: path, fill: "none",
-      stroke: line.colour || COLOURS.fine,
-      "stroke-width": line.width || 1.5,
-      opacity: line.opacity != null ? line.opacity : 1,
-    }));
+    const colour = line.colour || COLOURS.fine;
+    // A width of 0 means "dots only, no line".
+    const strokeWidth = line.width != null ? line.width : 1.5;
+    if (strokeWidth > 0) {
+      const path = line.points
+        .map((p, i) => `${i ? "L" : "M"}${toX(p[0]).toFixed(1)},${toY(p[1]).toFixed(1)}`)
+        .join(" ");
+      svg.appendChild(el("path", {
+        d: path, fill: "none",
+        stroke: colour,
+        "stroke-width": strokeWidth,
+        opacity: line.opacity != null ? line.opacity : 1,
+      }));
+    }
+    // One small filled circle per data point, when asked for.
+    if (line.dots) {
+      const group = el("g", { fill: colour, opacity: line.opacity != null ? line.opacity : 1 });
+      for (const p of line.points) {
+        group.appendChild(el("circle", { cx: toX(p[0]).toFixed(1), cy: toY(p[1]).toFixed(1), r: line.dots }));
+      }
+      svg.appendChild(group);
+    }
   }
 
-  if (cursor != null) {
-    svg.appendChild(el("line", {
-      x1: toX(cursor), y1: box.top, x2: toX(cursor), y2: box.top + box.height,
-      stroke: COLOURS.accent, "stroke-width": 2,
-    }));
-  }
+  // The cursor is one line that later calls move; it is created on first use.
+  let cursorLine = null;
+  svg.setCursor = (value) => {
+    if (value == null) { if (cursorLine) cursorLine.remove(); cursorLine = null; return; }
+    if (!cursorLine) {
+      cursorLine = el("line", { y1: box.top, y2: box.top + box.height, stroke: COLOURS.accent, "stroke-width": 2 });
+      svg.appendChild(cursorLine);
+    }
+    cursorLine.setAttribute("x1", toX(value));
+    cursorLine.setAttribute("x2", toX(value));
+  };
+  if (cursor != null) svg.setCursor(cursor);
   if (onCursor) {
     svg.style.cursor = "crosshair";
     svg.addEventListener("click", (event) => {
@@ -471,7 +558,15 @@ export function lineChart(container, { series, yLabel = "", xLabel = "",
     });
   }
 
-  container.replaceChildren(svg);
+  // A legend for the series that carry a label, under the drawing.
+  const labelled = series.filter((s) => s.label);
+  if (labelled.length) {
+    const keys = labelled.map((s) => s.label);
+    const colours = Object.fromEntries(labelled.map((s) => [s.label, s.colour || COLOURS.fine]));
+    container.replaceChildren(svg, legend(keys, colours));
+  } else {
+    container.replaceChildren(svg);
+  }
   return svg;
 }
 

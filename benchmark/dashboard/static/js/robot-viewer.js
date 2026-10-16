@@ -72,6 +72,10 @@ export class RobotViewer {
     // currently tinted to point at a collision.
     this.overlays = [];
     this.highlighted = [];
+    // What stands around the robot (built bars, joint halves, support robots)
+    // from a second file, and the bodies in it that ride on a robot link.
+    this.staticRoot = null;
+    this.carriedNodes = [];
 
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
@@ -160,6 +164,49 @@ export class RobotViewer {
     if (!this.kinematics) return;
     this.kinematics.pose(angles);
     if (this.carriedBar) this.updateCarriedBar();
+    this.updateCarriedNodes();
+  }
+
+  // Loads the scene around the robot from a glb (see scenes.export_scene_glb).
+  // Top-level nodes named C-<link>-<n> ride on that robot link: their own
+  // transform is the attachment frame, and they are re-placed on every pose.
+  async loadStaticScene(glbUrl) {
+    if (this.staticUrl === glbUrl) return;
+    this.clearStaticScene();
+    const gltf = await new Promise((resolve, reject) => {
+      new GLTFLoader().load(glbUrl, resolve, undefined, reject);
+    });
+    this.staticRoot = gltf.scene;
+    this.staticUrl = glbUrl;
+    this.carriedNodes = [];
+    for (const node of this.staticRoot.children) {
+      const match = /^C-(.+)-\d+_\d+$/.exec(node.name || "");
+      if (!match) continue;
+      node.updateMatrix();
+      node.matrixAutoUpdate = false;
+      this.carriedNodes.push({ node, link: match[1], local: node.matrix.clone() });
+    }
+    this.scene.add(this.staticRoot);
+    this.updateCarriedNodes();
+  }
+
+  clearStaticScene() {
+    if (!this.staticRoot) return;
+    this.scene.remove(this.staticRoot);
+    this.staticRoot.traverse((child) => {
+      if (child.isMesh) { child.geometry.dispose(); child.material.dispose(); }
+    });
+    this.staticRoot = null;
+    this.staticUrl = null;
+    this.carriedNodes = [];
+  }
+
+  updateCarriedNodes() {
+    if (!this.kinematics) return;
+    for (const carried of this.carriedNodes) {
+      const link = this.kinematics.linkMatrix(carried.link);
+      if (link) carried.node.matrix.multiplyMatrices(link, carried.local);
+    }
   }
 
   // Attaches a bar to a tool flange, so it follows the arm when posed.

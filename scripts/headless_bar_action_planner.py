@@ -110,6 +110,7 @@ from rs_data_structure.bar_action import (  # noqa: E402
 import pybullet  # noqa: E402
 import pybullet_planning as pp  # noqa: E402
 from compas.data import json_dump, json_load  # noqa: E402
+from compas.geometry import Frame, Rotation, Transformation, Translation  # noqa: E402
 from compas_fab.backends import (  # noqa: E402
     CollisionCheckError,
     PyBulletClient,
@@ -135,6 +136,7 @@ from husky_assembly_tamp.motion_planner.api import (  # noqa: E402
 from husky_assembly_tamp.motion_planner.dual_arm_task_space_rrt.core import (  # noqa: E402
     validate_dual_arm_bar_pose,
 )
+from husky_assembly_tamp.motion_planner.holding_prm.store import write_json_atomic  # noqa: E402
 # Constraint-error maths shared with the tamp path validator, so the numbers this
 # script reports mean the same thing as the ones validate_stage_trajectory reports.
 from husky_assembly_tamp.motion_planner.dual_arm_task_space_rrt.path_validation import (  # noqa: E402
@@ -286,6 +288,68 @@ def home_conf12_from_action(action, joint_names_12: Sequence[str]) -> np.ndarray
             "exporter (the planner does not invent a home)."
         )
     return vec12_from_conf(target, joint_names_12)
+
+
+# * The newer export splits each bar into "<bar>__J.json" (jointing: load, carry,
+# * tighten, insert) and "<bar>__R.json" (release: ..., free home). The bar carry
+# * is then no longer tagged "_M1_", and the home pose lives in the release file.
+# * "--movement cdfm" finds the carry by its type instead, in either layout.
+JOINTING_SUFFIX = "__J.json"
+RELEASE_SUFFIX = "__R.json"
+
+
+def find_carry_movement(action):
+    """The bar-carry movement of an action, found by its type.
+
+    Args:
+        action: the loaded bar action (old single-file layout, or a jointing file).
+
+    Returns:
+        The one ``EndEffectorConstrainedDualArmFreeMovement``, or ``None`` when
+        the action has none.
+
+    Raises:
+        RuntimeError: when the action has more than one (which one to plan
+            would be a guess).
+    """
+    found = [mv for mv in action.movements if isinstance(mv, EndEffectorConstrainedDualArmFreeMovement)]
+    if len(found) > 1:
+        raise RuntimeError(
+            f"{getattr(action, 'action_id', '<action>')}: {len(found)} constrained dual-arm free movements; "
+            "expected one bar carry."
+        )
+    return found[0] if found else None
+
+
+def carry_home_conf12(action, clean_action_path: str, joint_names_12: Sequence[str]) -> np.ndarray:
+    """The authored home configuration for a bar carry, in either file layout.
+
+    For a jointing file (``<bar>__J.json``) the home is the target of the last
+    free movement of the sibling release file (``<bar>__R.json``); otherwise it
+    is M4's target, as :func:`home_conf12_from_action` reads it.
+
+    Args:
+        action: the loaded bar action.
+        clean_action_path (str): its file path.
+        joint_names_12 (Sequence[str]): the twelve arm-joint names, in order.
+
+    Returns:
+        np.ndarray: the twelve home joint values (left arm first).
+
+    Raises:
+        RuntimeError: when no home is authored where it should be.
+    """
+    if not clean_action_path.endswith(JOINTING_SUFFIX):
+        return home_conf12_from_action(action, joint_names_12)
+    release_path = clean_action_path[: -len(JOINTING_SUFFIX)] + RELEASE_SUFFIX
+    if not os.path.isfile(release_path):
+        raise RuntimeError(f"No release action {release_path}; the home pose of this export lives there.")
+    release = json_load(release_path)
+    homes = [mv for mv in release.movements
+             if isinstance(mv, IndependentDualArmFreeMovement) and getattr(mv, "target_configuration", None) is not None]
+    if not homes:
+        raise RuntimeError(f"{release_path}: no free movement with a target_configuration (the home pose).")
+    return vec12_from_conf(homes[-1].target_configuration, joint_names_12)
 
 
 _ROLE_RE = re.compile(r"_M([0-9])_")
@@ -1038,9 +1102,16 @@ def plan_movement(planner, state, role: str, selected, *, active_bar_id: str,
                   cdfm_position_res: float = DEFAULT_CDFM_POSITION_RES,
                   cdfm_rotation_res: float = DEFAULT_CDFM_ROTATION_RES,
                   cdfm_home_anchor: str = "all",
+                  cdfm_backend: str = "birrt",
+                  prm_options: Optional[dict] = None,
                   max_step_distance: float = DEFAULT_MAX_STEP_DISTANCE,
                   max_step_angle: float = DEFAULT_MAX_STEP_ANGLE):
     """Send one movement to the right planner API for its role.
+
+    For M1, ``cdfm_backend`` picks the planner behind
+    ``api.plan_constrained_dual_arm``: ``"birrt"`` (the task-space search) or
+    ``"prm"`` (a roadmap precomputed for the bar; ``prm_options`` then names
+    its folder -- see ``scripts/prm_pilot.py build --problem-dir``).
 
     For M1, ``derive_start`` (the default) asks the planner to compute a
     feasible, grasp-consistent start instead of trusting the (placeholder)
@@ -1114,7 +1185,7 @@ def plan_movement(planner, state, role: str, selected, *, active_bar_id: str,
         if not goal_ee_frames:
             return None, {"failure_reason": "M1 needs target_ee_frames on the movement."}
         print(f"[plan] plan_constrained_dual_arm "
-              f"(active_bar_id={active_bar_id}, derive_start={derive_start})")
+              f"(active_bar_id={active_bar_id}, derive_start={derive_start}, backend={cdfm_backend})")
         return plan_constrained_dual_arm(
             planner, state,
             active_bar_id=active_bar_rb_name,
@@ -1127,6 +1198,8 @@ def plan_movement(planner, state, role: str, selected, *, active_bar_id: str,
             use_birrt=use_birrt,
             derive_start=derive_start,
             start_home_anchor=None if cdfm_home_anchor == "all" else cdfm_home_anchor,
+            backend=cdfm_backend,
+            prm_options=prm_options,
         )
     if role == "M2" and isinstance(selected, EndEffectorConstrainedDualArmLinearMovement):
         if not active_bar_id:
@@ -2133,6 +2206,81 @@ def run_solve_keyframes(args, problem_dir: str) -> int:
     return 0 if results and all(ok for _, ok, _ in results) else 2
 
 
+def shifted_base_frame(frame, shift: Sequence[float]):
+    """A base frame moved on the ground: shifted in its own x/y, then turned about its own z.
+
+    Args:
+        frame: the planned base ``Frame`` (world).
+        shift (Sequence[float]): ``(dx m, dy m, dyaw deg)`` in the base's own frame.
+
+    Returns:
+        Frame: the moved base frame.
+    """
+    dx, dy, dyaw_deg = shift
+    move = Translation.from_vector([dx, dy, 0.0]) * Rotation.from_axis_and_angle([0.0, 0.0, 1.0], np.radians(dyaw_deg))
+    return Frame.from_transformation(Transformation.from_frame(frame) * move)
+
+
+def save_plan_info(save_path: str, movement_id: str, backend: str, seconds: float, path, info: Optional[dict],
+                   base_shift: str) -> None:
+    """Write a small summary of one bar-carry plan next to the solved file.
+
+    The solved file holds the path; this holds how the plan went (also when it
+    failed and no solved file is written), so runs can be compared afterwards
+    without reading console logs.
+
+    Args:
+        save_path (str): the solved-motion file of this run (tag included).
+        movement_id (str): the planned movement.
+        backend (str): "birrt" or "prm".
+        seconds (float): wall time of the planning call.
+        path: the planned path, or None when planning failed.
+        info (Optional[dict]): the planner's info.
+        base_shift (str): the ``--base-shift`` in force ("" for none).
+    """
+    info = info or {}
+    profile = info.get("profile") or {}
+    summary = {
+        "movement": movement_id, "backend": backend, "ok": path is not None, "plan_s": float(seconds),
+        "n_waypoints": None if path is None else len(path), "failure_reason": info.get("failure_reason"),
+        "base_shift": base_shift,
+        # The search backend: how hard it worked. Only plain numbers and the stop reasons are kept.
+        "search": {key: value for key, value in profile.items()
+                   if isinstance(value, (int, float, str, bool)) or key == "extend_stop_reasons"},
+        # The roadmap backend: route, tolerance, counters and time per phase.
+        "prm": info.get("prm"),
+    }
+    out_path = os.path.splitext(save_path)[0] + ".plan_info.json"
+    write_json_atomic(out_path, summary)
+    print(f"[save] plan summary -> {out_path}")
+
+
+def print_roadmap_summary(prm: Optional[dict]) -> None:
+    """Print what the roadmap backend did: the route it used and where the time went.
+
+    Args:
+        prm (Optional[dict]): ``info["prm"]`` from ``plan_constrained_dual_arm``
+            (None for the search backend: nothing is printed).
+    """
+    if not prm:
+        return
+    timings = prm.get("timings") or {}
+    print("  roadmap: " + ", ".join(f"{key[:-2]} {value:.1f} s" for key, value in timings.items()))
+    if prm.get("starts"):
+        print(f"  roadmap: carry poses free in this scene: {prm['starts']['free_in_scene']} of "
+              f"{prm['starts']['carry_nodes']} roadmap start nodes")
+    if prm.get("route"):
+        start = prm.get("start") or {}
+        print(f"  roadmap: route of {len(prm['route'])} nodes within {prm['tolerance_mm']:g} mm "
+              f"(worst edge {max(prm['route_scores_mm']):.1f} mm), from carry pose {start.get('label')} "
+              f"({start.get('carry')}); {prm['n_waypoints_1cm']} waypoints at 1 cm, {prm['n_waypoints']} returned")
+    elif prm.get("best_gap_left_mm") is not None:
+        print(f"  roadmap: no route within the tolerances; the best one left needs {prm['best_gap_left_mm']:.1f} mm")
+    print(f"  roadmap: edges looked at {prm.get('edges_looked_at', 0)} {prm.get('edge_verdicts', {})}; "
+          f"blocked by the scene {prm.get('scene_blocked_edges', 0)}; dropped in the final check "
+          f"{len(prm.get('dropped_in_final_check', []))}; scene bodies {prm.get('scene', {})}")
+
+
 def plan_one_action(planner, rcell, clean_action_path: str, args, groups):
     """Run full motion planning for ONE BarAction file (no PyBullet lifecycle / replay).
 
@@ -2164,7 +2312,23 @@ def plan_one_action(planner, rcell, clean_action_path: str, args, groups):
     # The clean file (Rhino export) is never overwritten; the half-solved motion
     # snapshot is always written to this sidecar, regardless of which we load.
     save_path = solved_action_path(clean_action_path, "motion")
-    if args.load == "clean":
+    if args.save_dir:
+        # Experiment runs keep their results out of the problem folder.
+        os.makedirs(args.save_dir, exist_ok=True)
+        save_path = os.path.join(args.save_dir, os.path.basename(save_path))
+    if args.save_tag:
+        # A tagged copy, so runs with different planners do not overwrite each other.
+        stem, ext = os.path.splitext(save_path)
+        save_path = f"{stem}.{args.save_tag}{ext}"
+    # A saved path from anywhere (e.g. an experiment's --save-dir), to look at
+    # in the GUI: its trajectories are reused as they are and nothing is written.
+    replay_only = bool(args.replay_file)
+    if replay_only:
+        action_path = args.replay_file
+        if not os.path.isfile(action_path):
+            print(f"[X] --replay-file: no such file: {action_path}")
+            return False, [], [], ""
+    elif args.load == "clean":
         action_path = clean_action_path
     else:
         # --load names exactly which partly-solved sidecar to start from:
@@ -2184,7 +2348,7 @@ def plan_one_action(planner, rcell, clean_action_path: str, args, groups):
                   f"{action_path}")
             return False, [], [], ""
 
-    print(f"[load] BarAction ({args.load}) <- {action_path}")
+    print(f"[load] BarAction ({'replay' if replay_only else args.load}) <- {action_path}")
     action = json_load(action_path)
     active_bar_id = getattr(action, "active_bar_id", "") or ""
     print(f"  action_id     : {action.action_id}")
@@ -2209,18 +2373,24 @@ def plan_one_action(planner, rcell, clean_action_path: str, args, groups):
     # Planning sequence: the order movements are planned in (not just a set of
     # roles). Order matters — each solved movement's start/end config propagates
     # into its neighbours (see accept_trajectory), so M1 must plan before M2, etc.
+    # "cdfm" plans the bar carry alone, found by its type (works for both file
+    # layouts); it runs as role M1, which is what the planner API calls it.
+    carry_only = args.movement == "cdfm"
     planning_sequence = (
-        ["M1", "M2", "M3", "M4"] if args.movement == "all" else [args.movement]
+        ["M1", "M2", "M3", "M4"] if args.movement == "all"
+        else ["M1"] if carry_only else [args.movement]
     )
 
     # 12-vec joint names — read from the cell, shared across movements.
     joint_names_12 = arm_joint_names_12(rcell, groups)
 
-    # The authored home pose, read from the JSON (M4's target_configuration). It
-    # is only needed as the fill-in for movements exported without a start config;
-    # a missing home only fails a movement that actually needs the fill.
+    # The authored home pose, read from the JSON (M4's target_configuration, or
+    # the release file's home for the split layout). It is only needed as the
+    # fill-in for movements exported without a start config; a missing home only
+    # fails a movement that actually needs the fill.
     try:
-        home12 = home_conf12_from_action(action, joint_names_12)
+        home12 = (carry_home_conf12(action, clean_action_path, joint_names_12) if carry_only
+                  else home_conf12_from_action(action, joint_names_12))
     except RuntimeError as exc:
         home12 = None
         print(f"[!] {exc}")
@@ -2228,7 +2398,23 @@ def plan_one_action(planner, rcell, clean_action_path: str, args, groups):
     # Resolve the movements once, in planning order, and mutate their start_states
     # in place — accept_trajectory propagates each planned endpoint into the next
     # movement's start_state (the key chaining step).
-    movements = [select_movement(action, r) for r in planning_sequence]
+    movements = ([find_carry_movement(action)] if carry_only
+                 else [select_movement(action, r) for r in planning_sequence])
+
+    # The roadmap backend needs to know where this bar's precomputed roadmap is.
+    prm_options = None
+    if args.cdfm_backend == "prm":
+        prm_root = args.prm_root or os.environ.get("HUSKY_BENCH_ROOT")
+        if not prm_root:
+            print("[X] --cdfm-backend prm needs --prm-root (or HUSKY_BENCH_ROOT): the folder holding prm/<run>.")
+            return False, [], joint_names_12, active_bar_id
+        prm_run = args.prm_run or f"{args.problem}__{active_bar_id}"
+        prm_options = {"roadmap_dir": os.path.join(prm_root, "prm", prm_run), "workers": args.prm_workers,
+                       "tolerances_mm": [float(t) for t in args.prm_tolerances_mm.split(",") if t.strip()],
+                       "tube_rounds": args.prm_tube_rounds, "use_pretracked": not args.prm_no_pretracked,
+                       # The plan is saved as a query of the roadmap, for its dashboard page.
+                       "query_tag": f"{active_bar_id}_{args.save_tag or 'online'}"}
+        print(f"[plan] roadmap backend: {prm_options['roadmap_dir']} ({args.prm_workers} worker(s))")
 
     segments = []          # (role, state, path) for each solved movement
     results = []           # (role, ok, detail) for the roll-up
@@ -2278,12 +2464,28 @@ def plan_one_action(planner, rcell, clean_action_path: str, args, groups):
         # trajectories; a keyframe sidecar has none, so this simply never fires for
         # --load solved_keyframe (every movement is planned fresh from its base).
         existing_traj = getattr(selected, "trajectory", None)
-        if args.load != "clean" and existing_traj:
+        if (args.load != "clean" or replay_only) and existing_traj:
             path = path_from_trajectory(existing_traj, joint_names_12)
             print(f"[reuse] {role}: {len(path)} waypoint(s) from half-solved file.")
             segments.append((role, state, path))
             results.append((role, True, f"reused {len(path)} waypoint(s)"))
             continue
+        if replay_only:
+            msg = f"{selected.movement_id}: the replay file holds no trajectory for it."
+            print(f"[X] {msg}")
+            results.append((role, False, msg))
+            break
+
+        # Test option: plan as if the base parked off its planned pose. Only the
+        # robot (and what it carries) moves; the goal and the built structure
+        # stay where they are in the world.
+        if args.base_shift:
+            shift = [float(v) for v in args.base_shift.split(",")]
+            if len(shift) != 3:
+                raise ValueError(f"--base-shift needs 'dx,dy,dyaw_deg'; got {args.base_shift!r}")
+            state.robot_base_frame = shifted_base_frame(state.robot_base_frame, shift)
+            print(f"[plan] base shifted by {shift[0] * 100:.1f} cm, {shift[1] * 100:.1f} cm, {shift[2]:.1f} deg "
+                  "from its planned pose (--base-shift)")
 
         # M1 derives its own start; M2/M3/M4 should already carry a start config
         # propagated from the previous movement's accept_trajectory. The authored
@@ -2331,6 +2533,8 @@ def plan_one_action(planner, rcell, clean_action_path: str, args, groups):
             cdfm_position_res=args.cdfm_position_res,
             cdfm_rotation_res=args.cdfm_rotation_res,
             cdfm_home_anchor=args.cdfm_home_anchor,
+            cdfm_backend=args.cdfm_backend,
+            prm_options=prm_options,
             max_step_distance=args.max_step_distance,
             max_step_angle=args.max_step_angle,
         )
@@ -2344,10 +2548,14 @@ def plan_one_action(planner, rcell, clean_action_path: str, args, groups):
             with pp.LockRenderer():
                 path, info = plan_movement(planner, state, role, selected, **plan_kwargs)
         plan_times[role] = time.time() - plan_t0
+        if carry_only:
+            save_plan_info(save_path, selected.movement_id, args.cdfm_backend, plan_times[role], path, info,
+                           args.base_shift)
 
         if path is None:
             reason = (info or {}).get("failure_reason", "<unknown>")
             print(f"[plan] {role} FAILED: {reason} (after {plan_times[role]:.1f} s)")
+            print_roadmap_summary((info or {}).get("prm"))
             # Failure-mode breakdown from the RRT (why extends stopped), so a
             # failed plan is diagnosable without a rerun.
             profile = (info or {}).get("profile") or {}
@@ -2365,9 +2573,23 @@ def plan_one_action(planner, rcell, clean_action_path: str, args, groups):
         if ok_profile.get("extend_stop_reasons"):
             print(f"  extend_stop_reasons: {ok_profile['extend_stop_reasons']}")
         for k, v in (info or {}).items():
-            if k in ("profile", "smooth_profile", "path_poses", "derived_start_conf"):
+            if k in ("profile", "smooth_profile", "path_poses", "derived_start_conf", "prm"):
                 continue
             print(f"  {k}: {v}")
+        print_roadmap_summary((info or {}).get("prm"))
+
+        # The export authors a goal configuration that later movements start
+        # from; a plan to "any posture at the goal pose" may end elsewhere.
+        authored_goal = getattr(selected, "target_configuration", None)
+        if role == "M1" and authored_goal is not None:
+            off = float(np.abs(np.asarray(path[-1], dtype=float)
+                               - vec12_from_conf(authored_goal, joint_names_12)).max())
+            if off > 1e-3:
+                print(f"[!] {selected.movement_id}: the path ends {np.degrees(off):.1f} deg (largest joint) from the "
+                      "authored target_configuration, on another arm posture at the same goal pose. The "
+                      "movements after it were authored from that configuration and need re-solving.")
+            else:
+                print(f"[Plan] {selected.movement_id}: the path ends on the authored target_configuration.")
 
         # Chain bookkeeping: propagate traj[0]/[-1] into neighbouring start_states.
         accepted = accept_solved_movement(
@@ -2408,14 +2630,15 @@ def plan_one_action(planner, rcell, clean_action_path: str, args, groups):
     # saved next to the motion sidecar so the figure travels with the data it
     # describes. Drawn here (not in main) so a --all batch gets one per bar, and
     # so a single-bar run has it on disk BEFORE the blocking replay slider opens.
-    if segments:
+    if segments and not replay_only:
         # Showing blocks on a window per bar, which would stall a batch, so a
         # --all run saves the PNGs without stopping to show them. No warning:
         # showing is the default now, so this would print on every batch run.
         plot_planned_motion(
             planner, segments, joint_names_12,
             os.path.join(os.path.dirname(save_path),
-                         f"{os.path.splitext(bar_file)[0]}_planned_motion.png"),
+                         f"{os.path.splitext(bar_file)[0]}_planned_motion"
+                         f"{'.' + args.save_tag if args.save_tag else ''}.png"),
             title=f"{action.action_id} ({args.load})",
             show=args.show_plot and not args.all_bars,
         )
@@ -2452,8 +2675,10 @@ def main() -> int:
         help="BarAction filename inside <data_root>/<problem>/BarActions/.",
     )
     parser.add_argument(
-        "--movement", default=None, choices=("M0", "M1", "M2", "M3", "M4", "all"),
+        "--movement", default=None, choices=("M0", "M1", "M2", "M3", "M4", "all", "cdfm"),
         help="Which movement role to plan (required unless --solve-keyframes). "
+             "'cdfm' plans the bar carry alone, found by its type: use it for the "
+             "split export layout (<bar>__J.json, home read from <bar>__R.json). "
              "'all' chains M1->M2->M3->M4 (M0 is left unplanned offline -- the "
              "live monitor plans it). 'M0' only works after M1 has been planned "
              "so its goal config is backfilled.",
@@ -2522,6 +2747,62 @@ def main() -> int:
         help="M1: bar rotation step in RADIANS (default "
              f"{DEFAULT_CDFM_ROTATION_RES}). Same three consumers and the same "
              "goal-tolerance role as --cdfm-position-res.",
+    )
+    parser.add_argument(
+        "--cdfm-backend", choices=("birrt", "prm"), default="birrt",
+        help="M1: which planner runs the bar carry. 'birrt' (default) is the "
+             "task-space search. 'prm' plans on a roadmap precomputed for the bar "
+             "with only the robot, tools and bar, and checks this scene's built "
+             "bars at plan time (build it with scripts/prm_pilot.py build "
+             "--problem-dir, then track).",
+    )
+    parser.add_argument(
+        "--prm-root", default=None,
+        help="prm backend: the folder holding prm/<run> (default: HUSKY_BENCH_ROOT).",
+    )
+    parser.add_argument(
+        "--prm-run", default=None,
+        help="prm backend: the roadmap's run name (default: <problem>__<bar id>).",
+    )
+    parser.add_argument(
+        "--prm-workers", type=int, default=1,
+        help="prm backend: 1 = plan in this process; more = that many worker "
+             "processes, each opening the scene from files.",
+    )
+    parser.add_argument(
+        "--prm-tolerances-mm", default="10,20,30",
+        help="prm backend: roadmap tolerances to try, smallest first.",
+    )
+    parser.add_argument(
+        "--prm-tube-rounds", type=int, default=1,
+        help="prm backend: rounds of new nodes drawn around the best route when none survives.",
+    )
+    parser.add_argument(
+        "--save-tag", default="",
+        help="Append this tag to the saved motion file name "
+             "(<bar>.solved_motion.<tag>.json), e.g. to keep one result per planner.",
+    )
+    parser.add_argument(
+        "--prm-no-pretracked", action="store_true",
+        help="Roadmap backend, for comparison runs: ignore the roadmap's overnight "
+             "tracking file and track every edge a route needs now.",
+    )
+    parser.add_argument(
+        "--replay-file", default="",
+        help="Replay only: load this saved motion file (any folder, e.g. an experiment's "
+             "--save-dir), reuse its trajectories and show them with the GUI slider; "
+             "nothing is planned or written. Use with --gui and the matching --movement.",
+    )
+    parser.add_argument(
+        "--save-dir", default="",
+        help="Write the solved motion file, its plan summary and its figure into this "
+             "folder instead of next to the bar action (for experiment runs).",
+    )
+    parser.add_argument(
+        "--base-shift", default="",
+        help="Test option: 'dx,dy,dyaw_deg' (metres, metres, degrees, in the base's own "
+             "frame). Plans as if the base parked that far off its planned pose; the "
+             "goal and the built structure stay where they are.",
     )
     parser.add_argument(
         "--cdfm-home-anchor",

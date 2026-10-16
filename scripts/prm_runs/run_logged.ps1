@@ -3,6 +3,8 @@
 #   "build ..." / "query ..." / "refine ..."   -> scripts\prm_pilot.py
 #   "bridge validate ..." / "bridge birrt ..." -> scripts\prm_bridge.py
 #   "carry stage1 ..." / "carry starts ..."    -> scripts\prm_carry_search.py
+#   "headless ..."                             -> scripts\headless_bar_action_planner.py
+#   "check ..."                                -> scripts\prm_check_solved.py
 # Launch detached, from the repository root, e.g.
 #   Start-Process powershell -WindowStyle Hidden -ArgumentList '-ExecutionPolicy','Bypass','-File',
 #       'scripts\prm_runs\run_logged.ps1','-Log','e2_refine_20261001.log',
@@ -22,6 +24,10 @@ foreach ($command in $Commands) {
         $script = "scripts\prm_bridge.py"; $rest = $command.Substring(7)
     } elseif ($command.StartsWith("carry ")) {
         $script = "scripts\prm_carry_search.py"; $rest = $command.Substring(6)
+    } elseif ($command.StartsWith("headless ")) {
+        $script = "scripts\headless_bar_action_planner.py"; $rest = $command.Substring(9)
+    } elseif ($command.StartsWith("check ")) {
+        $script = "scripts\prm_check_solved.py"; $rest = $command.Substring(6)
     } else {
         $script = "scripts\prm_pilot.py"; $rest = $command
     }

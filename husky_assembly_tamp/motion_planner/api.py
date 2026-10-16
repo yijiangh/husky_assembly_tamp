@@ -30,6 +30,7 @@ missed.
 from __future__ import annotations
 
 import logging
+from time import perf_counter
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -67,6 +68,10 @@ _ARM_SUFFIXES = (
 
 TOOL_LINK_LEFT = "left_ur_arm_tool0"
 TOOL_LINK_RIGHT = "right_ur_arm_tool0"
+
+# * The planners plan_constrained_dual_arm can run: the task-space search, or a
+# * roadmap precomputed per bar (motion_planner/holding_prm).
+PLANNING_BACKENDS = ("birrt", "prm")
 
 
 # ---------------------------------------------------------------------------
@@ -800,8 +805,24 @@ def plan_constrained_dual_arm(
     record_search: bool = False,
     ik_options: Optional[Dict[str, Any]] = None,
     repair: Optional[Dict[str, Any]] = None,
+    backend: str = "birrt",
+    prm_options: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Optional[List[np.ndarray]], dict]:
     """Constrained dual-arm SE(3) RRT with a rigid bar grasp.
+
+    ``backend`` picks the planner: ``"birrt"`` (default) is the task-space
+    search described below; ``"prm"`` plans on a roadmap precomputed for this
+    bar with only the robot, its tools and the carried bar, and checks the
+    real scene at plan time (``holding_prm.online.plan_on_roadmap``).
+    ``prm_options`` then needs ``roadmap_dir`` (the roadmap's folder) and may
+    give ``workers``, ``tolerances_mm``, ``tube_rounds``, ``tube_draws``,
+    ``scene_cache_dir`` and ``verbose``. With the roadmap, ``derive_start=True``
+    lets the search pick the start among the roadmap's carry poses (returned as
+    ``info['derived_start_conf']``), ``goal_ee_frames`` accepts any
+    collision-free posture at the goal pose and ``goal_conf`` asks for exactly
+    that one; ``repair`` and ``enable_smoothing`` apply as for the search. The
+    roadmap backend never falls back to the search: with no roadmap for the
+    bar it raises, and with no route it returns ``failure_reason``.
 
     ``ik_options`` and ``repair`` exist for the benchmark's planner variants
     and are ``None`` in production. ``ik_options`` is handed to every
@@ -876,6 +897,17 @@ def plan_constrained_dual_arm(
         raise ValueError(
             "exactly one of goal_conf / goal_ee_frames must be provided"
         )
+    # * Argument checks come before the planner core is imported, so a wrong
+    # * call fails without loading it.
+    if stage not in (1, 2, 3):
+        raise ValueError(f"stage must be 1, 2, or 3; got {stage}")
+    if repair is not None and stage < 3:
+        raise ValueError("repair needs stage 3 (the repair re-solves with full collision)")
+    if backend not in PLANNING_BACKENDS:
+        raise ValueError(f"backend must be one of {PLANNING_BACKENDS}; got {backend!r}")
+    if backend == "prm" and stage != 3:
+        raise ValueError("the roadmap backend always plans with IK and full collision (stage 3)")
+
     from .dual_arm_task_space_rrt.core import (
         DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
         SearchRecorder,
@@ -885,11 +917,6 @@ def plan_constrained_dual_arm(
         repair_joint_path,
     )
     from .dual_arm_task_space_rrt.smooth import smooth_dual_arm_pose_path
-
-    if stage not in (1, 2, 3):
-        raise ValueError(f"stage must be 1, 2, or 3; got {stage}")
-    if repair is not None and stage < 3:
-        raise ValueError("repair needs stage 3 (the repair re-solves with full collision)")
 
     robot_cell = planner.client.robot_cell
     left_names, right_names = _arm_joint_names(robot_cell)
@@ -904,6 +931,32 @@ def plan_constrained_dual_arm(
     planner.set_robot_cell_state(start_state)
     bar_body = _bar_body_id(planner, active_bar_id)
     obstacles = _collect_obstacle_puids(planner, exclude={active_bar_id})
+
+    if backend == "prm":
+        # * The precomputed roadmap takes over from here; see the function below.
+        return _plan_constrained_dual_arm_on_roadmap(
+            planner, start_state,
+            active_bar_id=active_bar_id,
+            goal_conf=goal_conf,
+            goal_ee_frames=goal_ee_frames,
+            joint_names_12=joint_names_12,
+            robot_puid=robot_puid,
+            arm_joints=arm_joints,
+            tool_link_left=tool_link_left,
+            tool_link_right=tool_link_right,
+            derive_start=derive_start,
+            position_res=position_res,
+            rotation_res=rotation_res,
+            max_time=max_time,
+            enable_smoothing=enable_smoothing,
+            smooth_max_iterations=smooth_max_iterations,
+            smooth_max_time=smooth_max_time,
+            joint_continuity_threshold_rad=joint_continuity_threshold_rad,
+            random_seed=random_seed,
+            feature_points=feature_points,
+            repair=repair,
+            prm_options=prm_options,
+        )
 
     if derive_start:
         # Goal-first procedure (mirrors dual_arm_task_space_rrt.run Stage 3):
@@ -1172,6 +1225,206 @@ def plan_constrained_dual_arm(
             return None, info
         info["failure_reason"] = "no_joint_path"
         return None, info
+    return [np.asarray(q, dtype=float) for q in path_confs], info
+
+
+def _plan_constrained_dual_arm_on_roadmap(
+    planner,
+    start_state: RobotCellState,
+    *,
+    active_bar_id: str,
+    goal_conf,
+    goal_ee_frames: Optional[dict],
+    joint_names_12: List[str],
+    robot_puid: int,
+    arm_joints: List[int],
+    tool_link_left: int,
+    tool_link_right: int,
+    derive_start: bool,
+    position_res: float,
+    rotation_res: float,
+    max_time: float,
+    enable_smoothing: bool,
+    smooth_max_iterations: int,
+    smooth_max_time: float,
+    joint_continuity_threshold_rad: Optional[float],
+    random_seed: Optional[int],
+    feature_points,
+    repair: Optional[Dict[str, Any]],
+    prm_options: Optional[Dict[str, Any]],
+) -> Tuple[Optional[List[np.ndarray]], dict]:
+    """The roadmap backend of :func:`plan_constrained_dual_arm`.
+
+    Reads the grasp from the authored bar attachment, works out where the bar
+    must end up, hands the plan to ``holding_prm.online.plan_on_roadmap`` and
+    then applies the same optional repair and smoothing as the search backend.
+
+    Args:
+        planner: the planner, with ``start_state`` already set.
+        start_state (RobotCellState): the movement's start state.
+        active_bar_id (str): the carried bar's rigid-body name.
+        goal_conf: the goal configuration, or None.
+        goal_ee_frames (Optional[dict]): the two goal tool frames, or None.
+        joint_names_12 (List[str]): the twelve arm joints.
+        robot_puid (int): the robot's PyBullet body.
+        arm_joints (List[int]): its twelve arm joints.
+        tool_link_left (int): left tool0 link index.
+        tool_link_right (int): right tool0 link index.
+        derive_start (bool): let the roadmap pick the start among its carry poses.
+        position_res (float): bar step of the returned path (m).
+        rotation_res (float): bar turn step of the returned path (rad).
+        max_time (float): only recorded; the roadmap plan is not time-limited.
+        enable_smoothing (bool): shortcut-smooth the path afterwards.
+        smooth_max_iterations (int): smoothing budget.
+        smooth_max_time (float): smoothing budget (s).
+        joint_continuity_threshold_rad (Optional[float]): gate for the smoothing re-solves.
+        random_seed (Optional[int]): seed of the smoothing.
+        feature_points: bar feature points for the smoothing metric.
+        repair (Optional[Dict[str, Any]]): re-solve the path with the production repair.
+        prm_options (Optional[Dict[str, Any]]): ``roadmap_dir`` and the optional settings.
+
+    Returns:
+        Tuple[Optional[List[np.ndarray]], dict]: the path and ``info``, shaped
+        as the search backend's.
+
+    Raises:
+        ValueError: when ``prm_options`` has no ``roadmap_dir``, or the bar is
+            not attached to the left tool link.
+    """
+    # ! Imported here, not at the top: holding_prm.parallel imports
+    # ! benchmark.scene, which imports this module.
+    from .dual_arm_task_space_rrt.core import (
+        DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
+        get_bar_feature_points,
+        repair_joint_path,
+    )
+    from .dual_arm_task_space_rrt.smooth import smooth_dual_arm_pose_path
+    from .holding_prm.holding import matrix_from_pose
+    from .holding_prm.online import OnlineSettings, plan_on_roadmap
+
+    options = dict(prm_options or {})
+    if not options.get("roadmap_dir"):
+        raise ValueError("backend='prm' needs prm_options['roadmap_dir'] (the precomputed roadmap's folder).")
+
+    # * The grasp, from the authored attachment (the export hangs the bar off one tool0 link).
+    bar_state = start_state.rigid_body_states[active_bar_id]
+    if bar_state.attached_to_link != TOOL_LINK_LEFT or bar_state.attachment_frame is None:
+        raise ValueError(
+            f"{active_bar_id} must be attached to {TOOL_LINK_LEFT} with an attachment frame for the roadmap "
+            f"backend (it is attached to {bar_state.attached_to_link!r})."
+        )
+    grasp_bar_from_left = pp.invert(_pp_pose_from_frame(bar_state.attachment_frame))
+
+    # * Where the bar must end up, and the right-hand grasp, from the goal.
+    if goal_ee_frames is not None:
+        if goal_ee_frames.get("left") is None or goal_ee_frames.get("right") is None:
+            raise ValueError("goal_ee_frames must contain 'left' and 'right' Frame entries")
+        world_from_tool0_L_goal = _pp_pose_from_frame(goal_ee_frames["left"])
+        world_from_tool0_R_goal = _pp_pose_from_frame(goal_ee_frames["right"])
+        goal_conf_arr = None
+    else:
+        goal_conf_arr = _conf12_from_target(goal_conf, joint_names_12)
+        world_from_tool0_L_goal = _fk_link_pose_pp(planner, goal_conf_arr, robot_puid, arm_joints, tool_link_left)
+        world_from_tool0_R_goal = _fk_link_pose_pp(planner, goal_conf_arr, robot_puid, arm_joints, tool_link_right)
+    world_from_bar_goal = pp.multiply(world_from_tool0_L_goal, pp.invert(grasp_bar_from_left))
+    grasp_bar_from_right = pp.multiply(pp.invert(world_from_bar_goal), world_from_tool0_R_goal)
+
+    def as_matrix(pose) -> np.ndarray:
+        """A pybullet pose as a 4x4 transform."""
+        return matrix_from_pose([list(pose[0]), list(pose[1])])
+
+    settings = OnlineSettings(
+        roadmap_dir=str(options["roadmap_dir"]),
+        workers=int(options.get("workers", 1)),
+        tolerances_mm=[float(t) for t in options.get("tolerances_mm", (10.0, 20.0, 30.0))],
+        tube_rounds=int(options.get("tube_rounds", 1)),
+        tube_draws=int(options.get("tube_draws", 400)),
+        position_res_m=float(position_res),
+        rotation_res_rad=float(rotation_res),
+        scene_cache_dir=str(options.get("scene_cache_dir", "")),
+        use_pretracked=bool(options.get("use_pretracked", True)),
+        save_query=bool(options.get("save_query", True)),
+        query_tag=str(options.get("query_tag", "online")),
+        verbose=bool(options.get("verbose", True)),
+    )
+    start_conf = None if derive_start else _conf12_from_state(start_state, joint_names_12)
+    path_confs, prm_info = plan_on_roadmap(
+        planner, start_state, joint_names_12, active_bar_id, as_matrix(world_from_bar_goal), settings,
+        robot_puid=robot_puid, arm_joints=arm_joints, start_conf=start_conf, goal_conf=goal_conf_arr,
+        grasp_bar_from_right=as_matrix(grasp_bar_from_right),
+    )
+    path_poses = prm_info.pop("path_poses", None)
+    if path_poses is not None:
+        path_poses = [(tuple(p[0]), tuple(p[1])) for p in path_poses]
+
+    info: Dict[str, Any] = {
+        "stage": 3,
+        "max_time": float(max_time),
+        "joint_continuity_threshold_rad": joint_continuity_threshold_rad or DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
+        "ik_backend": ssik_ik.ik_backend(),
+        "planner": "prm",
+        "repair_settings": dict(repair or {}),
+        # The search backend's callers read these; the roadmap has no trees.
+        "profile": {},
+        "prm": prm_info,
+        "path_poses": path_poses,
+    }
+    # The roadmap's checks moved the planner's state around; put it back.
+    planner.set_robot_cell_state(start_state)
+    if path_confs is None:
+        info["failure_reason"] = prm_info.get("failure_reason", "prm_failed")
+        return None, info
+    if derive_start:
+        info["derived_start_conf"] = [float(v) for v in path_confs[0]]
+
+    post_threshold = (repair or {}).get("joint_continuity_threshold_rad") or info["joint_continuity_threshold_rad"]
+    if repair is not None or enable_smoothing:
+        post_start = perf_counter()
+        with pp.WorldSaver():
+            joint_collision_fn = _build_cfab_collision_fn(planner, start_state, joint_names_12)
+            post_scene = {
+                "robot": robot_puid,
+                "arm_joints": arm_joints,
+                "tool_link_left": tool_link_left,
+                "tool_link_right": tool_link_right,
+                "grasp_bar_from_left": grasp_bar_from_left,
+                "grasp_bar_from_right": grasp_bar_from_right,
+                "ik_options": {"artifact_set": "calibrated"} if repair is not None else None,
+            }
+            if repair is not None:
+                info["search_success"] = True
+                repaired, repair_info = repair_joint_path(
+                    post_scene, path_poses, path_confs[0], path_confs[-1],
+                    joint_collision_fn=joint_collision_fn,
+                    joint_continuity_threshold_rad=post_threshold,
+                )
+                info["repair"] = repair_info
+                if repaired is None:
+                    info["failure_reason"] = f"repair_{repair_info.get('reason') or 'failed'}"
+                    planner.set_robot_cell_state(start_state)
+                    return None, info
+                path_confs = repaired
+            if enable_smoothing:
+                smooth_profile: Dict[str, Any] = {}
+                path_poses, path_confs = smooth_dual_arm_pose_path(
+                    path_poses=path_poses,
+                    path_confs=path_confs,
+                    scene=post_scene,
+                    pose_collision_fn=None,
+                    joint_collision_fn=joint_collision_fn,
+                    feature_points=feature_points if feature_points is not None else get_bar_feature_points(),
+                    position_res=position_res,
+                    rotation_res=rotation_res,
+                    joint_continuity_threshold_rad=post_threshold,
+                    max_smooth_iterations=smooth_max_iterations,
+                    max_time=smooth_max_time,
+                    random_seed=random_seed,
+                    profile_out=smooth_profile,
+                )
+                info["smooth_profile"] = smooth_profile
+                info["path_poses"] = path_poses
+        prm_info.setdefault("timings", {})["post_process_s"] = perf_counter() - post_start
+        planner.set_robot_cell_state(start_state)
     return [np.asarray(q, dtype=float) for q in path_confs], info
 
 

@@ -101,7 +101,6 @@ def _bench_root():
 def test_a_short_pass_records_trees_and_attempts(tmp_path):
     """Plan four seconds and check everything the dashboard relies on."""
     from husky_assembly_tamp.benchmark.cdfm import RunTask, plan_one_pass
-    from husky_assembly_tamp.benchmark.cli import resolve_source_key
     from husky_assembly_tamp.benchmark.library import load_bar_library
     from husky_assembly_tamp.benchmark.scene import load_trimmed_problem, open_scene
 
@@ -111,7 +110,11 @@ def test_a_short_pass_records_trees_and_attempts(tmp_path):
     start = goal["starts"][0]
     task = RunTask(bar_id="B3", goal_index=0, start_index=start["start_index"], seed=0,
                    goal_conf=goal["primary_conf"], start_conf=start["conf"])
-    problem, cell, template = load_trimmed_problem(root, resolve_source_key(root, None), "B3")
+    # The trimmed scene the smoke library was built from, named by the library
+    # itself: the data root may hold the scenes of several exports.
+    with open(os.path.join(root, "library", "smoke", "index.json"), "r", encoding="utf-8") as handle:
+        source_key = json.load(handle)["source_key"]
+    problem, cell, template = load_trimmed_problem(root, source_key, "B3")
     scene = open_scene(cell, template, problem)
     tree_path = str(tmp_path / "B3_g000_s0000_k00_coarse.tree.json")
     try:

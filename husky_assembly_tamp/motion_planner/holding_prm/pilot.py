@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import asdict, dataclass, field
+from glob import glob
 from math import ceil
 from time import perf_counter, time
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -41,10 +42,14 @@ import networkx as nx
 import numpy as np
 from scipy.spatial import cKDTree
 
+from compas.data import json_load
+
+from husky_assembly_tamp.benchmark.scene import BarProblem
 from husky_assembly_tamp.motion_planner.holding_prm.carry import carry_bar_pose
 from husky_assembly_tamp.motion_planner.holding_prm.holding import (
     HoldingModel,
     arm_limits,
+    invert_transform,
     pose_from_matrix,
     rebranch12,
 )
@@ -63,7 +68,19 @@ from husky_assembly_tamp.motion_planner.holding_prm.roadmap import (
     candidate_pairs,
     edge_cost,
 )
-from husky_assembly_tamp.motion_planner.holding_prm.sampling import SAMPLING_MODES, SamplerConfig, add_counters
+from husky_assembly_tamp.motion_planner.holding_prm.sampling import (
+    SAMPLING_MODES,
+    SamplerConfig,
+    add_counters,
+    robot_side_signature,
+)
+from husky_assembly_tamp.benchmark.export_assets import export_robot_assets
+from husky_assembly_tamp.motion_planner.holding_prm.scenes import (
+    export_scene_glb,
+    load_carry_movement,
+    planned_goal,
+    shifted_base,
+)
 from husky_assembly_tamp.motion_planner.holding_prm.search import (
     EdgeTable,
     build_graph,
@@ -88,6 +105,7 @@ from husky_assembly_tamp.motion_planner.holding_prm.store import (
     rounded_columns,
     run_dir,
     save_roadmap,
+    update_index,
     update_query_index,
     update_run_index,
     write_json_atomic,
@@ -140,6 +158,14 @@ class BuildSettings:
         starts_file (str): a starts file (see :func:`file_starts`) whose
             poses also become anchors, every collision-free branch pair of
             each on the home turn; "" = none.
+        problem_dir (str): build from an exported problem folder instead of a
+            benchmark library: the goal anchors are the bar's planned goal (as
+            seen from the robot) and copies of it for a shifted base; "" =
+            use ``library``.
+        base_error_m (float): how far the base may park from its planned
+            place, along each ground axis (export mode).
+        base_error_deg (float): how far it may be turned (export mode).
+        base_samples (int): how many shifted bases to anchor on (export mode).
     """
 
     run_name: str
@@ -171,6 +197,10 @@ class BuildSettings:
     sample_chunk: int = 32
     edge_chunk: int = 64
     starts_file: str = ""
+    problem_dir: str = ""
+    base_error_m: float = 0.10
+    base_error_deg: float = 5.0
+    base_samples: int = 12
 
     def edge_settings(self) -> Dict[str, float]:
         """The edge-measuring settings the workers need, in radians."""
@@ -490,22 +520,141 @@ def file_anchors(root: str, settings: BuildSettings, existing: Sequence[Dict[str
                     settings.edge_settings(), verbose) as pool:
         model = HoldingModel.from_dict(pool.run(task_model, [{"chunk": 0}], "model")[0]["model"])
         starts = file_starts(resolve_starts_file(root, settings.starts_file), model)
-        home = model.home_conf12.tolist()
-        results = pool.run(task_expand, [{"chunk": n, "world_from_bar": s["world_from_bar"],
-                                          "turn_references": [["home", home]]} for n, s in enumerate(starts)],
-                           "file starts")
+        items = start_items(starts)
+        results = expand_items(pool, items, model.home_conf12.tolist(), "file starts")
+    new = anchors_from_expansion(items, results, existing)
+    if verbose:
+        print(f"  starts file: {len(starts)} poses, {len(new)} branch pairs added as anchors")
+    return new
+
+
+def anchors_from_expansion(items: Sequence[Dict[str, Any]], results: Sequence[Dict[str, Any]],
+                           existing: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Turn solved bar poses into anchors: one per collision-free branch pair, without duplicates.
+
+    Args:
+        items (Sequence[Dict[str, Any]]): one per pose, each with ``fields``
+            (what every anchor of that pose carries: role, indices, labels).
+        results (Sequence[Dict[str, Any]]): the matching ``task_expand`` results.
+        existing (Sequence[Dict[str, Any]]): anchors already listed.
+
+    Returns:
+        List[Dict[str, Any]]: the new anchors, on the home turn.
+    """
     new: List[Dict[str, Any]] = []
-    for start, result in zip(starts, results):
+    for item, result in zip(items, results):
         for found in result["confs"]:
             conf = np.asarray(found["conf"], dtype=float)
             if any(np.max(np.abs(conf - np.asarray(a["conf"]))) < 1e-9 for a in list(existing) + new):
                 continue
-            new.append({"role": "start", "goal_index": None, "start_index": start["start_index"],
-                        "carry": start["anchor"], "label": start["label"], "difficulty": "file",
-                        "turn": "home", "conf": [float(v) for v in conf]})
-    if verbose:
-        print(f"  starts file: {len(starts)} poses, {len(new)} branch pairs added as anchors")
+            new.append({**item["fields"], "pair_index": int(found["pair"]), "turn": "home",
+                        "conf": [float(v) for v in conf]})
     return new
+
+
+def start_items(starts: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Starts of a starts file as poses to expand into anchors."""
+    return [{"world_from_bar": s["world_from_bar"],
+             "fields": {"role": "start", "goal_index": None, "start_index": s["start_index"],
+                        "carry": s["anchor"], "label": s["label"], "difficulty": "file"}} for s in starts]
+
+
+def expand_items(pool: WorkerPool, items: Sequence[Dict[str, Any]], home: Sequence[float],
+                 label: str) -> List[Dict[str, Any]]:
+    """Solve every collision-free branch pair of each pose, in the pool's scene."""
+    return pool.run(task_expand, [{"chunk": n, "world_from_bar": item["world_from_bar"],
+                                   "turn_references": [["home", list(home)]]} for n, item in enumerate(items)], label)
+
+
+def export_goal_poses(settings: BuildSettings, problem: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The bar's goal as seen from the robot: the planned one, and copies for a base parked elsewhere.
+
+    A roadmap lives in the robot's own frame, so a base that parks a little
+    off does not need another roadmap: it only moves the goal as the robot
+    sees it (``inverse(world_from_base) @ world_from_bar_goal``). Anchoring
+    on a spread of such goals makes the roadmap dense around the whole region
+    the real goal can fall in.
+
+    Args:
+        settings (BuildSettings): the export folder, bar, and the parking error.
+        problem (Dict[str, Any]): the bar's problem (grasps), as cached by build-cells.
+
+    Returns:
+        List[Dict[str, Any]]: per goal ``goal_index`` (0 = planned), ``shift``
+        (dx m, dy m, dyaw deg of the base) and ``base_from_bar`` (pose lists).
+    """
+    _action, movement, _home = load_carry_movement(settings.problem_dir, settings.bar_id)
+    goal = planned_goal(movement, BarProblem.from_dict(problem))
+    poses = [{"goal_index": 0, "shift": [0.0, 0.0, 0.0], "base_from_bar": pose_from_matrix(goal["base_from_bar"])}]
+    rng = np.random.default_rng(np.random.SeedSequence([int(settings.seed), 7919]))
+    for k in range(1, int(settings.base_samples) + 1):
+        dx, dy = rng.uniform(-settings.base_error_m, settings.base_error_m, 2)
+        dyaw = float(rng.uniform(-settings.base_error_deg, settings.base_error_deg))
+        base = shifted_base(goal["world_from_base"], float(dx), float(dy), float(np.radians(dyaw)))
+        poses.append({"goal_index": k, "shift": [float(dx), float(dy), dyaw],
+                      "base_from_bar": pose_from_matrix(invert_transform(base) @ goal["world_from_bar"])})
+    return poses
+
+
+def export_anchors(root: str, settings: BuildSettings, problem: Dict[str, Any],
+                   verbose: bool) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Anchors for a roadmap built from an export: home, the goal region, and the starts file.
+
+    Args:
+        root (str): the benchmark data root.
+        settings (BuildSettings): the build.
+        problem (Dict[str, Any]): the bar's problem, as cached by build-cells.
+        verbose (bool): print progress.
+
+    Returns:
+        Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]: the anchors, and
+        the goal poses they came from (with how many branch pairs each gave).
+    """
+    home = [float(v) for v in problem["home_conf12"]]
+    anchors: List[Dict[str, Any]] = [{"role": "home", "turn": "given", "conf": home}]
+    goal_poses = export_goal_poses(settings, problem)
+    with WorkerPool(root, settings.source_key, settings.bar_id, min(settings.workers, 4), None,
+                    settings.edge_settings(), verbose) as pool:
+        model = HoldingModel.from_dict(pool.run(task_model, [{"chunk": 0}], "model")[0]["model"])
+        items = [{"world_from_bar": pose["base_from_bar"],
+                  "fields": {"role": "goal", "goal_index": pose["goal_index"]}} for pose in goal_poses]
+        starts = file_starts(resolve_starts_file(root, settings.starts_file), model) if settings.starts_file else []
+        items += start_items(starts)
+        results = expand_items(pool, items, home, "goal and start poses")
+    for pose, result in zip(goal_poses, results):
+        pose["n_branch_pairs"] = len(result["confs"])
+    new = anchors_from_expansion(items, results, anchors)
+    anchors.extend(new)
+    if verbose:
+        start_results = results[len(goal_poses):]
+        print(f"  export anchors: {len(goal_poses)} goal poses "
+              f"({sum(1 for p in goal_poses if p['n_branch_pairs'])} holdable), {len(starts)} start poses "
+              f"({sum(1 for r in start_results if r['confs'])} holdable), {len(new)} branch pairs in all")
+    return anchors, goal_poses
+
+
+def cached_problem(root: str, source_key: str, bar_id: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """A bar's problem and its robot-side signature, from the build-cells cache.
+
+    Args:
+        root (str): the benchmark data root.
+        source_key (str): the trimmed-scene cache key.
+        bar_id (str): the bar.
+
+    Returns:
+        Tuple[Dict[str, Any], Dict[str, Any]]: the problem (grasps, home, names)
+        and the signature of what the precompute scene carries.
+
+    Raises:
+        FileNotFoundError: when the bar has no trimmed scene (run build-cells).
+    """
+    folder = os.path.join(root, "cells", source_key, bar_id)
+    if not os.path.isfile(os.path.join(folder, "problem.json")):
+        raise FileNotFoundError(f"No trimmed scene for {bar_id} at {folder}. Run "
+                                "scripts/benchmark_cdfm.py build-cells on the problem folder first.")
+    problem = read_json(os.path.join(folder, "problem.json"))
+    template_state = json_load(os.path.join(folder, "template_state.json"))
+    return problem, robot_side_signature(template_state, problem["bar_rb_name"])
 
 
 def build_roadmap(root: str, settings: BuildSettings, verbose: bool = True) -> Roadmap:
@@ -521,10 +670,20 @@ def build_roadmap(root: str, settings: BuildSettings, verbose: bool = True) -> R
     """
     wall_start = perf_counter()
     say = print if verbose else (lambda *args, **kwargs: None)
-    entry = load_library_entry(root, settings.library, settings.bar_id)
-    anchors = make_anchors(entry, settings.goals, settings.anchor_starts, settings.anchor_turns, arm_limits())
-    if settings.starts_file:
-        anchors.extend(file_anchors(root, settings, anchors, verbose))
+    export: Dict[str, Any] = {}
+    if settings.problem_dir:
+        # * Export mode: no benchmark library; the goal region comes from the design.
+        problem, signature = cached_problem(root, settings.source_key, settings.bar_id)
+        anchors, goal_poses = export_anchors(root, settings, problem, verbose)
+        export = {"problem_dir": settings.problem_dir, "goal_poses": goal_poses, "signature": signature}
+        source = "export " + os.path.basename(os.path.normpath(settings.problem_dir))
+    else:
+        entry = load_library_entry(root, settings.library, settings.bar_id)
+        problem = entry["problem"]
+        anchors = make_anchors(entry, settings.goals, settings.anchor_starts, settings.anchor_turns, arm_limits())
+        if settings.starts_file:
+            anchors.extend(file_anchors(root, settings, anchors, verbose))
+        source = "library " + settings.library
     sampler = SamplerConfig(
         anchors=np.asarray([a["conf"] for a in anchors], dtype=float),
         anchor_roles=[a["role"] for a in anchors],
@@ -537,7 +696,7 @@ def build_roadmap(root: str, settings: BuildSettings, verbose: bool = True) -> R
     unknown_modes = [mode for mode in settings.mode_mix if mode not in SAMPLING_MODES]
     if unknown_modes or sum(settings.mode_mix.values()) <= 0:
         raise ValueError(f"Bad sampling mix {settings.mode_mix}; modes are {SAMPLING_MODES}.")
-    say(f"[prm build] {settings.run_name}: bar {settings.bar_id}, library {settings.library}, "
+    say(f"[prm build] {settings.run_name}: bar {settings.bar_id}, {source}, "
         f"{len(anchors)} anchors, target {settings.nodes} nodes, {settings.workers} workers")
 
     timings: Dict[str, float] = {}
@@ -634,7 +793,7 @@ def build_roadmap(root: str, settings: BuildSettings, verbose: bool = True) -> R
     roadmap.meta = {
         "schema_version": SCHEMA_VERSION, "run_name": settings.run_name, "bar_id": settings.bar_id,
         "library": settings.library, "source_key": settings.source_key, "created": time(),
-        "problem": entry["problem"], "provenance": provenance_record(),
+        "problem": problem, "export": export, "provenance": provenance_record(),
         "summary": graph_summary(roadmap.n_nodes, roadmap.edges, anchor_nodes, settings.rot_deg_per_mm),
         "parallel": {name: parallel_summary(counters[name], timings[f"{name}_s"])
                      for name in ("anchors", "sample", "edges")},
@@ -1050,8 +1209,72 @@ def print_query_summary(record: Dict[str, Any]) -> None:
 # -----------------------------------------------------------------------------
 
 
+def export_scene_assets(root: str, run_name: str, verbose: bool = True) -> List[str]:
+    """Write the 3D file of every scene an online plan was made in, when it is not there yet.
+
+    Args:
+        root (str): the benchmark data root.
+        run_name (str): the run.
+        verbose (bool): print what was written.
+
+    Returns:
+        List[str]: the glb files that exist afterwards.
+    """
+    scenes_dir = os.path.join(run_dir(root, run_name), "scenes")
+    bar_rb_name = load_roadmap(root, run_name).meta["problem"]["bar_rb_name"]
+    written: List[str] = []
+    for entry in list_queries(root, run_name):
+        query = read_json(query_path(root, run_name, entry["tag"]))
+        files = (query.get("scene") or {}).get("files")
+        if not files:
+            continue
+        glb_path = os.path.join(scenes_dir, os.path.splitext(files["state"])[0] + ".glb")
+        if not os.path.isfile(glb_path):
+            cell = json_load(os.path.join(scenes_dir, files["cell"]))
+            state = json_load(os.path.join(scenes_dir, files["state"]))
+            counts = export_scene_glb(cell, state, bar_rb_name, glb_path)
+            if verbose:
+                print(f"  scene {entry['tag']}: {counts['standing']} bodies, {counts['carried']} carried, "
+                      f"{counts['support_robots']} support robots -> {glb_path} ({counts['bytes'] / 1e6:.1f} MB)")
+        written.append(glb_path)
+    return written
+
+
+def pretracking_summary(root: str, run_name: str) -> List[Dict[str, Any]]:
+    """What the run's pretracking files cost: one entry per ``tracked_<score>mm.json.gz``.
+
+    Pretracking (``refine.py``, usually run overnight) is part of the precompute
+    of a roadmap, so the page shows its wall time next to the build phases. The
+    files are large (one record per edge), so only the headline numbers are
+    copied out here; the page never loads them.
+
+    Args:
+        root (str): the benchmark data root.
+        run_name (str): the run.
+
+    Returns:
+        List[Dict[str, Any]]: ``file``, ``max_score_mm``, ``wall_s``, ``n_records``
+            for each tracking file, in file-name order.
+    """
+    entries = []
+    for path in sorted(glob(os.path.join(run_dir(root, run_name), "tracked_*mm.json.gz"))):
+        tracked = read_json(path)
+        entries.append({
+            "file": os.path.basename(path),
+            "max_score_mm": tracked.get("max_score_mm"),
+            "wall_s": tracked.get("wall_s"),
+            "n_records": len(tracked.get("records", [])),
+        })
+    return entries
+
+
 def export_dashboard(root: str, run_name: str) -> str:
     """Copy the roadmap page into the run and write the small index it starts from.
+
+    The robot's 3D file (shared by every run of the same export) and the 3D
+    files of the scenes online plans were made in are written when missing.
+    The run is also recorded in ``<root>/prm/dashboards.json``, the list the
+    page's run dropdown reads, so every exported page can jump to every other.
 
     Args:
         root (str): the benchmark data root.
@@ -1064,6 +1287,10 @@ def export_dashboard(root: str, run_name: str) -> str:
     roadmap_meta = load_roadmap(root, run_name).meta
     out_dir = copy_dashboard(root, run_name)
     problem = roadmap_meta["problem"]
+    if not os.path.isfile(os.path.join(root, "assets", roadmap_meta["source_key"], "scene.glb")):
+        export_robot_assets(root, roadmap_meta["source_key"], roadmap_meta["bar_id"])
+    export_scene_assets(root, run_name)
+    queries = list_queries(root, run_name)
     write_json_atomic(os.path.join(out_dir, "prm.json"), {
         "schema_version": SCHEMA_VERSION, "run_name": run_name, "bar_id": roadmap_meta["bar_id"],
         "library": roadmap_meta["library"], "source_key": roadmap_meta["source_key"],
@@ -1073,8 +1300,23 @@ def export_dashboard(root: str, run_name: str) -> str:
                                                    "grasp_bar_from_right", "joint_names_12")},
         "rot_deg_per_mm": config["settings"]["rot_deg_per_mm"],
         "roadmap": "../roadmap.json.gz",
-        "queries": [{**q, "file": f"../queries/{q['file']}"} for q in list_queries(root, run_name)],
+        "queries": [{**q, "file": f"../queries/{q['file']}"} for q in queries],
+        # * What the precompute cost: the build's phases (the roadmap file carries
+        # * the same numbers) and the pretracking files' wall time.
+        "precompute": {
+            "build_timings": config.get("timings", {}),
+            "workers": config["settings"].get("workers"),
+            "tracking": pretracking_summary(root, run_name),
+        },
     })
+    # * The list every page's run dropdown reads: one line per exported run with
+    # * its queries, so the reader can switch bar or plan without editing the address.
+    update_index(os.path.join(prm_root(root), "dashboards.json"), "run_name", {
+        "run_name": run_name, "bar_id": roadmap_meta["bar_id"], "library": roadmap_meta["library"],
+        "source_key": roadmap_meta["source_key"], "updated": time(),
+        "queries": [{key: q.get(key) for key in ("tag", "kind", "found", "goal_index", "n_starts", "best_gap_mm")}
+                    for q in queries],
+    }, "dashboards")
     return out_dir
 
 

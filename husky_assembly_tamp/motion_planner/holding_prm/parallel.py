@@ -29,7 +29,9 @@ from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
 
-from husky_assembly_tamp.benchmark.scene import load_trimmed_problem, open_scene, quiet_planner_logging
+from compas.data import json_load
+
+from husky_assembly_tamp.benchmark.scene import BarProblem, load_trimmed_problem, open_scene, quiet_planner_logging
 from husky_assembly_tamp.motion_planner.holding_prm.carry import carry_bar_pose, score_carry_pose
 from husky_assembly_tamp.motion_planner.holding_prm.holding import (
     HoldingModel,
@@ -45,10 +47,11 @@ from husky_assembly_tamp.motion_planner.holding_prm.sampling import (
     WorkerTools,
     expand_bar_pose,
     make_collision_fn,
+    make_collision_fns,
     new_counters,
     sample_chunk,
 )
-from husky_assembly_tamp.motion_planner.holding_prm.tracking import TrackSettings, track_edge_landing
+from husky_assembly_tamp.motion_planner.holding_prm.tracking import TrackSettings, fine_segment, track_edge_landing
 from husky_assembly_tamp.motion_planner.ssik_ik import verify_ssik_joint_order
 
 
@@ -84,6 +87,50 @@ def init_worker(root: str, source_key: str, bar_id: str, sampler: Optional[Dict[
         "sampler": SamplerConfig.from_dict(sampler) if sampler else None,
         "edge_settings": dict(edge_settings),
     })
+
+
+def init_worker_scene(cell_path: str, state_path: str, problem: Dict[str, Any],
+                      edge_settings: Dict[str, float]) -> None:
+    """Open a real scene in this process, from files. Runs once, when the process starts.
+
+    Unlike :func:`init_worker`, which opens a bar's precompute scene from the
+    benchmark cache, this opens whatever cell and state it is pointed at: the
+    robot at its real base pose with the built bars around it (see
+    ``scenes.build_scene_cell``). The worker then has both the full collision
+    check and the scene-only one.
+
+    Args:
+        cell_path (str): the scene's cell file (compas JSON).
+        state_path (str): its state file.
+        problem (Dict[str, Any]): the bar's ``BarProblem`` as a dict (grasps,
+            home, joint names).
+        edge_settings (Dict[str, float]): see :func:`init_worker`.
+    """
+    os.environ.setdefault("OMP_NUM_THREADS", "1")
+    quiet_planner_logging()
+    bar_problem = BarProblem.from_dict(problem)
+    scene = open_scene(json_load(cell_path), json_load(state_path), bar_problem)
+    verify_ssik_joint_order(scene.robot_puid)
+    checks = make_collision_fns(scene.planner, scene.template_state, bar_problem.joint_names_12)
+    _WORKER.clear()
+    _WORKER.update({
+        "scene": scene,
+        "tools": WorkerTools(build_holding_model(scene.robot_puid, bar_problem), checks["full"],
+                             checks["scene_only"]),
+        "sampler": None,
+        "edge_settings": dict(edge_settings),
+    })
+
+
+def use_tools_in_process(tools: WorkerTools, edge_settings: Dict[str, float]) -> None:
+    """Make this process the single worker, on a scene the caller already has open.
+
+    Args:
+        tools (WorkerTools): model and collision checks built on the caller's planner.
+        edge_settings (Dict[str, float]): see :func:`init_worker`.
+    """
+    _WORKER.clear()
+    _WORKER.update({"scene": None, "tools": tools, "sampler": None, "edge_settings": dict(edge_settings)})
 
 
 def worker_model() -> HoldingModel:
@@ -216,6 +263,50 @@ def task_track(task: Dict[str, Any]) -> Dict[str, Any]:
     return {"chunk": task["chunk"], "records": records, "counters": counters}
 
 
+def task_check(task: Dict[str, Any]) -> Dict[str, Any]:
+    """Collision-check a batch of configurations, with the scene-only check or the full one.
+
+    Args:
+        task (Dict[str, Any]): ``chunk``, ``confs`` (lists of 12 values) and
+            ``which`` ("scene": only against what does not ride on the robot;
+            "full": everything).
+
+    Returns:
+        Dict[str, Any]: ``chunk``, ``collides`` (one bool per configuration)
+        and ``counters``.
+    """
+    start = perf_counter()
+    tools: WorkerTools = _WORKER["tools"]
+    counters = new_counters()
+    check = tools.timed_scene_collides if task["which"] == "scene" else tools.timed_collides
+    collides = [bool(check(np.asarray(conf, dtype=float), counters)) for conf in task["confs"]]
+    counters["seconds_worker"] = perf_counter() - start
+    return {"chunk": task["chunk"], "collides": collides, "counters": counters}
+
+
+def task_fine(task: Dict[str, Any]) -> Dict[str, Any]:
+    """Walk consecutive exact waypoints at a fine step and collision-check what lies between.
+
+    Args:
+        task (Dict[str, Any]): ``chunk``, ``confs`` (consecutive exact
+            waypoints of a path; each neighbouring pair is one step),
+            ``first_index`` (the path index of ``confs[0]``, only passed back),
+            ``position_res_m`` and ``rotation_res_rad`` (the fine step).
+
+    Returns:
+        Dict[str, Any]: ``chunk``, ``first_index``, ``steps`` (one record per
+        pair, see ``tracking.fine_segment``) and ``counters``.
+    """
+    start = perf_counter()
+    tools: WorkerTools = _WORKER["tools"]
+    counters = new_counters()
+    confs = [np.asarray(conf, dtype=float) for conf in task["confs"]]
+    steps = [fine_segment(tools, a, b, task["position_res_m"], task["rotation_res_rad"], counters)
+             for a, b in zip(confs[:-1], confs[1:])]
+    counters["seconds_worker"] = perf_counter() - start
+    return {"chunk": task["chunk"], "first_index": task["first_index"], "steps": steps, "counters": counters}
+
+
 def task_carry(task: Dict[str, Any]) -> Dict[str, Any]:
     """Score one chunk of carry-pose candidates (see ``carry.score_carry_pose``).
 
@@ -292,17 +383,64 @@ class WorkerPool:
         """
         self.workers = max(1, int(workers))
         self.verbose = verbose
-        init_args = (root, source_key, bar_id, sampler, edge_settings)
+        # Whether this pool opened the in-process scene (and so must close it).
+        self.owns_scene = True
+        self._start(init_worker, (root, source_key, bar_id, sampler, edge_settings))
+
+    def _start(self, initializer: Callable[..., None], init_args: tuple) -> None:
+        """Start the processes, or open the scene in this process when there is one worker."""
         start = perf_counter()
         if self.workers == 1:
-            init_worker(*init_args)
+            initializer(*init_args)
             self.executor = None
         else:
             self.executor = ProcessPoolExecutor(
                 max_workers=self.workers, mp_context=get_context("spawn"),
-                initializer=init_worker, initargs=init_args,
+                initializer=initializer, initargs=init_args,
             )
         self.startup_s = perf_counter() - start
+
+    @classmethod
+    def from_scene_files(cls, cell_path: str, state_path: str, problem: Dict[str, Any], workers: int,
+                         edge_settings: Dict[str, float], verbose: bool = True) -> "WorkerPool":
+        """A pool whose workers each open one real scene from files (see :func:`init_worker_scene`).
+
+        Args:
+            cell_path (str): the scene's cell file.
+            state_path (str): its state file.
+            problem (Dict[str, Any]): the bar's problem as a dict.
+            workers (int): how many processes (at least 2: a single worker
+                would open a second scene in the caller's process; use
+                :meth:`in_process` for that).
+            edge_settings (Dict[str, float]): see :func:`init_worker`.
+            verbose (bool): print progress.
+
+        Returns:
+            WorkerPool: the pool.
+        """
+        if int(workers) < 2:
+            raise ValueError("A pool from scene files needs at least 2 workers; use in_process for one.")
+        pool = cls.__new__(cls)
+        pool.workers, pool.verbose, pool.owns_scene = int(workers), verbose, True
+        pool._start(init_worker_scene, (cell_path, state_path, problem, edge_settings))
+        return pool
+
+    @classmethod
+    def in_process(cls, tools: WorkerTools, edge_settings: Dict[str, float], verbose: bool = True) -> "WorkerPool":
+        """A one-worker pool on a scene the caller already has open (never opens a second one).
+
+        Args:
+            tools (WorkerTools): model and collision checks on the caller's planner.
+            edge_settings (Dict[str, float]): see :func:`init_worker`.
+            verbose (bool): print progress.
+
+        Returns:
+            WorkerPool: the pool.
+        """
+        pool = cls.__new__(cls)
+        pool.workers, pool.verbose, pool.owns_scene = 1, verbose, False
+        pool._start(use_tools_in_process, (tools, edge_settings))
+        return pool
 
     def run(self, job: Callable[[Dict[str, Any]], Dict[str, Any]], tasks: List[Dict[str, Any]],
             label: str, progress: Optional[Callable[[Dict[str, Any]], str]] = None) -> List[Dict[str, Any]]:
@@ -365,7 +503,9 @@ class WorkerPool:
         if self.executor is not None:
             self.executor.shutdown(wait=True, cancel_futures=True)
         elif "scene" in _WORKER:
-            _WORKER["scene"].close()
+            # A scene the caller lent us stays open; one this pool opened is closed.
+            if self.owns_scene and _WORKER["scene"] is not None:
+                _WORKER["scene"].close()
             _WORKER.clear()
 
     def __enter__(self) -> "WorkerPool":

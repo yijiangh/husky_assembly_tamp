@@ -29,6 +29,8 @@ from typing import Dict, List, Optional
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from husky_assembly_tamp.motion_planner.holding_prm.parallel import default_workers  # noqa: E402
+from husky_assembly_tamp.motion_planner.holding_prm.scenes import problem_source_key  # noqa: E402
+from husky_assembly_tamp.motion_planner.holding_prm.store import read_json  # noqa: E402
 from husky_assembly_tamp.motion_planner.holding_prm.tracking import TrackSettings  # noqa: E402
 from husky_assembly_tamp.motion_planner.holding_prm.pilot import (  # noqa: E402
     BuildSettings,
@@ -121,7 +123,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     build = commands.add_parser("build", help="sample and measure a roadmap")
     common(build)
-    build.add_argument("--library", required=True, help="problem library, e.g. cdfm_v1 or smoke")
+    build.add_argument("--library", default="", help="problem library, e.g. cdfm_v1 or smoke")
+    build.add_argument("--problem-dir", default="",
+                       help="build from an exported problem folder instead of a library: anchors on the "
+                            "bar's planned goal and on copies of it for a shifted base (needs build-cells)")
+    build.add_argument("--base-error-m", type=float, default=defaults.base_error_m,
+                       help="with --problem-dir: how far the base may park from its planned place")
+    build.add_argument("--base-error-deg", type=float, default=defaults.base_error_deg,
+                       help="with --problem-dir: how far the base may be turned")
+    build.add_argument("--base-samples", type=int, default=defaults.base_samples,
+                       help="with --problem-dir: how many shifted bases to anchor on")
     build.add_argument("--bar", required=True, help="bar id, e.g. B18")
     build.add_argument("--source-key", default=None, help="trimmed-scene cache (only if several exist)")
     build.add_argument("--goals", default="all", help="goal indices whose pairs become anchors, or all")
@@ -207,7 +218,9 @@ def build_parser() -> argparse.ArgumentParser:
     track.add_argument("--lead", choices=("mid", "left", "right"), default=refine_defaults.lead)
     track.add_argument("--workers", type=int, default=default_workers())
 
-    export = commands.add_parser("export", help="copy the roadmap page into the run")
+    export = commands.add_parser("export", help="copy the roadmap page into the run; also writes the robot's 3D "
+                                                 "file and the scene files of saved online plans when missing, "
+                                                 "and lists the run in prm/dashboards.json (the page's run dropdown)")
     common(export)
     info = commands.add_parser("info", help="print a run's numbers")
     common(info)
@@ -226,9 +239,23 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     root = resolve_root(args.root)
     if args.command == "build":
+        if bool(args.library) == bool(args.problem_dir):
+            raise SystemExit("Give exactly one of --library (benchmark library) or --problem-dir (exported problem).")
+        # An export has its own trimmed-scene cache, named after the folder; a
+        # library records which cache it was built from.
+        if args.source_key:
+            source_key = args.source_key
+        elif args.problem_dir:
+            source_key = problem_source_key(args.problem_dir)
+        else:
+            index = os.path.join(root, "library", args.library, "index.json")
+            source_key = (read_json(index).get("source_key") if os.path.isfile(index) else None) \
+                or resolve_source_key(root, None)
         build_roadmap(root, BuildSettings(
             run_name=args.name, library=args.library, bar_id=args.bar,
-            source_key=resolve_source_key(root, args.source_key), goals=parse_goals(args.goals),
+            problem_dir=os.path.abspath(args.problem_dir) if args.problem_dir else "",
+            base_error_m=args.base_error_m, base_error_deg=args.base_error_deg, base_samples=args.base_samples,
+            source_key=source_key, goals=parse_goals(args.goals),
             anchor_starts=args.anchor_starts, anchor_turns=args.anchor_turns, nodes=args.nodes, k=args.k,
             radius_deg=args.radius_deg, collision_step_deg=args.collision_step_deg,
             viol_step_deg=args.viol_step_deg, rot_deg_per_mm=args.rot_deg_per_mm,

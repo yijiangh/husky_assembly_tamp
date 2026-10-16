@@ -2,27 +2,40 @@
 
 The first group needs no robot. The second opens the smoke cell of the
 benchmark data root in this process (no files are written there) and is
-skipped when the root is not available (set ``HUSKY_BENCH_ROOT``). Run with::
+skipped when the root is not available (set ``HUSKY_BENCH_ROOT``). The last
+group compares collision checks on an exported problem with built bars around
+the robot; it is skipped when that export or its trimmed scenes are missing
+(``HUSKY_EXPORT_PROBLEM_DIR`` points at another export than the default). Run with::
 
     .venv/Scripts/python.exe -m pytest benchmark/tests/test_holding_prm.py -q
 """
 from __future__ import annotations
 
+import glob
 import os
+import struct
 import subprocess
 import sys
+from json import loads
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from compas.datastructures import Mesh
+from compas.geometry import Box, Frame
+from compas_fab.robots import RigidBody, RigidBodyState, RobotCellState, ToolState
 from pybullet_planning import tform_from_pose
 
+from husky_assembly_tamp.benchmark.asset_versions import stamp_module_imports, stamp_page_assets
 from husky_assembly_tamp.benchmark.scene import load_trimmed_problem, open_scene
+from husky_assembly_tamp.motion_planner.api import plan_constrained_dual_arm
 from husky_assembly_tamp.motion_planner.holding_prm.holding import (
     STEP_MAX_RAD,
     HoldingModel,
     arm_limits,
     bar_from_arm,
     build_holding_model,
+    continuous_poses,
     holding_violation,
     interpolate_confs,
     interpolate_pose,
@@ -35,6 +48,7 @@ from husky_assembly_tamp.motion_planner.holding_prm.holding import (
     tool_target_from_bar,
     violation_score_mm,
 )
+from husky_assembly_tamp.motion_planner.holding_prm.online import RoadmapMismatch, check_roadmap_fits
 from husky_assembly_tamp.motion_planner.holding_prm.pilot import (
     choose_starts,
     load_library_entry,
@@ -53,7 +67,15 @@ from husky_assembly_tamp.motion_planner.holding_prm.sampling import (
     arm_branches,
     expand_bar_pose,
     make_collision_fn,
+    new_counters,
+    robot_side_signature,
     sample_chunk,
+)
+from husky_assembly_tamp.motion_planner.holding_prm.scenes import (
+    export_scene_glb,
+    geometry_key,
+    problem_source_key,
+    state_key,
 )
 from husky_assembly_tamp.motion_planner.holding_prm.search import (
     EdgeTable,
@@ -64,7 +86,7 @@ from husky_assembly_tamp.motion_planner.holding_prm.search import (
     route_from,
     shortest_between_sets,
 )
-from husky_assembly_tamp.motion_planner.holding_prm.refine import Tracker
+from husky_assembly_tamp.motion_planner.holding_prm.refine import Tracker, spread_size
 from husky_assembly_tamp.motion_planner.holding_prm.store import read_json, write_json_atomic
 from husky_assembly_tamp.motion_planner.holding_prm.tracking import TrackSettings, track_edge
 
@@ -105,6 +127,16 @@ def test_pose_round_trip_and_small_angles():
     turned[:3, :3] = [[np.cos(angle), -np.sin(angle), 0], [np.sin(angle), np.cos(angle), 0], [0, 0, 1]]
     _, measured = pose_gap(np.eye(4), turned)
     assert measured == pytest.approx(angle, rel=1e-3)
+
+
+def test_path_poses_keep_their_quaternion_sign():
+    """A flipped sign is the same orientation, but an interpolation by numbers reads it as a full turn."""
+    poses = [[[0, 0, 0], [0, 0, 0, 1]], [[0, 0, 1], [0, 0, -0.01, -1]], [[0, 0, 2], [0, 0, 0.02, 1]]]
+    fixed = continuous_poses(poses)
+    assert [pose[0] for pose in fixed] == [[0, 0, 0], [0, 0, 1], [0, 0, 2]]
+    assert np.allclose(fixed[1][1], [0, 0, 0.01, 1]) and np.allclose(fixed[2][1], [0, 0, 0.02, 1])
+    for before, after in zip(fixed[:-1], fixed[1:]):
+        assert np.dot(before[1], after[1]) > 0
 
 
 def test_score_and_cost_mean_the_same_tolerance():
@@ -192,6 +224,13 @@ def test_lazy_search_drops_edges_that_turn_out_blocked():
     assert tally["edges_blocked"] == 1
 
 
+def test_small_batches_are_spread_over_all_workers():
+    assert spread_size(8, 4, 4) == 2      # 8 edges, 4 workers: 2 each, not 4 + 4 on two workers
+    assert spread_size(3, 8, 4) == 1      # fewer edges than workers: one each
+    assert spread_size(500, 8, 4) == 4    # a big batch keeps the usual task size
+    assert spread_size(0, 8, 4) == 1
+
+
 def test_start_selection():
     starts = [{"start_index": k, "rank": k, "anchor": ("back", "horizontal")[k % 2],
                "difficulty": ("free", "blocked", "broken")[k % 3]} for k in range(30)]
@@ -221,10 +260,49 @@ def test_json_files_round_trip(tmp_path):
         assert read_json(path) == {"a": [0, 1, 2], "b": None, "c": 1.5}
 
 
+def test_copied_dashboard_stamps_every_import_with_a_content_hash(tmp_path):
+    """A change deep in the module tree must change the address of every module above it.
+
+    This is the cache bug of 2026-10-13: the entry script was stamped, but its
+    bare import of charts.js was not, so the browser ran an old cached copy.
+    """
+    js_dir = tmp_path / "static" / "js"
+    js_dir.mkdir(parents=True)
+    (js_dir / "leaf.js").write_text("export const a = 1;\n", encoding="utf-8")
+    (js_dir / "middle.js").write_text('import { a } from "./leaf.js";\nexport const b = a;\n', encoding="utf-8")
+    (js_dir / "entry.js").write_text("import { b } from './middle.js';\nimport * as THREE from \"three\";\n", encoding="utf-8")
+    (tmp_path / "index.html").write_text('<script type="module" src="./static/js/entry.js"></script>\n', encoding="utf-8")
+
+    stamp_page_assets(str(tmp_path), ("index.html",), ("static/js/entry.js", "static/css/missing.css"))
+    first = {name: (js_dir / name).read_text(encoding="utf-8") for name in ("leaf.js", "middle.js", "entry.js")}
+    assert '"./leaf.js?v=' in first["middle.js"]
+    assert "'./middle.js?v=" in first["entry.js"]
+    assert 'from "three"' in first["entry.js"]  # third-party imports are left alone
+    html = (tmp_path / "index.html").read_text(encoding="utf-8")
+    assert 'src="./static/js/entry.js?v=' in html and "missing.css" not in html
+
+    # * Changing the leaf changes the stamp in the middle module, which changes the entry's.
+    (js_dir / "leaf.js").write_text("export const a = 2;\n", encoding="utf-8")
+    (js_dir / "middle.js").write_text('import { a } from "./leaf.js";\nexport const b = a;\n', encoding="utf-8")
+    (js_dir / "entry.js").write_text("import { b } from './middle.js';\nimport * as THREE from \"three\";\n", encoding="utf-8")
+    (tmp_path / "index.html").write_text('<script type="module" src="./static/js/entry.js"></script>\n', encoding="utf-8")
+    stamp_page_assets(str(tmp_path), ("index.html",), ("static/js/entry.js",))
+    second = {name: (js_dir / name).read_text(encoding="utf-8") for name in ("middle.js", "entry.js")}
+    assert second["middle.js"] != first["middle.js"] and second["entry.js"] != first["entry.js"]
+    assert (tmp_path / "index.html").read_text(encoding="utf-8") != html
+
+    # * A cycle has no consistent stamping order and is reported, not guessed.
+    (js_dir / "leaf.js").write_text('import { b } from "./middle.js";\nexport const a = 1;\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="cycle"):
+        stamp_module_imports(str(js_dir))
+
+
 def test_the_package_never_imports_the_planner_core():
     """Importing the core empties its log file, which a running batch may be writing."""
     code = ("import sys; import husky_assembly_tamp.motion_planner.holding_prm.pilot; "
             "import husky_assembly_tamp.motion_planner.holding_prm.refine; "
+            "import husky_assembly_tamp.motion_planner.holding_prm.online; "
+            "import husky_assembly_tamp.motion_planner.holding_prm.scenes; "
             "print([m for m in sys.modules if 'dual_arm_task_space_rrt' in m])")
     result = subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, capture_output=True, text=True, check=True)
     assert result.stdout.strip().splitlines()[-1] == "[]"
@@ -383,6 +461,144 @@ def test_assembly_reads_reversed_edges_and_skips_the_shared_node():
     assert confs is None and info["failed_row"] == 1 and info["blame_row"] == 1
 
 
+# * ---- Planning in a changing scene, without a scene ------------------------
+# The roadmap's verdicts cover only the robot, its tools and the carried bar.
+# These tests use made-up waypoints and a stand-in for the worker processes.
+
+
+class _FakeScenePool:
+    """Stands in for the workers: a configuration "touches the scene" when its first joint is above 0.5."""
+
+    workers = 2
+
+    def run(self, job, tasks, label, progress=None):
+        """Answer scene-check tasks the way ``parallel.task_check`` would."""
+        return [{"chunk": task["chunk"], "counters": new_counters(),
+                 "collides": [conf[0] > 0.5 for conf in task["confs"]]} for task in tasks]
+
+
+def _scene_tracker(table, records):
+    """A tracker whose edges all come from the overnight file and still wait for the scene check."""
+    tracker = Tracker.__new__(Tracker)
+    tracker.table = table
+    tracker.row_of = table.index_of()
+    tracker.pool = _FakeScenePool()
+    tracker.counters = {}
+    tracker.records = records
+    tracker.scene_check = True
+    tracker.scene_pending = set(records)
+    tracker.scene_blocked = []
+    tracker.asked_rows = set()
+    return tracker
+
+
+def test_scene_check_drops_only_the_direction_that_touches_the_scene():
+    clear, touching = [0.0] * 12, [0.9] + [0.0] * 11
+    table = _table([(0, 1, 1.0, 1.0, True, False), (1, 2, 1.0, 1.0, True, False)])
+    # Row 0: the walk 0 -> 1 is clear, the walk back touches the scene. Row 1: both touch.
+    records = {0: {"row": 0, "free": True, "confs": [clear, clear], "confs_back": [clear, touching, clear]},
+               1: {"row": 1, "free": True, "confs": [clear, touching], "confs_back": [touching, clear]}}
+    tracker = _scene_tracker(table, records)
+    tracker.scene_check_rows([0, 1])
+    assert records[0]["free"] and records[0]["confs"] and records[0]["confs_back"] == []
+    assert not records[1]["free"] and records[1]["reason"] == "scene_collision"
+    assert tracker.scene_blocked == [1] and tracker.scene_pending == set()
+    assert list(table.free) == [True, False] and all(table.checked)
+
+
+def test_lazy_search_goes_around_an_edge_the_scene_blocks():
+    """The short route 0-1-2 was fine overnight, but a built bar now sits on edge 1-2."""
+    clear, touching = [0.0] * 12, [0.9] + [0.0] * 11
+    table = _table([(0, 1, 1.0, 1.0, True, False), (1, 2, 1.0, 1.0, True, False),
+                    (0, 3, 2.0, 1.0, True, False), (3, 2, 2.0, 1.0, True, False)])
+    records = {row: {"row": row, "free": True, "confs": [clear, clear], "confs_back": [clear, clear]}
+               for row in range(4)}
+    records[1]["confs"] = [clear, touching, clear]
+    records[1]["confs_back"] = [clear, touching, clear]
+    tracker = _scene_tracker(table, records)
+
+    def find_path(mask):
+        found = shortest_between_sets(build_graph(table, mask, table.len_l2, [0], [2]))
+        return found[0] if found else None
+
+    path, tally = lazy_search(find_path, table, tracker.track_rows)
+    assert path == [0, 3, 2]
+    assert tally["edges_blocked"] == 1 and tracker.scene_blocked == [1]
+    # Only the edges a route wanted were sent to the scene check.
+    assert tally["edges_checked"] == 4 and tracker.scene_pending == set()
+    assert tracker.asked_rows == {0, 1, 2, 3}
+
+
+def _carrying_state(grasp_shift: float = 0.0) -> RobotCellState:
+    """A state with a bar on the left flange, a joint half riding along, an arm tool and a built bar."""
+    grasp = Frame([grasp_shift, 0.0, 0.1], [1, 0, 0], [0, 1, 0])
+    bodies = {
+        "bar_B1": RigidBodyState(Frame.worldXY(), attached_to_link="left_ur_arm_tool0", attachment_frame=grasp,
+                                 touch_links=["left_ur_arm_wrist_3_link"], touch_bodies=["joint_a", "bar_B0"]),
+        "joint_a": RigidBodyState(Frame.worldXY(), attached_to_link="left_ur_arm_tool0",
+                                  attachment_frame=Frame.worldXY(), touch_bodies=["bar_B1"]),
+        "bar_B0": RigidBodyState(Frame.worldXY()),  # built, stands in the scene
+    }
+    tools = {"gripper_left": ToolState(Frame.worldXY(), attached_to_group="left_arm",
+                                       touch_links=["left_ur_arm_wrist_3_link"])}
+    return RobotCellState(Frame.worldXY(), None, tools, bodies)
+
+
+def test_a_roadmap_built_for_another_load_is_refused():
+    model = SimpleNamespace(grasp={"right": np.eye(4)})
+    signature = robot_side_signature(_carrying_state(), "bar_B1")
+    # The built bar is not part of the signature (it belongs to the scene, not to the robot).
+    assert sorted(signature["bodies"]) == ["bar_B1", "joint_a"]
+    assert signature["bodies"]["bar_B1"]["touch_bodies"] == ["joint_a"]
+    roadmap = SimpleNamespace(meta={"export": {"signature": signature}}, model=model)
+
+    # Same load: accepted, also after the scene around the robot changed.
+    check_roadmap_fits(roadmap, _carrying_state(), "bar_B1", np.eye(4))
+    grown = _carrying_state()
+    grown.rigid_body_states["bar_B7"] = RigidBodyState(Frame.worldXY())
+    check_roadmap_fits(roadmap, grown, "bar_B1", None)
+
+    # The bar is grasped 2 cm further along: refused, saying what differs.
+    with pytest.raises(RoadmapMismatch, match="bar_B1: attachment frame differs"):
+        check_roadmap_fits(roadmap, _carrying_state(grasp_shift=0.02), "bar_B1", None)
+    # Another right grasp than the roadmap's: refused.
+    other_grasp = np.eye(4)
+    other_grasp[0, 3] = 0.01
+    with pytest.raises(RoadmapMismatch, match="right grasp differs"):
+        check_roadmap_fits(roadmap, _carrying_state(), "bar_B1", other_grasp)
+    # A joint half is missing from what the robot carries: refused.
+    lighter = _carrying_state()
+    del lighter.rigid_body_states["joint_a"]
+    with pytest.raises(RoadmapMismatch, match="joint_a: missing in the scene"):
+        check_roadmap_fits(roadmap, lighter, "bar_B1", None)
+    # A roadmap from a benchmark library carries no signature: refused rather than trusted.
+    with pytest.raises(RoadmapMismatch):
+        check_roadmap_fits(SimpleNamespace(meta={}, model=model), _carrying_state(), "bar_B1", None)
+
+
+def test_scene_cache_keys_tell_geometry_from_placement():
+    """The large cell file is reused when only the base moved; a reshaped bar gets a new one."""
+    def cell_with_bar(length: float) -> SimpleNamespace:
+        bar = RigidBody.from_mesh(Mesh.from_shape(Box(length, 0.02, 0.02)))
+        return SimpleNamespace(rigid_body_models={"bar_B1": bar}, tool_models={"gripper_left": None})
+
+    state = _carrying_state()
+    moved = _carrying_state()
+    moved.robot_base_frame = Frame([0.05, 0.0, 0.0], [1, 0, 0], [0, 1, 0])
+    assert geometry_key(cell_with_bar(1.0)) == geometry_key(cell_with_bar(1.0))
+    assert geometry_key(cell_with_bar(1.0)) != geometry_key(cell_with_bar(1.2))
+    assert state_key(state, "bar_B1") == state_key(_carrying_state(), "bar_B1")
+    assert state_key(state, "bar_B1") != state_key(moved, "bar_B1")
+
+
+def test_an_unknown_planning_backend_is_refused():
+    """The check comes before any planner or scene is touched, so none is needed here."""
+    with pytest.raises(ValueError, match="backend must be one of"):
+        plan_constrained_dual_arm(None, None, active_bar_id="B1", goal_conf=np.zeros(12), backend="rrt-connect")
+    with pytest.raises(ValueError, match="stage 3"):
+        plan_constrained_dual_arm(None, None, active_bar_id="B1", goal_conf=np.zeros(12), backend="prm", stage=2)
+
+
 # * ---- Pieces that need the smoke scene -----------------------------------
 
 ROOT = os.environ.get("HUSKY_BENCH_ROOT")
@@ -395,8 +611,9 @@ needs_scene = pytest.mark.skipif(not (ROOT and os.path.isfile(SMOKE_LIBRARY)),
 def smoke():
     """The smoke B3 scene, its holding model, and its library entry."""
     entry = load_library_entry(ROOT, "smoke", "B3")
-    cells = os.path.join(ROOT, "cells")
-    problem, cell, template = load_trimmed_problem(ROOT, sorted(os.listdir(cells))[0], "B3")
+    # The trimmed scene the smoke library was built from (several exports may be cached).
+    source_key = read_json(os.path.join(ROOT, "library", "smoke", "index.json"))["source_key"]
+    problem, cell, template = load_trimmed_problem(ROOT, source_key, "B3")
     scene = open_scene(cell, template, problem)
     tools = WorkerTools(build_holding_model(scene.robot_puid, problem), make_collision_fn(scene))
     yield scene, tools, entry
@@ -457,3 +674,85 @@ def test_sampled_nodes_hold_the_bar_and_edges_are_measured(smoke):
                                collision_step_rad=STEP_MAX_RAD, viol_step_rad=np.radians(2.5),
                                rot_deg_per_mm=0.4, check_collision=True, counters={})
         assert record["checked"] and record["viol_pos_max"] >= 0.0
+
+
+# * ---- The collision split, on an exported problem with built bars ----------
+# One process holds one simulator scene, so each scene is opened by the helper
+# program next to this file and its verdicts are read back.
+
+EXPORT_DIR = os.environ.get("HUSKY_EXPORT_PROBLEM_DIR") or os.path.normpath(os.path.join(
+    ROOT or "", "..", "..", "data_design_study", "260920_RobArch_demo_revamp"))
+SPLIT_BAR = "B4"  # its scene has two built bars, their joints and a support robot
+
+
+def _has_export() -> bool:
+    """Whether the export and the trimmed scene of the test bar are on this machine."""
+    if not (ROOT and os.path.isfile(os.path.join(EXPORT_DIR, "RobotCell.json"))):
+        return False
+    return os.path.isdir(os.path.join(ROOT, "cells", problem_source_key(EXPORT_DIR), SPLIT_BAR))
+
+
+def _verdicts(mode: str, count: int):
+    """Run the helper program for one scene and read its verdicts."""
+    helper = os.path.join(os.path.dirname(os.path.abspath(__file__)), "collision_split_helper.py")
+    result = subprocess.run([sys.executable, helper, mode, EXPORT_DIR, SPLIT_BAR, str(count)],
+                            cwd=REPO_ROOT, capture_output=True, text=True, check=True)
+    line = [row for row in result.stdout.splitlines() if row.startswith("RESULT ")][-1]
+    return loads(line[len("RESULT "):])
+
+
+@pytest.mark.skipif(not _has_export(), reason="needs the exported problem and its trimmed scenes (build-cells)")
+def test_collision_split_adds_up_to_the_full_check():
+    """What the roadmap reuse rests on, checked on a real scene.
+
+    1. The full check says "collides" exactly when the robot-side check or the
+       scene-only check does (nothing is lost or invented by splitting).
+    2. The scene the roadmap is precomputed in (base at the origin, nothing
+       built) gives the same verdict as the robot-side check in the real
+       scene at the real base pose (so precomputed verdicts carry over).
+    """
+    real = _verdicts("real", 80)
+    trimmed = _verdicts("trimmed", 80)
+    assert [a or b for a, b in zip(real["robot_side"], real["scene_only"])] == real["full"]
+    assert trimmed["full"] == real["robot_side"]
+    # The sample must exercise both parts, or the test proves nothing.
+    assert any(real["robot_side"]) and any(real["scene_only"]) and not all(real["full"])
+
+
+# * ---- The scene file the roadmap page draws -------------------------------
+
+ROBARCH_B4_RUN = os.path.join(ROOT or "", "prm", "260920_RobArch_demo_revamp__B4")
+
+
+def _a_cached_scene():
+    """The cell and state files of one scene an online plan was made in, or None."""
+    for state_path in sorted(glob.glob(os.path.join(ROBARCH_B4_RUN, "scenes", "*", "state_*.json"))):
+        cell_path = os.path.join(os.path.dirname(state_path), "cell.json")
+        if os.path.isfile(cell_path):
+            return cell_path, state_path
+    return None
+
+
+@pytest.mark.skipif(not (ROOT and _a_cached_scene()), reason="needs a cached scene of the B4 roadmap run")
+def test_scene_glb_holds_the_bodies_in_the_robots_frame(tmp_path):
+    """The glb lists every standing body, the carried joint halves by their link, and the support robots."""
+    from compas.data import json_load
+
+    cell_path, state_path = _a_cached_scene()
+    cell, state = json_load(cell_path), json_load(state_path)
+    out = str(tmp_path / "scene.glb")
+    counts = export_scene_glb(cell, state, "bar_B4", out)
+    standing = [n for n, b in state.rigid_body_states.items() if not (b.attached_to_link or b.attached_to_tool)]
+    carried = [n for n, b in state.rigid_body_states.items() if b.attached_to_link and n != "bar_B4"]
+    assert counts["standing"] == len(standing) and counts["carried"] == len(carried)
+    assert counts["support_robots"] == sum(1 for t in state.tool_states.values() if not t.attached_to_group)
+    # The glb's JSON chunk names one node per carried mesh, with the link it rides on.
+    with open(out, "rb") as handle:
+        handle.read(12)
+        length = struct.unpack("<I", handle.read(4))[0]
+        handle.read(4)
+        scene_json = loads(handle.read(length).decode("utf-8"))
+    names = [node["name"] for node in scene_json["nodes"]]
+    links = {state.rigid_body_states[n].attached_to_link for n in carried}
+    assert all(any(name.startswith(f"C-{link}-") for name in names) for link in links)
+    assert sum(name.startswith("S-") for name in names) >= len(standing)

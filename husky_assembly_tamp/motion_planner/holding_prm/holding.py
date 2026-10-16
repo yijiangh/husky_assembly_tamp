@@ -111,6 +111,29 @@ def pose_from_matrix(matrix: np.ndarray) -> List[List[float]]:
     return [[float(v) for v in matrix[:3, 3]], [float(v) for v in quaternion_from_matrix(matrix)]]
 
 
+def continuous_poses(poses: Sequence[Sequence[Sequence[float]]]) -> List[List[List[float]]]:
+    """The same poses with every quaternion's sign chosen to stay close to the one before.
+
+    A quaternion and its negative are the same orientation, but code that
+    interpolates between two poses by their numbers (pybullet_planning's
+    ``interpolate_poses``) takes a flipped sign for a turn of nearly a full
+    circle and cuts that step into more than a thousand pieces.
+
+    Args:
+        poses (Sequence): ``[[x, y, z], [qx, qy, qz, qw]]`` poses along a path.
+
+    Returns:
+        List[List[List[float]]]: the poses, orientation unchanged, signs made continuous.
+    """
+    out: List[List[List[float]]] = []
+    for position, quaternion in poses:
+        quaternion = [float(v) for v in quaternion]
+        if out and float(np.dot(out[-1][1], quaternion)) < 0.0:
+            quaternion = [-v for v in quaternion]
+        out.append([[float(v) for v in position], quaternion])
+    return out
+
+
 def invert_transform(matrix: np.ndarray) -> np.ndarray:
     """Invert a rigid transform without a general matrix inverse.
 

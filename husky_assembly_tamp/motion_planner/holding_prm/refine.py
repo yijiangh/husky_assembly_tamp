@@ -38,6 +38,7 @@ import numpy as np
 from husky_assembly_tamp.motion_planner.holding_prm.holding import HoldingModel, interpolate_confs, linf
 from husky_assembly_tamp.motion_planner.holding_prm.parallel import (
     WorkerPool,
+    task_check,
     task_edges,
     task_sample_with,
     task_track,
@@ -70,6 +71,9 @@ from husky_assembly_tamp.motion_planner.holding_prm.tracking import SAME_SOLUTIO
 # * Edges per tracking task. Tracking one edge costs a fraction of a second to
 # * a few seconds (mostly collision checks), so small chunks keep workers even.
 TRACK_CHUNK = 4
+
+# * Edges per scene-check task (each edge has a few dozen stored waypoints).
+SCENE_CHUNK = 6
 
 # * Tube draws per sampling task.
 TUBE_CHUNK = 32
@@ -278,6 +282,21 @@ def best_node_per_start(start_of: Dict[int, int], gap: np.ndarray) -> Dict[int, 
 # -----------------------------------------------------------------------------
 
 
+def spread_size(n_items: int, workers: int, largest: int) -> int:
+    """How many items go into one task, so a small batch still uses every worker.
+
+    Args:
+        n_items (int): how many items there are.
+        workers (int): how many workers share them.
+        largest (int): the task size used for big batches.
+
+    Returns:
+        int: ``largest`` for big batches; for small ones just enough per task
+        that every worker gets one (never less than 1).
+    """
+    return max(1, min(int(largest), -(-int(n_items) // max(1, int(workers)))))
+
+
 class Tracker:
     """The graph under refinement, with every edge's tracking verdict.
 
@@ -300,10 +319,29 @@ class Tracker:
             continued across them (see :meth:`assemble`).
     """
 
-    def __init__(self, graph: QueryGraph, settings: RefineSettings, pool: WorkerPool):
+    def __init__(self, graph: QueryGraph, settings: RefineSettings, pool: WorkerPool, scene_check: bool = False):
+        """Set up the tracking state.
+
+        Args:
+            graph (QueryGraph): the graph to refine.
+            settings (RefineSettings): tracker and tube settings.
+            pool (WorkerPool): the workers.
+            scene_check (bool): the workers hold a real scene (built bars
+                around the robot) and verdicts loaded from an overnight file
+                only cover the robot's own side. An edge loaded from that
+                file is then usable only after its stored waypoints also
+                pass the scene-only collision check, done the first time a
+                route wants the edge.
+        """
         self.graph = graph
         self.settings = settings
         self.pool = pool
+        self.scene_check = scene_check
+        # Rows whose verdict came from the overnight file and still need the scene check.
+        self.scene_pending: set = set()
+        self.scene_blocked: List[int] = []
+        # Rows some route asked about in this run (scene-checked or tracked now).
+        self.asked_rows: set = set()
         self.track_settings = settings.track_settings()
         base = graph.table
         self.confs = graph.confs.copy()
@@ -325,7 +363,9 @@ class Tracker:
     def _run(self, items: Sequence[Tuple[int, int, int, Optional[np.ndarray]]], label: str) -> List[Dict[str, Any]]:
         """Track edges given as (row, from node, to node, seed or None); results in order."""
         tasks = []
-        for number, piece in enumerate(chunked(list(items), TRACK_CHUNK)):
+        # A route's handful of edges is spread over all workers, not packed into one or two tasks.
+        size = spread_size(len(items), self.pool.workers, TRACK_CHUNK)
+        for number, piece in enumerate(chunked(list(items), size)):
             tasks.append({
                 "chunk": number, "rows": [row for row, _a, _b, _s in piece],
                 "confs_a": [self.confs[a].tolist() for _r, a, _b, _s in piece],
@@ -346,7 +386,11 @@ class Tracker:
         given row, in order, each with ``free`` = trackable (the shape the lazy
         search expects).
         """
+        pending = sorted({int(r) for r in rows if int(r) in self.scene_pending})
+        if pending:
+            self.scene_check_rows(pending)
         todo = sorted({int(r) for r in rows if int(r) not in self.records})
+        self.asked_rows.update(pending, todo)
         if todo:
             items = [(row, int(self.table.i[row]), int(self.table.j[row]), None) for row in todo]
             for record in self._run(items, "track"):
@@ -355,6 +399,45 @@ class Tracker:
                 self.table.checked[row] = True
                 self.table.free[row] = bool(record["free"])
         return [self.records[int(r)] for r in rows]
+
+    def scene_check_rows(self, rows: Sequence[int]) -> None:
+        """Run the scene-only collision check on the stored waypoints of edges from the overnight file.
+
+        Each direction of an edge keeps its own waypoints; a direction with a
+        waypoint that touches the scene is dropped, and an edge with no
+        direction left is marked unusable (reason "scene_collision").
+
+        Args:
+            rows (Sequence[int]): rows waiting for the scene check.
+        """
+        # One task per few edges; each lists the waypoints of both directions.
+        tasks, layout = [], []
+        size = spread_size(len(rows), self.pool.workers, SCENE_CHUNK)
+        for number, piece in enumerate(chunked(list(rows), size)):
+            confs, spans = [], []
+            for row in piece:
+                record = self.records[row]
+                forward, back = record["confs"], record.get("confs_back", [])
+                spans.append((row, len(confs), len(forward), len(back)))
+                confs.extend(forward)
+                confs.extend(back)
+            tasks.append({"chunk": number, "confs": confs, "which": "scene"})
+            layout.append(spans)
+        for result, spans in zip(self.pool.run(task_check, tasks, "scene check"), layout):
+            add_counters(self.counters, result["counters"])
+            hits = result["collides"]
+            for row, first, n_forward, n_back in spans:
+                record = self.records[row]
+                if any(hits[first:first + n_forward]):
+                    record["confs"] = []
+                if any(hits[first + n_forward:first + n_forward + n_back]):
+                    record["confs_back"] = []
+                if not record["confs"] and not record.get("confs_back"):
+                    record.update({"free": False, "reason": "scene_collision"})
+                    self.scene_blocked.append(int(row))
+                self.scene_pending.discard(row)
+                self.table.checked[row] = True
+                self.table.free[row] = bool(record["free"])
 
     def load_pretracked(self, path: str) -> int:
         """Take roadmap-edge verdicts from a pretracking file instead of tracking them again.
@@ -379,8 +462,13 @@ class Tracker:
         for record in data["records"]:
             row = int(record["row"])
             self.records[row] = record
-            self.table.checked[row] = True
             self.table.free[row] = bool(record["free"])
+            if self.scene_check and record["free"]:
+                # Robot side settled overnight; the scene still has to be asked.
+                self.table.checked[row] = False
+                self.scene_pending.add(row)
+            else:
+                self.table.checked[row] = True
         return len(data["records"])
 
     # * ---- Extending the graph (tube rounds) --------------------------------
@@ -437,7 +525,7 @@ class Tracker:
         """
         # Two waypoints at one node are the same solution within this (a branch apart otherwise).
         same = SAME_SOLUTION_RAD
-        state = {key: {"route": list(route), "edge": 0, "pieces": [], "joins": 0, "failed_row": None,
+        state = {key: {"route": list(route), "edge": 0, "pieces": [], "spans": [], "joins": 0, "failed_row": None,
                        "drift_row": None, "done": len(route) < 2} for key, route in routes.items()}
         while True:
             needed: Dict[Tuple, Tuple[int, int, int, np.ndarray]] = {}
@@ -474,7 +562,10 @@ class Tracker:
                         confs = again["confs"]
                     # Skip a first waypoint identical to the previous last one (the shared node).
                     skip = 1 if pieces and linf(confs[0], pieces[-1]) <= same else 0
+                    first = len(pieces) - 1 if skip else len(pieces)
                     pieces.extend(confs[skip:])
+                    # Which waypoints this edge gave (so a later failure can name the edge).
+                    walk["spans"].append((int(row), first, len(pieces) - 1))
                     # Remember the last edge that left the roadmap's branch (ended away from its node).
                     if linf(pieces[-1], self.confs[b]) > same:
                         walk["drift_row"] = row
@@ -492,7 +583,9 @@ class Tracker:
             failed = walk["failed_row"]
             blame = None if failed is None else (walk["drift_row"] if walk["drift_row"] is not None else failed)
             out[key] = (walk["pieces"] if failed is None else None,
-                        {"joins": walk["joins"], "failed_row": failed, "blame_row": blame})
+                        {"joins": walk["joins"], "failed_row": failed, "blame_row": blame,
+                         # (row, first waypoint, last waypoint) of each edge of the chain.
+                         "spans": walk["spans"]})
         return out
 
     def assemble(self, route: Sequence[int]) -> Tuple[Optional[List[List[float]]], Dict[str, Any]]:

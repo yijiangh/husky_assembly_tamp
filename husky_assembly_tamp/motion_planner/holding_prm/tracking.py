@@ -221,6 +221,63 @@ def fine_walk(model: HoldingModel, from_pose: np.ndarray, to_pose: np.ndarray, f
     return current, "ok"
 
 
+def fine_segment(tools: WorkerTools, conf_a: np.ndarray, conf_b: np.ndarray, position_res_m: float,
+                 rotation_res_rad: float, counters: Dict[str, float]) -> Dict[str, Any]:
+    """Fill in the path between two neighbouring exact waypoints at a fine step, and check it.
+
+    The planner's waypoints are about 1 cm apart; a path handed to the robot
+    is wanted at the production's step (2 mm by default). This walks the bar
+    from one waypoint to the next at that step -- the bar frame interpolated,
+    both arms solved nearest the previous solution, the continuity gate at
+    every step, exactly what the production repair does -- and runs the full
+    collision check on every configuration in between.
+
+    Args:
+        tools (WorkerTools): model and (full) collision check of the real scene.
+        conf_a (np.ndarray): the waypoint to start from (holds the bar exactly).
+        conf_b (np.ndarray): the next waypoint.
+        position_res_m (float): longest bar move per fine step.
+        rotation_res_rad (float): largest bar turn per fine step.
+        counters (Dict[str, float]): tally.
+
+    Returns:
+        Dict[str, Any]: ``free`` (the walk arrives on ``conf_b`` and nothing
+        in between collides), ``reason`` ("ok", "ik_failure", "continuity",
+        "branch_change" when it arrives on another solution, "collision"),
+        and ``confs`` (the configurations after ``conf_a`` up to and including
+        ``conf_b``; empty when not free).
+    """
+    model = tools.model
+    from_pose = bar_from_arm(model, "left", conf_a[:6])
+    to_pose = bar_from_arm(model, "left", conf_b[:6])
+    distance, angle = pose_gap(from_pose, to_pose)
+    pieces = max(1, int(ceil(max(distance / position_res_m, angle / rotation_res_rad) - 1e-12)))
+    current = np.asarray(conf_a, dtype=float)
+    confs: List[np.ndarray] = []
+    for piece in range(1, pieces + 1):
+        pose = interpolate_pose(from_pose, to_pose, piece / pieces)
+        conf = np.empty(12)
+        for arm in ARMS:
+            part = ARM_SLICE[arm]
+            branches = arm_branches(model, arm, tool_target_from_bar(model, arm, pose), current[part],
+                                    allow_rescue=False, counters=counters)
+            if not branches:
+                return {"free": False, "reason": "ik_failure", "confs": []}
+            conf[part] = branches[0]
+        if linf(conf, current) > STEP_MAX_RAD:
+            return {"free": False, "reason": "continuity", "confs": []}
+        confs.append(conf)
+        current = conf
+    if linf(current, conf_b) > SAME_SOLUTION_RAD:
+        return {"free": False, "reason": "branch_change", "confs": []}
+    # The last one is the waypoint itself (already checked); the ones before it are new.
+    for conf in confs[:-1]:
+        if tools.timed_collides(conf, counters):
+            return {"free": False, "reason": "collision", "confs": []}
+    confs[-1] = np.asarray(conf_b, dtype=float)
+    return {"free": True, "reason": "ok", "confs": [conf.tolist() for conf in confs]}
+
+
 # -----------------------------------------------------------------------------
 # * Tracking one edge
 # -----------------------------------------------------------------------------

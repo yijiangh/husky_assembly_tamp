@@ -104,6 +104,182 @@ def make_collision_fn(scene) -> Callable[[Sequence[float]], bool]:
     return collides
 
 
+# -----------------------------------------------------------------------------
+# * Splitting the collision check: what the robot carries, and the scene
+# -----------------------------------------------------------------------------
+# A roadmap is precomputed with only the robot, its two tools and the carried
+# bar (with its joint halves). None of those checks depends on where the robot
+# stands or on what has been built around it, so their verdicts stay valid in
+# any scene. What a new scene adds is everything that does NOT ride on the
+# robot: built bars and joints, a support robot. The functions below ask
+# compas_fab for one part or the other by editing a private copy of the cell
+# state (who is hidden, who may touch whom); the collision engine is untouched.
+
+
+def is_carried(body_state) -> bool:
+    """Whether a rigid body rides on the robot (attached to a link or a tool)."""
+    return bool(body_state.attached_to_link or body_state.attached_to_tool)
+
+
+def robot_side_state(template_state):
+    """A copy of a state with everything that does not ride on the robot hidden.
+
+    Args:
+        template_state: the scene's cell state.
+
+    Returns:
+        The copy: stationary rigid bodies and stationary tools are hidden, so
+        a collision check on it tests only the robot, its tools and what it
+        carries.
+    """
+    state = template_state.copy()
+    for body_state in state.rigid_body_states.values():
+        if not is_carried(body_state):
+            body_state.is_hidden = True
+    for tool_state in state.tool_states.values():
+        if not tool_state.attached_to_group:
+            tool_state.is_hidden = True
+    return state
+
+
+def scene_only_state(template_state, robot_link_names: Sequence[str]):
+    """A copy of a state in which the robot, its tools and its load may all touch each other.
+
+    A collision check on it (with the robot's self-check switched off) then
+    tests only pairs that involve something stationary: robot links, tools and
+    carried bodies against built bars, joints and stationary tools. Allowances
+    the export wrote that involve the scene (a carried bar may touch the joint
+    half it is about to mate with) are kept as they are.
+
+    Args:
+        template_state: the scene's cell state.
+        robot_link_names (Sequence[str]): every robot link name.
+
+    Returns:
+        The copy.
+    """
+    state = template_state.copy()
+    links = list(robot_link_names)
+    carried = [name for name, body in state.rigid_body_states.items() if is_carried(body)]
+    arm_tools = [name for name, tool in state.tool_states.items() if tool.attached_to_group]
+    for name in carried:
+        body_state = state.rigid_body_states[name]
+        body_state.touch_links = links
+        allowed = set(body_state.touch_bodies or []) | set(carried) | set(arm_tools)
+        allowed.discard(name)
+        body_state.touch_bodies = sorted(allowed)
+    for name in arm_tools:
+        state.tool_states[name].touch_links = links
+    return state
+
+
+def make_collision_fns(planner, template_state,
+                       joint_names_12: Sequence[str]) -> Dict[str, Callable[[Sequence[float]], bool]]:
+    """Three collision checks on one scene: everything, the robot side only, the scene only.
+
+    All three go through ``planner.check_collision``. For any configuration,
+    ``full`` is true exactly when ``robot_side`` or ``scene_only`` is (a test
+    checks this on real scenes).
+
+    Args:
+        planner: a compas_fab ``PyBulletPlanner`` with the cell loaded.
+        template_state: the scene's cell state (base pose, attachments,
+            hidden flags, allowances).
+        joint_names_12 (Sequence[str]): the twelve arm joints.
+
+    Returns:
+        Dict[str, Callable]: ``full``, ``robot_side`` and ``scene_only``, each
+        ``conf12 -> True if colliding``.
+    """
+    names = list(joint_names_12)
+    links = list(planner.client.robot_link_puids.keys())
+
+    def checker(state, options: Dict[str, Any]) -> Callable[[Sequence[float]], bool]:
+        """A check that writes the joints into its own state (no copy per call) and asks compas_fab."""
+        def collides(conf12: Sequence[float]) -> bool:
+            for name, value in zip(names, conf12):
+                state.robot_configuration[name] = float(value)
+            try:
+                planner.check_collision(state, options=options)
+            except CollisionCheckError:
+                return True
+            return False
+        return collides
+
+    return {
+        "full": checker(template_state.copy(), {"verbose": False}),
+        "robot_side": checker(robot_side_state(template_state), {"verbose": False}),
+        # The robot's self-check belongs to the robot side: skip it here.
+        "scene_only": checker(scene_only_state(template_state, links), {"verbose": False, "_skip_cc1": True}),
+    }
+
+
+def robot_side_signature(state, bar_rb_name: str) -> Dict[str, Any]:
+    """What a roadmap's robot-side verdicts depend on, as plain data.
+
+    Two scenes with the same signature carry the same bodies, attached the
+    same way, with the same allowances among themselves, so a roadmap built
+    in one is valid in the other. Allowances toward stationary bodies are left
+    out (they belong to the scene).
+
+    Args:
+        state: a cell state (the roadmap's template, or a live start state).
+        bar_rb_name (str): the carried bar's rigid-body name.
+
+    Returns:
+        Dict[str, Any]: the bar name, and per carried body its link, its
+        attachment frame (rounded) and its allowances; per arm tool its
+        allowed links.
+    """
+    carried = sorted(name for name, body in state.rigid_body_states.items()
+                     if is_carried(body) and not body.is_hidden)
+    arm_tools = sorted(name for name, tool in state.tool_states.items() if tool.attached_to_group)
+    inside = set(carried) | set(arm_tools)
+    bodies = {}
+    for name in carried:
+        body = state.rigid_body_states[name]
+        frame = body.attachment_frame
+        bodies[name] = {
+            "link": body.attached_to_link or f"tool:{body.attached_to_tool}",
+            "attachment": [round(float(v), 5) for v in (list(frame.point) + list(frame.quaternion))],
+            "touch_links": sorted(body.touch_links or []),
+            "touch_bodies": sorted(set(body.touch_bodies or []) & inside),
+        }
+    tools = {name: sorted(state.tool_states[name].touch_links or []) for name in arm_tools}
+    return {"bar": bar_rb_name, "bodies": bodies, "tools": tools}
+
+
+def signature_differences(expected: Dict[str, Any], found: Dict[str, Any]) -> List[str]:
+    """Plain-word differences between two robot-side signatures (empty when they match).
+
+    Args:
+        expected (Dict[str, Any]): the roadmap's signature.
+        found (Dict[str, Any]): the live scene's signature.
+
+    Returns:
+        List[str]: one line per difference.
+    """
+    out = []
+    if expected.get("bar") != found.get("bar"):
+        out.append(f"bar: roadmap {expected.get('bar')}, scene {found.get('bar')}")
+    for name in sorted(set(expected["bodies"]) | set(found["bodies"])):
+        a, b = expected["bodies"].get(name), found["bodies"].get(name)
+        if a is None or b is None:
+            out.append(f"carried body {name}: {'missing in the scene' if b is None else 'not in the roadmap'}")
+            continue
+        if a["link"] != b["link"]:
+            out.append(f"{name}: attached to {a['link']} in the roadmap, {b['link']} in the scene")
+        if np.max(np.abs(np.asarray(a["attachment"]) - np.asarray(b["attachment"]))) > 1e-4:
+            out.append(f"{name}: attachment frame differs")
+        for key in ("touch_links", "touch_bodies"):
+            if a[key] != b[key]:
+                out.append(f"{name}: {key} differ (roadmap {a[key]}, scene {b[key]})")
+    for name in sorted(set(expected["tools"]) | set(found["tools"])):
+        if expected["tools"].get(name) != found["tools"].get(name):
+            out.append(f"tool {name}: allowed links differ")
+    return out
+
+
 def new_counters() -> Dict[str, float]:
     """An empty tally of the work done: calls, outcomes and seconds spent."""
     return {}
@@ -128,10 +304,14 @@ class WorkerTools:
     Attributes:
         model (HoldingModel): the holding model.
         collides (Callable): the full-cell collision check.
+        scene_collides (Optional[Callable]): the scene-only check (see
+            :func:`make_collision_fns`); None in a precompute scene, which
+            has nothing stationary in it.
     """
 
     model: HoldingModel
     collides: Callable[[Sequence[float]], bool]
+    scene_collides: Optional[Callable[[Sequence[float]], bool]] = None
 
     def timed_collides(self, conf12: Sequence[float], counters: Dict[str, float]) -> bool:
         """Run the collision check, counting the call and its time."""
@@ -141,6 +321,18 @@ class WorkerTools:
         count(counters, "seconds_collision", perf_counter() - start)
         if hit:
             count(counters, "collisions")
+        return hit
+
+    def timed_scene_collides(self, conf12: Sequence[float], counters: Dict[str, float]) -> bool:
+        """Run the scene-only check, counting the call and its time."""
+        if self.scene_collides is None:
+            raise RuntimeError("This scene has no scene-only collision check (it is a precompute scene).")
+        start = perf_counter()
+        hit = self.scene_collides(conf12)
+        count(counters, "scene_checks")
+        count(counters, "seconds_scene", perf_counter() - start)
+        if hit:
+            count(counters, "scene_collisions")
         return hit
 
 

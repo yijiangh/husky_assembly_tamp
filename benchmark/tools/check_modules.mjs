@@ -67,7 +67,11 @@ function stripBlockComments(source) {
   return source.replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
-function resolveSpecifier(specifier, fromFile) {
+function resolveSpecifier(rawSpecifier, fromFile) {
+  // An exported copy stamps its local imports with a content hash
+  // ("./charts.js?v=1a2b3c4d", see benchmark/asset_versions.py). The browser
+  // fetches the file named before the "?", so the checker looks for that too.
+  const specifier = rawSpecifier.replace(/[?#].*$/, "");
   if (specifier.startsWith("./") || specifier.startsWith("../")) {
     return resolve(dirname(fromFile), specifier);
   }

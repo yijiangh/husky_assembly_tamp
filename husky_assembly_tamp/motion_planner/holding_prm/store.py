@@ -17,7 +17,6 @@ so a reader (the dashboard, a sync client) never sees half a file.
 from __future__ import annotations
 
 import gzip
-import hashlib
 import json
 import os
 import shutil
@@ -26,6 +25,7 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+from husky_assembly_tamp.benchmark.asset_versions import stamp_page_assets
 from husky_assembly_tamp.benchmark.provenance import provenance
 from husky_assembly_tamp.keyframe.ssik_inprocess import describe_artifact_set
 from husky_assembly_tamp.motion_planner.holding_prm.holding import HoldingModel
@@ -281,8 +281,9 @@ def copy_dashboard(root: str, run_name: str) -> str:
     The page ``prm.html`` is copied twice, as itself and as ``index.html``,
     so the folder's own address opens it and the module checker
     (``benchmark/tools/check_modules.mjs``, which looks for ``index.html``)
-    can check it. The script and stylesheet addresses get a content hash
-    appended, so a browser never runs a stale cached copy.
+    can check it. The script and stylesheet addresses, and the imports inside
+    the copied modules, get a content hash appended, so a browser never runs
+    a stale cached copy (see ``benchmark/asset_versions.py``).
 
     Args:
         root (str): the benchmark data root.
@@ -304,15 +305,12 @@ def copy_dashboard(root: str, run_name: str) -> str:
     out_dir = os.path.join(run_dir(root, run_name), "dashboard")
     os.makedirs(out_dir, exist_ok=True)
     shutil.copytree(os.path.join(source, "static"), os.path.join(out_dir, "static"), dirs_exist_ok=True)
-    with open(page, "r", encoding="utf-8") as handle:
-        html = handle.read()
-    for relative in ("static/css/index.css", "static/js/prm-viewer.js"):
-        with open(os.path.join(out_dir, relative.replace("/", os.sep)), "rb") as handle:
-            digest = hashlib.sha1(handle.read()).hexdigest()[:8]
-        html = html.replace(f'"./{relative}"', f'"./{relative}?v={digest}"')
     for name in ("prm.html", "index.html"):
-        with open(os.path.join(out_dir, name), "w", encoding="utf-8") as handle:
-            handle.write(html)
+        shutil.copyfile(page, os.path.join(out_dir, name))
+    # * Content hashes on the page's assets AND on the imports inside the copied
+    # * modules: the entry script's hash alone left the browser free to reuse an
+    # * old cached charts.js (seen 2026-10-13: "svg.setCursor is not a function").
+    stamp_page_assets(out_dir, ("prm.html", "index.html"), ("static/css/index.css", "static/js/prm-viewer.js"))
     return out_dir
 
 

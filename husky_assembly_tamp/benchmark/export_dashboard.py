@@ -13,7 +13,6 @@ the renderer.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import shutil
 import os
@@ -22,6 +21,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
 
+from husky_assembly_tamp.benchmark.asset_versions import stamp_page_assets
 from husky_assembly_tamp.benchmark.library import load_bar_library, load_sweep_detail
 from husky_assembly_tamp.benchmark.summarize import load_runs, summarize_group, summarize_run
 
@@ -389,31 +389,18 @@ def copy_static_site(out_dir: str) -> None:
 
 
 def _stamp_asset_versions(out_dir: str) -> None:
-    """Make the page ask for its own script and stylesheet by content.
+    """Make the page ask for its scripts and stylesheet by content.
 
     A browser holds on to a cached script hard, and a fix that is on disk but
     not in the cache looks exactly like a fix that did not work -- which has
-    cost real debugging time here. Appending a hash of the file's contents to
-    the URL means a changed file is a different URL, so the browser fetches it,
-    and an unchanged one still comes from cache.
+    cost real debugging time here. The shared helper appends a content hash to
+    the page's asset addresses and to the imports inside the copied modules
+    (``benchmark/asset_versions.py``), so a changed file is a different address.
 
     Args:
         out_dir (str): the dashboard folder whose index.html to rewrite.
     """
-    index_path = os.path.join(out_dir, "index.html")
-    with open(index_path, "r", encoding="utf-8") as handle:
-        html = handle.read()
-
-    for relative in ("static/css/index.css", "static/js/app.js"):
-        path = os.path.join(out_dir, relative.replace("/", os.sep))
-        if not os.path.isfile(path):
-            continue
-        with open(path, "rb") as handle:
-            digest = hashlib.sha1(handle.read()).hexdigest()[:8]
-        html = html.replace(f'"./{relative}"', f'"./{relative}?v={digest}"')
-
-    with open(index_path, "w", encoding="utf-8") as handle:
-        handle.write(html)
+    stamp_page_assets(out_dir, ("index.html",), ("static/css/index.css", "static/js/app.js"))
 
 
 def _joint_order(root: str, library_name: str, bar_ids: Sequence[str]) -> List[str]:

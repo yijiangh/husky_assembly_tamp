@@ -1,0 +1,31 @@
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{7.4cm} rrr@{}}
+\toprule
+bar & B1 & B3 & B4 \\
+\midrule
+result: tolerance of the route used & 20 mm & 20 mm & 10 mm \\
+carry-pose nodes free in the scene & 197 of 197 & 248 of 253 & 245 of 245 \\
+carry pose the route starts from & horizontal\_1 & horizontal\_4 & vertical\_4 \\
+nodes on the route; waypoints returned (count) & 7; 824 & 7; 760 & 10; 1323 \\
+edges looked at, of which usable (count) & 6, 6 & 6, 6 & 23, 14 \\
+\quad blocked by the scene (count) & 0 & 0 & 9 \\
+\quad dropped in the final check (count) & 0 & 0 & 0 \\
+tube rounds needed (count) & 0 & 0 & 0 \\
+scene-only checks: count, worker-seconds & 373, 3.1 & 349, 4.7 & 1187, 17.7 \\
+full checks: count, worker-seconds & 998, 26.3 & 1478, 45.8 & 1421, 41.6 \\
+\midrule
+start the workers (s) & 15.4 & 17.0 & 15.2 \\
+read the roadmap; write or find the scene files (s) & 0.7 & 0.8 & 0.7 \\
+goal postures and carry-pose nodes in the scene (s) & 1.5 & 2.9 & 3.6 \\
+search: scene checks and tracking of route edges (s) & 6.5 & 6.9 & 3.2 \\
+final check at 2 mm (s) & 4.2 & 8.4 & 7.3 \\
+roadmap plan in all (s) & 28.4 & 36.0 & 30.1 \\
+smoothing afterwards, in the caller's process (s) & 57.4 & 44.5 & 30.1 \\
+whole planning call (s) & 88.9 & 83.6 & 63.3 \\
+\midrule
+independent check of the saved path & pass & pass & pass \\
+path length: bar travel (m); bar turning (deg) & 1.44; 70 & 1.13; 109 & 1.17; 158 \\
+path length: joint travel (deg) & 140 & 146 & 190 \\
+lowest point of bar, joints and tools on the path (m) & -0.003 & 0.048 & 0.071 \\
+\quad the same at the goal itself (m) & -0.003 & 0.048 & 0.071 \\
+\bottomrule
+\end{tabular}

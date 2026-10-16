@@ -1,0 +1,445 @@
+% Third part of holding_prm_report.tex (input from there): the roadmap as a
+% backend of plan_constrained_dual_arm, used in scenes that change from bar to bar.
+% Tables come from docs/figures/make_prm_figures.py (robarch_* functions).
+
+% =============================================================================
+\section{A precomputed roadmap behind \texttt{plan\_constrained\_dual\_arm}, in a changing scene}
+\label{sec:scene}
+% =============================================================================
+
+Sections~\ref{sec:build}--\ref{sec:refine} built and refined roadmaps inside the
+benchmark's scenes, which hold only the robot, its tools and the carried bar. On
+site the scene is different for every bar: the bars built so far, their joints,
+and sometimes a support robot stand around the goal, and the base parks a few
+centimetres off its planned pose. This section puts the roadmap behind the
+production entry point and makes it work there. The idea is the one from the
+meeting notes: \emph{precompute} a roadmap per bar that knows only the robot, its
+tools and the bar; \emph{online}, place it at the real base pose and check only
+what the precompute could not know.
+
+\subsection{What is reused, and what has to be redone}
+
+\begin{center}
+\footnotesize
+\begin{tabular}{@{}p{4.6cm} p{5.0cm} p{5.6cm}@{}}
+\toprule
+ & depends on & online \\
+\midrule
+roadmap nodes and edges & the bar, its two grasps & reused as they are \\
+collisions among robot, tools, bar and the joint halves on the bar & the same & reused (verdicts of the precompute) \\
+exact waypoints of each edge (tracking) & the same & reused \\
+the goal as seen from the robot & base pose, goal in the world & solved fresh: a few IK calls \\
+collisions with built bars, joints, support robots & base pose, the scene & checked fresh, only on what a route uses \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+A node is twelve joint values, so it does not depend on where the base stands;
+neither does anything that rides on the arms. The roadmap is therefore built once,
+\emph{in the robot's frame}, and ``moving it to the real base pose'' needs no
+computation on the roadmap at all: the planner reads the two arm bases from the
+live scene and expresses the world goal with them,
+\[
+  {}^{\text{base}}T_{\text{bar}}^{\text{goal}} \;=\;
+  \bigl({}^{\text{world}}T_{\text{base}}\bigr)^{-1}\; {}^{\text{world}}T_{\text{bar}}^{\text{goal}} .
+\]
+A base parked elsewhere moves the goal as seen from the robot, and moves the
+scene; nothing else. There is one roadmap per bar, never several to stitch.
+
+\subsection{Splitting the collision check}
+\label{sec:split}
+
+The production check (\code{planner.check_collision} of compas\_fab) tests
+everything against everything in one call and has no per-body filter. The split
+is made by editing a private copy of the cell state, so compas\_fab itself is
+unchanged (\code{sampling.make_collision_fns}):
+
+\begin{description}[nosep,leftmargin=1.5em]
+  \item[full] the production check, as before.
+  \item[robot side] every body and tool that does not ride on the robot is hidden.
+        What is left is exactly what the precompute scene tests.
+  \item[scene only] every carried body is allowed to touch all robot links, all
+        other carried bodies and the arm tools; the arm tools are allowed to touch
+        all robot links; and the robot's self-collision pass is skipped. What is
+        left is robot links, tools and carried bodies against the bodies and tools
+        standing in the scene. Allowances the design authored toward the scene
+        (the bar may touch the joint halves it will sit in) are kept.
+\end{description}
+
+\noindent
+Two facts make the reuse sound, and both are tested on a real scene (the last
+test of \path{test_holding_prm.py}): the full check says
+``collides'' exactly when the robot-side check or the scene-only check does; and
+the precompute scene, with the base at the origin and nothing built, gives the
+same verdict as the robot-side check in the real scene at the real base pose.
+Table~\ref{tab:robarchsplit} gives the result and the time of each check.
+
+\paragraph{A signature guards the reuse.} The robot-side verdicts are valid only
+for the same load. The roadmap stores a signature of what they depend on (the
+bar, every carried body with its link, attachment frame and allowed contacts
+among the carried bodies, the arm tools' allowed links); the planner compares it
+with the live start state and the caller's right-hand grasp, and stops with
+\code{RoadmapMismatch}, listing the differences, when they do not match. A
+roadmap built from a benchmark library has no signature and is refused. There
+is no fallback to another roadmap or to the BiRRT.
+
+\subsection{Precompute for one exported bar}
+
+\code{prm_pilot.py build --problem-dir <export> --bar B4} builds the roadmap of
+one bar from the exported action files, in the trimmed scene of
+\code{benchmark build-cells} (robot, tools, the bar and its joint halves).
+
+\begin{description}[nosep,leftmargin=1.5em]
+  \item[goal anchors] the planned goal pose of the carry movement
+        (\code{target_ee_frames} of the jointing file, seen from the planned base
+        pose), plus the same world goal seen from 12 bases shifted by up to
+        10\,cm and turned by up to $5^\circ$ (\code{--base-error-m},
+        \code{--base-error-deg}, \code{--base-samples}). Each pose is expanded to
+        all its collision-free branch pairs. The roadmap is then dense around a
+        goal \emph{region}, so that the real goal, which will coincide with none of
+        the 13, has neighbours.
+  \item[start anchors] the 18 carry poses of the family found in
+        Section~\ref{sec:e5} (\path{prm/carry/carry_v1/starts.json}), every
+        branch pair.
+  \item[the rest] sampling, edges and exact tracking of every edge within 15\,mm
+        (\code{prm_pilot.py track}), as in Sections~\ref{sec:build}
+        and~\ref{sec:refine}.
+\end{description}
+
+\subsection{The online plan}
+\label{sec:online}
+
+\begin{algo}{\textsc{PlanOnRoadmap} --- \texttt{online.plan\_on\_roadmap}}{alg:online}
+\Function{PlanOnRoadmap}{live scene and start state, world goal pose of the bar, roadmap folder}
+  \State load the roadmap; \textbf{stop} unless its signature matches the load in the scene \Comment{no fallback}
+  \State read the arm bases from the live scene; check numpy FK against the simulator ($10^{-5}$\,m)
+  \State workers: this process (1 worker), or $n$ processes that open the scene from files
+         \Comment{cell cached by geometry}
+  \State $G \gets$ every collision-free branch pair at the goal pose \Comment{full check, in the scene}
+  \State $S \gets$ the roadmap's carry-pose nodes that pass the scene-only check
+  \State join new goal nodes to their nearest roadmap nodes; load the night's tracking verdicts
+  \For{tolerance $t$ in 10, 20, 30\,mm}
+    \Loop
+      \State route $\gets$ shortest route $S \to G$ over edges within $t$ not known bad; \textbf{break} if none
+      \State edges tracked overnight: scene-only check of their stored waypoints \Comment{parallel, lazy}
+      \State other edges (they touch a new goal node): track now, full check \Comment{parallel}
+      \State drop the edges that failed; \textbf{continue} unless the whole route is usable
+      \State join the edges' waypoints into one exact path \Comment{Section~\ref{sec:refine}}
+      \State walk it at the caller's step (2\,mm) and full-check every fine waypoint \Comment{parallel}
+      \State \Return the fine path if clean; else drop the edge that failed and \textbf{continue}
+    \EndLoop
+  \EndFor
+  \State one tube round around the best route left (Section~\ref{sec:refine}), then the loop once more
+  \State \Return failure, with the smallest tolerance a remaining route would need
+\EndFunction
+\end{algo}
+
+\noindent
+The scene check is \emph{lazy}: only edges on a candidate route are checked, and
+only against the scene, because their robot side was settled overnight. An edge
+keeps a separate chain of waypoints for each direction; a direction that touches
+the scene is dropped on its own. The final check replaces the production repair
+of Section~\ref{sec:refine} (which ran in one process and took 30--190\,s per
+path): the same fine walk and the same collision check, spread over the workers,
+and a failure costs one edge and another search round rather than the plan.
+
+\paragraph{A new base pose, or a newly built bar.} Nothing in the roadmap is
+redone. The goal nodes are solved again (the goal moved as seen from the robot)
+and joined to the roadmap; scene verdicts are asked again, lazily. The cached
+scene files are keyed by the scene's geometry, so a new base pose rewrites only
+the small state file, not the cell.
+
+\subsection{Switching planners}
+
+\code{plan_constrained_dual_arm} keeps its signature and gains two keywords:
+\code{backend="birrt"} (default, unchanged) or \code{"prm"}, and
+\code{prm_options} (\code{roadmap_dir}, \code{workers}, \code{tolerances_mm},
+\code{tube_rounds}). The roadmap branch returns the same \code{(path, info)}; an
+unknown backend, a missing roadmap or a roadmap for another load raise. After
+the roadmap plan the path goes through the same optional repair and the same
+shortcut smoothing as a BiRRT path.
+
+\code{scripts/headless_bar_action_planner.py} plans the bar carry of an exported
+jointing file with either planner:
+\begin{quote}\footnotesize
+\code{headless_bar_action_planner.py <data> --problem 260920_RobArch_demo_revamp}\\
+\hspace*{1.5em}\code{--bar-action B4__J.json --movement cdfm --cdfm-backend prm --prm-workers 8}
+\end{quote}
+(\code{--movement cdfm} finds the carry by its type and reads home from the
+release file; \code{--prm-run} names another roadmap than
+\code{<problem>__<bar>}; \code{--save-tag} and \code{--save-dir} keep results of
+different runs apart; \code{--base-shift} plans as if the base parked off its
+planned pose.) \code{scripts/prm_check_solved.py} then checks a saved path on its
+own: production repair at 2\,mm with the calibrated solver, the $10^\circ$ gate
+and the full collision check in the scene of the saved start state.
+
+\paragraph{Looking at a plan.} Two ways. \code{--replay-file <saved motion file> --gui}
+replays any saved path in the planner script's PyBullet window, in the scene of the
+saved start state, with a slider along the path. And every online plan is saved as a
+query of its roadmap (\path{prm/<run>/queries/<bar>_<tag>.json.gz}, with the scene
+it was planned in): after \code{prm_pilot.py export --name <run>}, which also writes
+the robot's and the scene's 3D files, the roadmap page
+(\path{http://localhost:8000/prm/<run>/dashboard/} over a web server on the data root)
+draws the built bars, joint halves and support robots around the robot, marks the
+edges the scene blocked, and walks the plan's exact path with its stepper; the
+holding error it measures along that path is zero. Under the stepper the page
+plots, for the exact path or for a node's best route alike, the holding error at
+the commanded points (one dot per point, so the density of the data is visible),
+the holding error along a dense joint-space interpolation of the same path
+($0.1^\circ$ per joint, the step of the planner's own path checker), which
+approximates what the robot shows while its controller tracks the path between
+commanded points, and the twelve joint angles along the path. On the exact B4 path
+(1525 points, at most $0.3^\circ$ between neighbours) the dense interpolation adds
+nothing measurable; on a node route interpolated at the roadmap's $2.5^\circ$ it
+rises by a few hundredths of a millimetre over the value at the points.
+
+\subsection{Test bed: B1, B3 and B4 of the RobArch demo export}
+\label{sec:scenetest}
+
+The three bars are the first three the two-arm robot carries in
+\path{data_design_study/260920_RobArch_demo_revamp}; their scenes grow as the
+structure does (Table~\ref{tab:robarchpre}). The movement planned is the bar carry
+embedded in each jointing file (movement \code{J_M3}, the constrained two-arm
+free movement), from a carry pose the planner
+chooses to the authored goal pose, any arm posture.
+
+\begin{table}[h]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\caption{The three bars, their scenes at carry time, and the roadmap precomputed for
+each (6000 sampled nodes plus anchors; 8 workers). B3's and B4's tracking ran while
+other jobs used the machine; B1's times are from an idle machine.}
+\label{tab:robarchpre}
+\IfFileExists{figures/prm_table_robarch_precompute.tex}{\input{figures/prm_table_robarch_precompute.tex}}{(missing)}
+\end{table}
+
+\begin{table}[h]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\caption{The roadmap planner on the bar carry of each bar, in its real scene, with 8
+workers (\code{--cdfm-backend prm}). Times are wall-clock seconds on an otherwise
+idle machine; ``worker-seconds'' add up the time inside all workers.}
+\label{tab:robarchplans}
+\IfFileExists{figures/prm_table_robarch_plans.tex}{\input{figures/prm_table_robarch_plans.tex}}{(missing)}
+\end{table}
+
+\begin{table}[h]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\caption{The BiRRT on the same three movements (three runs each; a run may use up to
+five attempts of 300\,s), the roadmap planner with 8 workers and with one, and the
+roadmap planner without the night's tracking file. ``fail (t)'': no path after
+$t$ seconds.}
+\label{tab:robarchcompare}
+\IfFileExists{figures/prm_table_robarch_compare.tex}{\input{figures/prm_table_robarch_compare.tex}}{(missing)}
+\end{table}
+
+\begin{table}[h]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\caption{The base parked off its planned pose (shift in the base's own frame, then a
+turn about its vertical axis). Each cell: the tolerance of the route used, the time
+of the roadmap plan, and the independent check of the saved path.}
+\label{tab:robarchshift}
+\IfFileExists{figures/prm_table_robarch_shift.tex}{\input{figures/prm_table_robarch_shift.tex}}{(missing)}
+\end{table}
+
+\begin{table}[h]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\caption{One collision check of each kind, on 252 configurations spread between home
+and the goal posture (one process, idle machine), and whether the split agrees with
+the full check.}
+\label{tab:robarchsplit}
+\IfFileExists{figures/prm_table_robarch_split.tex}{\input{figures/prm_table_robarch_split.tex}}{(missing)}
+\end{table}
+
+\begin{table}[h]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\caption{Every saved path at its waypoints and between them
+(\code{prm_check_solved.py --holding-only}). ``Between'': the path interpolated
+straight in joint space at $0.1^\circ$ per joint, as the controller moves between
+waypoints. The holding error is the planner's own measure (the larger of the two
+``where the other flange should be'' gaps). Joint reversals: how often any joint
+turns back, moves under $0.2^\circ$ ignored. Ranges over the paths of a row.}
+\label{tab:robarchdense}
+\IfFileExists{figures/prm_table_robarch_dense.tex}{\input{figures/prm_table_robarch_dense.tex}}{(missing)}
+\end{table}
+
+\subsection{What was measured}
+
+All times below are from runs made one at a time on an otherwise idle machine
+(16 logical cores). A first pass ran next to the roadmap precompute and was two to
+four times slower; its summaries are kept in
+\path{prm/robarch_plans/shared_machine_run/} and are not used here, except where
+said.
+
+\paragraph{The roadmap precompute (T1).} A 6000-node roadmap takes 8--11 minutes to
+build per bar on eight workers and 26 minutes (B1, 4094 edges) to 114 minutes
+(B4, 12\,849 edges) to track; B3's and B4's tracking ran next to other jobs, so their
+times in Table~\ref{tab:robarchpre} are upper bounds (at B1's rate B4 would take
+about 80 minutes). All 13 goal poses can be held for B3 and B4 and 11 of 13 for B1;
+of the 18 carry poses, 18 (B3), 17 (B4) and 10 (B1) can be held. B1 is the long bar
+grasped far apart, and the family was found on other bars; ten poses were enough
+here, so the per-bar carry search that was planned as a fallback was not needed.
+The free graph is in a few hundred pieces with roughly a third of the goal nodes
+in the largest one, as in Section~\ref{sec:data}.
+
+\paragraph{The collision split holds, and the scene part is the cheap part (T4).}
+On 252 configurations per bar the split agreed with the full check every time, in
+both senses of Section~\ref{sec:split} (Table~\ref{tab:robarchsplit}). A scene-only
+check costs 7--11\,ms against 21--23\,ms for the full check: the pairs it skips
+(robot against itself, against its tools and against its load) are most of the
+work. In B4's scene 63 of the 252 configurations touch the built structure and 56
+collide on the robot's own side, so neither part is negligible there; in B1's
+scene nothing touches the scene at all.
+
+\paragraph{Every bar gets a path, and every path passes the independent check (T2).}
+Table~\ref{tab:robarchplans} lists the roadmap planner's runs. In each scene nearly
+all carry-pose nodes are free (the carry poses are held close to the robot, away
+from the structure), a route within 10\,mm (B4) or 20\,mm (B1, B3) exists without any
+tube round, and the fine check at 2\,mm found nothing the 1\,cm waypoints had
+missed. For B4 the scene removed 9 of the 23 edges the search asked about, and the
+search went around them; for B1 and B3 the first route was clean. The tolerance
+only says which roadmap edges the route used: the returned path holds the bar
+exactly (the bar slips at most 0.004\,mm in the right hand, measured on the saved
+joints). Of the 30 plans made on the idle machine (three planner settings and four
+shifted bases per bar with the roadmap, three BiRRT runs per bar), 29 returned a
+path, and all 29 passed \code{prm_check_solved.py}; the thirtieth is a goal that
+cannot be held (below).
+
+\paragraph{Against the BiRRT (T2).} Table~\ref{tab:robarchcompare}. The three bars
+are three different cases for the BiRRT, and its log says which:
+\begin{description}[nosep,leftmargin=1.5em]
+  \item[B1] The BiRRT's start derivation tracks backward from the goal toward its
+        home anchors; for B1 it reached none of them in its three 40\,s shares and
+        returned a \emph{partial} start 0.41\,m from the goal, leaving the rest to
+        another movement. Its path is therefore 0.41--0.51\,m of bar travel, after
+        183--188\,s. The roadmap planner returns a whole path from a carry pose
+        (1.44\,m of bar travel) in 89\,s, of which 28\,s is planning.
+  \item[B3] The straight track from the horizontal home anchor to the goal is
+        collision-free, so the BiRRT skips its search and returns in 63--65\,s. The
+        roadmap planner takes 84\,s (36\,s of planning, 45\,s of smoothing) for a
+        path of the same length. Nothing to gain here.
+  \item[B4] The BiRRT has to search between the built bars: 397, 504 and
+        1624\,s (the last after four failed attempts of five minutes); in the
+        first pass, on the busy machine, one of three runs failed outright after
+        28 minutes. Its paths are long: 1.5--2.5\,m of bar travel and
+        560--780$^\circ$ of joint travel. The roadmap planner's whole call takes
+        63\,s and its path has 1.17\,m and 190$^\circ$.
+\end{description}
+
+\paragraph{Where the roadmap planner's time goes (T2, T5).} With eight workers the
+roadmap plan takes 28--36\,s, and 15--17\,s of that is starting the workers (each
+process loads the scene from files; a planner that keeps its workers for a session
+would pay it once). The search takes 3--7\,s and the fine check 4--8\,s. Writing the
+scene files the first time a structure is seen cost another 14--22\,s in earlier
+runs; a new base pose rewrites only the small state file. With one worker
+everything runs in the caller's process on the whole 92-body cell: 57--93\,s. The
+shortcut smoothing that follows, the same code as after the BiRRT, runs in the
+caller's process and takes another 17--57\,s; it is the largest single part of the
+call (its time budget is only looked at between shortcut attempts, each of which
+re-solves and re-checks the rest of the path).
+
+\paragraph{The night's tracking saved little here (T4).} Without the tracking file
+the search tracks its route edges online and takes 6--16\,s instead of 3--7\,s
+(Table~\ref{tab:robarchcompare}): the first or second route worked in every case, so
+only 6 to 23 edges were ever asked about, and eight workers track those in a few
+seconds. Tracking every edge within 15\,mm in advance is the most expensive part of
+the precompute (26--114 minutes) and bought at most 13\,s online. It would matter
+when many routes have to be tried; on these three bars, building the roadmap
+alone would have been enough.
+
+\paragraph{A base parked off its planned pose (T3).} Table~\ref{tab:robarchshift}:
+11 of the 12 shifted bases were planned in 28--50\,s with the same roadmaps, and all
+11 paths pass the independent check. The goal seen from a shifted base is a new
+pose; its postures became new nodes (4 to 18 per plan) joined to the roadmap, and
+only the edges at those nodes had to be tracked online. The one failure is B1
+with the base 10\,cm back-left and turned $-5^\circ$: no arm posture can hold the
+bar at the goal from there (\code{prm_goal_unholdable}), which no planner can fix;
+two of B1's 13 precomputed goal poses had the same problem.
+
+\paragraph{Between the waypoints, and what the joints do (added 2026-10-13).}
+Table~\ref{tab:robarchdense} looks at the 29 saved paths the way the roadmap page
+now draws them. Every path holds the bar at its waypoints to within
+0.002\,mm, whichever planner made it; that is the IK's own precision. Between the
+waypoints, where the controller moves the joints in straight lines, the roadmap
+paths stay within 0.005\,mm: their waypoints are the 2\,mm fine walk, at most
+$0.74^\circ$ apart on any joint, and a straight joint move that short bends the
+bar's pose by nothing measurable. The BiRRT paths, whose smoothing leaves steps of
+up to $5^\circ$, reach 0.078\,mm and $0.007^\circ$ between waypoints (B4, third
+run); twenty times what the roadmap paths show, and still a hundredth of the
+loosest tolerance any route here used. Two things follow. The
+holding constraint does not need the 2\,mm cut: a path with $1^\circ$ joint steps
+would hold the bar to a few hundredths of a millimetre, so the fine check's cost
+(Section~\ref{sec:online}) is paid for the collision check, not for holding.
+And the joint evolution separates the planners more than the holding error does:
+on the roadmap paths a joint turns back 0--3 times per path (moves under
+$0.2^\circ$ ignored), the BiRRT's B4 paths turn back 15--31 times, with every
+joint taking part (its B1 and B3 paths, which it did not have to search for,
+turn back 0--6 times). A shortcut smoother removes detours but not the
+zig-zag of the tree's branches, which is what the 560--780$^\circ$ of joint
+travel on B4 are made of. On a finer band ($0.006^\circ$) the roadmap paths show
+15--74 reversals of a few thousandths of a degree, the IK's noise on a path cut
+every 2\,mm; harmless, but a joint-space smoother could take them out.
+
+\paragraph{A note on the export.} The design was exported again on 2026-10-05 and
+its cell now holds a ground slab (\code{ground_WG0}, top face at $z=-0.016$\,m).
+Paths planned since then see it as a stationary body in the scene check; the
+paths above predate it and were measured by completing their saved start state
+with the slab's state from the current export (\code{prm_check_solved.py} says so
+in its record). The lowest point of any of them, 0.031\,m, stays above it.
+
+\subsection{What this says, and what is still open}
+
+\begin{enumerate}[nosep,label=(\roman*)]
+  \item \textbf{The scheme works as proposed.} A roadmap that knows only the robot,
+        its tools and the bar is reused across base poses and scenes with no
+        recomputation; the scene costs a few hundred to a thousand cheap checks per
+        plan, spread over the workers.
+  \item \textbf{It pays where the BiRRT has to search.} On B4 the roadmap planner's
+        whole call is 6--26 times shorter than the BiRRT's and its path has a quarter
+        to a third of the joint travel; on B3, where the BiRRT finds a straight
+        track, the BiRRT is the quicker one; on B1 the roadmap planner returns a
+        whole path where the BiRRT returns part of one.
+  \item \textbf{Both planners end on another arm posture than the export's.} The
+        script hands the goal over as two flange frames, so either planner picks
+        the posture: the roadmap paths end $155$--$205^\circ$ (largest joint) from the
+        authored \code{target_configuration}, the BiRRT paths $203$--$298^\circ$. The
+        movements after the carry were authored from that configuration and must
+        be re-solved, or the goal restricted to the authored posture
+        (\code{goal_conf}, which \code{plan_on_roadmap} accepts; the headless script
+        does not pass it yet).
+  \item \textbf{No planner checked the floor on these paths.} The cell of
+        2026-10-02 had no ground body. The lowest point of the bar, the joint
+        halves and the tools was at the goal itself on every path from the
+        planned base pose (B1's ground joint lands at $z = -0.003$\,m by design).
+        Two shifted-base paths of B4 went lower than their goal: to 0.058\,m and to
+        0.031\,m, against 0.071\,m at the goal. The export of 2026-10-05 added a
+        ground slab, so plans made since then check against it; whether a floor
+        rule is still wanted in the planners (a slab only catches the bodies the
+        collision check knows) is to be decided.
+  \item \textbf{The holding constraint is kept far inside tolerance, between the
+        waypoints too.} At most 0.005\,mm between the waypoints of a roadmap path
+        and 0.078\,mm of a BiRRT path (Table~\ref{tab:robarchdense}); the 2\,mm cut
+        is for the collision check. The roadmap paths are monotone joint by joint,
+        the BiRRT's searched paths are not.
+  \item \textbf{Start-up and smoothing now dominate.} Keeping the workers (and the
+        roadmap) alive across bars would remove 15\,s per plan; the smoothing is
+        shared with the BiRRT and would need its own look.
+  \item \textbf{The precompute is per bar and per grasp}, and its expensive half
+        (tracking) was not needed on these bars. A build alone is 8--11 minutes per
+        bar on eight workers; the node budget and the 15\,mm tracking limit have not
+        been tuned.
+  \item \textbf{Three bars are a small sample.} They are the first three of one
+        structure; later bars carry into denser scenes, where more routes will be
+        blocked and the tracking may earn its cost.
+\end{enumerate}

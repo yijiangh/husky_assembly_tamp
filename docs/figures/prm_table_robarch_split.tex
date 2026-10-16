@@ -1,0 +1,15 @@
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{7.4cm} rrr@{}}
+\toprule
+bar & B1 & B3 & B4 \\
+\midrule
+full check, real scene (ms) & 21.1 & 23.3 & 22.0 \\
+scene-only check, real scene (ms) & 7.2 & 10.6 & 11.1 \\
+robot-side check, real scene (ms) & 20.1 & 18.8 & 18.1 \\
+full check, precompute scene (ms) & 18.5 & 17.2 & 15.1 \\
+\midrule
+test configurations colliding: full check (of 252) & 45 & 84 & 109 \\
+\quad robot side & 45 & 51 & 56 \\
+\quad scene only & 0 & 47 & 63 \\
+verdicts where the split disagrees with the full check & 0 of 252 & 0 of 252 & 0 of 252 \\
+\bottomrule
+\end{tabular}

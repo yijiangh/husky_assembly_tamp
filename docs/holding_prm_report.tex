@@ -78,7 +78,7 @@
 \title{A Holding-Constraint Roadmap for the Two-Arm Bar Carry\\
        \large A technical report on the PRM pilot (\texttt{holding\_prm}) and its first measurements}
 \author{husky\_assembly\_tamp \texttt{motion\_planner} --- written for Yijiang Huang}
-\date{30 September 2026; second version 1 October 2026}
+\date{30 September 2026; second version 1 October 2026; third version 2 October 2026}
 
 \begin{document}
 \maketitle
@@ -109,6 +109,16 @@ one of which passes the production repair at 2\,mm steps, against 21 starts the
 BiRRT solved. New experiments: wider edges (E1), every IK branch at equal draws
 (E4), the refinement (E2, E3), a search for better carry poses (E5) and overnight
 precomputation (E6). Terms are defined in \emph{Words used} (Section~\ref{sec:words}).
+
+\smallskip\noindent
+\emph{Third version (2 October 2026).} The production entry point can now plan on
+the roadmap (\code{backend="prm"}), and the roadmap works in scenes that
+change from bar to bar (Section~\ref{sec:scene}): a roadmap precomputed with only the
+robot, its tools and the bar is placed at the real base pose, and online only the
+collisions with the built structure are checked, lazily and in parallel. On bars B1, B3
+and B4 of the RobArch demo export it plans the embedded bar carry in every case tried,
+including bases parked up to 10\,cm and $5^\circ$ off, and every path passes an
+independent production check.
 \end{abstract}
 
 \tableofcontents
@@ -239,12 +249,18 @@ exact gap & (Section~\ref{sec:refine}) The smallest roadmap tolerance at which a
 \code{track_edge}, \code{fine_walk}, \code{track_edge_landing} & \code{tracking.py} & the exact tracker (Section~\ref{sec:refine}) \\
 \code{Tracker}, \code{refine_query}, \code{pretrack_roadmap} & \code{refine.py} & exact gaps, assembly, tube rounds; overnight tracking \\
 \code{carry_bar_pose}, \code{score_carry_pose} & \code{carry.py} & carry poses and their scores (Section~\ref{sec:e5}) \\
+\code{make_collision_fns}, \code{robot_side_signature} & \code{sampling.py} & the collision split and the load signature (Section~\ref{sec:split}) \\
+\code{load_carry_movement}, \code{build_scene_cell}, \code{save_scene} & \code{scenes.py} & exported problems; the real scene, cut down for workers \\
+\code{plan_on_roadmap}, \code{check_roadmap_fits} & \code{online.py} & the online plan in a live scene (Alg.~\ref{alg:online}) \\
+\code{plan_constrained_dual_arm}, keyword \code{backend} & \path{motion_planner/api.py} & the switch between the BiRRT and the roadmap \\
+\code{--movement cdfm}, \code{--cdfm-backend} & \path{scripts/headless_bar_}\path{action_planner.py} & planning an exported bar carry with either planner \\
+\code{check_file} & \path{scripts/prm_check_solved.py} & independent check of a saved path \\
 \code{plan_seeded_birrt} & \path{dual_arm_task_space_rrt/seeded.py} & the BiRRT seeded with a route (imports the core) \\
 \code{main} & \path{scripts/prm_pilot.py} & command line: \code{build}, \code{query}, \code{refine}, \code{track}, \code{export}, \code{info} \\
 \code{validate}, \code{birrt} & \path{scripts/prm_bridge.py} & the production check; the seeded BiRRT (moves the core's log first) \\
 \code{stage1}, \code{starts}, \code{stage2}, \code{pick} & \path{scripts/prm_carry_search.py} & the carry search \\
 page & \path{benchmark/dashboard/prm.html}, \path{prm-viewer.js} & the roadmap viewer (Section~\ref{sec:dashboard}) \\
-tests & \path{benchmark/tests/test_holding_prm.py} & 23 checks, including one that the package never imports the planner core \\
+tests & \path{benchmark/tests/test_holding_prm.py} & 31 checks, including one that the package never imports the planner core \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -897,6 +913,8 @@ parameter (flag) & default & meaning \\
 % =============================================================================
 
 \input{holding_prm_results.tex}
+
+\input{holding_prm_scene.tex}
 
 % =============================================================================
 \section{Reading guide}

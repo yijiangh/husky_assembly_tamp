@@ -1,0 +1,22 @@
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{7.4cm} rrr@{}}
+\toprule
+bar & B1 & B3 & B4 \\
+\midrule
+BiRRT: runs solved (of 3) & 3 & 3 & 3 \\
+BiRRT: whole planning call of each run (s) & 183, 188, 185 & 64, 65, 63 & 1624, 504, 397 \\
+BiRRT: solved paths that pass the independent check & 3 of 3 & 3 of 3 & 3 of 3 \\
+BiRRT: lowest point on its paths (m) & -0.003 & 0.048 & 0.071 \\
+BiRRT: bar travel of each path (m) & 0.41, 0.51, 0.41 & 1.15, 1.15, 1.15 & 1.49, 2.06, 2.51 \\
+BiRRT: joint travel of each path (deg) & 128, 217, 126 & 144, 144, 144 & 570, 563, 779 \\
+\midrule
+roadmap, 8 workers: whole planning call (s) & 89 & 84 & 63 \\
+\quad of which the roadmap plan (s) & 28 & 36 & 30 \\
+\quad of which starting the workers (s) & 15 & 17 & 15 \\
+roadmap, 1 worker: whole planning call (s) & 78 & 116 & 118 \\
+\quad of which the roadmap plan (s) & 57 & 86 & 93 \\
+\midrule
+roadmap, 8 workers: search with the night's tracking (s) & 7 & 7 & 3 \\
+roadmap, 8 workers: search without it (s) & 6 & 12 & 16 \\
+\quad roadmap plan without it (s) & 27 & 38 & 41 \\
+\bottomrule
+\end{tabular}

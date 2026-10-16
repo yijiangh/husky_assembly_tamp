@@ -40,6 +40,12 @@ B3_RUN = "B3_g4-11-16_n2000"
 BIRRT_RUN = "20260929_1756"   # experiment 2: every start of B18 goal 2, two seeds
 TOLERANCES = ("2.0", "5.0", "10.0", "30.0")
 CLASS_COLOURS = {"free": "#2e9e5b", "blocked": "#d98324", "broken": "#b23a48"}
+# The exported problem the changing-scene test uses, and where its plans were saved.
+ROBARCH = "260920_RobArch_demo_revamp"
+ROBARCH_BARS = ("B1", "B3", "B4")
+ROBARCH_PLANS = os.path.join(ROOT, "prm", "robarch_plans")
+ROBARCH_SHIFTS = (("shift5a", "5 cm forward, $+3^\\circ$"), ("shift5b", "5 cm back-right, $-3^\\circ$"),
+                  ("shift10a", "10 cm left, $+5^\\circ$"), ("shift10b", "10 cm back-left, $-5^\\circ$"))
 
 plt.rcParams.update({"font.size": 8, "axes.titlesize": 8, "axes.labelsize": 8, "legend.fontsize": 7,
                      "figure.dpi": 150, "savefig.bbox": "tight", "axes.spines.top": False,
@@ -665,6 +671,361 @@ def b3_table() -> None:
     write("prm_table_b3.tex", "\n".join(rows) + "\n")
 
 
+# -----------------------------------------------------------------------------
+# * The changing-scene test (bars of an exported problem, in their real scenes)
+# -----------------------------------------------------------------------------
+
+
+def robarch_plan(bar: str, tag: str) -> Optional[Dict[str, Any]]:
+    """The summary the headless planner wrote for one run, or None when it was not run."""
+    path = os.path.join(ROBARCH_PLANS, f"{bar}__J.solved_motion.{tag}.plan_info.json")
+    return read_json(path) if os.path.isfile(path) else None
+
+
+def robarch_checks() -> Dict[Tuple[str, str], Dict[str, Any]]:
+    """The independent checks (``prm_check_solved.py``), the latest one per (bar, tag)."""
+    path = os.path.join(ROBARCH_PLANS, "checks.jsonl")
+    checks: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    if os.path.isfile(path):
+        with open(path, "r", encoding="utf-8") as handle:
+            for line in handle:
+                if line.strip():
+                    record = json.loads(line)
+                    checks[(record["bar"], record["tag"])] = record
+    return checks
+
+
+def robarch_dense_checks() -> Dict[Tuple[str, str], Dict[str, Any]]:
+    """The holding-only checks (``prm_check_solved.py --holding-only``), the latest per (bar, tag)."""
+    path = os.path.join(ROBARCH_PLANS, "dense_checks.jsonl")
+    checks: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    if os.path.isfile(path):
+        with open(path, "r", encoding="utf-8") as handle:
+            for line in handle:
+                if line.strip():
+                    record = json.loads(line)
+                    if record.get("ok"):
+                        checks[(record["bar"], record["tag"])] = record
+    return checks
+
+
+def robarch_dense_table() -> None:
+    """The holding error at and between the waypoints of every saved path, and the joints' reversals.
+
+    One row per bar and group of paths (roadmap from the planned base, roadmap
+    from the shifted bases, BiRRT); a cell gives the range over the group.
+    """
+    checks = robarch_dense_checks()
+    if not checks:
+        return
+    groups = (("roadmap, planned base", ("prm", "prm_w1", "prm_notrack")),
+              ("roadmap, shifted bases", tuple(tag for tag, _label in ROBARCH_SHIFTS)),
+              ("BiRRT", ("birrt1", "birrt2", "birrt3")))
+
+    def span(records: List[Dict[str, Any]], key: str, digits: int) -> str:
+        values = [record[key] for record in records]
+        low, high = min(values), max(values)
+        return fmt(low, digits) if low == high else f"{fmt(low, digits)}--{fmt(high, digits)}"
+
+    lines = [r"\begin{tabular}{@{}llrrrrrrr@{}}", r"\toprule",
+             r"bar & paths & count & \shortstack[r]{waypoints\\(count)} & \shortstack[r]{largest joint\\step (deg)} "
+             r"& \shortstack[r]{holding error at\\waypoints (mm)} & \shortstack[r]{holding error\\between (mm)} "
+             r"& \shortstack[r]{rotation\\between (deg)} & \shortstack[r]{joint\\reversals} \\", r"\midrule"]
+    for bar in ROBARCH_BARS:
+        for label, tags in groups:
+            records = [checks[(bar, tag)] for tag in tags if (bar, tag) in checks]
+            if not records:
+                continue
+            lines.append(" & ".join([bar, label, str(len(records)), span(records, "n_waypoints", 0),
+                                     span(records, "saved_max_step_deg", 2),
+                                     span(records, "holding_at_waypoints_pos_mm", 4),
+                                     span(records, "holding_between_pos_mm", 4),
+                                     span(records, "holding_between_rot_deg", 4),
+                                     span(records, "joint_reversals", 0)]) + r" \\")
+        lines.append(r"\midrule")
+    lines[-1] = r"\bottomrule"
+    lines.append(r"\end{tabular}")
+    write("prm_table_robarch_dense.tex", "\n".join(lines) + "\n")
+
+
+def robarch_split(bar: str, mode: str) -> Optional[Dict[str, Any]]:
+    """The collision-split measurement of one bar ("real" or "trimmed" scene), or None."""
+    path = os.path.join(ROBARCH_PLANS, f"split_{bar}_{mode}.json")
+    return read_json(path) if os.path.isfile(path) else None
+
+
+def check_cell(check: Optional[Dict[str, Any]]) -> str:
+    """One independent check as a table cell: pass, or why not."""
+    if check is None:
+        return "--"
+    if check["ok"]:
+        return "pass"
+    return str(check.get("repair_reason") or check.get("reason") or "fail").replace("_", " ")
+
+
+def travel_cell(check: Optional[Dict[str, Any]]) -> str:
+    """How far the bar travels and turns on a checked path, as a table cell."""
+    if not check or check.get("bar_travel_m") is None:
+        return "--"
+    return f"{check['bar_travel_m']:.2f}; {check['bar_turn_deg']:.0f}"
+
+
+def robarch_precompute_table() -> None:
+    """T1: what the roadmap of each bar holds and what it cost to make."""
+    roadmaps, tracked, splits = {}, {}, {}
+    for bar in ROBARCH_BARS:
+        run = f"{ROBARCH}__{bar}"
+        if not os.path.isfile(os.path.join(ROOT, "prm", run, "roadmap.json.gz")):
+            continue
+        roadmaps[bar] = load_roadmap(ROOT, run)
+        tracked_path = os.path.join(ROOT, "prm", run, "tracked_15mm.json.gz")
+        tracked[bar] = read_json(tracked_path) if os.path.isfile(tracked_path) else None
+        splits[bar] = robarch_split(bar, "real")
+    bars = list(roadmaps)
+    if not bars:
+        return
+
+    def cells(get) -> List[str]:
+        return [get(bar) for bar in bars]
+
+    def scene(bar: str, key: str) -> str:
+        return f"{splits[bar]['scene'][key]}" if splits[bar] else "--"
+
+    def holdable_goals(bar: str) -> str:
+        poses = roadmaps[bar].meta["export"]["goal_poses"]
+        return f"{sum(1 for pose in poses if pose['n_branch_pairs'])} of {len(poses)}"
+
+    def holdable_starts(bar: str) -> str:
+        labels = {a["label"] for a in roadmaps[bar].anchors if a.get("role") == "start"}
+        return f"{len(labels)} of 18"
+
+    def anchors_connected(bar: str, role: str) -> str:
+        summary = roadmaps[bar].meta["summary"]
+        return f"{summary['anchors_in_largest'][role]} of {summary['anchors_total'][role]}"
+
+    def tracked_cell(bar: str, get) -> str:
+        return get(tracked[bar]) if tracked[bar] else "--"
+
+    rows = [
+        ("bar length (m)", cells(lambda b: fmt(roadmaps[b].meta["problem"]["bar_length_m"], 2))),
+        ("bodies riding on the arms: bar and joint halves (count)", cells(lambda b: scene(b, "carried"))),
+        ("scene at carry time: built bars and joint halves (count)", cells(lambda b: scene(b, "stationary"))),
+        ("scene at carry time: support robots (count)", cells(lambda b: scene(b, "stationary_tools"))),
+        (None, []),
+        ("goal poses the arms can hold: planned + 12 shifted bases", cells(holdable_goals)),
+        ("carry poses the arms can hold", cells(holdable_starts)),
+        ("nodes (count)", cells(lambda b: f"{roadmaps[b].n_nodes}")),
+        ("collision-free edges (count)",
+         cells(lambda b: f"{int(np.sum(np.asarray(roadmaps[b].edges['free'], dtype=bool)))}")),
+        ("components of the free graph (count)", cells(lambda b: f"{roadmaps[b].meta['summary']['n_components']}")),
+        ("goal nodes in the largest component", cells(lambda b: anchors_connected(b, "goal"))),
+        ("carry-pose nodes in the largest component", cells(lambda b: anchors_connected(b, "start"))),
+        (None, []),
+        ("build: sampling and edges (s)", cells(lambda b: fmt(roadmaps[b].timings["total_s"], 0))),
+        ("build: workers", cells(lambda b: f"{roadmaps[b].config['workers']}")),
+        ("edges within 15 mm, tracked exactly (count)",
+         cells(lambda b: tracked_cell(b, lambda t: f"{len(t['records'])}"))),
+        ("\\quad of which track", cells(lambda b: tracked_cell(
+            b, lambda t: f"{sum(1 for record in t['records'] if record['free'])}"))),
+        ("tracking (s)", cells(lambda b: tracked_cell(b, lambda t: fmt(t["wall_s"], 0)))),
+    ]
+    sideways("prm_table_robarch_precompute.tex", "bar", bars, rows, label_width_cm=7.4)
+
+
+def robarch_plan_rows(tag: str, checks: Dict[Tuple[str, str], Dict[str, Any]],
+                      bars: List[str]) -> List[Tuple[Optional[str], List[str]]]:
+    """Rows describing the roadmap planner's run with the given tag, one cell per bar."""
+    plans = {bar: robarch_plan(bar, tag) for bar in bars}
+
+    def cells(get) -> List[str]:
+        return [get(plans[bar]) if plans[bar] else "--" for bar in bars]
+
+    def prm(key: str):
+        return lambda plan: (plan.get("prm") or {}).get(key)
+
+    def timing(*keys: str):
+        def get(plan: Dict[str, Any]) -> str:
+            timings = (plan.get("prm") or {}).get("timings") or {}
+            values = [timings.get(key) for key in keys]
+            return fmt(sum(v for v in values if v is not None), 1) if any(v is not None for v in values) else "--"
+        return get
+
+    def result(plan: Dict[str, Any]) -> str:
+        if plan["ok"]:
+            return f"{prm('tolerance_mm')(plan):g} mm"
+        gap = prm("best_gap_left_mm")(plan)
+        return "no route" + (f" ({gap:.0f} mm)" if gap is not None else "")
+
+    def start(plan: Dict[str, Any]) -> str:
+        label = (prm("start")(plan) or {}).get("label")
+        return str(label).replace("_", r"\_") if label else "--"
+
+    def starts_free(plan: Dict[str, Any]) -> str:
+        starts = prm("starts")(plan)
+        return f"{starts['free_in_scene']} of {starts['carry_nodes']}" if starts else "--"
+
+    def verdicts(plan: Dict[str, Any]) -> str:
+        looked, by_reason = prm("edges_looked_at")(plan), prm("edge_verdicts")(plan) or {}
+        return f"{looked}, {by_reason.get('ok', 0)}" if looked is not None else "--"
+
+    def scene_work(plan: Dict[str, Any]) -> str:
+        track = ((prm("counters")(plan) or {}).get("track") or {})
+        nodes = ((prm("counters")(plan) or {}).get("nodes") or {})
+        checks_done = track.get("scene_checks", 0) + nodes.get("scene_checks", 0)
+        seconds = track.get("seconds_scene", 0.0) + nodes.get("seconds_scene", 0.0)
+        return f"{int(checks_done)}, {seconds:.1f}"
+
+    def full_work(plan: Dict[str, Any]) -> str:
+        counters = prm("counters")(plan) or {}
+        checks_done = sum((counters.get(part) or {}).get("collision_checks", 0) for part in counters)
+        seconds = sum((counters.get(part) or {}).get("seconds_collision", 0.0) for part in counters)
+        return f"{int(checks_done)}, {seconds:.1f}"
+
+    return [
+        ("result: tolerance of the route used", cells(result)),
+        ("carry-pose nodes free in the scene", cells(starts_free)),
+        ("carry pose the route starts from", cells(start)),
+        ("nodes on the route; waypoints returned (count)",
+         cells(lambda plan: f"{len(prm('route')(plan))}; {plan['n_waypoints']}" if plan["ok"] else "--")),
+        ("edges looked at, of which usable (count)", cells(verdicts)),
+        ("\\quad blocked by the scene (count)", cells(lambda plan: f"{prm('scene_blocked_edges')(plan)}")),
+        ("\\quad dropped in the final check (count)",
+         cells(lambda plan: f"{len(prm('dropped_in_final_check')(plan) or [])}")),
+        ("tube rounds needed (count)", cells(lambda plan: f"{len(prm('tube')(plan) or [])}")),
+        ("scene-only checks: count, worker-seconds", cells(scene_work)),
+        ("full checks: count, worker-seconds", cells(full_work)),
+        (None, []),
+        ("start the workers (s)", cells(timing("worker_start_s"))),
+        ("read the roadmap; write or find the scene files (s)", cells(timing("load_s", "scene_setup_s"))),
+        ("goal postures and carry-pose nodes in the scene (s)", cells(timing("goal_s", "starts_s", "connect_s"))),
+        ("search: scene checks and tracking of route edges (s)", cells(timing("search_s"))),
+        ("final check at 2 mm (s)", cells(timing("final_check_s"))),
+        ("roadmap plan in all (s)", cells(timing("total_s"))),
+        ("smoothing afterwards, in the caller's process (s)", cells(timing("post_process_s"))),
+        ("whole planning call (s)", cells(lambda plan: fmt(plan["plan_s"], 1))),
+        (None, []),
+        ("independent check of the saved path", [check_cell(checks.get((bar, tag))) for bar in bars]),
+        ("path length: bar travel (m); bar turning (deg)", [travel_cell(checks.get((bar, tag))) for bar in bars]),
+        ("path length: joint travel (deg)",
+         [fmt((checks.get((bar, tag)) or {}).get("joint_travel_deg"), 0) for bar in bars]),
+        ("lowest point of bar, joints and tools on the path (m)",
+         [fmt((checks.get((bar, tag)) or {}).get("lowest_z_m"), 3) for bar in bars]),
+        ("\\quad the same at the goal itself (m)",
+         [fmt((checks.get((bar, tag)) or {}).get("lowest_z_at_goal_m"), 3) for bar in bars]),
+    ]
+
+
+def robarch_tables() -> None:
+    """T2-T5: the two planners on each bar, the shifted bases, one worker, and the collision split."""
+    checks = robarch_checks()
+    bars = [bar for bar in ROBARCH_BARS if robarch_plan(bar, "prm") or robarch_plan(bar, "birrt1")]
+    if not bars:
+        return
+
+    # * The roadmap planner with 8 workers.
+    sideways("prm_table_robarch_plans.tex", "bar", bars, robarch_plan_rows("prm", checks, bars), label_width_cm=7.4)
+
+    # * The BiRRT, three runs per bar, and the roadmap planner's time next to it.
+    def birrt_runs(bar: str) -> List[Optional[Dict[str, Any]]]:
+        return [robarch_plan(bar, f"birrt{n}") for n in (1, 2, 3)]
+
+    def birrt_times(bar: str) -> str:
+        return ", ".join(fmt(run["plan_s"], 0) if run["ok"] else f"fail ({run['plan_s']:.0f})"
+                         for run in birrt_runs(bar) if run) or "--"
+
+    def birrt_checks(bar: str) -> str:
+        done = [checks.get((bar, f"birrt{n}")) for n in (1, 2, 3)]
+        solved = [check for check, run in zip(done, birrt_runs(bar)) if run and run["ok"] and check]
+        return f"{sum(1 for check in solved if check['ok'])} of {len(solved)}" if solved else "--"
+
+    def birrt_low(bar: str) -> str:
+        lows = [check["lowest_z_m"] for n in (1, 2, 3) for check in [checks.get((bar, f"birrt{n}"))]
+                if check and check.get("lowest_z_m") is not None]
+        return fmt(min(lows), 3) if lows else "--"
+
+    def birrt_travel(bar: str, key: str, digits: int) -> str:
+        values = [(checks.get((bar, f"birrt{n}")) or {}).get(key) for n in (1, 2, 3)]
+        return ", ".join(fmt(value, digits) for value in values if value is not None) or "--"
+
+    def prm_time(bar: str, tag: str, key: Optional[str]) -> str:
+        plan = robarch_plan(bar, tag)
+        if not plan:
+            return "--"
+        value = plan["plan_s"] if key is None else ((plan.get("prm") or {}).get("timings") or {}).get(key)
+        return (fmt(value, 0) if plan["ok"] else f"fail ({value:.0f})") if value is not None else "--"
+
+    rows = [
+        ("BiRRT: runs solved (of 3)",
+         [f"{sum(1 for run in birrt_runs(bar) if run and run['ok'])}" if any(birrt_runs(bar)) else "--"
+          for bar in bars]),
+        ("BiRRT: whole planning call of each run (s)", [birrt_times(bar) for bar in bars]),
+        ("BiRRT: solved paths that pass the independent check", [birrt_checks(bar) for bar in bars]),
+        ("BiRRT: lowest point on its paths (m)", [birrt_low(bar) for bar in bars]),
+        ("BiRRT: bar travel of each path (m)", [birrt_travel(bar, "bar_travel_m", 2) for bar in bars]),
+        ("BiRRT: joint travel of each path (deg)", [birrt_travel(bar, "joint_travel_deg", 0) for bar in bars]),
+        (None, []),
+        ("roadmap, 8 workers: whole planning call (s)", [prm_time(bar, "prm", None) for bar in bars]),
+        ("\\quad of which the roadmap plan (s)", [prm_time(bar, "prm", "total_s") for bar in bars]),
+        ("\\quad of which starting the workers (s)", [prm_time(bar, "prm", "worker_start_s") for bar in bars]),
+        ("roadmap, 1 worker: whole planning call (s)", [prm_time(bar, "prm_w1", None) for bar in bars]),
+        ("\\quad of which the roadmap plan (s)", [prm_time(bar, "prm_w1", "total_s") for bar in bars]),
+        (None, []),
+        ("roadmap, 8 workers: search with the night's tracking (s)",
+         [prm_time(bar, "prm", "search_s") for bar in bars]),
+        ("roadmap, 8 workers: search without it (s)", [prm_time(bar, "prm_notrack", "search_s") for bar in bars]),
+        ("\\quad roadmap plan without it (s)", [prm_time(bar, "prm_notrack", "total_s") for bar in bars]),
+    ]
+    sideways("prm_table_robarch_compare.tex", "bar", bars, rows, label_width_cm=7.4)
+
+    # * The base parked off its planned pose.
+    def shift_cell(bar: str, tag: str) -> str:
+        plan = robarch_plan(bar, tag)
+        if not plan:
+            return "--"
+        prm_info = plan.get("prm") or {}
+        if not plan["ok"]:
+            gap = prm_info.get("best_gap_left_mm")
+            reason = str(plan.get("failure_reason") or "fail").replace("prm_", "").replace("_", " ")
+            return reason + (f" ({gap:.0f} mm)" if gap is not None else "")
+        total = (prm_info.get("timings") or {}).get("total_s")
+        check = check_cell(checks.get((bar, tag)))
+        return f"{prm_info['tolerance_mm']:g} mm, {fmt(total, 0)} s, {check}"
+
+    rows = [(label, [shift_cell(bar, tag) for bar in bars]) for tag, label in ROBARCH_SHIFTS]
+    sideways("prm_table_robarch_shift.tex", "base shift", bars, rows, label_width_cm=5.0)
+
+    # * What one collision check of each kind costs.
+    def ms(bar: str, mode: str, key: str) -> str:
+        split = robarch_split(bar, mode)
+        return fmt(split["ms"].get(key), 1) if split else "--"
+
+    def adds_up(bar: str) -> str:
+        real, trimmed = robarch_split(bar, "real"), robarch_split(bar, "trimmed")
+        if not real or not trimmed:
+            return "--"
+        union = [a or b for a, b in zip(real["robot_side"], real["scene_only"])]
+        wrong = sum(1 for a, b in zip(union, real["full"]) if a != b)
+        wrong += sum(1 for a, b in zip(trimmed["full"], real["robot_side"]) if a != b)
+        return f"{wrong} of {len(real['full'])}"
+
+    def hits(bar: str, key: str) -> str:
+        real = robarch_split(bar, "real")
+        return f"{sum(real[key])}" if real else "--"
+
+    rows = [
+        ("full check, real scene (ms)", [ms(bar, "real", "full") for bar in bars]),
+        ("scene-only check, real scene (ms)", [ms(bar, "real", "scene_only") for bar in bars]),
+        ("robot-side check, real scene (ms)", [ms(bar, "real", "robot_side") for bar in bars]),
+        ("full check, precompute scene (ms)", [ms(bar, "trimmed", "full") for bar in bars]),
+        (None, []),
+        ("test configurations colliding: full check (of 252)", [hits(bar, "full") for bar in bars]),
+        ("\\quad robot side", [hits(bar, "robot_side") for bar in bars]),
+        ("\\quad scene only", [hits(bar, "scene_only") for bar in bars]),
+        ("verdicts where the split disagrees with the full check", [adds_up(bar) for bar in bars]),
+    ]
+    sideways("prm_table_robarch_split.tex", "bar", bars, rows, label_width_cm=7.4)
+
+
 def macros(runs: Dict[int, Any], query: Optional[Dict[str, Any]], solved: Dict[int, int]) -> None:
     """A few single numbers the report's text quotes, as LaTeX macros."""
     largest = max(runs)
@@ -931,6 +1292,9 @@ def main() -> None:
     e3_tables(solved)
     precompute_table("prm_table_precompute_6k.tex", "B18_overnight")
     precompute_table("prm_table_precompute_30k.tex", "B18_night30k")
+    robarch_precompute_table()
+    robarch_tables()
+    robarch_dense_table()
     refined = load_refine("B18_g2_n4000", "all_k2.5_p10mm_mid")
     if refined:
         fig_trackability(refined, "prm_trackability.pdf")

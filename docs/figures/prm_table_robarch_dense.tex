@@ -1,0 +1,17 @@
+\begin{tabular}{@{}llrrrrrrr@{}}
+\toprule
+bar & paths & count & \shortstack[r]{waypoints\\(count)} & \shortstack[r]{largest joint\\step (deg)} & \shortstack[r]{holding error at\\waypoints (mm)} & \shortstack[r]{holding error\\between (mm)} & \shortstack[r]{rotation\\between (deg)} & \shortstack[r]{joint\\reversals} \\
+\midrule
+B1 & roadmap, planned base & 3 & 824--918 & 0.30--0.31 & 0.0010--0.0016 & 0.0014--0.0023 & 0.0001 & 3 \\
+B1 & roadmap, shifted bases & 3 & 789--1008 & 0.27--0.43 & 0.0005--0.0015 & 0.0012--0.0023 & 0.0001 & 0--2 \\
+B1 & BiRRT & 3 & 295--346 & 0.54--1.49 & 0.0008 & 0.0064--0.0404 & 0.0004--0.0014 & 3--6 \\
+\midrule
+B3 & roadmap, planned base & 3 & 755--1343 & 0.28--0.74 & 0.0007--0.0008 & 0.0016--0.0044 & 0.0000--0.0001 & 0--2 \\
+B3 & roadmap, shifted bases & 4 & 846--1786 & 0.25--0.51 & 0.0008--0.0020 & 0.0011--0.0033 & 0.0001 & 0--1 \\
+B3 & BiRRT & 3 & 579 & 0.49 & 0.0008 & 0.0018 & 0.0001 & 0 \\
+\midrule
+B4 & roadmap, planned base & 3 & 1276--1515 & 0.30 & 0.0010--0.0011 & 0.0013--0.0017 & 0.0001 & 0 \\
+B4 & roadmap, shifted bases & 4 & 648--2990 & 0.24--0.36 & 0.0010--0.0016 & 0.0014--0.0023 & 0.0001--0.0002 & 0--2 \\
+B4 & BiRRT & 3 & 1319--1450 & 1.09--5.01 & 0.0013 & 0.0103--0.0781 & 0.0012--0.0071 & 15--31 \\
+\bottomrule
+\end{tabular}

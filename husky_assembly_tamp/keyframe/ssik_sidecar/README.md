@@ -96,6 +96,17 @@ python3 -m venv /tmp/ssik_build_env && /tmp/ssik_build_env/bin/pip install "ssik
 
 (100/100 validation poses, max FK error 1.35e-11.)
 
+**Alice and Belle rebuilt for husky_urdf 4d0c854** (2026-10-19, branch `yh/core-port`):
+- **Why:** 4d0c854 ("ur base frames fixed in place") moves the single-arm robots' 90° mounting turn out of the
+  UR chain, so the 2026-10-12/13 builds above are 90° off on it.
+- **How:** the same commands, run against the 4d0c854 URDFs with ssik 4.1.0.
+- **Result:** 100/100 poses each; max FK error 1.02e-11 (Alice) and 9.24e-12 (Belle); KinBody hashes
+  5dd5950e42e8 and 6cb0eb7d796d.
+- **Cindy:** her left and right chains don't change in 4d0c854, so their modules (e1e0725d821f, 0d36e26c3450)
+  stay as they are.
+- ! Use these modules only with husky_urdf 4d0c854 or later. The lab branch still pins aa6a261 and keeps the
+  older builds on `yh/ssik-speedup` (de6ddc3).
+
 The calibrated UR5e classifies as a **non-Pieper 6R** chain (ssik tier-2,
 `ikgeo.general_6r`), which is exactly what ssik handles; each build validates on
 100 random poses (max FK error ~1e-11) and finishes in a few seconds. The

@@ -63,6 +63,8 @@ from husky_assembly_tamp.motion_planner.holding_prm.sampling import (
     add_counters,
     make_collision_fns,
     robot_side_signature,
+    with_tool_names_of,
+    without_prefix,
     signature_differences,
 )
 from husky_assembly_tamp.motion_planner.holding_prm.scenes import build_scene_cell, save_scene
@@ -203,7 +205,12 @@ def check_roadmap_fits(roadmap: Roadmap, start_state, bar_rb_name: str,
             "This roadmap carries no record of what it was built for (it was built from a benchmark "
             "library). Build one from the exported problem with 'prm_pilot.py build --problem-dir'."
         )
-    differences = signature_differences(expected, robot_side_signature(start_state, bar_rb_name))
+    found = robot_side_signature(start_state, bar_rb_name)
+    # * The monitor names the process's bodies under a prefix (process/bars/B20); compare them as the export names them.
+    expected_bar = expected.get("bar") or ""
+    if bar_rb_name != expected_bar and bar_rb_name.endswith("/" + expected_bar):
+        found = without_prefix(found, bar_rb_name[:-len(expected_bar)])
+    differences = signature_differences(with_tool_names_of(expected, found), found)
     if grasp_bar_from_right is not None:
         stored = roadmap.model.grasp["right"]
         distance, angle = pose_gap(stored, grasp_bar_from_right)

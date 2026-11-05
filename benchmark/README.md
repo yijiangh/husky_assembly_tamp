@@ -101,8 +101,8 @@ python -m http.server --directory "$HUSKY_BENCH_ROOT" 8000
 
 - ! A roadmap only fits a scene built the same way: when the core's allowed contacts change (its tool-contacts
   merge did, 2026-11), rebuild the cells (delete `cells/<key>/<bar>` and run `build-cells`) and then the roadmaps, or the online planner
-  refuses them with `RoadmapMismatch` (the touch bodies differ). The roadmaps synced from the Windows runs date
-  from before that change.
+  refuses them with `RoadmapMismatch` (the touch bodies differ). The Drive's two-modules demo cells and roadmaps
+  (B20, B21, B22; 600 nodes, untracked) were rebuilt that way on 2026-11-05; its other roadmaps predate the change.
 - `plan_process_carry.py --cdfm-backend prm` saves its query and scene files under the roadmap folder (the
   monitor's own calls pass `save_query=False` and one worker, so they write nothing there). On this machine the
   B21 carry took 150 s with the BiRRT and 350 s on a 600-node untracked roadmap with one worker, both while

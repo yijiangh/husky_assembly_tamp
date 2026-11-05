@@ -249,6 +249,55 @@ def robot_side_signature(state, bar_rb_name: str) -> Dict[str, Any]:
     return {"bar": bar_rb_name, "bodies": bodies, "tools": tools}
 
 
+def without_prefix(signature: Dict[str, Any], prefix: str) -> Dict[str, Any]:
+    """The signature with ``prefix`` taken off every body and tool name that carries it.
+
+    A monitor names a process's bodies under a prefix (``process/bars/B20``); the roadmap was built from the
+    export, which names them without it.
+
+    Args:
+        signature (Dict[str, Any]): a signature from :func:`robot_side_signature`.
+        prefix (str): what to take off the front of each name, e.g. ``"process/"``.
+
+    Returns:
+        Dict[str, Any]: a new signature with the names shortened.
+    """
+    def short(name: str) -> str:
+        return name[len(prefix):] if name.startswith(prefix) else name
+    bodies = {short(name): dict(body, touch_bodies=sorted(short(other) for other in body["touch_bodies"]))
+              for name, body in signature["bodies"].items()}
+    return {"bar": short(signature["bar"]), "bodies": bodies,
+            "tools": {short(name): links for name, links in signature["tools"].items()}}
+
+
+def with_tool_names_of(expected: Dict[str, Any], found: Dict[str, Any]) -> Dict[str, Any]:
+    """``expected`` with its arm tools renamed to ``found``'s, matched by the links each may touch.
+
+    The export names a tool by the robot's and the tool's names (``tools/cindy/AT3L``), the monitor by the robot's
+    serial and arm (``tools/a200-0806/left_ur_arm``); the links a tool may touch say which arm it is on.
+
+    Args:
+        expected (Dict[str, Any]): the roadmap's signature.
+        found (Dict[str, Any]): the live scene's signature.
+
+    Returns:
+        Dict[str, Any]: ``expected`` with the tools that match one of ``found``'s renamed to it, or ``expected``.
+    """
+    renames = {}
+    for name, links in expected["tools"].items():
+        same = [other for other, other_links in found["tools"].items() if other_links == links]
+        if len(same) == 1 and same[0] != name:
+            renames[name] = same[0]
+    if not renames:
+        return expected
+    def new(name: str) -> str:
+        return renames.get(name, name)
+    bodies = {name: dict(body, touch_bodies=sorted(new(other) for other in body["touch_bodies"]))
+              for name, body in expected["bodies"].items()}
+    return {"bar": expected["bar"], "bodies": bodies,
+            "tools": {new(name): links for name, links in expected["tools"].items()}}
+
+
 def signature_differences(expected: Dict[str, Any], found: Dict[str, Any]) -> List[str]:
     """Plain-word differences between two robot-side signatures (empty when they match).
 

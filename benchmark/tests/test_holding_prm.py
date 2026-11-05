@@ -565,6 +565,19 @@ def test_a_roadmap_built_for_another_load_is_refused():
     other_grasp[0, 3] = 0.01
     with pytest.raises(RoadmapMismatch, match="right grasp differs"):
         check_roadmap_fits(roadmap, _carrying_state(), "bar_B1", other_grasp)
+    # The monitor names the process's bodies under a prefix: the same load, accepted.
+    prefixed = _carrying_state()
+    prefixed.rigid_body_states = {f"process/{name}": body for name, body in prefixed.rigid_body_states.items()}
+    for body in prefixed.rigid_body_states.values():
+        body.touch_bodies = [f"process/{other}" for other in (body.touch_bodies or [])]
+    check_roadmap_fits(roadmap, prefixed, "process/bar_B1", np.eye(4))
+    # The monitor names the tools by the robot's serial and arm: matched by the links they may touch, accepted.
+    renamed = _carrying_state()
+    renamed.tool_states = {"tools/a200-0806/left_ur_arm": renamed.tool_states["gripper_left"]}
+    for body in renamed.rigid_body_states.values():
+        body.touch_bodies = ["tools/a200-0806/left_ur_arm" if other == "gripper_left" else other
+                             for other in (body.touch_bodies or [])]
+    check_roadmap_fits(roadmap, renamed, "bar_B1", np.eye(4))
     # A joint half is missing from what the robot carries: refused.
     lighter = _carrying_state()
     del lighter.rigid_body_states["joint_a"]

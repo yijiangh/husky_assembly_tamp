@@ -64,6 +64,53 @@ $PYTHON -m http.server --directory "$HUSKY_BENCH_ROOT" 8000
 It has to be served rather than opened from disk: browsers refuse `fetch` and
 JavaScript modules on `file://` URLs.
 
+## Running it on Ubuntu, in the monitor's ROS venv
+
+The monitor's venv (`ros2_ws_next/venv`: Python 3.10, numpy 1.26, ssik 4.1, the editable core and compas_fab)
+runs the benchmark, the roadmap planner and the dashboards as they are; it only needs `pyinstrument`
+(`pip install pyinstrument`). No ROS is needed. Checked on 2026-11-05 with the smoke library and the two-modules
+demo's B21 (the BiRRT batch, a 600-node roadmap, `plan_process_carry.py` with both backends, both dashboards).
+
+```bash
+source ~/Code/ros2_ws_next/venv/bin/activate
+cd ~/Code/ros2_ws_next/src/husky-assembly-teleop/external/husky_assembly_tamp
+export HUSKY_BENCH_ROOT="…/data_experiment/cdfm_planner_benchmark"           # or a local copy, see below
+export HUSKY_DESIGN_STUDY_DIR="…/2025-03 Husky Assembly/data_design_study"  # read only
+export PYTHON=$VIRTUAL_ENV/bin/python                                        # for the scripts/prm_runs/*.sh
+
+# BiRRT batch, smoke size (three cell caches exist, so name the source):
+python scripts/benchmark_cdfm.py run --name smoke_linux --library smoke --source-key 260921_motion_sample-de81ff31 \
+    --seeds 1 --max-goals 1 --max-starts-per-goal 2 --workers 2
+python scripts/benchmark_cdfm.py summarize --name smoke_linux --source-key 260921_motion_sample-de81ff31
+python scripts/benchmark_cdfm.py export-dashboard --name smoke_linux --library smoke --source-key 260921_motion_sample-de81ff31
+
+# Roadmap for one bar of a process (cells first, then build + export; TRACK_MM=0 skips the tracking):
+python scripts/benchmark_cdfm.py build-cells "$HUSKY_DESIGN_STUDY_DIR/261008_2ModulesDemo_purged_process" --bars B21
+NODES=600 WORKERS=4 TRACK_MM=0 scripts/prm_runs/process_precompute.sh 261008_2ModulesDemo_purged_process B21
+# The same carry with either backend (the monitor's held transfer calls the same function):
+python scripts/plan_process_carry.py "$HUSKY_DESIGN_STUDY_DIR/261008_2ModulesDemo_purged_process" --bar B21 \
+    --cdfm-backend prm --no-plot
+python scripts/plan_process_carry.py "$HUSKY_DESIGN_STUDY_DIR/261008_2ModulesDemo_purged_process" --bar B21 \
+    --cdfm-backend birrt --max-time 60 --no-plot
+
+# Both dashboards: serve the data root (the pages read assets/ and compare/ above their run folder).
+python -m http.server --directory "$HUSKY_BENCH_ROOT" 8000
+#   http://localhost:8000/runs/smoke_linux/dashboard/
+#   http://localhost:8000/prm/261008_2ModulesDemo_purged_process__B21/dashboard/
+```
+
+- ! A roadmap only fits a scene built the same way: when the core's allowed contacts change (its tool-contacts
+  merge did, 2026-11), rebuild the cells (delete `cells/<key>/<bar>` and run `build-cells`) and then the roadmaps, or the online planner
+  refuses them with `RoadmapMismatch` (the touch bodies differ). The roadmaps synced from the Windows runs date
+  from before that change.
+- `plan_process_carry.py --cdfm-backend prm` saves its query and scene files under the roadmap folder (the
+  monitor's own calls pass `save_query=False` and one worker, so they write nothing there). On this machine the
+  B21 carry took 150 s with the BiRRT and 350 s on a 600-node untracked roadmap with one worker, both while
+  other jobs ran.
+- For a trial run, point `HUSKY_BENCH_ROOT` at a local copy holding only `cells/`, `library/smoke`, `assets/`,
+  `prm/carry/carry_v1/starts.json` and the roadmaps you need (about 300 MB), so nothing lands on the shared
+  Drive; copy the results over by hand when they should last.
+
 ## What a run is
 
 Each run plans one start-to-goal transfer with one random seed, twice:

@@ -23,6 +23,7 @@ import numpy as np
 
 from husky_assembly_tamp.benchmark.asset_versions import stamp_page_assets
 from husky_assembly_tamp.benchmark.library import load_bar_library, load_sweep_detail
+from husky_assembly_tamp.benchmark.paths import long_path
 from husky_assembly_tamp.benchmark.summarize import load_runs, summarize_group, summarize_run
 
 

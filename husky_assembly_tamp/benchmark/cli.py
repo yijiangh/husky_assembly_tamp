@@ -448,9 +448,10 @@ def cmd_export_dashboard(args: argparse.Namespace) -> int:
 
     root = resolve_root(args.root)
     export_run(root, args.name, library_name=args.library)
+    # ! Serve the data root, not the dashboard folder: the page reads the assets and compare index above it.
     print("[export] serve the dashboard with:")
-    print("    python -m http.server --directory "
-          f"{os.path.join(root, 'runs', args.name, 'dashboard')} 8000")
+    print(f"    python -m http.server --directory {root} 8000")
+    print(f"    then open http://localhost:8000/runs/{args.name}/dashboard/")
     return 0
 
 

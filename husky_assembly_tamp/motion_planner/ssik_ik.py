@@ -42,6 +42,9 @@ from husky_assembly_tamp.keyframe import ssik_inprocess
 ARM_BASE_LINK: Dict[str, str] = {
     "left": "left_ur_arm_base_link",
     "right": "right_ur_arm_base_link",
+    # The support robots' single arms: each solved in its own robot body.
+    "alice": "ur_arm_base_link",
+    "belle": "ur_arm_base_link",
 }
 
 # * Where each arm's 6 joints live inside the flat 12-vector (left 6 then right 6).
@@ -50,7 +53,7 @@ ARM_SLICE: Dict[str, slice] = {
     "right": slice(6, 12),
 }
 
-# Robot body ids whose joint order has already been checked against the artifacts.
+# (robot body id, arm) pairs whose joint order has already been checked against the artifacts.
 _JOINT_ORDER_CHECKED: set = set()
 
 
@@ -64,37 +67,41 @@ def ik_backend() -> str:
     return keyframe_config.IK_BACKEND
 
 
-def verify_ssik_joint_order(robot: int, artifact_set: Optional[str] = None) -> None:
+def verify_ssik_joint_order(robot: int, arms: Sequence[str] = ("left", "right"),
+                            artifact_set: Optional[str] = None) -> None:
     """One-time guard: artifact joint order must match the PyBullet URDF chain.
 
     The 6 values ssik returns are in kinematic base->tool0 order; we splice them
     straight into the 12-vector, which is built from the URDF chain order. This
-    asserts (once per robot body id and artifact set) that every artifact joint
+    asserts (once per robot body id, arm and artifact set) that every artifact joint
     name exists in the loaded robot and that their PyBullet joint indices are
     strictly increasing, i.e. the chain order agrees. The per-solve FK
     validation downstream would also catch a mismatch, but this fails FAST and
     with a readable message.
 
     Args:
-        robot (int): PyBullet body id of the dual-arm robot.
+        robot (int): PyBullet body id of the robot.
+        arms (Sequence[str]): The arms to check: Cindy's two by default, or the
+            one arm about to be solved (a single-arm robot has no left/right).
         artifact_set (Optional[str]): which solver set's joint names to check
             (``None`` = the calibrated production solver).
 
     Raises:
         AssertionError: when a joint name is missing or the order disagrees.
     """
-    key = (robot, artifact_set or ssik_inprocess.DEFAULT_ARTIFACT_SET)
-    if key in _JOINT_ORDER_CHECKED:
-        return
-    for arm in ("left", "right"):
+    set_name = artifact_set or ssik_inprocess.DEFAULT_ARTIFACT_SET
+    for arm in arms:
+        key = (robot, arm, set_name)
+        if key in _JOINT_ORDER_CHECKED:
+            continue
         names = ssik_inprocess.joint_names(arm, artifact_set)
         # pp.joint_from_name raises if the name is absent from the body.
         indices = [pp.joint_from_name(robot, n) for n in names]
         assert indices == sorted(indices), (
-            f"ssik/{arm} ({key[1]}): artifact joint order {names} does not follow the "
+            f"ssik/{arm} ({set_name}): artifact joint order {names} does not follow the "
             f"URDF chain order in PyBullet (indices {indices})"
         )
-    _JOINT_ORDER_CHECKED.add(key)
+        _JOINT_ORDER_CHECKED.add(key)
 
 
 def target_in_arm_base(robot: int, arm: str, world_tool_pose) -> np.ndarray:
@@ -106,7 +113,7 @@ def target_in_arm_base(robot: int, arm: str, world_tool_pose) -> np.ndarray:
 
     Args:
         robot (int): PyBullet body id.
-        arm (str): "left" or "right".
+        arm (str): "left", "right" (Cindy), "alice" or "belle".
         world_tool_pose: PyBullet ``(pos, quat_xyzw)`` world pose of tool0.
 
     Returns:
@@ -159,7 +166,7 @@ def ssik_arm_branches(
 
     Args:
         robot (int): PyBullet body id.
-        arm (str): "left" or "right".
+        arm (str): "left", "right" (Cindy), "alice" or "belle".
         world_tool_pose: PyBullet ``(pos, quat_xyzw)`` world target for tool0.
         seed6 (Optional[Sequence[float]]): the arm's current 6 joint values;
             when given, results are re-branched toward it and sorted by raw
@@ -183,7 +190,7 @@ def ssik_arm_branches(
         List[np.ndarray]: 6-vectors in kinematic (== 12-vector slice) order;
         empty list = pose unreachable for this arm.
     """
-    verify_ssik_joint_order(robot, artifact_set)
+    verify_ssik_joint_order(robot, (arm,), artifact_set=artifact_set)
     target = target_in_arm_base(robot, arm, world_tool_pose)
     seed_arr = None if seed6 is None else np.asarray(seed6, dtype=float)
     solutions = ssik_inprocess.solve(

@@ -30,6 +30,7 @@ missed.
 from __future__ import annotations
 
 import logging
+import time
 from time import perf_counter
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -288,6 +289,7 @@ def _ssik_pair_goal_branch_with_home(
     goal_conf_fallback,
     cfab_collision_fn,
     home_anchors=None,
+    report=None,
 ):
     """Re-pick the M1 goal conf on the IK branch pair most compatible with the home pose.
 
@@ -399,9 +401,68 @@ def _ssik_pair_goal_branch_with_home(
             continue
         print(f"[ssik] goal branch paired with home anchor "
               f"(worst-arm cross distance {np.rad2deg(cross_dist):.1f} deg)")
+        if report is not None:
+            report["cross_distance_deg"] = float(np.rad2deg(cross_dist))
         return np.asarray(conf, dtype=float)
     # No valid combination -- keep the seeded goal rather than failing here.
+    if report is not None:
+        report["cross_distance_deg"] = None
     return goal_conf_fallback
+
+
+# How long the goal-branch probe may spend proving that an authored goal conf
+# can walk to some home pose. Nearly always answered within a second; the cap
+# only matters when the answer is "no".
+GOAL_BRANCH_PROBE_S = 8.0
+
+
+def _planning_context(start_state, active_bar_id, joint_names_12, goal_conf_arr,
+                      world_from_bar_goal, grasp_bar_from_left, grasp_bar_from_right,
+                      goal_conf_authored=None, pairing_report=None):
+    """Everything a diagnostics viewer needs to rebuild one M1 planning scene.
+
+    The frames the planner works in, the goal it aims at (as authored and as
+    actually used), and the rigid grasp it preserves -- gathered once so the
+    derive-only and the full-plan paths describe themselves the same way.
+
+    Args:
+        start_state: the RobotCellState the plan runs on.
+        active_bar_id (str): the held bar's rigid-body name.
+        joint_names_12 (Sequence[str]): the twelve arm joint names, in order.
+        goal_conf_arr: the goal 12-vec the planner uses.
+        world_from_bar_goal: the goal bar pose, pybullet ``(pos, quat)``.
+        grasp_bar_from_left: left grasp transform (bar-from-tool0).
+        grasp_bar_from_right: right grasp transform (bar-from-tool0).
+        goal_conf_authored: the goal 12-vec the caller asked for, when the
+            branch pairing may have moved it; None means "the same".
+        pairing_report (dict | None): what the branch pairing / probe recorded.
+
+    Returns:
+        dict: JSON-able context (poses as pybullet pairs).
+    """
+    identity = ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
+    bar_state = (start_state.rigid_body_states or {}).get(active_bar_id)
+    attachment_frame = getattr(bar_state, "attachment_frame", None)
+    base_frame = getattr(start_state, "robot_base_frame", None)
+    used = np.asarray(goal_conf_arr, dtype=float)
+    authored = used if goal_conf_authored is None else np.asarray(goal_conf_authored, dtype=float)
+    report = pairing_report or {}
+    return {
+        "joint_names_12": list(joint_names_12),
+        "world_from_mobile_base": (_pp_pose_from_frame(base_frame)
+                                   if base_frame is not None else identity),
+        "goal_conf_authored": [float(v) for v in authored],
+        "goal_conf": [float(v) for v in used],
+        "goal_rebranch_max_rad": float(np.max(np.abs(used - authored))),
+        "world_from_bar_goal": world_from_bar_goal,
+        "pairing_cross_distance_deg": report.get("cross_distance_deg"),
+        "goal_branch_probe": report.get("probe"),
+        "grasp_bar_from_left": grasp_bar_from_left,
+        "grasp_bar_from_right": grasp_bar_from_right,
+        "attach_link": getattr(bar_state, "attached_to_link", None),
+        "tool0_from_bar": (_pp_pose_from_frame(attachment_frame)
+                           if attachment_frame is not None else identity),
+    }
 
 
 def _derive_constrained_start_for_plan(
@@ -471,6 +532,10 @@ def _derive_constrained_start_for_plan(
     home_anchor_selection = [home_anchor] if home_anchor is not None else None
     resolve_home_anchors(home_anchor_selection)
 
+    # Wall time per stage, returned in info["stage_times"] so a slow
+    # derivation can be attributed (goal branch pairing vs the sweep etc.).
+    stage_t: Dict[str, float] = {}
+    t0 = time.perf_counter()
     # 1. goal conf.
     if goal_ee_frames is not None:
         left_goal_frame = goal_ee_frames.get("left")
@@ -486,6 +551,11 @@ def _derive_constrained_start_for_plan(
         planner.set_robot_cell_state(start_state)
     else:
         goal_conf_arr = _conf12_from_target(goal_conf, joint_names_12)
+    stage_t["goal_conf"] = time.perf_counter() - t0
+    # Kept so the diagnostics can say whether (and how far) the ssik branch
+    # pairing below moved the goal off the conf the caller asked for.
+    goal_conf_authored = np.asarray(goal_conf_arr, dtype=float).copy()
+    pairing_report = {}
 
     # 2. rigid grasp from the authored attachment (tool0_from_bar).
     bar_state = (start_state.rigid_body_states or {}).get(active_bar_id)
@@ -527,23 +597,97 @@ def _derive_constrained_start_for_plan(
     # attached bar), so no husky URDF/SRDF file on disk is required.
     cfab_collision_fn = _build_cfab_collision_fn(planner, start_state, joint_names_12)
 
-    # * ssik only: re-pick the goal conf on the branch pair that is compatible
-    # * with the home anchor, so a continuous in-limit motion start->goal can
-    # * exist at all (see _ssik_pair_goal_branch_with_home for the geometry).
-    if ssik_ik.ik_backend() == "ssik":
+    # Sweep settings shared by the probe below and the real derivation. Only
+    # values the caller actually chose are forwarded, so an unset one keeps
+    # derive_constrained_start_tracked's own default (one source of truth).
+    walk_kwargs: Dict[str, Any] = {}
+    if bar_sweep_box is not None:
+        walk_kwargs["bar_sweep_box"] = bar_sweep_box
+    if position_res is not None:
+        walk_kwargs["position_res"] = position_res
+    if rotation_res is not None:
+        walk_kwargs["rotation_res"] = rotation_res
+    if home_anchor_selection is not None:
+        walk_kwargs["anchors"] = home_anchor_selection
+
+    # * An AUTHORED goal conf (M2's own start) is kept whenever it can already
+    # * walk to a home pose. The branch pairing below exists for goals stuck on
+    # * a branch no home can reach -- but it also moves M1's end off the conf
+    # * M2 starts from, and on easy scenes that alone was what made every home
+    # * pose fail (B3: 722 of 728 walks broke on a branch flip after the goal
+    # * was moved 215 deg; with the authored conf kept, a clear corridor turned
+    # * up in 36 s). So the pairing is now the exception, decided by the real
+    # * question -- a short walk with collisions off, which returns at the
+    # * first home the goal reaches continuously -- not by a branch-distance
+    # * metric. A goal solved from frames has no authored conf to protect and
+    # * is paired as before.
+    pairing_needed = ssik_ik.ik_backend() == "ssik"
+    if pairing_needed and goal_ee_frames is None:
+        t0 = time.perf_counter()
+        probe_pose, probe_conf, probe_info = derive_constrained_start_tracked(
+            robot_puid, arm_joints, tool_link_left, tool_link_right,
+            grasp_bar_from_left, grasp_bar_from_right, world_from_bar_goal, goal_conf_arr,
+            world_from_mobile_base=world_from_mobile_base,
+            joint_collision_fn=None,          # reachability only, not clearance
+            max_time=GOAL_BRANCH_PROBE_S,
+            **walk_kwargs,
+        )
+        stage_t["goal_branch_probe"] = time.perf_counter() - t0
+        pairing_needed = probe_conf is None
+        pairing_report["probe"] = {
+            "authored_reaches_home": probe_conf is not None,
+            "variant": probe_info.get("variant"),
+            "candidates_walked": len(probe_info.get("candidates") or []),
+            "t_s": stage_t["goal_branch_probe"],
+        }
+        if probe_conf is not None:
+            print(f"[ssik] authored goal conf kept: it walks to home "
+                  f"{probe_info.get('variant')!r} continuously "
+                  f"({stage_t['goal_branch_probe']:.1f} s).")
+        else:
+            print(f"[ssik] authored goal conf reaches no home pose within "
+                  f"{GOAL_BRANCH_PROBE_S:.0f} s -- re-pairing its branch.")
+
+    # * Re-pick the goal conf on the branch pair that is compatible with the
+    # * home anchor, so a continuous in-limit motion start->goal can exist at
+    # * all (see _ssik_pair_goal_branch_with_home for the geometry).
+    t0 = time.perf_counter()
+    if pairing_needed:
         goal_conf_arr = _ssik_pair_goal_branch_with_home(
             planner, robot_puid, arm_joints, tool_link_left, tool_link_right,
             world_from_bar_goal, world_from_mobile_base,
             grasp_bar_from_left, grasp_bar_from_right,
             goal_conf_arr, cfab_collision_fn,
             home_anchors=home_anchor_selection,
+            report=pairing_report,
         )
         # cfab probes above left the cache at the last tested conf; reset.
         planner.set_robot_cell_state(start_state)
 
+    stage_t["goal_branch_pairing"] = time.perf_counter() - t0
+
+    def _with_context(payload):
+        """Stamp the planning context onto a result dict.
+
+        Built at call time because the collision gate below may still re-solve
+        the goal conf after this point.
+
+        Args:
+            payload (dict): the info dict about to be returned.
+
+        Returns:
+            dict: the same dict, with ``context`` filled in.
+        """
+        payload["context"] = _planning_context(
+            start_state, active_bar_id, joint_names_12, goal_conf_arr,
+            world_from_bar_goal, grasp_bar_from_left, grasp_bar_from_right,
+            goal_conf_authored=goal_conf_authored, pairing_report=pairing_report)
+        return payload
+
     # Goal must be collision-free too (mirrors dual_arm_task_space_rrt.run): the
     # frame IK above runs with collision off and may return a colliding branch.
     # If so, re-solve at the same bar pose + grasps with random restarts.
+    t0 = time.perf_counter()
     if cfab_collision_fn(goal_conf_arr):
         rng = np.random.default_rng(random_seed)
         resolved_goal = solve_endpoint_dual_arm_ik(
@@ -560,10 +704,14 @@ def _derive_constrained_start_for_plan(
             collision_fn=cfab_collision_fn,
         )
         if resolved_goal is None:
-            return (*_fail, {"failure_reason": "goal_in_collision"})
+            stage_t["goal_cc_resolve"] = time.perf_counter() - t0
+            return (*_fail, _with_context({
+                "failure_reason": "goal_in_collision", "stage_times": stage_t}))
         goal_conf_arr = np.asarray(resolved_goal, dtype=float)
         # cfab probes left the cache at the last sampled conf; reset to start.
         planner.set_robot_cell_state(start_state)
+
+    stage_t["goal_cc_resolve"] = time.perf_counter() - t0
 
     derive_kwargs = dict(
         bar_body=bar_body,
@@ -587,20 +735,11 @@ def _derive_constrained_start_for_plan(
         # * IK branch by construction, so a continuous in-limit joint path
         # * start->goal exists (see derive_constrained_start_tracked).
         tracked_kwargs = dict(
+            walk_kwargs,
             world_from_mobile_base=world_from_mobile_base,
             joint_collision_fn=cfab_collision_fn,
         )
-        if bar_sweep_box is not None:
-            tracked_kwargs["bar_sweep_box"] = bar_sweep_box
-        # Only forward a resolution the caller actually chose, so an unset one
-        # keeps derive_constrained_start_tracked's own default (one source of
-        # truth for the numbers, no second copy of them here).
-        if position_res is not None:
-            tracked_kwargs["position_res"] = position_res
-        if rotation_res is not None:
-            tracked_kwargs["rotation_res"] = rotation_res
-        if home_anchor_selection is not None:
-            tracked_kwargs["anchors"] = home_anchor_selection
+        t0 = time.perf_counter()
         world_from_bar_start, start_conf, tracked_info = derive_constrained_start_tracked(
             robot_puid,
             arm_joints,
@@ -612,6 +751,7 @@ def _derive_constrained_start_for_plan(
             goal_conf_arr,
             **tracked_kwargs,
         )
+        stage_t["tracked_sweep"] = time.perf_counter() - t0
         if start_conf is not None:
             partial_note = ""
             if tracked_info.get("partial"):
@@ -639,7 +779,14 @@ def _derive_constrained_start_for_plan(
                   f"{tracked_info.get('arrival_collisions')} arrival collisions); "
                   f"falling back to the cold endpoint sweep.")
 
+    # Everything the sweep recorded except the (large) direct path itself: the
+    # counters, the per-candidate trace and the timing profile.
+    tracked_report = (
+        {k: v for k, v in tracked_info.items() if k != "direct_path"}
+        if tracked_info is not None else None
+    )
     if start_conf is None or world_from_bar_start is None:
+        t0 = time.perf_counter()
         world_from_bar_start, start_conf = derive_constrained_start(
             robot_puid,
             arm_joints,
@@ -651,10 +798,19 @@ def _derive_constrained_start_for_plan(
             seed_conf=goal_conf_arr,
             **derive_kwargs,
         )
+        stage_t["cold_sweep"] = time.perf_counter() - t0
     if start_conf is None or world_from_bar_start is None:
-        return (*_fail, {"failure_reason": "start_derivation_failed"})
+        return (*_fail, _with_context({
+            "failure_reason": "start_derivation_failed",
+            "stage_times": stage_t,
+            "tracked": tracked_report,
+        }))
 
-    info = {"derived_start_conf": [float(x) for x in start_conf]}
+    info = _with_context({
+        "derived_start_conf": [float(x) for x in start_conf],
+        "stage_times": stage_t,
+        "tracked": tracked_report,
+    })
     # Forward a fully collision-free tracked direct path (goal->home order) when
     # the ssik derivation found one -- the caller can use it as the finished
     # M1 path and skip the RRT (direct-connect-first).
@@ -1012,7 +1168,14 @@ def plan_constrained_dual_arm(
                 "planner": "direct_path",
                 "derived_start_conf": derive_info.get("derived_start_conf"),
                 "path_poses": path_poses,
+                "start_conf": [float(v) for v in start_conf],
+                "world_from_bar_start": world_from_bar_start,
             }
+            # The derivation's own record rides along, so a run file can show
+            # the sweep that produced this corridor.
+            for key in ("tracked", "context", "stage_times"):
+                if key in derive_info:
+                    info[key] = derive_info[key]
             return path_confs, info
     else:
         start_conf = _conf12_from_state(start_state, joint_names_12)
@@ -1083,8 +1246,19 @@ def plan_constrained_dual_arm(
         "ik_options": dict(ik_options or {}),
         "repair_settings": dict(repair or {}),
     }
+    info["start_conf"] = [float(v) for v in start_conf]
+    info["world_from_bar_start"] = world_from_bar_start
     if derive_start:
         info["derived_start_conf"] = derive_info.get("derived_start_conf")
+        for key in ("tracked", "context", "stage_times"):
+            if key in derive_info:
+                info[key] = derive_info[key]
+    else:
+        # Planned from a stored start: no sweep to report, but the viewer still
+        # needs the frames and the goal to draw the search.
+        info["context"] = _planning_context(
+            start_state, active_bar_id, joint_names_12, goal_conf_arr,
+            world_from_bar_goal, grasp_bar_from_left, grasp_bar_from_right)
 
     # * The settings every re-solve AFTER the search uses (repair, smoothing).
     # * With repair on these are the production ones -- calibrated solver,
@@ -1489,12 +1663,18 @@ def _run_dual_arm_cartesian_ik_loop(
     max_descend_iterations: int = 200,
     skip_env_collisions: bool = True,
     joint_continuity_threshold_rad: Optional[float] = None,
+    report: Optional[Dict[str, Any]] = None,
 ) -> Optional[JointTrajectory]:
     """Per-waypoint synchronized dual-arm IK with continuity check.
 
     Same flow as the previous version of this helper, but the wrapper into
     a JointTrajectory uses the local ``_joint_trajectory_from_path_12``
     instead of pulling the function from the teleop package.
+
+    ``report`` (optional dict) is filled when the loop fails, so the caller can
+    show why: see :func:`_run_dual_arm_cartesian_ik_loop_ssik`. The gradient
+    backend only fills ``waypoint``, ``n_waypoints``, ``reason`` and the two
+    target frames.
     """
     from .dual_arm_task_space_rrt.core import (
         DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
@@ -1516,10 +1696,19 @@ def _run_dual_arm_cartesian_ik_loop(
             right_frames,
             skip_env_collisions=skip_env_collisions,
             joint_continuity_threshold_rad=joint_continuity_threshold_rad,
+            report=report,
         )
 
     left_arm_joints, right_arm_joints = _arm_joint_names(robot_cell)
     joint_names_12 = left_arm_joints + right_arm_joints
+
+    def _failed(i: int, reason: str) -> None:
+        """Note which waypoint failed and why in ``report`` (if given); return None."""
+        if report is not None:
+            report.update(waypoint=i, n_waypoints=len(left_frames), reason=reason,
+                          left_frame=left_frames[i], right_frame=right_frames[i],
+                          skip_env_collisions=skip_env_collisions)
+        return None
 
     ik_options = {
         "max_results": max_results,
@@ -1560,7 +1749,7 @@ def _run_dual_arm_cartesian_ik_loop(
             _dbg_probe_ik_failure(planner, state, left_target, ik_options, LEFT_GROUP,
                                   i, "LEFT", joint_names_12, left_arm_joints, right_arm_joints)
             # === END DEBUG ===
-            return None
+            return _failed(i, "left_unreachable")
         except PlanningGroupNotSupported:
             planner.set_robot_cell_state(state)
             try:
@@ -1571,7 +1760,7 @@ def _run_dual_arm_cartesian_ik_loop(
                 _dbg_probe_ik_failure(planner, state, left_target, ik_options, LEFT_GROUP,
                                       i, "LEFT", joint_names_12, left_arm_joints, right_arm_joints)
                 # === END DEBUG ===
-                return None
+                return _failed(i, "left_unreachable")
         for n in right_arm_joints:
             conf_L[n] = float(state.robot_configuration[n])
         state.robot_configuration = conf_L
@@ -1579,14 +1768,14 @@ def _run_dual_arm_cartesian_ik_loop(
             conf_LR = planner.inverse_kinematics(right_target, state, RIGHT_GROUP, ik_options)
         except (InverseKinematicsError, CollisionCheckError) as e:
             logger.warning(f"[cartesian IK loop] waypoint {i}: RIGHT FAIL: {getattr(e, 'message', e)}")
-            return None
+            return _failed(i, "right_unreachable")
         except PlanningGroupNotSupported:
             planner.set_robot_cell_state(state)
             try:
                 conf_LR = planner.inverse_kinematics(right_target, state, RIGHT_GROUP, ik_options)
             except Exception as e2:
                 logger.warning(f"[cartesian IK loop] waypoint {i}: RIGHT FAIL after retry: {e2}")
-                return None
+                return _failed(i, "right_unreachable")
         for n in left_arm_joints:
             conf_LR[n] = float(state.robot_configuration[n])
         state.robot_configuration = conf_LR
@@ -1600,7 +1789,7 @@ def _run_dual_arm_cartesian_ik_loop(
                 f"[cartesian IK loop] waypoint {i}: joint step {diff:.4f} rad exceeds "
                 f"threshold {float(joint_continuity_threshold_rad):.4f}; rejecting IK branch."
             )
-            return None
+            return _failed(i, "no_candidate")
         path_12.append(next_vec)
 
     return _joint_trajectory_from_path_12(path_12, joint_names_12)
@@ -1615,6 +1804,7 @@ def _run_dual_arm_cartesian_ik_loop_ssik(
     *,
     skip_env_collisions: bool = True,
     joint_continuity_threshold_rad: Optional[float] = None,
+    report: Optional[Dict[str, Any]] = None,
 ) -> Optional[JointTrajectory]:
     """ssik variant of :func:`_run_dual_arm_cartesian_ik_loop` (M2/M3 linear).
 
@@ -1637,6 +1827,19 @@ def _run_dual_arm_cartesian_ik_loop_ssik(
             expected during mate/insertion.
         joint_continuity_threshold_rad (Optional[float]): max raw per-joint
             step between consecutive waypoints (default: the shared RRT value).
+        report (Optional[dict]): the loop adds these only when it fails, so the
+            caller can show why (the linear planners add ``waypoint_frames``
+            before the loop, success or not):
+            ``waypoint`` / ``n_waypoints`` (index of the failing waypoint and
+            the count), ``left_frame`` / ``right_frame`` (its tool0 targets),
+            ``reason`` ('left_unreachable' | 'right_unreachable' |
+            'no_candidate'), ``previous_conf`` (the 12 joints of the waypoint
+            before), ``candidates`` (12-vecs, nearest first), ``rejected_by``
+            (per candidate: 'continuity' | 'collision'), ``max_step`` (per
+            candidate, rad), ``threshold`` (rad), ``first_colliding_state``
+            (RobotCellState of the nearest candidate the collision check
+            rejected, or None), ``skip_env_collisions``.
+            ! Waypoint 0 (the start) is never collision-checked here.
 
     Returns:
         Optional[JointTrajectory]: the synchronized 12-DOF trajectory, or
@@ -1681,6 +1884,14 @@ def _run_dual_arm_cartesian_ik_loop_ssik(
         if not branches_left or not branches_right:
             side = "LEFT" if not branches_left else "RIGHT"
             logger.warning(f"[cartesian IK loop/ssik] waypoint {i}: {side} unreachable")
+            if report is not None:
+                report.update(waypoint=i, n_waypoints=len(left_frames),
+                              left_frame=lf, right_frame=rf,
+                              reason=f"{side.lower()}_unreachable",
+                              previous_conf=previous.tolist(), candidates=[], rejected_by=[],
+                              max_step=[], threshold=float(joint_continuity_threshold_rad),
+                              first_colliding_state=None,
+                              skip_env_collisions=skip_env_collisions)
             return None
         # * Candidate combinations, smallest max-joint-step first: for linear
         # * tracking the nearest pair almost always wins; the rest are fallbacks
@@ -1690,16 +1901,24 @@ def _run_dual_arm_cartesian_ik_loop_ssik(
             key=lambda conf: float(np.max(np.abs(conf - previous))),
         )
         accepted = None
+        # Why each candidate was turned down, kept for ``report`` (cheap: one
+        # string per candidate; the first colliding state is a reference).
+        rejected_by: List[str] = []
+        first_colliding_state = None
         for conf in candidates:
             next_vec = [float(v) for v in conf]
             # Cheap gate first: raw joint-step continuity (same threshold + check
             # as the gradient loop).
             if joint_step_exceeds_threshold(next_vec, path_12[-1], joint_continuity_threshold_rad):
+                rejected_by.append("continuity")
                 continue
             trial_state = _state_with_conf12(state, next_vec, joint_names_12)
             try:
                 planner.check_collision(trial_state, options=cc_opts)
             except CollisionCheckError:
+                rejected_by.append("collision")
+                if first_colliding_state is None:
+                    first_colliding_state = trial_state
                 continue
             accepted = next_vec
             state = trial_state
@@ -1711,6 +1930,16 @@ def _run_dual_arm_cartesian_ik_loop_ssik(
                 f"continuity+collision (nearest max joint step {nearest_step:.4f} rad, "
                 f"threshold {float(joint_continuity_threshold_rad):.4f})."
             )
+            if report is not None:
+                report.update(waypoint=i, n_waypoints=len(left_frames),
+                              left_frame=lf, right_frame=rf, reason="no_candidate",
+                              previous_conf=previous.tolist(),
+                              candidates=[c.tolist() for c in candidates],
+                              rejected_by=rejected_by,
+                              max_step=[float(np.max(np.abs(c - previous))) for c in candidates],
+                              threshold=float(joint_continuity_threshold_rad),
+                              first_colliding_state=first_colliding_state,
+                              skip_env_collisions=skip_env_collisions)
             return None
         path_12.append(accepted)
 
@@ -1730,6 +1959,7 @@ def plan_constrained_dual_arm_linear(
     max_descend_iterations: int = 200,
     skip_env_collisions: bool = True,
     joint_continuity_threshold_rad: Optional[float] = None,
+    report: Optional[Dict[str, Any]] = None,
 ) -> Optional[JointTrajectory]:
     """Linear dual-arm motion with bar held rigidly.
 
@@ -1738,6 +1968,11 @@ def plan_constrained_dual_arm_linear(
     Bar starts at ``start_state.rigid_body_states[active_bar_id].frame``; the
     goal bar pose is derived from ``goal_ee_frames['left']`` + start grasp
     (preferred) or from FK at ``goal_conf`` + start grasp.
+
+    ``report`` (optional dict) is filled when no path is found: see
+    :func:`_run_dual_arm_cartesian_ik_loop_ssik`. Its ``waypoint_frames``
+    (``{"left": [Frame], "right": [Frame]}``, the tool0 waypoints IK follows,
+    waypoint 0 = the start) is filled whenever the waypoint loop runs.
     """
     if (goal_conf is None) == (goal_ee_frames is None):
         raise ValueError(
@@ -1817,6 +2052,11 @@ def plan_constrained_dual_arm_linear(
             Frame.from_transformation(bar_t_tf * Transformation.from_frame(bar_from_right_tool0))
         )
 
+    # The tool0 path IK is asked to follow, kept for the caller's drawing
+    # (filled on success too, unlike the failure fields).
+    if report is not None:
+        report["waypoint_frames"] = {"left": left_frames, "right": right_frames}
+
     return _run_dual_arm_cartesian_ik_loop(
         planner, robot_cell, state,
         left_frames, right_frames,
@@ -1824,6 +2064,7 @@ def plan_constrained_dual_arm_linear(
         max_descend_iterations=max_descend_iterations,
         skip_env_collisions=skip_env_collisions,
         joint_continuity_threshold_rad=joint_continuity_threshold_rad,
+        report=report,
     )
 
 
@@ -1841,6 +2082,7 @@ def plan_dual_arm_linear_independent(
     max_descend_iterations: int = 200,
     skip_env_collisions: bool = True,
     joint_continuity_threshold_rad: Optional[float] = None,
+    report: Optional[Dict[str, Any]] = None,
 ) -> Optional[JointTrajectory]:
     """Linear dual-arm motion with each arm interpolating independently.
 
@@ -1848,6 +2090,11 @@ def plan_dual_arm_linear_independent(
       1. ``target_left_frame`` + ``target_right_frame`` explicitly,
       2. ``goal_ee_frames`` dict with ``'left'`` and ``'right'`` keys,
       3. forward kinematics at ``goal_conf``.
+
+    ``report`` (optional dict) is filled when no path is found: see
+    :func:`_run_dual_arm_cartesian_ik_loop_ssik`. Its ``waypoint_frames``
+    (``{"left": [Frame], "right": [Frame]}``, the tool0 waypoints IK follows,
+    waypoint 0 = the start) is filled whenever the waypoint loop runs.
     """
     from compas_fab.backends.pybullet.backend_features.pybullet_plan_cartesian_motion import (
         FrameInterpolator,
@@ -1901,6 +2148,11 @@ def plan_dual_arm_linear_independent(
         left_frames.append(left_interp.get_interpolated_frame(t))
         right_frames.append(right_interp.get_interpolated_frame(t))
 
+    # The tool0 path IK is asked to follow, kept for the caller's drawing
+    # (filled on success too, unlike the failure fields).
+    if report is not None:
+        report["waypoint_frames"] = {"left": left_frames, "right": right_frames}
+
     return _run_dual_arm_cartesian_ik_loop(
         planner, robot_cell, state,
         left_frames, right_frames,
@@ -1908,4 +2160,5 @@ def plan_dual_arm_linear_independent(
         max_descend_iterations=max_descend_iterations,
         skip_env_collisions=skip_env_collisions,
         joint_continuity_threshold_rad=joint_continuity_threshold_rad,
+        report=report,
     )

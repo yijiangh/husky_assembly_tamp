@@ -70,6 +70,43 @@ external\ssik_env\Scripts\ssik build $urdf `
   --base right_ur_arm_base_link --ee right_ur_arm_tool0 --out $out\right_ur_arm_ik.py
 ```
 
+**Alice** (single arm, Linux, built 2026-10-12): `ssik build` needs the `[urdf]` extra, which the
+ROS 2 venv does not have (and installing it there risks numpy 2.x), so build in a throwaway venv
+with the SAME ssik version the runtime uses (the artifact imports ssik internals):
+
+```bash
+python3 -m venv /tmp/ssik_build_env && /tmp/ssik_build_env/bin/pip install "ssik[urdf]==4.1.0"
+/tmp/ssik_build_env/bin/ssik build \
+  ../../data/husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e_no_base_joint_Alice_Calibrated.urdf \
+  --base ur_arm_base_link --ee ur_arm_tool0 \
+  --out asset/ssik/alice_ur_arm_ik.py --module-name alice_ur_arm_ik
+```
+
+(URDF path relative to this repo when vendored in `husky-assembly-teleop`; the build takes ~90 s,
+100/100 validation poses, max FK error ~1e-11.)
+
+**Belle** (single arm, Linux, built 2026-10-13): the same, from her own calibrated URDF:
+
+```bash
+/tmp/ssik_build_env/bin/ssik build \
+  ../../data/husky_urdf/mt_husky_moveit_config/urdf/husky_ur5_e_no_base_joint_Belle_Calibrated.urdf \
+  --base ur_arm_base_link --ee ur_arm_tool0 \
+  --out asset/ssik/belle_ur_arm_ik.py --module-name belle_ur_arm_ik
+```
+
+(100/100 validation poses, max FK error 1.35e-11.)
+
+**Alice and Belle rebuilt for husky_urdf 4d0c854** (2026-10-19, branch `yh/core-port`):
+- **Why:** 4d0c854 ("ur base frames fixed in place") moves the single-arm robots' 90° mounting turn out of the
+  UR chain, so the 2026-10-12/13 builds above are 90° off on it.
+- **How:** the same commands, run against the 4d0c854 URDFs with ssik 4.1.0.
+- **Result:** 100/100 poses each; max FK error 1.02e-11 (Alice) and 9.24e-12 (Belle); KinBody hashes
+  5dd5950e42e8 and 6cb0eb7d796d.
+- **Cindy:** her left and right chains don't change in 4d0c854, so their modules (e1e0725d821f, 0d36e26c3450)
+  stay as they are.
+- ! Use these modules only with husky_urdf 4d0c854 or later. The lab branch still pins aa6a261 and keeps the
+  older builds on `yh/ssik-speedup` (de6ddc3).
+
 The calibrated UR5e classifies as a **non-Pieper 6R** chain (ssik tier-2,
 `ikgeo.general_6r`), which is exactly what ssik handles; each build validates on
 100 random poses (max FK error ~1e-11) and finishes in a few seconds. The

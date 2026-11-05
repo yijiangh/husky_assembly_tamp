@@ -2131,6 +2131,7 @@ def track_direct_path(
     rotation_res: float,
     joint_continuity_threshold_rad: float = DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
     use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
+    break_out: Optional[Dict[str, Any]] = None,
 ) -> Tuple[List[Tuple[PoseLike, np.ndarray]], bool]:
     """Walk the straight task-space path between two bar poses with warm IK.
 
@@ -2158,6 +2159,10 @@ def track_direct_path(
             L-infinity) allowed between consecutive waypoints; a bigger step
             means the IK flipped onto another branch and the walk is broken.
         use_angle_normalization (bool): whether to wrap solved angles.
+        break_out (Optional[Dict[str, Any]]): when given, filled with why the
+            walk broke: ``{"reason": "ik_miss", "pose"}`` (the pose is out of
+            reach) or ``{"reason": "branch_flip", "joint", "jump_rad", "pose"}``
+            (reachable, but not continuously from the previous waypoint).
 
     Returns:
         Tuple[List[Tuple[PoseLike, np.ndarray]], bool]: ``(track, track_ok)``.
@@ -2188,10 +2193,18 @@ def track_direct_path(
             seed_conf=track[-1][1],
             use_angle_normalization=use_angle_normalization,
         )
-        # Track breaks on IK miss or a branch flip.
-        if next_conf is None or joint_step_exceeds_threshold(
-            next_conf, track[-1][1], joint_continuity_threshold_rad
-        ):
+        # Track breaks on IK miss or a branch flip; say which, so the failure
+        # can be explained instead of merely counted.
+        if next_conf is None:
+            if break_out is not None:
+                break_out.update({"reason": "ik_miss", "pose": _pose_lists(pose)})
+            return track, False
+        if joint_step_exceeds_threshold(next_conf, track[-1][1], joint_continuity_threshold_rad):
+            if break_out is not None:
+                jump = np.abs(np.asarray(next_conf, dtype=float) - track[-1][1])
+                j = int(np.argmax(jump))
+                break_out.update({"reason": "branch_flip", "joint": j, "jump_rad": float(jump[j]),
+                                  "pose": _pose_lists(pose)})
             return track, False
         track.append((pose, np.asarray(next_conf, dtype=float)))
     return track, True
@@ -2228,6 +2241,44 @@ def first_blocked_index(
     return None
 
 
+def _pose_lists(pose: PoseLike) -> Dict[str, List[float]]:
+    """A pybullet pose as plain JSON-able lists.
+
+    Args:
+        pose (PoseLike): a ``(position, quaternion_xyzw)`` pair.
+
+    Returns:
+        Dict[str, List[float]]: ``{"pos": [x, y, z], "quat_xyzw": [x, y, z, w]}``.
+    """
+    return {"pos": [float(v) for v in pose[0]],
+            "quat_xyzw": [float(v) for v in pose[1]]}
+
+
+def _subsample_confs(track, max_points: int = 20) -> Dict[str, Any]:
+    """Thin an accepted track down to a handful of configurations.
+
+    The viewer scrubs the walk from the goal to wherever it got; a few dozen
+    poses are plenty, while a full track can be hundreds of 12-vectors per
+    candidate (and there are a thousand candidates). The first and last
+    waypoints are always kept -- they are the goal and the arrival/break pose.
+
+    Args:
+        track (list): the accepted ``(pose, conf)`` waypoints.
+        max_points (int): how many to keep at most.
+
+    Returns:
+        Dict[str, Any]: ``{"indices": [...], "confs": [[12 floats], ...]}``.
+    """
+    n = len(track)
+    if n <= max_points:
+        keep = list(range(n))
+    else:
+        step = (n - 1) / float(max_points - 1)
+        keep = sorted({int(round(i * step)) for i in range(max_points)} | {0, n - 1})
+    return {"indices": keep,
+            "confs": [[float(v) for v in track[i][1]] for i in keep]}
+
+
 def derive_constrained_start_tracked(
     robot: int,
     arm_joints: Sequence[int],
@@ -2253,6 +2304,7 @@ def derive_constrained_start_tracked(
     joint_collision_fn: Optional[Callable[[FullConf], bool]] = None,
     use_angle_normalization: bool = DEFAULT_USE_ANGLE_NORMALIZATION,
     anchors: Optional[Sequence[str]] = None,
+    max_time: float = 120.0,
 ) -> Tuple[Optional[PoseLike], Optional[np.ndarray], Dict[str, Any]]:
     """Derive M1's start by TRACKING the goal conf backward to a home pose.
 
@@ -2325,6 +2377,10 @@ def derive_constrained_start_tracked(
             selection (None/"all" = every anchor). The time budget is split
             evenly across the selected anchors so a hopeless first anchor
             cannot starve the others.
+        max_time (float): soft wall-clock budget for the whole sweep, seconds.
+            A short budget with ``joint_collision_fn=None`` turns this into a
+            quick reachability probe: it returns at the first home pose the
+            goal can walk to continuously, ignoring clearance.
 
     Returns:
         Tuple[Optional[PoseLike], Optional[np.ndarray], Dict[str, Any]]:
@@ -2362,7 +2418,7 @@ def derive_constrained_start_tracked(
     # a hopeless first anchor cannot starve the others); a single selected
     # anchor keeps the full budget, matching the old single-anchor behavior.
     # On expiry we fall through to the best partial track found so far.
-    max_time = 120.0
+    max_time = float(max_time)
     anchor_allowance = max_time / max(1, len(anchor_labels))
     anchor_spent: Dict[str, float] = {label: 0.0 for label in anchor_labels}
 
@@ -2378,8 +2434,24 @@ def derive_constrained_start_tracked(
     needs_fine_retrack = screen_pos > fine_pos or screen_rot > fine_rot
 
     def _track_to(world_from_bar_home: PoseLike, pos_step: float, rot_step: float):
-        """Track goal -> this candidate home pose; see ``track_direct_path``."""
-        return track_direct_path(
+        """Track goal -> this candidate home pose (``track_direct_path``), and say how far it got and why it broke.
+
+        Args:
+            world_from_bar_home (PoseLike): the candidate home bar pose.
+            pos_step (float): linear interpolation step, meters.
+            rot_step (float): angular interpolation step, radians.
+
+        Returns:
+            Tuple[list, bool, int, Optional[dict]]: ``(track, track_ok, n_total, break_info)``: the accepted
+            ``(pose, conf)`` prefix starting at the goal; whether the walk reached home; how many waypoints the
+            whole goal->home segment has (``len(track) / n_total`` says how far the walk got); and why it broke,
+            ``track_direct_path``'s ``break_out`` (an IK miss means the pose is out of reach, a branch flip that it
+            is reachable but not continuously from the goal), None when it did not.
+        """
+        n_total = len(list(pp.interpolate_poses(world_from_bar_goal, world_from_bar_home,
+                                                pos_step_size=pos_step, ori_step_size=rot_step)))
+        break_info: Dict[str, Any] = {}
+        track, track_ok = track_direct_path(
             robot=robot,
             arm_joints=arm_joints,
             tool_link_left=tool_link_left,
@@ -2393,11 +2465,15 @@ def derive_constrained_start_tracked(
             rotation_res=rot_step,
             joint_continuity_threshold_rad=joint_continuity_threshold_rad,
             use_angle_normalization=use_angle_normalization,
+            break_out=break_info,
         )
+        # One IK solve per waypoint walked past the goal, plus the one that broke the walk.
+        info["profile"]["n_ik"] += len(track) - 1 + (0 if track_ok else 1)
+        return track, track_ok, n_total, (break_info or None)
 
     def _first_blocked_index(track) -> Optional[int]:
-        """First colliding interior waypoint; see ``first_blocked_index``."""
-        return first_blocked_index(track, joint_collision_fn)
+        """First colliding interior waypoint (``first_blocked_index``), its checks timed by ``_cc``."""
+        return first_blocked_index(track, _cc if joint_collision_fn is not None else None)
 
     info: Dict[str, Any] = {
         "tracked_deltas": 0,
@@ -2406,6 +2482,55 @@ def derive_constrained_start_tracked(
         "blocked_direct_paths": 0,
         "fine_reverify_failures": 0,
     }
+    # * Per-candidate trace + timing profile, so a slow or failed sweep can be
+    # * explained afterwards (husky_assembly_teleop.m1_derive_report plots
+    # * both). One record per delta tried, stamped with its outcome; the
+    # * profile splits the wall time between per-waypoint IK and collision
+    # * checks and keeps the per-anchor spend against the budget.
+    info["candidates"] = []
+    info["goal_mb"] = [float(v) for v in mb_from_bar_goal[0]]
+    # Every home orientation the sweep may use, in the order it tries them, and
+    # the numbers that decide how far/finely it walks -- the dashboard needs
+    # both to describe a candidate in physical terms.
+    info["variants_mb"] = [[label, [float(v) for v in pos], [float(v) for v in quat]]
+                           for label, (pos, quat) in anchor_variants]
+    info["sweep_params"] = {
+        "screen_pos": float(screen_pos),
+        "screen_rot": float(screen_rot),
+        "fine_pos": float(fine_pos),
+        "fine_rot": float(fine_rot),
+        "continuity_rad": float(joint_continuity_threshold_rad),
+        "grid_step": float(bar_sweep_step),
+        "box": [[float(lo), float(hi)] for lo, hi in bar_sweep_box],
+        "max_variant_deltas": int(max_variant_deltas),
+    }
+    info["profile"] = {
+        "max_time": float(max_time),
+        "anchor_allowance": float(anchor_allowance),
+        "n_variants": len(anchor_variants),
+        "n_deltas": len(deltas),
+        "t_track": 0.0,          # screening tracks (per-waypoint IK)
+        "n_ik": 0,
+        "t_fine_retrack": 0.0,   # re-tracking a winning corridor at fine res
+        "t_cc": 0.0,             # arrival + interior collision checks
+        "n_cc": 0,
+        # (anchor, variant, candidates tried so far) where a time share ran out
+        "budget_cuts": [],
+    }
+    t_sweep_start = time.perf_counter()
+
+    def _cc(conf) -> bool:
+        """``joint_collision_fn`` with its calls and time charged to the profile."""
+        t0 = time.perf_counter()
+        hit = bool(joint_collision_fn(conf))
+        info["profile"]["t_cc"] += time.perf_counter() - t0
+        info["profile"]["n_cc"] += 1
+        return hit
+
+    def _finalize() -> None:
+        """Stamp wall time + per-anchor spend on the profile (every exit path)."""
+        info["profile"]["t_total"] = time.perf_counter() - t_sweep_start
+        info["profile"]["anchor_spent"] = {k: float(v) for k, v in anchor_spent.items()}
     # First fully-tracked candidate with a collision-free ARRIVAL: kept as the
     # start-only answer when no fully collision-free direct path turns up.
     first_start: Optional[Dict[str, Any]] = None
@@ -2430,6 +2555,8 @@ def derive_constrained_start_tracked(
                 anchor_spent[anchor_label] += now - mark
                 mark = now
                 if anchor_spent[anchor_label] >= anchor_allowance:
+                    info["profile"]["budget_cuts"].append(
+                        [anchor_label, variant_label, len(info["candidates"])])
                     logger.warning(
                         "derive_constrained_start_tracked: anchor %s spent its %.0fs "
                         "time share at variant %s; moving to the next anchor.",
@@ -2447,13 +2574,41 @@ def derive_constrained_start_tracked(
                 # coarse screening step. ``track`` records every accepted
                 # (pose, conf) so a broken walk can still donate its farthest
                 # reachable prefix as a partial start.
-                track, track_ok = _track_to(world_from_bar_home, screen_pos, screen_rot)
+                t_at = time.perf_counter() - t_sweep_start
+                t0 = time.perf_counter()
+                track, track_ok, n_total, break_info = _track_to(
+                    world_from_bar_home, screen_pos, screen_rot)
+                t_track = time.perf_counter() - t0
+                info["profile"]["t_track"] += t_track
+                record = {
+                    "variant": variant_label,
+                    "anchor": anchor_label,
+                    "delta": [float(v) for v in delta],
+                    "home_mb": [float(v) for v in home_mb[0]],
+                    "home_quat_mb": [float(v) for v in home_bar_quat],
+                    "n_wp": len(track),
+                    "n_total": n_total,
+                    # fraction of the goal->home segment the walk survived
+                    "reached": (len(track) - 1) / max(1, n_total - 1),
+                    "blocked_at": None,
+                    # seconds since the sweep started; consecutive values give
+                    # each candidate's own duration on the dashboard timeline.
+                    "t_at": t_at,
+                    "t_track": t_track,
+                    "break": break_info,
+                    "last_conf": [float(v) for v in track[-1][1]],
+                    "track": _subsample_confs(track),
+                    "outcome": None,
+                }
+                info["candidates"].append(record)
 
                 if track_ok:
                     # --- Arrival config must be collision-free (it is a plan endpoint).
                     conf = track[-1][1]
-                    if joint_collision_fn is not None and joint_collision_fn(conf):
+                    record["arrival_conf"] = [float(v) for v in conf]
+                    if joint_collision_fn is not None and _cc(conf):
                         info["arrival_collisions"] += 1
+                        record["outcome"] = "arrival_collision"
                         continue
                     # --- FREE DIRECT PATH check: if every interior waypoint is also
                     # collision-free, this track IS a finished M1 path -- return
@@ -2465,10 +2620,13 @@ def derive_constrained_start_tracked(
                         # so its spacing must be what the caller asked for, not
                         # the screening step.
                         if needs_fine_retrack:
-                            fine_track, fine_ok = _track_to(world_from_bar_home, fine_pos, fine_rot)
+                            t0 = time.perf_counter()
+                            fine_track, fine_ok, _n, _b = _track_to(
+                                world_from_bar_home, fine_pos, fine_rot)
+                            info["profile"]["t_fine_retrack"] += time.perf_counter() - t0
                             if fine_ok and (
                                 joint_collision_fn is None
-                                or not joint_collision_fn(fine_track[-1][1])
+                                or not _cc(fine_track[-1][1])
                             ) and _first_blocked_index(fine_track) is None:
                                 track = fine_track
                                 conf = fine_track[-1][1]
@@ -2481,6 +2639,7 @@ def derive_constrained_start_tracked(
                                 # passed the collision gate -- and keep scanning
                                 # for another direct path.
                                 info["fine_reverify_failures"] += 1
+                                record["outcome"] = "fine_reverify_failed"
                                 logger.warning(
                                     "derive_constrained_start_tracked: direct path at %s "
                                     "failed the fine re-track (%.4f m / %.4f rad); "
@@ -2501,6 +2660,8 @@ def derive_constrained_start_tracked(
                             [wp_pose for wp_pose, _c in track],
                             [wp_conf for _p, wp_conf in track],
                         )
+                        record["outcome"] = "corridor"
+                        _finalize()
                         return world_from_bar_home, conf, info
                     # Direct path blocked mid-way: keep the FIRST such candidate as
                     # the start-only answer and keep scanning for a free direct path.
@@ -2511,6 +2672,10 @@ def derive_constrained_start_tracked(
                     info["blocked_direct_paths"] += 1
                     blocked_fraction = first_blocked / max(1, len(track) - 1)
                     info.setdefault("blocked_fractions", []).append(round(blocked_fraction, 2))
+                    record["outcome"] = "blocked"
+                    record["blocked_at"] = float(blocked_fraction)
+                    record["blocked_index"] = int(first_blocked)
+                    record["blocked_conf"] = [float(v) for v in track[first_blocked][1]]
                     if first_start is None:
                         first_start = {
                             "pose": world_from_bar_home,
@@ -2521,6 +2686,7 @@ def derive_constrained_start_tracked(
                     continue
 
                 info["track_breaks"] += 1
+                record["outcome"] = "track_break"
                 # Remember the farthest-reaching broken walk for the fallback.
                 partial_dist = float(np.linalg.norm(
                     np.asarray(track[-1][0][0], dtype=float)
@@ -2542,6 +2708,7 @@ def derive_constrained_start_tracked(
     if first_start is not None:
         info["delta"] = first_start["delta"]
         info["variant"] = first_start["variant"]
+        _finalize()
         return first_start["pose"], first_start["conf"], info
 
     # --- Partial fallback: no home pose fully tracked. Walk the best partial
@@ -2555,7 +2722,7 @@ def derive_constrained_start_tracked(
             ))
             if dist < min_partial_distance:
                 break  # walked back too close to the goal -- give up on partial
-            if joint_collision_fn is not None and joint_collision_fn(conf):
+            if joint_collision_fn is not None and _cc(conf):
                 continue
             info["variant"] = best_partial["variant"]
             info["delta"] = best_partial["delta"]
@@ -2566,6 +2733,7 @@ def derive_constrained_start_tracked(
                 "PARTIAL start %.3f m from the goal (variant %s). M0 will cover the rest.",
                 dist, best_partial["variant"],
             )
+            _finalize()
             return pose, conf, info
 
     logger.warning(
@@ -2574,6 +2742,7 @@ def derive_constrained_start_tracked(
         info["tracked_deltas"], "/".join(anchor_labels),
         info["track_breaks"], info["arrival_collisions"],
     )
+    _finalize()
     return None, None, info
 
 
@@ -3118,6 +3287,11 @@ def update_debug_tree(
     confs_a: Optional[Dict[int, FullConf]] = None,
     confs_b: Optional[Dict[int, FullConf]] = None,
     recorder: Optional[SearchRecorder] = None,
+    tree_start: Optional[List[TreeNode]] = None,
+    tree_goal: Optional[List[TreeNode]] = None,
+    outcome: Optional[str] = None,
+    elapsed_s: Optional[float] = None,
+    restarts: Optional[int] = None,
 ) -> None:
     """Populate ``debug_tree_out`` in place with the trees + planning outcome.
 
@@ -3141,7 +3315,17 @@ def update_debug_tree(
         confs_a (Optional[Dict[int, FullConf]]): joint configurations of
             ``nodes_a`` keyed by ``id(node)``.
         confs_b (Optional[Dict[int, FullConf]]): the same for ``nodes_b``.
-        recorder (Optional[SearchRecorder]): the failed extensions, if kept.
+        recorder (Optional[SearchRecorder]): the failed extensions, if kept
+            (``attempts``: the benchmark reads them).
+        tree_start (Optional[List[TreeNode]]): the start-rooted tree on its
+            own, when the planner is bidirectional (``tree1`` merges both).
+        tree_goal (Optional[List[TreeNode]]): the goal-rooted tree on its own.
+        outcome (Optional[str]): why the search stopped -- ``connected``,
+            ``max_time``, ``max_iterations``, ``start_in_collision`` or
+            ``goal_in_collision``.
+        elapsed_s (Optional[float]): wall time of the search, seconds.
+        restarts (Optional[int]): how many restarts were made (``attempts``
+            is the recorder's list, so this goes under ``restarts``).
 
     Returns:
         None. Mutates ``debug_tree_out``.
@@ -3166,6 +3350,18 @@ def update_debug_tree(
     # Histogram of `extend_toward` stop_reasons across all RRT iterations.
     # Useful for diagnosing failed plans (e.g. mostly "ik_failure" vs "collision").
     debug_tree_out["extend_stop_reasons"] = dict(extend_stop_reasons) if extend_stop_reasons else {}
+    # * The pieces a diagnostics viewer needs to show WHY a search failed: the
+    # * two trees apart (how far did each get), the stop reason and the time.
+    if tree_start is not None:
+        debug_tree_out["tree_start"] = export_tree(tree_start)
+    if tree_goal is not None:
+        debug_tree_out["tree_goal"] = export_tree(tree_goal)
+    if outcome is not None:
+        debug_tree_out["outcome"] = outcome
+    if elapsed_s is not None:
+        debug_tree_out["elapsed_s"] = float(elapsed_s)
+    if restarts is not None:
+        debug_tree_out["restarts"] = int(restarts)
 
 
 def plan_pose_rrt(
@@ -3459,22 +3655,32 @@ def plan_pose_birrt(
     else:
         collision_fn = _noop_pose_collision_fn
 
+    search_started = time.time()
+
+    def _give_up(outcome: str):
+        """Record an endpoint failure so the caller can tell it from a search failure."""
+        update_debug_tree(debug_tree_out, False, 0, [], start_pose, goal_pose, recorder=recorder,
+                          outcome=outcome, elapsed_s=time.time() - search_started, restarts=0)
+        if debug_tree_out is not None:
+            debug_tree_out["n_ik_solves"] = 0
+        return None, None
+
     if joint_collision_fn is not None:
         if start_conf is None or goal_conf is None:
             raise ValueError("Collision-aware planning requires both start_conf and goal_conf.")
         if joint_collision_fn(start_conf):
             logger.warning("Start configuration is in collision.")
-            return None, None
+            return _give_up("start_in_collision")
         if joint_collision_fn(goal_conf):
             logger.warning("Goal configuration is in collision.")
-            return None, None
+            return _give_up("goal_in_collision")
     else:
         if collision_fn(start_pose):
             logger.warning("Start pose is in floating-body collision.")
-            return None, None
+            return _give_up("start_in_collision")
         if collision_fn(goal_pose):
             logger.warning("Goal pose is in floating-body collision.")
-            return None, None
+            return _give_up("goal_in_collision")
 
     def make_tree(root_pose: PoseLike, root_conf: Optional[FullConf]) -> Tuple[List[TreeNode], Dict, Dict]:
         """Create one BiRRT tree rooted at a pose, with its per-node side caches.
@@ -3514,6 +3720,9 @@ def plan_pose_birrt(
     # The last attempt's trees, kept for the debug export when every attempt fails.
     best_trees: Tuple[List[TreeNode], Dict, List[TreeNode], Dict] = ([], {}, [], {})
     total_iterations = 0
+    # Why the LAST attempt stopped, for the diagnostics: the time budget or
+    # the iteration cap (a connect sets neither and returns directly).
+    stopped_on = "max_iterations"
 
     for attempt in range(max_attempts):
         start_time = time.time()
@@ -3521,10 +3730,12 @@ def plan_pose_birrt(
             recorder.reset()
         nodes_a, confs_a, fvecs_a = make_tree(start_pose, start_conf)
         nodes_b, confs_b, fvecs_b = make_tree(goal_pose, goal_conf)
+        stopped_on = "max_iterations"
 
         for iteration in range(max_iterations):
             total_iterations += 1
             if (time.time() - start_time) >= max_time:
+                stopped_on = "max_time"
                 break
 
             # Alternate which tree extends toward the random sample.
@@ -3756,6 +3967,8 @@ def plan_pose_birrt(
                 debug_tree_out, True, iteration + 1, nodes_a, start_pose, goal_pose,
                 extend_stop_reasons=extend_stop_reasons,
                 nodes_b=nodes_b, confs_a=confs_a, confs_b=confs_b, recorder=recorder,
+                tree_start=nodes_a, tree_goal=nodes_b, outcome="connected",
+                elapsed_s=time.time() - search_started, restarts=attempt + 1,
             )
             if debug_tree_out is not None:
                 debug_tree_out["n_ik_solves"] = n_ik_solves
@@ -3776,6 +3989,8 @@ def plan_pose_birrt(
         debug_tree_out, False, total_iterations, nodes_a, start_pose, goal_pose,
         extend_stop_reasons=extend_stop_reasons,
         nodes_b=nodes_b, confs_a=confs_a, confs_b=confs_b, recorder=recorder,
+        tree_start=nodes_a, tree_goal=nodes_b, outcome=stopped_on,
+        elapsed_s=time.time() - search_started, restarts=max_attempts,
     )
     if debug_tree_out is not None:
         debug_tree_out["n_ik_solves"] = n_ik_solves

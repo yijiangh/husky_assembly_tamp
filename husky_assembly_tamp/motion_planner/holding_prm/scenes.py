@@ -1,107 +1,52 @@
-"""Turning an exported bar action into the scenes the roadmap planner needs.
+"""The scenes the roadmap planner needs for one bar carry, and their files.
 
 Two scenes matter for one bar-carry movement:
 
 * the **precompute scene**: the robot, its two tools and the carried bodies,
-  with the robot at the world origin. ``benchmark build-cells`` makes it and
-  caches it under ``<root>/cells/<source_key>/<bar>/`` (see
-  ``benchmark/scene.py``); the roadmap is built in it.
-* the **real scene**: the same, plus everything visible and stationary in the
-  movement's start state (built bars and joints, a support robot), with the
-  robot at its real base pose. The online planner checks routes in it.
+  with the robot at the world origin. ``benchmark build-cells`` makes it from
+  the process folder (``benchmark/process_export.py``) and caches it under
+  ``<root>/cells/<source_key>/<bar>/``; the roadmap is built in it.
+* the **real scene**: the same, plus everything visible and stationary at the
+  start of the carry (built bars and joints, a support robot), with the robot
+  at its real base pose. The online planner checks routes in it.
 
-A full exported cell holds every body of the whole assembly (hundreds of
-megabytes); a worker process must not load that. :func:`build_scene_cell`
-keeps only what a movement's scene actually shows, and the pair it returns is
-small enough to write to disk for each worker to open.
+The cell the online planner works in holds every body of the assembly; a
+worker process must not load that. :func:`build_scene_cell` keeps only what a
+scene actually shows, and the pair it returns is small enough to write to disk
+for each worker to open.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import os
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
-from compas.data import json_dump, json_load
+from compas.data import json_dump
 from compas.geometry import Frame, Transformation
 from compas_fab.robots import RobotCell, RobotCellState
 
 from husky_assembly_tamp.benchmark.build_cells import source_key_for
-from husky_assembly_tamp.benchmark.glb import GlbBuilder, frame_to_translation_rotation, mesh_arrays
-from husky_assembly_tamp.benchmark.scene import (
-    HOME_MOVEMENT_INDEX,
-    BarProblem,
-    select_cdfm_movement,
-)
-from husky_assembly_tamp.motion_planner.api import _pp_pose_from_frame
+from husky_assembly_tamp.benchmark.glb import GlbBuilder, frame_to_translation_rotation, mesh_arrays, mesh_scale
+from husky_assembly_tamp.benchmark.process_export import carry_goal_frames, read_process
+from husky_assembly_tamp.benchmark.scene import BarProblem
 from husky_assembly_tamp.motion_planner.holding_prm.holding import invert_transform, matrix_from_pose
 from husky_assembly_tamp.motion_planner.holding_prm.sampling import is_carried
 
 
 # -----------------------------------------------------------------------------
-# * Reading an export
+# * The planned goal of a carry
 # -----------------------------------------------------------------------------
 
 
-def action_paths(problem_dir: str, bar_id: str) -> Tuple[str, str]:
-    """The jointing and release action files of one bar in an export.
-
-    Args:
-        problem_dir (str): the exported problem folder.
-        bar_id (str): the bar, e.g. ``"B3"``.
-
-    Returns:
-        Tuple[str, str]: ``<bar>__J.json`` and ``<bar>__R.json``.
-
-    Raises:
-        FileNotFoundError: when either is missing.
-    """
-    folder = os.path.join(problem_dir, "BarActions")
-    paths = (os.path.join(folder, f"{bar_id}__J.json"), os.path.join(folder, f"{bar_id}__R.json"))
-    for path in paths:
-        if not os.path.isfile(path):
-            raise FileNotFoundError(f"No bar action {path}. Check the problem folder and the bar id.")
-    return paths
-
-
-def load_carry_movement(problem_dir: str, bar_id: str):
-    """The bar-carry movement of one bar, and the authored home configuration.
-
-    Args:
-        problem_dir (str): the exported problem folder.
-        bar_id (str): the bar.
-
-    Returns:
-        Tuple: the jointing action, its bar-carry movement (movement
-        ``CDFM_MOVEMENT_INDEX``, an ``EndEffectorConstrainedDualArmFreeMovement``)
-        and the home target configuration read from the release action.
-
-    Raises:
-        ValueError: when the release action carries no home configuration.
-    """
-    jointing_path, release_path = action_paths(problem_dir, bar_id)
-    action = json_load(jointing_path)
-    release = json_load(release_path)
-    movement = select_cdfm_movement(action)
-    home = getattr(list(release.movements)[HOME_MOVEMENT_INDEX], "target_configuration", None)
-    if home is None:
-        raise ValueError(f"{release_path}: movement {HOME_MOVEMENT_INDEX} has no target_configuration (the home).")
-    return action, movement, home
-
-
-def frame_matrix(frame) -> np.ndarray:
-    """A compas ``Frame`` as a 4x4 transform."""
-    position, quaternion = _pp_pose_from_frame(frame)
-    return matrix_from_pose([list(position), list(quaternion)])
-
-
-def planned_goal(movement, problem: BarProblem) -> Dict[str, np.ndarray]:
+def planned_goal_from_frames(world_from_base: np.ndarray, world_from_left: np.ndarray,
+                             problem: BarProblem) -> Dict[str, np.ndarray]:
     """Where the design puts the bar at the end of the carry, in the world and as seen from the robot.
 
     Args:
-        movement: the bar-carry movement (its ``target_ee_frames`` and the
-            base pose in its ``start_state``).
+        world_from_base (np.ndarray): the planned base pose, 4x4.
+        world_from_left (np.ndarray): the left flange's goal pose, 4x4.
         problem (BarProblem): the bar's grasps.
 
     Returns:
@@ -109,11 +54,24 @@ def planned_goal(movement, problem: BarProblem) -> Dict[str, np.ndarray]:
         base pose), ``world_from_bar`` and ``base_from_bar`` (the goal as seen
         from the robot: what a roadmap in the robot's frame works with).
     """
-    world_from_base = frame_matrix(movement.start_state.robot_base_frame)
-    world_from_left = frame_matrix(movement.target_ee_frames["left"])
     world_from_bar = world_from_left @ invert_transform(matrix_from_pose(problem.grasp_bar_from_left))
     return {"world_from_base": world_from_base, "world_from_bar": world_from_bar,
             "base_from_bar": invert_transform(world_from_base) @ world_from_bar}
+
+
+def carry_goal(problem_dir: str, bar_id: str, problem: BarProblem) -> Dict[str, np.ndarray]:
+    """The planned goal of a bar's carry, read from its process folder.
+
+    Args:
+        problem_dir (str): the process folder.
+        bar_id (str): the bar, e.g. ``"B21"``.
+        problem (BarProblem): the bar's grasps (as cached by build-cells).
+
+    Returns:
+        Dict[str, np.ndarray]: see :func:`planned_goal_from_frames`.
+    """
+    world_from_base, world_from_left = carry_goal_frames(read_process(problem_dir), bar_id)
+    return planned_goal_from_frames(world_from_base, world_from_left, problem)
 
 
 def shifted_base(world_from_base: np.ndarray, dx: float, dy: float, dyaw: float) -> np.ndarray:
@@ -304,29 +262,15 @@ def save_scene(cache_dir: str, cell: RobotCell, state: RobotCellState, bar_rb_na
     return cell_path, state_path, f"{geometry}/{placement}"
 
 
-def filled_start_state(state: RobotCellState, rcell: RobotCell, joint_names_12: Sequence[str],
-                       conf12: Sequence[float]) -> RobotCellState:
-    """A copy of a start state with a full robot configuration (the export leaves it empty).
+def problem_source_key(problem_dir: str) -> str:
+    """The trimmed-scene cache key of a process folder (see ``benchmark.build_cells``).
 
     Args:
-        state (RobotCellState): the exported start state.
-        rcell (RobotCell): the cell (for the robot's full joint list).
-        joint_names_12 (Sequence[str]): the twelve arm joints.
-        conf12 (Sequence[float]): their values (e.g. home).
+        problem_dir (str): the process folder.
 
     Returns:
-        RobotCellState: the copy.
+        str: the key.
     """
-    filled = state.copy()
-    if filled.robot_configuration is None:
-        filled.robot_configuration = rcell.zero_full_configuration()
-    for name, value in zip(joint_names_12, conf12):
-        filled.robot_configuration[name] = float(value)
-    return filled
-
-
-def problem_source_key(problem_dir: str) -> str:
-    """The trimmed-scene cache key of an export (see ``benchmark.build_cells``)."""
     return source_key_for(problem_dir)
 
 
@@ -409,7 +353,7 @@ def export_scene_glb(cell: RobotCell, state: RobotCellState, bar_rb_name: str, o
                               body.native_scale, body_state.attachment_frame, materials["carried_joint"])
         else:
             counts["standing"] += 1
-            colour = "joint" if name.startswith("joint_") else "built_bar"
+            colour = "joint" if name.startswith("joints/") else "built_bar"
             frame = Frame.from_transformation(base_from_world * as_transformation(body_state.frame))
             for number, mesh in enumerate(meshes):
                 add_mesh_node(f"S-{counts['standing']}_{number}", mesh, body.native_scale, frame, materials[colour])
@@ -432,9 +376,10 @@ def export_scene_glb(cell: RobotCell, state: RobotCellState, bar_rb_name: str, o
         for link in tool.links:
             if link.name not in link_in_root:
                 continue
-            for index, visual in enumerate(link.visual or []):
+            # A planning cell may carry no visual shapes: draw the collision shapes then.
+            for index, visual in enumerate(link.visual or link.collision or []):
                 shape = visual.geometry.shape
-                scale = getattr(shape, "scale", None)
+                scale = mesh_scale(shape)
                 world_from_visual = world_from_root * link_in_root[link.name] * as_transformation(visual.origin)
                 frame = Frame.from_transformation(world_from_visual)
                 for mesh_index, mesh in enumerate(list(getattr(shape, "meshes", None) or [])):
@@ -442,7 +387,7 @@ def export_scene_glb(cell: RobotCell, state: RobotCellState, bar_rb_name: str, o
                     if faces.size == 0:
                         continue
                     if scale is not None:
-                        vertices = vertices * np.asarray(scale, dtype=np.float32)
+                        vertices = vertices * scale
                     translation, rotation = frame_to_translation_rotation(frame)
                     counts["triangles"] += int(faces.shape[0])
                     roots.append(builder.add_node(

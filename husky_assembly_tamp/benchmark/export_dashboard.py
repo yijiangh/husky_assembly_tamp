@@ -381,7 +381,8 @@ def copy_static_site(out_dir: str) -> None:
         src = os.path.join(source, name)
         dst = os.path.join(out_dir, name)
         if os.path.isdir(src):
-            shutil.copytree(src, dst, dirs_exist_ok=True)
+            # Deep vendored trees under a long data-root path: see benchmark/paths.py.
+            shutil.copytree(long_path(src), long_path(dst), dirs_exist_ok=True)
         else:
             shutil.copy2(src, dst)
 

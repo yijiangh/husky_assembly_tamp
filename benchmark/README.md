@@ -16,8 +16,17 @@ Everything goes through one script. Set the data root once:
 
 ```bash
 export HUSKY_BENCH_ROOT="…/data_experiment/cdfm_planner_benchmark"
-PYTHON=external/husky_assembly_tamp/.venv/Scripts/python.exe
+PYTHON=external/husky_assembly_tamp/.venv/Scripts/python.exe   # Ubuntu: .venv/bin/python
 ```
+
+Setting a machine up from scratch (environment, data, both dashboards, the
+roadmap planner) is covered step by step in
+[`../docs/prm_ubuntu_setup.md`](../docs/prm_ubuntu_setup.md).
+
+`build-cells` (and the roadmap's `build --problem-dir`) read a schema 2.1
+process folder (`process.json` + `actions/`), the export of Rhino's
+`RSExportProcess`, through the shared core library `scaffolding_assembly_core`
+(`process_export.py`; the core is a sibling checkout, or the `[process]` extra).
 
 Then, in order:
 

@@ -76,9 +76,8 @@ from husky_assembly_tamp.motion_planner.holding_prm.sampling import (
 )
 from husky_assembly_tamp.benchmark.export_assets import export_robot_assets
 from husky_assembly_tamp.motion_planner.holding_prm.scenes import (
+    carry_goal,
     export_scene_glb,
-    load_carry_movement,
-    planned_goal,
     shifted_base,
 )
 from husky_assembly_tamp.motion_planner.holding_prm.search import (
@@ -583,8 +582,8 @@ def export_goal_poses(settings: BuildSettings, problem: Dict[str, Any]) -> List[
         List[Dict[str, Any]]: per goal ``goal_index`` (0 = planned), ``shift``
         (dx m, dy m, dyaw deg of the base) and ``base_from_bar`` (pose lists).
     """
-    _action, movement, _home = load_carry_movement(settings.problem_dir, settings.bar_id)
-    goal = planned_goal(movement, BarProblem.from_dict(problem))
+    # The export may be an old one or a process folder; `carry_goal` reads either.
+    goal = carry_goal(settings.problem_dir, settings.bar_id, BarProblem.from_dict(problem))
     poses = [{"goal_index": 0, "shift": [0.0, 0.0, 0.0], "base_from_bar": pose_from_matrix(goal["base_from_bar"])}]
     rng = np.random.default_rng(np.random.SeedSequence([int(settings.seed), 7919]))
     for k in range(1, int(settings.base_samples) + 1):

@@ -1,14 +1,15 @@
 """Check a planned bar carry on its own, in the real scene, whatever planner made it.
 
-Reads the bar-carry movement of a solved-motion file written by
-``headless_bar_action_planner.py`` (``<bar>__J.solved_motion.<tag>.json``) and
-tests its saved path without trusting the planner that produced it:
+Reads a carry saved by ``plan_process_carry.py`` (``<bar>_J.solved_motion.<tag>.json``,
+in the core's solution shape) and tests its path without trusting the planner
+that produced it. The scene is rebuilt from the process folder by the shared
+core: the start of the carry, the robot at the base pose and the start posture
+saved in the file. Then:
 
 1. the bar path is cut into fine steps (2 mm / 0.002 rad by default) and walked
    again by the production repair (``core.repair_joint_path``): calibrated IK at
    every fine bar pose, the 10 degree joint-step gate, and the full production
-   collision check in the scene of the movement's own start state (built bars,
-   joints, support robots; the base pose saved in the file);
+   collision check in that scene (built bars, joints, support robots);
 2. every saved waypoint is collision-checked as it is, and the grasp rigidity
    (how far the bar slips in the right hand) is measured on the saved joints;
 3. the lowest point the carried bar, the carried joint halves and the arm
@@ -23,46 +24,54 @@ tests its saved path without trusting the planner that produced it:
 
 Run from the repository root::
 
-    .venv/Scripts/python.exe -u scripts/prm_check_solved.py <problem folder> --bar B4 --tags prm birrt
+    .venv/bin/python -u scripts/prm_check_solved.py <process folder> --bar B21 --tags prm birrt1
 
-``--solved-dir`` names the folder of the solved files when they were saved
-elsewhere (the planner's ``--save-dir``). ``--holding-only`` skips the slow
-parts (repair, collisions, lowest point) and reports only items 4 and 5.
+``--solved-dir`` names the folder of the saved files (the planner's
+``--save-dir``); without it the files are looked for where
+``plan_process_carry.py`` puts them by default. ``--holding-only`` skips the
+slow parts (repair, collisions, lowest point) and reports only items 4 and 5.
 One line of JSON per file is appended to ``--out`` when given.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from json import dumps
 from time import perf_counter
 from typing import Any, Dict, List, Optional, Sequence
 
-# ! The planner script next to this file sets up the import paths (sibling
-# ! checkouts, Rhino site folders) when it is imported, so it comes first.
+# * The package sits one level up from scripts/; the sibling checkouts
+# * (compas_fab, the core) are put on the path by the benchmark package.
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-if SCRIPT_DIR not in sys.path:
-    sys.path.insert(0, SCRIPT_DIR)
+REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 
-from headless_bar_action_planner import (  # noqa: E402
-    arm_joint_names_12,
-    find_carry_movement,
-    path_from_trajectory,
-    start_planner,
-)
+from husky_assembly_tamp.benchmark.sibling_packages import ensure_sibling_packages  # noqa: E402
+
+ensure_sibling_packages()
 
 import numpy as np  # noqa: E402
 import pybullet  # noqa: E402
 import pybullet_planning as pp  # noqa: E402
-from compas.data import json_load  # noqa: E402
 from pybullet_planning import interpolate_poses  # noqa: E402
 
-from husky_assembly_tamp.keyframe.dual_arm_ik import resolve_arm_groups  # noqa: E402
+from husky_assembly_tamp.benchmark.process_export import (  # noqa: E402
+    carry_scene,
+    default_plans_dir,
+    is_process_folder,
+    jointing_action,
+    read_process,
+    require_core,
+    short_id,
+)
 from husky_assembly_tamp.motion_planner.api import (  # noqa: E402
     TOOL_LINK_LEFT,
     TOOL_LINK_RIGHT,
+    _arm_joint_names,
     _build_cfab_collision_fn,
     _pp_pose_from_frame,
 )
@@ -97,8 +106,8 @@ REVERSAL_FINE_BAND_RAD = 1e-4
 
 
 def solved_file(solved_dir: str, bar_id: str, tag: str) -> str:
-    """The tagged solved-motion file of a bar's jointing action, in the given folder."""
-    return os.path.join(solved_dir, f"{bar_id}__J.solved_motion.{tag}.json")
+    """The tagged file ``plan_process_carry.py`` wrote for a bar's jointing action, in the given folder."""
+    return os.path.join(solved_dir, f"{bar_id}_J.solved_motion.{tag}.json")
 
 
 def fine_poses(poses: Sequence[Any], position_res: float, rotation_res: float) -> List[Any]:
@@ -157,7 +166,7 @@ def lowest_point(body_ids: Sequence[int]) -> float:
 
 
 # -----------------------------------------------------------------------------
-# * The check of one file
+# * The measurements of one path
 # -----------------------------------------------------------------------------
 
 
@@ -250,78 +259,26 @@ def path_lengths(confs: Sequence[np.ndarray], bar_poses: Sequence[Any]) -> Dict[
     }
 
 
-def complete_state(state, rcell, problem_dir: str, bar_id: str) -> List[str]:
-    """Add to a saved start state the bodies and tools a newer export of the cell has.
-
-    A solved-motion file keeps the start state of the day it was planned. When the
-    design is exported again with more bodies (the RobArch export of 2026-10-05
-    added a ground slab, ``ground_WG0``), the planner refuses the old state. The
-    missing states are copied from the current export's own action file of the
-    same bar, so they are the export's values, not guesses; a body the export does
-    not know either is an error.
+def check_path(planner, state, confs: Sequence[Sequence[float]], bar_name: str, record: Dict[str, Any],
+               joint_names_12: Sequence[str], position_res: float, rotation_res: float,
+               holding_only: bool = False) -> Dict[str, Any]:
+    """Measure a saved carry path in the scene of its start state: items 1 to 5 of the module docstring.
 
     Args:
-        state: the saved start state, changed in place.
-        rcell: the current cell.
-        problem_dir (str): the exported problem folder.
-        bar_id (str): the bar, e.g. "B4".
-
-    Returns:
-        List[str]: the names that were added (empty when nothing was missing).
-    """
-    missing_bodies = [name for name in rcell.rigid_body_models if name not in state.rigid_body_states]
-    missing_tools = [name for name in rcell.tool_models if name not in state.tool_states]
-    if not missing_bodies and not missing_tools:
-        return []
-    current = json_load(os.path.join(problem_dir, "BarActions", f"{bar_id}__J.json"))
-    current_state = find_carry_movement(current).start_state
-    for name in missing_bodies:
-        if name not in current_state.rigid_body_states:
-            raise ValueError(f"the cell has body {name!r} but neither the saved state nor the current "
-                             f"export's {bar_id}__J.json knows it; look into the export")
-        state.rigid_body_states[name] = current_state.rigid_body_states[name]
-    for name in missing_tools:
-        if name not in current_state.tool_states:
-            raise ValueError(f"the cell has tool {name!r} but neither the saved state nor the current "
-                             f"export's {bar_id}__J.json knows it; look into the export")
-        state.tool_states[name] = current_state.tool_states[name]
-    return missing_bodies + missing_tools
-
-
-def check_file(planner, rcell, path: str, joint_names_12: Sequence[str], position_res: float,
-               rotation_res: float, holding_only: bool = False, problem_dir: str = "") -> Dict[str, Any]:
-    """Check the bar carry saved in one solved-motion file.
-
-    Args:
-        planner: the planner with the whole cell loaded.
-        rcell: the cell.
-        path (str): the solved-motion file.
+        planner: the planner with the scene loaded.
+        state: the carry's start state (the base pose and the attachments).
+        confs (Sequence[Sequence[float]]): the saved waypoints, twelve values each.
+        bar_name (str): the carried bar's rigid-body name in the cell.
+        record (Dict[str, Any]): the record so far (file name, movement); filled in and returned.
         joint_names_12 (Sequence[str]): the twelve arm joints.
         position_res (float): fine step of the repair walk (m).
         rotation_res (float): fine step of the repair walk (rad).
-        holding_only (bool): skip the repair, the collision checks and the lowest
-            point; report only the path lengths and the holding error.
-        problem_dir (str): the exported problem folder, used to complete a saved
-            state that predates a re-export of the cell (see ``complete_state``).
+        holding_only (bool): skip the repair, the collision checks and the lowest point.
 
     Returns:
         Dict[str, Any]: the verdict (``ok``) and what was measured.
     """
-    action = json_load(path)
-    movement = find_carry_movement(action)
-    confs = path_from_trajectory(getattr(movement, "trajectory", None), joint_names_12)
-    record: Dict[str, Any] = {"file": os.path.basename(path), "movement": movement.movement_id}
-    if not confs:
-        record.update({"ok": False, "reason": "no saved path"})
-        return record
     confs = [np.asarray(conf, dtype=float) for conf in confs]
-    state = movement.start_state
-    added = complete_state(state, rcell, problem_dir, action.active_bar_id) if problem_dir else []
-    if added:
-        print(f"[check] {os.path.basename(path)}: saved state completed with {added} from the current export")
-        record["added_from_current_export"] = added
-    bar_name = next(name for name in (action.active_bar_id, f"bar_{action.active_bar_id}")
-                    if name in rcell.rigid_body_models)
     planner.set_robot_cell_state(state)
     robot = planner.client.robot_puid
     arm_joints = pp.joints_from_names(robot, joint_names_12)
@@ -398,18 +355,89 @@ def check_file(planner, rcell, path: str, joint_names_12: Sequence[str], positio
 
 
 # -----------------------------------------------------------------------------
+# * The saved file and its scene
+# -----------------------------------------------------------------------------
+
+
+def load_solved_run(path: str):
+    """Read a carry saved by ``plan_process_carry.py``.
+
+    Args:
+        path (str): the file (the core's solution shape, one movement).
+
+    Returns:
+        Tuple: the movement id, the base pose the plan was made at (or None),
+        the start joints (name -> value, or None) and the trajectory (or None).
+
+    Raises:
+        ValueError: when the file is not a solution file, or holds not exactly one movement.
+    """
+    # ? The core reads solutions only from <process>/solutions/; the experiment's
+    # ? tagged files live elsewhere, so its private parser is used on the raw JSON.
+    from scaffolding_assembly_core.process.read import check_keys
+    from scaffolding_assembly_core.process.solutions import _solution
+
+    with open(path, "r", encoding="utf-8") as handle:
+        raw = json.load(handle)
+    problems: List[str] = []
+    check_keys(raw, "solution", os.path.basename(path), problems)
+    if problems:
+        raise ValueError("\n".join(problems))
+    solution = _solution(raw)
+    if len(solution.movements) != 1:
+        raise ValueError(f"{path}: expected one movement, found {sorted(solution.movements)}")
+    (movement_id, result), = solution.movements.items()
+    robot = result.trajectory.robot if result.trajectory is not None else ""
+    return movement_id, result.bases.get(robot), result.start.get(robot), result.trajectory
+
+
+def check_file(mirror, process, action, path: str, position_res: float, rotation_res: float,
+               holding_only: bool = False) -> Dict[str, Any]:
+    """Check one saved carry in the scene the core rebuilds for it.
+
+    Args:
+        mirror: the acting robot's ``CompasFabMirror``.
+        process: the process.
+        action: the bar's jointing action.
+        path (str): the saved file.
+        position_res (float): fine step of the repair walk (m).
+        rotation_res (float): fine step of the repair walk (rad).
+        holding_only (bool): skip the slow parts.
+
+    Returns:
+        Dict[str, Any]: the verdict (``ok``) and what was measured.
+    """
+    record: Dict[str, Any] = {"file": os.path.basename(path)}
+    movement_id, base, start, trajectory = load_solved_run(path)
+    record["movement"] = movement_id
+    if trajectory is None:
+        record.update({"ok": False, "reason": "no saved path"})
+        return record
+    # The scene of the carry's start, the robot at the saved base and start posture.
+    scene, _action, _movement = carry_scene(process, short_id(action.bar), joints=start, base=base)
+    mirror.sync(scene)
+    left_names, right_names = _arm_joint_names(mirror.cell)
+    joint_names_12 = list(left_names) + list(right_names)
+    index = {name: position for position, name in enumerate(trajectory.joint_names)}
+    confs = [[row[index[name]] for name in joint_names_12] for row in trajectory.positions]
+    with mirror.lend() as planner:
+        return check_path(planner, mirror.state, confs, action.bar, record, joint_names_12, position_res,
+                          rotation_res, holding_only=holding_only)
+
+
+# -----------------------------------------------------------------------------
 # * Command line
 # -----------------------------------------------------------------------------
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    """Check the tagged solved-motion files of one bar; exit code 0 when all pass."""
+    """Check the tagged files of one bar; exit code 0 when all pass."""
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("problem_dir", help="the exported problem folder (holds RobotCell.json and BarActions/)")
-    parser.add_argument("--bar", required=True, help="bar id, e.g. B4")
-    parser.add_argument("--tags", nargs="+", required=True, help="save tags of the solved files to check")
+    parser.add_argument("problem_dir", help="the process folder (holds process.json and actions/)")
+    parser.add_argument("--bar", required=True, help="bar id, e.g. B21")
+    parser.add_argument("--tags", nargs="+", required=True, help="save tags of the files to check")
     parser.add_argument("--solved-dir", default="",
-                        help="folder holding the solved files (default: <problem folder>/BarActions)")
+                        help="folder holding the saved files (default: where plan_process_carry.py saves by default)")
     parser.add_argument("--position-res", type=float, default=0.002, help="fine step of the repair walk (m)")
     parser.add_argument("--rotation-res", type=float, default=0.002, help="fine step of the repair walk (rad)")
     parser.add_argument("--out", default="", help="append one line of JSON per file to this file")
@@ -417,20 +445,30 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="only the path lengths and the holding error at and between waypoints (fast)")
     args = parser.parse_args(argv)
 
-    rcell = json_load(os.path.join(args.problem_dir, "RobotCell.json"))
-    groups = resolve_arm_groups(rcell)
-    joint_names_12 = arm_joint_names_12(rcell, groups)
-    _client, planner = start_planner(rcell, use_gui=False)
+    if not is_process_folder(args.problem_dir):
+        print(f"[X] {args.problem_dir} is not a process folder (no process.json).")
+        return 1
+    try:
+        require_core()
+    except ImportError as exc:
+        print(f"[X] {exc}")
+        return 1
+    from scaffolding_assembly_core.mirrors.compas_fab import CompasFabMirror
+
+    process = read_process(args.problem_dir)
+    action = jointing_action(process, args.bar)
+    solved_dir = args.solved_dir or default_plans_dir(args.problem_dir, os.environ.get("HUSKY_BENCH_ROOT"))
+    mirror = CompasFabMirror(action.robot, log=print)
     all_ok = True
     try:
         for tag in args.tags:
-            path = solved_file(args.solved_dir or os.path.join(args.problem_dir, "BarActions"), args.bar, tag)
+            path = solved_file(solved_dir, args.bar, tag)
             if not os.path.isfile(path):
                 # A missing file is reported, not skipped quietly.
                 record = {"file": os.path.basename(path), "ok": False, "reason": "file not found"}
             else:
-                record = check_file(planner, rcell, path, joint_names_12, args.position_res, args.rotation_res,
-                                    holding_only=args.holding_only, problem_dir=args.problem_dir)
+                record = check_file(mirror, process, action, path, args.position_res, args.rotation_res,
+                                    holding_only=args.holding_only)
             record.update({"bar": args.bar, "tag": tag})
             all_ok = all_ok and record["ok"]
             print("[check] " + dumps(record))
@@ -438,7 +476,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 with open(args.out, "a", encoding="utf-8") as handle:
                     handle.write(dumps(record) + "\n")
     finally:
-        pp.disconnect()
+        mirror.close()
     return 0 if all_ok else 2
 
 

@@ -4,17 +4,18 @@ When this repo is vendored inside the design workflow repo, two of its
 dependencies live beside it as source checkouts rather than as installed
 packages:
 
-    external/compas_fab/src        the planning backend we actually develop
-    external/rs_data_structure     the bar action / movement classes
+    external/compas_fab/src             the planning backend we actually develop
+    external/scaffolding_assembly_core  the process format reader
 
 A venv may also have older copies of those installed. The source checkouts are
-the ones the exported data was written with -- reading a bar action with a
-stale ``rs_data_structure`` fails with an unhelpful decoder error -- so they go
-first on the path.
+the ones the exported data was written with, so they go first on the path.
 
-``scripts/headless_bar_action_planner.py`` does the same thing inline. The
-benchmark package cannot: it is imported, not run, so the wiring lives here and
-``__init__`` calls it once.
+* When this repo is not vendored (a git worktree, a plain clone on another
+* machine), ``HUSKY_EXTERNAL_DIR`` names the folder holding those checkouts
+* instead; it is looked at before the folder next to this repo.
+
+The benchmark package is imported, not run, so the wiring lives here and
+``__init__`` calls it once; the scripts call it before anything else.
 """
 from __future__ import annotations
 
@@ -33,12 +34,24 @@ def sibling_source_dirs() -> List[str]:
     """
     package_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     repo_dir = os.path.dirname(package_dir)
-    external_dir = os.path.dirname(repo_dir)
-    candidates = [
-        os.path.join(external_dir, "compas_fab", "src"),
-        os.path.join(external_dir, "rs_data_structure"),
-    ]
-    return [path for path in candidates if os.path.isdir(path)]
+    # The folder next to this repo, and the one named by HUSKY_EXTERNAL_DIR (first).
+    external_dirs = [os.path.dirname(repo_dir)]
+    named = os.environ.get("HUSKY_EXTERNAL_DIR")
+    if named:
+        external_dirs.insert(0, named)
+    candidates = []
+    for external_dir in external_dirs:
+        candidates += [
+            os.path.join(external_dir, "compas_fab", "src"),
+            os.path.join(external_dir, "scaffolding_assembly_core"),
+        ]
+    found = []
+    for path in candidates:
+        # ? The same package from two folders: the first one wins.
+        if os.path.isdir(path) and os.path.basename(path.rstrip(os.sep)) not in [
+                os.path.basename(p.rstrip(os.sep)) for p in found]:
+            found.append(path)
+    return found
 
 
 def ensure_sibling_packages() -> List[str]:

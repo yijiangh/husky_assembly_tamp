@@ -19,7 +19,7 @@ Stages are ordered: each one reads what the previous wrote.
 """
 from husky_assembly_tamp.benchmark.sibling_packages import ensure_sibling_packages
 
-# ! Runs on import, before anything here imports compas_fab or
-# ! rs_data_structure, so the sibling source checkouts win over any older
-# ! copies installed in the venv. See sibling_packages.py for why.
+# ! Runs on import, before anything here imports compas_fab or the core, so
+# ! the sibling source checkouts win over any older copies installed in the
+# ! venv. See sibling_packages.py for why.
 ensure_sibling_packages()

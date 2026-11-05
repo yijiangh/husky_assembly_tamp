@@ -1,29 +1,25 @@
-"""Build the small, robot-centric planning scene each benchmark problem uses.
+"""The small, robot-centric planning scene each benchmark problem uses, and its cache on disk.
 
-The exported design data describes a whole construction site: one robot cell
-with a hundred rigid bodies (every bar and every joint half of the structure)
-and four tool models. The benchmark does not want any of that. It asks a much
-narrower question -- how well does the planner carry ONE bar around an
-otherwise empty robot -- so the scene is trimmed to exactly:
+An exported process describes a whole construction site: every bar and every
+joint half of the structure, the ground, three robots. The benchmark does not
+want any of that. It asks a much narrower question -- how well does the planner
+carry ONE bar around an otherwise empty robot -- so the scene is trimmed to:
 
-    the robot, the two scaffolding tools, the bar being carried, and the two
-    joint halves screwed onto its ends
+    the robot, its two scaffolding tools, the bar being carried, and the joint
+    halves mounted on it
 
-Everything else is dropped. This matters twice over: loading the full cell into
-PyBullet is slow, and every collision check clones the cell state, so the fewer
-bodies the state carries the faster every single check runs.
+(``process_export.trimmed_problem`` does the trimming, with the core's
+``CompasFabCell``). This matters twice over: loading everything into PyBullet
+is slow, and every collision check clones the cell state, so the fewer bodies
+the state carries the faster every single check runs.
 
-What is NOT dropped is the collision bookkeeping. The allowed-collision
-information lives in three places, and all three are carried over verbatim from
-the bar action's M1 movement so the benchmark collides exactly like production:
+What is NOT dropped is the collision bookkeeping: the robot's SRDF, and each
+body's allowed contacts (``touch_links``, ``touch_bodies``), derived by the
+core exactly as the online planner gets them.
 
-    1. ``robot_semantics.disabled_collisions``  robot link pairs that may touch
-    2. each body's ``touch_links``              robot links that body may touch
-    3. each body's ``touch_bodies``             other bodies it may touch
-
-The one thing deliberately thrown away is the authored robot base frame. The
+The one thing deliberately thrown away is the planned robot base pose. The
 benchmark is robot-centric: the robot sits at the world origin and goal poses
-are sampled around it, so a base frame from the design file would only add an
+are sampled around it, so a base pose from the design would only add an
 irrelevant offset.
 
 Units: the planner works in metres, so everything here is metres.
@@ -39,35 +35,15 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import pybullet_planning as pp
 from compas.data import json_dump, json_load
-from compas.geometry import Frame, Transformation
-from compas_fab.backends import PyBulletClient, PyBulletPlanner
+from compas_fab.backends import CollisionCheckError, PyBulletClient, PyBulletPlanner
 from compas_fab.robots import RobotCell, RobotCellState
-
-from compas_fab.backends import CollisionCheckError
 
 from husky_assembly_tamp.motion_planner.api import (
     TOOL_LINK_LEFT,
     TOOL_LINK_RIGHT,
-    _arm_joint_names,
     _build_cfab_collision_fn,
-    _pp_pose_from_frame,
 )
 
-
-# * The two scaffolding tools the assembly robot carries. The support robots
-# * (ObstacleRobotAlice / ObstacleRobotBelle) are modelled as tools too, but
-# * they are parked 50 m away in the exports and are irrelevant here, so the
-# * trimmed cell keeps only these two.
-KEPT_TOOL_IDS = ("AT3L", "AT3R")
-
-# * Which movement of a "__J" (jointing) bar action is the M1 transfer. The
-# * export writes a fixed six-movement cycle and index 3 is the constrained
-# * dual-arm free movement -- the one this benchmark is about.
-CDFM_MOVEMENT_INDEX = 3
-
-# * Which movement of the matching "__R" (release) action carries the authored
-# * home configuration in its target_configuration. Index 3 is "free_home".
-HOME_MOVEMENT_INDEX = 3
 
 # * The planner's own logger. The benchmark listens to it (that is the only
 # * place the search reports its two tree sizes) but does not want its output.
@@ -118,8 +94,8 @@ class BarProblem:
 
     Attributes:
         bar_id (str): the design-side bar name, e.g. ``"B3"``.
-        bar_rb_name (str): the rigid-body name in the cell, e.g. ``"bar_B3"``.
-        joint_rb_names (List[str]): the two joint halves attached to the tools.
+        bar_rb_name (str): the rigid-body name in the cell, e.g. ``"bars/B3"``.
+        joint_rb_names (List[str]): the joint halves mounted on the bar, riding with it.
         bar_length_m (float): length of the bar, from its collision mesh.
         bar_radius_m (float): radius of the bar, from its collision mesh.
         bar_from_midpoint (List[float]): the bar's midpoint in bar-local
@@ -127,13 +103,13 @@ class BarProblem:
             place a bar by its middle.
         attached_link (str): the robot link the bar is attached to.
         tool0_from_bar (List[List[float]]): the grasp, as the bar's pose in the
-            attached link's frame. Copied from the action's attachment frame.
+            attached link's frame (the left holder's grasp in the process).
         grasp_bar_from_left (List[List[float]]): left tool0's pose in the bar
             frame -- what the planner calls the left grasp.
         grasp_bar_from_right (List[List[float]]): the same for the right tool0.
         home_conf12 (List[float]): the authored dual-arm home configuration.
         joint_names_12 (List[str]): the twelve arm joints, left six then right.
-        source_action (str): file name of the bar action this came from.
+        source_action (str): file name of the jointing action this came from.
     """
 
     bar_id: str
@@ -193,38 +169,6 @@ def pose_from_lists(data: Sequence[Sequence[float]]):
     return (tuple(float(v) for v in position), tuple(float(v) for v in quaternion))
 
 
-def select_cdfm_movement(action):
-    """Return the M1 constrained dual-arm free movement of a jointing action.
-
-    Args:
-        action: a ``BarAssemblyJointingAction`` loaded from a ``*__J.json``.
-
-    Returns:
-        The movement object at the fixed CDFM index.
-
-    Raises:
-        ValueError: if the action does not have the expected movement there.
-            The benchmark refuses to guess -- an export with a different shape
-            needs looking at, not a fallback.
-    """
-    movements = list(action.movements)
-    if len(movements) <= CDFM_MOVEMENT_INDEX:
-        raise ValueError(
-            f"{action.action_id}: expected at least {CDFM_MOVEMENT_INDEX + 1} "
-            f"movements, found {len(movements)}. This export does not have the "
-            "six-movement jointing shape the benchmark expects."
-        )
-    movement = movements[CDFM_MOVEMENT_INDEX]
-    kind = type(movement).__name__
-    if kind != "EndEffectorConstrainedDualArmFreeMovement":
-        raise ValueError(
-            f"{action.action_id}: movement {CDFM_MOVEMENT_INDEX} is a {kind}, "
-            "not the EndEffectorConstrainedDualArmFreeMovement (M1) this "
-            "benchmark measures."
-        )
-    return movement
-
-
 def mesh_extents(rigid_body) -> Tuple[np.ndarray, np.ndarray]:
     """Return the axis-aligned bounds of a rigid body's collision mesh.
 
@@ -246,192 +190,6 @@ def mesh_extents(rigid_body) -> Tuple[np.ndarray, np.ndarray]:
         points.extend(mesh.vertices_attributes("xyz"))
     vertices = np.asarray(points, dtype=float) * float(rigid_body.native_scale)
     return vertices.min(axis=0), vertices.max(axis=0)
-
-
-def extract_bar_problem(action, release_action, rcell) -> BarProblem:
-    """Read one bar-and-grasp out of a pair of exported bar actions.
-
-    The jointing action gives the bar, its two joint halves, the grasp and the
-    two tool0 target frames; the matching release action gives the authored
-    home configuration. Nothing here touches PyBullet -- it is pure reading.
-
-    The right-hand grasp deserves a note. The export records only ONE
-    attachment (the bar hangs off the left tool0), because the two tools hold
-    the bar rigidly and the second grasp is implied. It is recovered from the
-    two authored tool0 target frames: the transform from the left flange to the
-    right one is constant for the whole movement, so composing it with the left
-    grasp gives the right one.
-
-    Args:
-        action: the ``*__J.json`` jointing action.
-        release_action: the matching ``*__R.json`` release action.
-        rcell (RobotCell): the full robot cell (for the bar's mesh and the
-            joint names).
-
-    Returns:
-        BarProblem: the extracted problem.
-
-    Raises:
-        ValueError: if the action does not hold the bar in both tools, or the
-            release action carries no home configuration.
-    """
-    movement = select_cdfm_movement(action)
-    state = movement.start_state
-
-    # Exactly the bodies that ride on the robot: the bar plus its joint halves.
-    attached = {
-        name: rb_state
-        for name, rb_state in (state.rigid_body_states or {}).items()
-        if rb_state.attached_to_link
-    }
-    bar_rb_name = f"bar_{action.active_bar_id}"
-    if bar_rb_name not in attached:
-        raise ValueError(
-            f"{action.action_id}: {bar_rb_name} is not attached to a robot link "
-            "in the M1 start state, so there is no grasp to benchmark."
-        )
-    joint_rb_names = sorted(name for name in attached if name != bar_rb_name)
-
-    bar_state = attached[bar_rb_name]
-    if bar_state.attachment_frame is None:
-        raise ValueError(f"{action.action_id}: {bar_rb_name} has no attachment frame.")
-
-    # The grasp, as the planner wants it: the two tool0 poses in the bar frame.
-    # tool0_from_bar is the authored attachment; inverting it gives the left
-    # grasp, and the constant flange-to-flange transform gives the right one.
-    tool0_from_bar = _pp_pose_from_frame(bar_state.attachment_frame)
-    grasp_bar_from_left = pp.invert(tool0_from_bar)
-    ee_frames = movement.target_ee_frames or {}
-    if "left" not in ee_frames or "right" not in ee_frames:
-        raise ValueError(
-            f"{action.action_id}: M1 has no left/right target_ee_frames, so the "
-            "right-hand grasp cannot be recovered."
-        )
-    world_from_tool0_left = _pp_pose_from_frame(ee_frames["left"])
-    world_from_tool0_right = _pp_pose_from_frame(ee_frames["right"])
-    left_from_right = pp.multiply(pp.invert(world_from_tool0_left), world_from_tool0_right)
-    grasp_bar_from_right = pp.multiply(grasp_bar_from_left, left_from_right)
-
-    # Bar geometry lives only in the mesh; the action never states a length.
-    lower, upper = mesh_extents(rcell.rigid_body_models[bar_rb_name])
-    size = upper - lower
-    bar_length_m = float(size.max())
-    bar_radius_m = float(0.5 * float(np.sort(size)[1]))
-    bar_from_midpoint = [float(v) for v in 0.5 * (lower + upper)]
-
-    # The planner's own joint ordering: the left arm's six, then the right's.
-    left_joint_names, right_joint_names = _arm_joint_names(rcell)
-    joint_names_12 = list(left_joint_names) + list(right_joint_names)
-
-    home_movement = list(release_action.movements)[HOME_MOVEMENT_INDEX]
-    home_target = getattr(home_movement, "target_configuration", None)
-    if home_target is None:
-        raise ValueError(
-            f"{release_action.action_id}: movement {HOME_MOVEMENT_INDEX} has no "
-            "target_configuration, so the authored dual-arm home is missing."
-        )
-    home_conf12 = [float(home_target[name]) for name in joint_names_12]
-
-    return BarProblem(
-        bar_id=action.active_bar_id,
-        bar_rb_name=bar_rb_name,
-        joint_rb_names=joint_rb_names,
-        bar_length_m=bar_length_m,
-        bar_radius_m=bar_radius_m,
-        bar_from_midpoint=bar_from_midpoint,
-        attached_link=bar_state.attached_to_link,
-        tool0_from_bar=pose_to_lists(tool0_from_bar),
-        grasp_bar_from_left=pose_to_lists(grasp_bar_from_left),
-        grasp_bar_from_right=pose_to_lists(grasp_bar_from_right),
-        home_conf12=home_conf12,
-        joint_names_12=list(joint_names_12),
-        source_action=os.path.basename(getattr(action, "_source_path", "")) or action.action_id,
-    )
-
-
-def build_trimmed_cell(rcell, problem: BarProblem) -> RobotCell:
-    """Return a robot cell holding only what this benchmark problem needs.
-
-    The robot model and semantics are shared by reference with the source cell
-    (they are large and never modified); only the tool and rigid-body
-    dictionaries are rebuilt, keeping the two scaffolding tools and the three
-    carried bodies.
-
-    Args:
-        rcell (RobotCell): the full cell loaded from ``RobotCell.json``.
-        problem (BarProblem): which bar and joints to keep.
-
-    Returns:
-        RobotCell: the trimmed cell.
-
-    Raises:
-        ValueError: if the source cell is missing one of the kept bodies.
-    """
-    kept_bodies = [problem.bar_rb_name] + list(problem.joint_rb_names)
-    missing = [name for name in kept_bodies if name not in rcell.rigid_body_models]
-    missing += [name for name in KEPT_TOOL_IDS if name not in rcell.tool_models]
-    if missing:
-        raise ValueError(
-            f"RobotCell.json is missing {missing}. It does not match the bar "
-            "action being trimmed -- check that both come from the same export."
-        )
-    return RobotCell(
-        robot_model=rcell.robot_model,
-        robot_semantics=rcell.robot_semantics,
-        tool_models={name: rcell.tool_models[name] for name in KEPT_TOOL_IDS},
-        rigid_body_models={name: rcell.rigid_body_models[name] for name in kept_bodies},
-    )
-
-
-def build_template_state(action, problem: BarProblem, trimmed_cell: RobotCell) -> RobotCellState:
-    """Return the cell state every benchmark run starts from.
-
-    This is the M1 start state with the scene trimmed to match the trimmed
-    cell, the robot moved to the world origin, and the arm configuration filled
-    in (the export leaves it empty for the planner to derive). All the
-    allowed-collision bookkeeping -- the tools' and bodies' touch lists and the
-    attachment frames -- is carried over untouched, except that references to
-    dropped bodies are removed so the record stays honest.
-
-    Args:
-        action: the jointing action the state comes from.
-        problem (BarProblem): which bodies survive the trim.
-        trimmed_cell (RobotCell): the cell this state must match.
-
-    Returns:
-        RobotCellState: the template. Callers copy it and write a
-        configuration into the copy; see :func:`state_with_conf12`.
-    """
-    source_state = select_cdfm_movement(action).start_state
-    kept_bodies = set([problem.bar_rb_name] + list(problem.joint_rb_names))
-
-    rigid_body_states = {}
-    for name in sorted(kept_bodies):
-        rb_state = source_state.rigid_body_states[name].copy()
-        # Drop allowances that point at bodies no longer in the scene, so the
-        # state cannot claim a body may touch something that does not exist.
-        rb_state.touch_bodies = [
-            other
-            for other in (rb_state.touch_bodies or [])
-            if other in kept_bodies or other in KEPT_TOOL_IDS
-        ]
-        rigid_body_states[name] = rb_state
-
-    tool_states = {name: source_state.tool_states[name].copy() for name in KEPT_TOOL_IDS}
-
-    state = RobotCellState(
-        # ! Robot-centric by design: the authored base frame is discarded.
-        robot_base_frame=Frame.worldXY(),
-        robot_configuration=trimmed_cell.zero_full_configuration(),
-        tool_states=tool_states,
-        rigid_body_states=rigid_body_states,
-    )
-    # Start the arms at the authored home rather than at all-zeros, which is a
-    # self-colliding pose for this robot.
-    for name, value in zip(problem.joint_names_12, problem.home_conf12):
-        state.robot_configuration[name] = float(value)
-    trimmed_cell.assert_cell_state_match(state)
-    return state
 
 
 def state_with_conf12(

@@ -21,6 +21,12 @@ $env:HUSKY_BENCH_ROOT = "C:\Users\yijiangh\Insync\yijiang94817@gmail.com\Google 
 .venv\Scripts\python.exe -m http.server --directory $env:HUSKY_BENCH_ROOT 8000
 ```
 
+On Ubuntu the same two lines are
+`export HUSKY_BENCH_ROOT="…/cdfm_planner_benchmark"` and
+`.venv/bin/python -m http.server --directory "$HUSKY_BENCH_ROOT" 8000`
+(see `../docs/prm_ubuntu_setup.md`, which also covers the roadmap page at
+`prm/<run>/dashboard/`).
+
 Then open **http://localhost:8000/runs/night1/dashboard/**. Each run has its own
 address: replace `night1` with the run's name, or pick the run from the dropdown
 under the title. The dropdown lists every run in `runs.json` with its size and

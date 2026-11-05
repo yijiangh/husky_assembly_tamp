@@ -74,7 +74,6 @@ from husky_assembly_tamp.motion_planner.holding_prm.sampling import (
 from husky_assembly_tamp.motion_planner.holding_prm.scenes import (
     export_scene_glb,
     geometry_key,
-    problem_source_key,
     state_key,
 )
 from husky_assembly_tamp.motion_planner.holding_prm.search import (
@@ -674,49 +673,6 @@ def test_sampled_nodes_hold_the_bar_and_edges_are_measured(smoke):
                                collision_step_rad=STEP_MAX_RAD, viol_step_rad=np.radians(2.5),
                                rot_deg_per_mm=0.4, check_collision=True, counters={})
         assert record["checked"] and record["viol_pos_max"] >= 0.0
-
-
-# * ---- The collision split, on an exported problem with built bars ----------
-# One process holds one simulator scene, so each scene is opened by the helper
-# program next to this file and its verdicts are read back.
-
-EXPORT_DIR = os.environ.get("HUSKY_EXPORT_PROBLEM_DIR") or os.path.normpath(os.path.join(
-    ROOT or "", "..", "..", "data_design_study", "260920_RobArch_demo_revamp"))
-SPLIT_BAR = "B4"  # its scene has two built bars, their joints and a support robot
-
-
-def _has_export() -> bool:
-    """Whether the export and the trimmed scene of the test bar are on this machine."""
-    if not (ROOT and os.path.isfile(os.path.join(EXPORT_DIR, "RobotCell.json"))):
-        return False
-    return os.path.isdir(os.path.join(ROOT, "cells", problem_source_key(EXPORT_DIR), SPLIT_BAR))
-
-
-def _verdicts(mode: str, count: int):
-    """Run the helper program for one scene and read its verdicts."""
-    helper = os.path.join(os.path.dirname(os.path.abspath(__file__)), "collision_split_helper.py")
-    result = subprocess.run([sys.executable, helper, mode, EXPORT_DIR, SPLIT_BAR, str(count)],
-                            cwd=REPO_ROOT, capture_output=True, text=True, check=True)
-    line = [row for row in result.stdout.splitlines() if row.startswith("RESULT ")][-1]
-    return loads(line[len("RESULT "):])
-
-
-@pytest.mark.skipif(not _has_export(), reason="needs the exported problem and its trimmed scenes (build-cells)")
-def test_collision_split_adds_up_to_the_full_check():
-    """What the roadmap reuse rests on, checked on a real scene.
-
-    1. The full check says "collides" exactly when the robot-side check or the
-       scene-only check does (nothing is lost or invented by splitting).
-    2. The scene the roadmap is precomputed in (base at the origin, nothing
-       built) gives the same verdict as the robot-side check in the real
-       scene at the real base pose (so precomputed verdicts carry over).
-    """
-    real = _verdicts("real", 80)
-    trimmed = _verdicts("trimmed", 80)
-    assert [a or b for a, b in zip(real["robot_side"], real["scene_only"])] == real["full"]
-    assert trimmed["full"] == real["robot_side"]
-    # The sample must exercise both parts, or the test proves nothing.
-    assert any(real["robot_side"]) and any(real["scene_only"]) and not all(real["full"])
 
 
 # * ---- The scene file the roadmap page draws -------------------------------

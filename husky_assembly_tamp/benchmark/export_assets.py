@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from husky_assembly_tamp.benchmark.glb import (
-    GlbBuilder, frame_to_translation_rotation, mesh_arrays,
+    GlbBuilder, frame_to_translation_rotation, mesh_arrays, mesh_scale,
 )
 from husky_assembly_tamp.benchmark.scene import load_trimmed_problem
 
@@ -113,12 +113,14 @@ def export_robot_assets(root: str, source_key: str, bar_id: str, *,
             joint.origin if joint is not None else None)
 
         mesh_nodes: List[int] = []
-        for index, visual in enumerate(link.visual or []):
+        # A cell built for planning carries no visual shapes (a process folder's
+        # cell): the collision shapes are drawn then.
+        for index, visual in enumerate(link.visual or link.collision or []):
             shape = visual.geometry.shape
             meshes = list(getattr(shape, "meshes", None) or [])
             if not meshes:
                 continue
-            scale = getattr(shape, "scale", None)
+            scale = mesh_scale(shape)
             visual_translation, visual_rotation = frame_to_translation_rotation(
                 visual.origin)
             for mesh_index, mesh in enumerate(meshes):
@@ -126,7 +128,7 @@ def export_robot_assets(root: str, source_key: str, bar_id: str, *,
                 if faces.size == 0:
                     continue
                 if scale is not None:
-                    vertices = vertices * np.asarray(scale, dtype=np.float32)
+                    vertices = vertices * scale
                 n_triangles += faces.shape[0]
                 mesh_id = builder.add_mesh(
                     vertices, faces, materials[link_colour(link_name)])
@@ -156,7 +158,7 @@ def export_robot_assets(root: str, source_key: str, bar_id: str, *,
             continue
         tool_nodes: List[int] = []
         for link in tool_model.links:
-            for index, visual in enumerate(link.visual or []):
+            for index, visual in enumerate(link.visual or link.collision or []):
                 meshes = list(getattr(visual.geometry.shape, "meshes", None) or [])
                 visual_translation, visual_rotation = frame_to_translation_rotation(
                     visual.origin)

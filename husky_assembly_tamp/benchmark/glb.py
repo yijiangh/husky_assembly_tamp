@@ -259,6 +259,25 @@ def mesh_arrays(mesh) -> Tuple[np.ndarray, np.ndarray]:
     return vertices, np.array(triangles, dtype=np.uint32).reshape(-1, 3)
 
 
+def mesh_scale(shape) -> Optional[np.ndarray]:
+    """The per-axis scale of a URDF mesh shape, or None when it has none.
+
+    A mesh read from a file (``MeshDescriptor``) carries a ``scale`` list; a
+    box or cylinder primitive (the proxies compas_robots builds for them)
+    has a ``scale`` *method* instead, which is not a scale at all.
+
+    Args:
+        shape: the shape of a link's visual or collision element.
+
+    Returns:
+        Optional[np.ndarray]: three factors, or None.
+    """
+    scale = getattr(shape, "scale", None)
+    if scale is None or callable(scale):
+        return None
+    return np.asarray(scale, dtype=np.float32)
+
+
 def frame_to_translation_rotation(frame) -> Tuple[List[float], List[float]]:
     """Split a compas frame into a position and a rotation.
 

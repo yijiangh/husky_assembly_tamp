@@ -2,7 +2,7 @@
 
 Run the stages in order; each reads what the last one wrote::
 
-    build-cells    trim the exported robot cell into one small scene per bar
+    build-cells    trim the exported process into one small scene per bar
     build-library  sample goal poses and survey the starts they can be
                    reached from
     plan           say how much work a batch would be, and how long
@@ -576,8 +576,7 @@ def build_parser() -> argparse.ArgumentParser:
         "build-cells", help="trim an exported design study into per-bar scenes")
     add_common_arguments(cells)
     cells.add_argument("problem_dir",
-                       help="the exported problem folder (holds RobotCell.json "
-                            "and BarActions/)")
+                       help="the exported process folder (holds process.json and actions/)")
     cells.set_defaults(func=cmd_build_cells)
 
     library = subparsers.add_parser(

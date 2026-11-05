@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 from husky_assembly_tamp.benchmark.asset_versions import stamp_page_assets
+from husky_assembly_tamp.benchmark.paths import long_path
 from husky_assembly_tamp.benchmark.provenance import provenance
 from husky_assembly_tamp.keyframe.ssik_inprocess import describe_artifact_set
 from husky_assembly_tamp.motion_planner.holding_prm.holding import HoldingModel
@@ -306,7 +307,10 @@ def copy_dashboard(root: str, run_name: str) -> str:
         )
     out_dir = os.path.join(run_dir(root, run_name), "dashboard")
     os.makedirs(out_dir, exist_ok=True)
-    shutil.copytree(os.path.join(source, "static"), os.path.join(out_dir, "static"), dirs_exist_ok=True)
+    # ! The vendored script tree is deep; under a long data-root path it passes
+    # ! Windows' 260-character limit, which `long_path` lifts (benchmark/paths.py).
+    shutil.copytree(long_path(os.path.join(source, "static")), long_path(os.path.join(out_dir, "static")),
+                    dirs_exist_ok=True)
     for name in ("prm.html", "index.html"):
         shutil.copyfile(page, os.path.join(out_dir, name))
     # * Content hashes on the page's assets AND on the imports inside the copied

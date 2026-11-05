@@ -15,9 +15,16 @@ setup(
         "compas_fab @ git+https://github.com/compas-dev/compas_fab.git@wip_process",
         "compas_robots>=0.5",
         "matplotlib",
-        # Shared BarAssemblyAction / Movement schema; pinned SHA matches
-        # husky-assembly-teleop and bar_joint_rhino_design_workflow.
-        "rs_data_structure @ git+https://github.com/yijiangh/rs_data_structure.git@ce01ca0606ebf4a3a07505919cf96b7c29009b2e",
+        # Coloured console output of the planner's logger (utils/util.py).
+        "termcolor",
+        # The holding-constraint roadmap (motion_planner/holding_prm): nearest
+        # neighbours and sparse graph searches come from scipy, the roadmap
+        # graph from networkx.
+        "scipy",
+        "networkx",
+        # The benchmark samples every planning pass with pyinstrument
+        # (benchmark/profiling.py); imported by the benchmark package itself.
+        "pyinstrument",
     ],
     extras_require={
         "dev": [
@@ -35,6 +42,19 @@ setup(
         # (e.g. 1.26.4), NOT numpy 2.x, to stay ABI-compatible with rclpy/pybullet.
         "ssik": [
             "ssik>=4.1,<5; python_version >= '3.10'",
+        ],
+        # Reading the current Rhino export (a schema 2.1 "process folder":
+        # process.json, actions/, URDF robots) needs the shared core library
+        # and the URDF/mesh readers it uses. The core is pinned at the commit
+        # the design workflow vendors. A sibling checkout works too: next to
+        # this repo under external/, or in the folder HUSKY_EXTERNAL_DIR names
+        # (benchmark/sibling_packages.py).
+        "process": [
+            "scaffolding_assembly_core @ git+ssh://git@github.com/yijiangh/scaffolding_assembly_core.git@439bc18",
+            "trimesh",
+            "yourdfpy",
+            "lxml",
+            "six",
         ],
     },
     zip_safe=False,

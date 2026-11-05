@@ -235,8 +235,13 @@ def derive_home_start_poses_from_grasps(
 #   - the husky's robot_base_frame is non-identity. To keep the planner
 #     entirely in mobile-base coords (same convention as the legacy code),
 #     the gdrive loader transforms bar / env poses into mobile-base frame.
-GDRIVE_DATA_DIRECTORY = (
-    "/home/yijiangh/Insync/yijiang94817@gmail.com/Google Drive - Shared with me/2025-03 Husky Assembly/data_design_study"
+# * The design-study folder (one sub-folder per exported problem). Machine
+# * specific, so it comes from the environment first: HUSKY_ASSEMBLY_DATA_ROOT
+# * is the same variable the headless planner script uses. The literal path is
+# * only the historical default for the machine this was first written on.
+GDRIVE_DATA_DIRECTORY = os.environ.get(
+    "HUSKY_ASSEMBLY_DATA_ROOT",
+    "/home/yijiangh/Insync/yijiang94817@gmail.com/Google Drive - Shared with me/2025-03 Husky Assembly/data_design_study",
 )
 GDRIVE_DEFAULT_PROBLEM = "2026-05-14_foc_demo_reduced"
 

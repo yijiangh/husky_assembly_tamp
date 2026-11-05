@@ -90,7 +90,7 @@ def provenance(artifacts: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     workflow_repo = os.path.dirname(external_dir)
 
     repos: Dict[str, Dict[str, Any]] = {"husky_assembly_tamp": repo_state(tamp_repo)}
-    for name in ("compas_fab", "rs_data_structure"):
+    for name in ("compas_fab", "scaffolding_assembly_core"):
         folder = os.path.join(external_dir, name)
         if os.path.isdir(folder):
             repos[name] = repo_state(folder)

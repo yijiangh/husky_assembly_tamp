@@ -23,6 +23,11 @@ unless ``--write-solution`` is given):
     <bar>_J.solved_motion.<tag>.plan_info.json   how the plan went (also when it failed)
     <bar>_J_planned_motion.<tag>.png             the joint curves and the holding error
 
+The found path's corners are rounded in bar pose space (``--round-radius``,
+``--round-tolerance``; ``--round-radius 0`` keeps them), so the arms run
+through them instead of stopping at each. ``round_process_carry.py`` rounds a
+carry saved before.
+
 ``scripts/prm_check_solved.py`` checks the saved path on its own, in the same
 scene. The roadmap backend needs the bar's roadmap under
 ``<--prm-root>/prm/<--prm-run>`` (default run name ``<process folder>__<bar>``),
@@ -75,6 +80,10 @@ from husky_assembly_tamp.benchmark.process_export import (  # noqa: E402
 )
 from husky_assembly_tamp.motion_planner import api  # noqa: E402
 from husky_assembly_tamp.motion_planner import ssik_ik  # noqa: E402
+from husky_assembly_tamp.motion_planner.dual_arm_task_space_rrt.smooth import (  # noqa: E402
+    DEFAULT_ROUND_RADIUS,
+    DEFAULT_ROUND_TOLERANCE,
+)
 from husky_assembly_tamp.motion_planner.holding_prm.store import write_json_atomic  # noqa: E402
 
 # * The defaults the report's runs were made with.
@@ -283,6 +292,29 @@ def print_roadmap_summary(prm: Optional[dict]) -> None:
           f"{len(prm.get('dropped_in_final_check', []))}; scene bodies {prm.get('scene', {})}")
 
 
+def round_options(args) -> Optional[Dict[str, Any]]:
+    """``plan_constrained_dual_arm``'s ``round_corners`` from the command line; None with ``--round-radius 0``."""
+    if args.round_radius <= 0.0:
+        return None
+    return {"radius": args.round_radius, "tolerance": args.round_tolerance}
+
+
+def print_round_summary(profile: Optional[dict]) -> None:
+    """Print how the corners were rounded (nothing when rounding was off).
+
+    Args:
+        profile (Optional[dict]): ``info["round_profile"]`` from the planner.
+    """
+    if not profile:
+        return
+    if profile.get("rounded"):
+        radii = ", ".join(f"{1000.0 * r:.0f}" for r in profile.get("radii", [])) or "none"
+        print(f"  rounded: {profile['n_corners']} corner(s) at {1000.0 * profile['tolerance']:g} mm tolerance, "
+              f"radii (mm) {radii}, {profile['rounds']} re-solve(s), {profile['wall_s']:.1f} s")
+    else:
+        print(f"  [!] corners not rounded, the path is as planned: {profile.get('reason')}")
+
+
 def plan_carry(args) -> int:
     """Plan the carry of one bar and save what came out.
 
@@ -377,6 +409,7 @@ def plan_carry(args) -> int:
             start_home_anchor=None if args.cdfm_home_anchor == "all" else args.cdfm_home_anchor,
             backend=args.cdfm_backend,
             prm_options=prm_options,
+            round_corners=round_options(args),
         )
         plan_s = time.time() - plan_t0
         save_plan_info(plan_info_path(solved), movement.id, args.cdfm_backend, plan_s, confs, info,
@@ -397,10 +430,11 @@ def plan_carry(args) -> int:
         if profile.get("extend_stop_reasons"):
             print(f"  extend_stop_reasons: {profile['extend_stop_reasons']}")
         for key, value in (info or {}).items():
-            if key in ("profile", "smooth_profile", "path_poses", "derived_start_conf", "prm"):
+            if key in ("profile", "smooth_profile", "round_profile", "path_poses", "derived_start_conf", "prm"):
                 continue
             print(f"  {key}: {value}")
         print_roadmap_summary((info or {}).get("prm"))
+        print_round_summary((info or {}).get("round_profile"))
 
         # How far the path ends from the authored posture (the insert starts there).
         authored = goal_joints(movement, robot, names)
@@ -415,7 +449,8 @@ def plan_carry(args) -> int:
         settings = {"backend": args.cdfm_backend, "tag": args.save_tag, "goal": args.goal,
                     "base_shift": args.base_shift, "max_time": args.max_time,
                     "position_res": args.cdfm_position_res, "rotation_res": args.cdfm_rotation_res,
-                    "home_anchor": args.cdfm_home_anchor, "prm": prm_options or {}}
+                    "home_anchor": args.cdfm_home_anchor, "prm": prm_options or {},
+                    "round": round_options(args) or {}}
         record = solution_record(process, action, movement, robot, names, confs, info or {}, base_used, settings)
         write_json_atomic(solved, record)
         print(f"[save] solved carry -> {solved}")
@@ -478,6 +513,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--prm-tube-rounds", type=int, default=1, help="tube rounds of the roadmap backend")
     parser.add_argument("--prm-no-pretracked", action="store_true",
                         help="ignore the roadmap's tracking file (track every route edge now)")
+    parser.add_argument("--round-radius", type=float, default=DEFAULT_ROUND_RADIUS,
+                        help="round the path's corners in bar pose space with this radius (m, largest bar "
+                             "feature-point move from the corner; 0: keep the corners)")
+    parser.add_argument("--round-tolerance", type=float, default=DEFAULT_ROUND_TOLERANCE,
+                        help="bar path samples within this of a straight piece belong to it when the corners are "
+                             "looked for (m)")
     parser.add_argument("--base-shift", default="",
                         help="park the base off its planned pose: 'dx,dy,dyaw_deg' in the base's own frame")
     parser.add_argument("--save-dir", default="",

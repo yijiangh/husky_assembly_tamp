@@ -930,6 +930,28 @@ def plan_free_dual_arm(
     return [np.asarray(q, dtype=float) for q in raw_path], info
 
 
+def _round_corners(info: Dict[str, Any], options: Dict[str, Any], path_poses, path_confs, post_scene,
+                   joint_collision_fn, feature_points, position_res: float, rotation_res: float,
+                   threshold) -> Tuple[Any, Any]:
+    """Round a found path's corners in bar pose space (``plan_constrained_dual_arm``'s ``round_corners``).
+
+    Records the report as ``info["round_profile"]`` and the new poses as ``info["path_poses"]``.
+
+    Returns:
+        Tuple: the poses and joints, rounded, or as they were when rounding failed.
+    """
+    from .dual_arm_task_space_rrt.smooth import round_dual_arm_pose_path
+
+    profile: Dict[str, Any] = {}
+    path_poses, path_confs = round_dual_arm_pose_path(
+        path_poses, path_confs, scene=post_scene, joint_collision_fn=joint_collision_fn,
+        feature_points=feature_points, position_res=position_res, rotation_res=rotation_res,
+        joint_continuity_threshold_rad=threshold, profile_out=profile, **dict(options))
+    info["round_profile"] = profile
+    info["path_poses"] = path_poses
+    return path_poses, path_confs
+
+
 def plan_constrained_dual_arm(
     planner,
     start_state: RobotCellState,
@@ -963,6 +985,7 @@ def plan_constrained_dual_arm(
     repair: Optional[Dict[str, Any]] = None,
     backend: str = "birrt",
     prm_options: Optional[Dict[str, Any]] = None,
+    round_corners: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Optional[List[np.ndarray]], dict]:
     """Constrained dual-arm SE(3) RRT with a rigid bar grasp.
 
@@ -992,6 +1015,13 @@ def plan_constrained_dual_arm(
     verdict as ``info["repair"]``, and a path is returned only when the repair
     succeeded (``failure_reason`` = ``repair_<cause>`` otherwise). Smoothing
     then runs with the same strict settings, so it keeps the path valid.
+
+    ``round_corners`` (None = off) rounds the corners of the found bar path
+    in pose space after the smoothing (``smooth.round_dual_arm_pose_path``,
+    its keyword arguments: ``radius``, ``tolerance``, ...; ``{}`` for the
+    defaults), so the arms can run through them instead of stopping at each;
+    its report is ``info["round_profile"]``. A path it cannot round comes
+    back as it was.
 
     ``record_search=True`` keeps every failed tree extension with its cause
     (see ``SearchRecorder`` in the planner core) and returns it as
@@ -1112,6 +1142,7 @@ def plan_constrained_dual_arm(
             feature_points=feature_points,
             repair=repair,
             prm_options=prm_options,
+            round_corners=round_corners,
         )
 
     if derive_start:
@@ -1388,6 +1419,11 @@ def plan_constrained_dual_arm(
             info["smooth_profile"] = smooth_profile
             info["path_poses"] = path_poses
 
+        if round_corners is not None and path_confs is not None:
+            path_poses, path_confs = _round_corners(
+                info, round_corners, path_poses, path_confs, post_scene, joint_collision_fn, feature_points,
+                position_res, rotation_res, post_threshold)
+
     # Restore: WorldSaver already rewound the pybullet world; this re-syncs
     # cfab's Python-side cache to start_state (the RRT's last collision check
     # left the cache at the final sample).
@@ -1426,6 +1462,7 @@ def _plan_constrained_dual_arm_on_roadmap(
     feature_points,
     repair: Optional[Dict[str, Any]],
     prm_options: Optional[Dict[str, Any]],
+    round_corners: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Optional[List[np.ndarray]], dict]:
     """The roadmap backend of :func:`plan_constrained_dual_arm`.
 
@@ -1456,6 +1493,7 @@ def _plan_constrained_dual_arm_on_roadmap(
         feature_points: bar feature points for the smoothing metric.
         repair (Optional[Dict[str, Any]]): re-solve the path with the production repair.
         prm_options (Optional[Dict[str, Any]]): ``roadmap_dir`` and the optional settings.
+        round_corners (Optional[Dict[str, Any]]): round the path's corners afterwards (see the caller).
 
     Returns:
         Tuple[Optional[List[np.ndarray]], dict]: the path and ``info``, shaped
@@ -1552,7 +1590,7 @@ def _plan_constrained_dual_arm_on_roadmap(
         info["derived_start_conf"] = [float(v) for v in path_confs[0]]
 
     post_threshold = (repair or {}).get("joint_continuity_threshold_rad") or info["joint_continuity_threshold_rad"]
-    if repair is not None or enable_smoothing:
+    if repair is not None or enable_smoothing or round_corners is not None:
         post_start = perf_counter()
         with pp.WorldSaver():
             joint_collision_fn = _build_cfab_collision_fn(planner, start_state, joint_names_12)
@@ -1597,6 +1635,11 @@ def _plan_constrained_dual_arm_on_roadmap(
                 )
                 info["smooth_profile"] = smooth_profile
                 info["path_poses"] = path_poses
+            if round_corners is not None and path_poses is not None:
+                path_poses, path_confs = _round_corners(
+                    info, round_corners, path_poses, path_confs, post_scene, joint_collision_fn,
+                    feature_points if feature_points is not None else get_bar_feature_points(),
+                    position_res, rotation_res, post_threshold)
         prm_info.setdefault("timings", {})["post_process_s"] = perf_counter() - post_start
         planner.set_robot_cell_state(start_state)
     return [np.asarray(q, dtype=float) for q in path_confs], info

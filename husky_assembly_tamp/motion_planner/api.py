@@ -943,10 +943,12 @@ def _round_corners(info: Dict[str, Any], options: Dict[str, Any], path_poses, pa
     from .dual_arm_task_space_rrt.smooth import round_dual_arm_pose_path
 
     profile: Dict[str, Any] = {}
-    path_poses, path_confs = round_dual_arm_pose_path(
-        path_poses, path_confs, scene=post_scene, joint_collision_fn=joint_collision_fn,
-        feature_points=feature_points, position_res=position_res, rotation_res=rotation_res,
-        joint_continuity_threshold_rad=threshold, profile_out=profile, **dict(options))
+    # The planner's own resolution, gate and feature points unless the options name their own.
+    kwargs: Dict[str, Any] = {"feature_points": feature_points, "position_res": position_res,
+                              "rotation_res": rotation_res, "joint_continuity_threshold_rad": threshold}
+    kwargs.update(options)
+    kwargs.update({"scene": post_scene, "joint_collision_fn": joint_collision_fn, "profile_out": profile})
+    path_poses, path_confs = round_dual_arm_pose_path(path_poses, path_confs, **kwargs)
     info["round_profile"] = profile
     info["path_poses"] = path_poses
     return path_poses, path_confs

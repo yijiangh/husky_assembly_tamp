@@ -368,8 +368,9 @@ def round_pose_path(path_poses: Sequence[PoseLike], corners: Sequence[int], radi
             first = _between(a_pose, v_pose, s)
             second = _between(v_pose, b_pose, s)
             add(_between(first, second, s), k)
-    # Exactly the path's end (the last sample already is, up to rounding).
-    poses[-1] = control[-1]
+    # Exactly the path's ends, as given (the samples already are, up to rounding and the quaternion's sign).
+    poses[0] = tuple(np.asarray(v, dtype=float) for v in path_poses[0])
+    poses[-1] = tuple(np.asarray(v, dtype=float) for v in path_poses[-1])
     out = [(tuple(float(v) for v in p), tuple(float(v) for v in q)) for p, q in poses]
     return out, owner
 
@@ -405,7 +406,8 @@ def round_dual_arm_pose_path(
     gate, the collision check), from the path's first configuration and landing on its last. A corner whose
     curve fails (no IK, a joint jump, a collision) gets half its radius and the path is solved again; below
     ``min_radius`` that corner stays sharp. A path within the tolerance of one straight piece becomes that piece.
-    When the straight pieces fail with every corner sharp, the corners are looked for again at half the tolerance,
+    When the straight pieces fail with every corner sharp, or a sample on one collides or has no IK (the radii
+    cannot move it), the corners are looked for again at half the tolerance,
     down to ``min_tolerance``. When nothing works the path comes back unchanged.
 
     Args:
@@ -438,7 +440,8 @@ def round_dual_arm_pose_path(
     confs_in = [np.asarray(conf, dtype=float) for conf in path_confs]
     if len(poses_in) != len(confs_in):
         raise ValueError("Pose and joint path lengths must match for rounding.")
-    profile.update({"rounded": False, "rounds": 0, "reason": None, "failures": []})
+    profile.update({"rounded": False, "rounds": 0, "reason": None, "failures": [], "tolerance": tolerance,
+                    "n_corners": 0})
 
     def unchanged(reason: str) -> Tuple[List[PoseLike], List[FullConf]]:
         profile.update({"reason": reason, "radii": [], "wall_s": time.perf_counter() - started})
@@ -472,6 +475,12 @@ def round_dual_arm_pose_path(
                                             "backward": info.get("backward_reason"), "shrunk": []})
                 break
             targets = _blamed_corners(info, owner, radii, len(poses))
+            if targets is None:
+                # A collision or no IK on a straight part: that sample is on the chord whatever the radii are.
+                profile["failures"].append({"tolerance": tolerance, "reason": info.get("reason"),
+                                            "forward": info.get("forward_reason"),
+                                            "backward": info.get("backward_reason"), "shrunk": None})
+                break
             for k in targets:
                 radii[k] = radii[k] / 2.0 if radii[k] / 2.0 >= min_radius else 0.0
             profile["failures"].append({"tolerance": tolerance, "reason": info.get("reason"),
@@ -483,16 +492,22 @@ def round_dual_arm_pose_path(
         tolerance /= 2.0
 
 
-def _blamed_corners(info: Dict[str, Any], owner: Sequence[int], radii: Sequence[float], n_poses: int) -> List[int]:
-    """The corners to shrink after a failed re-solve.
+def _blamed_corners(info: Dict[str, Any], owner: Sequence[int], radii: Sequence[float],
+                    n_poses: int) -> Optional[List[int]]:
+    """The corners to shrink after a failed re-solve, or None when no radius can help.
 
-    The corner whose curve the forward walk stopped in (or, on a straight part, whose samples moved by up to the
-    tolerance, the nearest rounded corner before it, else after it); from the backward walk's stop when the forward
-    one names none; every rounded corner when neither names a waypoint.
+    The corner whose curve the forward walk stopped in; from the backward walk's stop when the forward one names
+    none; every rounded corner when neither names a waypoint. A collision or no IK on a straight part is None: that
+    sample lies on the chord whatever the radii are (only the IK branch the walk brings in differs), so a finer corner
+    search is tried instead of shrinking every corner first. A joint jump there
+    may come from the curve before it (the walk carries its joints on), so the nearest rounded corner before it is
+    blamed, else the one after it.
     """
-    index = _failed_index(info.get("forward_reason"))
+    reason = info.get("forward_reason")
+    index = _failed_index(reason)
     if index is None:
-        back = _failed_index(info.get("backward_reason"))
+        reason = info.get("backward_reason")
+        back = _failed_index(reason)
         index = None if back is None else n_poses - 1 - back
     rounded = [k for k, r in enumerate(radii) if r > 0.0]
     if index is None:
@@ -500,6 +515,8 @@ def _blamed_corners(info: Dict[str, Any], owner: Sequence[int], radii: Sequence[
     index = min(max(index, 0), len(owner) - 1)
     if owner[index] >= 0 and radii[owner[index]] > 0.0:
         return [owner[index]]
+    if owner[index] < 0 and str(reason).startswith(("collision", "ik_failure")):
+        return None
     before = [owner[i] for i in range(index, -1, -1) if owner[i] >= 0 and radii[owner[i]] > 0.0]
     after = [owner[i] for i in range(index, len(owner)) if owner[i] >= 0 and radii[owner[i]] > 0.0]
     return [before[0]] if before else ([after[0]] if after else rounded)

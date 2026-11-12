@@ -218,3 +218,56 @@ def test_radius_zero_is_off(monkeypatch):
                                               ("missing_right_grasp", None), (None, None)])
 def test_failed_index(reason, expected):
     assert smooth._failed_index(reason) == expected
+
+
+def zigzag():
+    """Five corners with a 10 mm bump in the first piece: at 60 mm the bump is flattened onto the chord."""
+    points = [(0, 0, 1), (0.25, 0.01, 1), (0.5, 0, 1), (0.5, 0.5, 1), (1.0, 0.5, 1), (1.0, 1.0, 1), (1.5, 1.0, 1),
+              (1.5, 1.5, 1)]
+    return dense(points, [IDENTITY] * len(points))
+
+
+def test_a_collision_on_a_straight_piece_goes_finer_without_shrinking_the_corners(monkeypatch):
+    # The chord of the first piece cuts below the bump; the path itself goes over it.
+    fake = FakeRepair(lambda pose: 0.2 < pose[0][0] < 0.3 and pose[0][1] < 0.005 and pose[0][2] > 0.5)
+    monkeypatch.setattr(smooth, "repair_joint_path", fake)
+    poses = zigzag()
+    profile = {}
+    round_dual_arm_pose_path(poses, joints_for(poses), scene={}, feature_points=FEATURES, position_res=0.004,
+                             rotation_res=0.01, radius=0.3, tolerance=0.06, profile_out=profile)
+    assert profile["rounded"] and profile["tolerance"] < 0.01
+    assert all(failure["shrunk"] is None for failure in profile["failures"])
+    assert fake.calls <= 5  # one try per tolerance level, not four halvings per corner
+    assert max(profile["radii"]) == 0.3
+
+
+def test_a_joint_jump_on_a_straight_piece_blames_the_curve_before_it():
+    owner = [-1, -1, 0, 0, -1, -1, 1, 1, -1]
+    info = {"forward_reason": "continuity_at_waypoint_5", "backward_reason": None}
+    assert smooth._blamed_corners(info, owner, [0.1, 0.1], len(owner)) == [0]
+    info = {"forward_reason": "continuity_at_waypoint_1", "backward_reason": None}
+    assert smooth._blamed_corners(info, owner, [0.1, 0.1], len(owner)) == [0]
+    info = {"forward_reason": "collision_at_waypoint_5", "backward_reason": None}
+    assert smooth._blamed_corners(info, owner, [0.1, 0.1], len(owner)) is None
+    # Only the backward walk names a waypoint: counted from the end.
+    info = {"forward_reason": "endpoint_mismatch", "backward_reason": "ik_failure_at_waypoint_1"}
+    assert smooth._blamed_corners(info, owner, [0.1, 0.1], len(owner)) == [1]
+    info = {"forward_reason": "endpoint_mismatch", "backward_reason": "endpoint_mismatch"}
+    assert smooth._blamed_corners(info, owner, [0.1, 0.0], len(owner)) == [0]
+
+
+def test_radius_zero_profile_has_the_summary_keys(monkeypatch):
+    monkeypatch.setattr(smooth, "repair_joint_path", FakeRepair(lambda pose: False))
+    profile = {}
+    round_dual_arm_pose_path(l_path(), joints_for(l_path()), scene={}, feature_points=FEATURES, radius=0.0,
+                             tolerance=0.06, profile_out=profile)
+    assert profile["n_corners"] == 0 and profile["tolerance"] == 0.06
+
+
+def test_the_ends_are_the_given_poses_exactly():
+    poses = l_path()
+    flipped = (poses[-1][0], tuple(-v for v in poses[-1][1]))  # same rotation, other sign
+    poses = poses[:-1] + [flipped]
+    rounded, _ = round_pose_path(poses, pose_path_corners(poses, FEATURES, 0.001), [0.1], position_res=0.004,
+                                 rotation_res=0.01, feature_points=FEATURES)
+    assert rounded[0] == poses[0] and rounded[-1] == flipped

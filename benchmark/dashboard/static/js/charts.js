@@ -23,6 +23,11 @@ export const COLOURS = {
   muted: "#7a8288",
 };
 
+// The twelve arm joints in a joint-value chart: warm for the left arm
+// (joints 0-5), cool for the right arm (joints 6-11).
+export const JOINT_COLOURS = ["#b23a48", "#d98324", "#e0b030", "#c46fa0", "#8a3f5c", "#e07b5f",
+                              "#1f84bd", "#2e9e5b", "#4fa3a1", "#8a6fb0", "#6f8ab0", "#2b5f8a"];
+
 // Time breakdown components, in the order they are stacked.
 export const BREAKDOWN_ORDER = [
   "collision", "ik", "fk_gate", "interpolation", "nearest_node",
@@ -338,7 +343,25 @@ export function horizontalBarChart(container, { data, xLabel = "",
   return svg;
 }
 
+// A small mark for a category: "wide" (a lying bar), "tall" (a standing bar) or "dot".
+function markShape(shape, cx, cy, colour) {
+  if (shape === "dot") return el("circle", { cx, cy, r: 4.5, fill: colour });
+  const [w, h] = shape === "wide" ? [14, 4] : [4, 14];
+  return el("rect", { x: cx - w / 2, y: cy - h / 2, width: w, height: h, rx: 1.5, fill: colour });
+}
+
+// The same mark as a small drawing of its own, for a legend.
+export function markIcon(shape, colour) {
+  const svg = el("svg", { viewBox: "0 0 16 16", width: "16", height: "16", style: "flex:none" });
+  svg.appendChild(markShape(shape, 8, 8, colour));
+  return svg;
+}
+
 // Stacked bars, for compositions such as failure reasons or time breakdowns.
+//
+// A data item may carry `mark` ({ shape, colour, title }: drawn under its x
+// label, see markShape) and `onClick` (the whole column, label and mark
+// included, then answers a click).
 export function stackedBarChart(container, { data, keys, colours = {},
                                              labels = {},
                                              yLabel = "", normalize = true,
@@ -365,6 +388,24 @@ export function stackedBarChart(container, { data, keys, colours = {},
   data.forEach((d, index) => {
     const centre = box.left + slot * (index + 0.5);
     const total = totals[index] || 1;
+    // One group per column, over the x label: a column that answers a click
+    // shades under the pointer from the top of the chart down to its mark.
+    const column = el("g");
+    svg.appendChild(column);
+    if (d.onClick) {
+      const shade = el("rect", { x: centre - slot / 2, y: box.top, width: slot, height: height - box.top - 12,
+                                 fill: "#000", "fill-opacity": 0 });
+      column.appendChild(shade);
+      column.style.cursor = "pointer";
+      column.addEventListener("click", d.onClick);
+      column.addEventListener("mouseenter", () => shade.setAttribute("fill-opacity", 0.07));
+      column.addEventListener("mouseleave", () => shade.setAttribute("fill-opacity", 0));
+    }
+    if (d.mark) {
+      const mark = markShape(d.mark.shape, centre, box.top + box.height + 36, d.mark.colour);
+      if (d.mark.title) mark.appendChild(el("title", {}, d.mark.title));
+      column.appendChild(mark);
+    }
     let cursor = 0;
     for (const key of keys) {
       const raw = d.values[key] || 0;
@@ -379,7 +420,7 @@ export function stackedBarChart(container, { data, keys, colours = {},
       });
       rect.appendChild(el("title", {},
         `${d.label} — ${labels[key] || key}: ${format(raw)}`));
-      svg.appendChild(rect);
+      column.appendChild(rect);
       cursor += value;
     }
   });
@@ -477,7 +518,8 @@ export function lineChart(container, { series, yLabel = "", xLabel = "",
                                        height = 200, yTickCount = 3,
                                        yFormat = (v) => v.toFixed(2) }) {
   const width = 820;
-  const box = { left: 48, top: 12, width: width - 72, height: height - 58 };
+  // The x label is drawn 48 under the plot: 66 leaves it clear of the bottom edge.
+  const box = { left: 48, top: 12, width: width - 72, height: height - 66 };
   const svg = makeSvg(width, height);
 
   // The data range, found with plain loops: spreading tens of thousands of

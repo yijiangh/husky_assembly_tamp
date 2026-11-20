@@ -118,6 +118,9 @@ python -m http.server --directory "$HUSKY_BENCH_ROOT" 8000
   A loading pose that gave a path is saved as `derived_starts.json` in the roadmap folder and tried first next time.
 - With `--goal frames` the end postures are offered on the whole turns nearest home and nearest the authored end
   joints: the same arm posture a turn apart can decide whether the insert stays inside the joint limits.
+- `scripts/prm_plans_page.py <process folder> --plans-dir <folder> --tag prm` writes one page for a set of plans:
+  every bar in build order, each plan in 3D in its scene, its loading pose and its time by phase; a bar's page
+  also draws the joint values and the holding of the bar along the path, with a cursor at the waypoint on show.
 - For a trial run, point `HUSKY_BENCH_ROOT` at a local copy holding only `cells/`, `library/smoke`, `assets/`,
   `prm/carry/carry_v1/starts.json` and the roadmaps you need (about 300 MB), so nothing lands on the shared
   Drive; copy the results over by hand when they should last.

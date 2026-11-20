@@ -36,7 +36,7 @@
 
 import * as THREE from "three";
 import { loadJson, loadJsonGz } from "./data.js";
-import { horizontalBarChart, lineChart } from "./charts.js";
+import { JOINT_COLOURS, horizontalBarChart, lineChart } from "./charts.js";
 import { RobotViewer, poseToMatrix } from "./robot-viewer.js";
 
 const main = document.querySelector("[data-main]");
@@ -80,11 +80,6 @@ const state = {
   pathCharts: [],    // the svgs of the path panel, so the cursor can move without a redraw
   step: 0,
 };
-
-// * Colours of the twelve joints in the joint-angle chart: warm for the left
-// * arm (joints 0-5), cool for the right arm (joints 6-11).
-const JOINT_COLOURS = ["#b23a48", "#d98324", "#e0b030", "#c46fa0", "#8a3f5c", "#e07b5f",
-                       "#1f84bd", "#2e9e5b", "#4fa3a1", "#8a6fb0", "#6f8ab0", "#2b5f8a"];
 
 // * Joint-space step of the dense interpolation, 0.1 degree per joint: the
 // * same as DEFAULT_DENSE_JOINT_VALIDATION_STEP_RAD in the planner's

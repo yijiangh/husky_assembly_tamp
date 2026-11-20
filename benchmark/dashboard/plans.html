@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title data-title>Bar carry plans</title>
+<!--
+  The page of a set of bar-carry plans (scripts/prm_plans_page.py): every bar
+  of a process in build order, and each plan in 3D in its own scene. It shares
+  the roadmap page's scripts and styles and has its own entry script,
+  plans-viewer.js.
+
+  Served as plain files over HTTP from the benchmark data root:
+
+      python -m http.server --directory <data root> 8000
+      http://localhost:8000/prm/plans/<problem>/<set>/dashboard/
+-->
+<script type="importmap">
+{
+  "imports": {
+    "three": "./static/vendor/three-r185/build/three.module.min.js",
+    "three/webgpu": "./static/vendor/three-r185/build/three.module.min.js",
+    "three/tsl": "./static/vendor/three-r185/build/three.module.min.js"
+  }
+}
+</script>
+<link rel="stylesheet" href="./static/css/index.css">
+</head>
+<body>
+
+<header class="top">
+  <h1 data-title>Bar carry plans</h1>
+  <nav data-breadcrumb class="breadcrumb"></nav>
+</header>
+
+<div class="layout split" data-layout>
+  <div class="stage">
+    <div class="viewer" data-viewer></div>
+    <div class="stage-controls" data-stage-controls hidden></div>
+    <p class="caption muted" data-viewer-caption></p>
+  </div>
+
+  <main data-main></main>
+</div>
+
+<script type="module" src="./static/js/plans-viewer.js"></script>
+</body>
+</html>

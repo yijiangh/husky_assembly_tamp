@@ -67,7 +67,11 @@ const AXIS_COLOURS = ["#b23a48", "#2e9e5b", "#1f84bd"];
 
 // `held` is how the bar is held along the path on show (see measurePath); `pathCharts` are the svgs of the path
 // panel, kept so the cursor moves without a redraw.
-const state = { index: null, bar: null, data: null, step: 0, playing: null, held: null, pathCharts: [] };
+// `drive` is the base's way in before the carry: its poses but the last, which is the carry's first waypoint, and
+// the metres still to drive from each. `step` counts the carry's waypoints from 0; the drive's poses are the steps
+// below 0, the station at `-drive.poses.length`.
+const state = { index: null, bar: null, data: null, step: 0, playing: null, held: null, pathCharts: [],
+                drive: { poses: [], left: [] }, follow: true };
 let viewer = null;
 let robotReady = null;
 let grasps = null;
@@ -300,9 +304,23 @@ async function showBarScene() {
   if (rightBar) { viewer.scene.remove(rightBar); rightBar.geometry.dispose(); rightBar = null; }
   if (data.scene) await viewer.loadStaticScene(data.scene);
   else viewer.clearStaticScene();
+  // ! The path is measured with the base where the carry happens: the view's frame.
+  viewer.setBase(0, 0, 0, state.follow);
   state.held = measurePath(data.positions, problem);
   viewer.setTrajectoryLine(state.held.midpoints);
-  drawDrive((data.drive_in || {}).line);
+  const line = data.positions.length ? (data.drive_in || {}).line : null;
+  drawDrive(line);
+  state.drive = drivePoses(line);
+}
+
+// The drive's poses as steps of the replay, and the metres left to drive from each (see `state.drive`).
+function drivePoses(line) {
+  if (!line || line.length < 2) return { poses: [], left: [] };
+  const left = new Array(line.length).fill(0);
+  for (let i = line.length - 2; i >= 0; i -= 1) {
+    left[i] = left[i + 1] + Math.hypot(line[i + 1][0] - line[i][0], line[i + 1][1] - line[i][1]);
+  }
+  return { poses: line.slice(0, -1), left: left.slice(0, -1) };
 }
 
 // The base's way in from the station, on the floor: the path, and a short stroke the way the robot faces every
@@ -383,12 +401,27 @@ function holdingError() {
 function showStep(index) {
   const positions = state.data.positions;
   if (!positions.length) return;
-  state.step = Math.max(0, Math.min(positions.length - 1, index));
-  viewer.pose(positions[state.step]);
+  const drive = state.drive.poses;
+  state.step = Math.max(-drive.length, Math.min(positions.length - 1, index));
+  // Below 0 the base is on its way in, the arms as at the carry's first waypoint.
+  const driving = state.step < 0;
+  const base = driving ? drive[drive.length + state.step] : [0, 0, 0];
+  viewer.setBase(base[0], base[1], base[2], state.follow);
+  viewer.pose(positions[Math.max(0, state.step)]);
   const slider = stageControls.querySelector("[data-path-slider]");
   if (slider) slider.value = String(state.step);
   // Only the cursors move; the charts stay as drawn.
-  for (const svg of state.pathCharts) svg.setCursor(state.step);
+  for (const svg of state.pathCharts) svg.setCursor(Math.max(0, state.step));
+  const hint = " Drag to orbit, scroll to zoom; Space plays and pauses, the arrow keys step.";
+  if (driving) {
+    const pose = drive.length + state.step;
+    viewerCaption.textContent = `Drive in, pose ${pose + 1} of ${drive.length}`
+      + `${pose === 0 ? " (the station, where the bar is loaded)" : ""}: `
+      + `${state.drive.left[pose].toFixed(2)} m left to this bar's base pose, the arms kept in the loading posture `
+      + "with the bar held. Brown line on the floor: the base's way in (short strokes: the way the robot faces)."
+      + hint;
+    return;
+  }
   const error = holdingError();
   const onRoadmap = ((state.data.plan || {}).backend || "prm") === "prm";
   const row = state.index.bars.find((b) => b.bar === state.data.bar) || {};
@@ -399,7 +432,7 @@ function showStep(index) {
     + " Yellow line: the bar's midpoint along the path."
     + ((state.data.drive_in || {}).line ? " Brown line on the floor: the base's way in from the station, with the "
       + "arms in the loading posture (short strokes: the way the robot faces)." : "")
-    + " Drag to orbit, scroll to zoom; Space plays and pauses, the arrow keys step.";
+    + hint;
 }
 
 function stopPlaying() {
@@ -418,13 +451,15 @@ function renderStageControls() {
     viewer.pose(new Array(12).fill(0));
     return;
   }
-  const slider = element("input", { type: "range", min: "0", max: String(positions.length - 1), step: "1",
+  // The slider runs over the drive in, when there is one, and then the carry.
+  const first = -state.drive.poses.length;
+  const slider = element("input", { type: "range", min: String(first), max: String(positions.length - 1), step: "1",
                                     "data-path-slider": "" });
   slider.addEventListener("input", () => { stopPlaying(); showStep(Number(slider.value)); });
   const play = element("button", { "data-play": "", title: "Space plays and pauses; the arrow keys step" }, "Play");
   play.addEventListener("click", () => {
     if (state.playing) { stopPlaying(); return; }
-    if (state.step >= positions.length - 1) showStep(0);
+    if (state.step >= positions.length - 1) showStep(first);
     play.textContent = "Pause";
     state.playing = setInterval(() => {
       if (state.step >= positions.length - 1) stopPlaying();
@@ -432,10 +467,18 @@ function renderStageControls() {
     }, 50);
   });
   const jump = (label, to) => element("button", { onclick: () => { stopPlaying(); showStep(to()); } }, label);
-  stageControls.replaceChildren(element("div", { class: "controls" }, [
-    play, jump("Start", () => 0), jump("‹", () => state.step - 1), slider, jump("›", () => state.step + 1),
-    jump("End", () => positions.length - 1),
-  ]));
+  const controls = [play, jump(first < 0 ? "Station" : "Start", () => first)];
+  if (first < 0) controls.push(jump("Carry", () => 0));
+  controls.push(jump("‹", () => state.step - 1), slider, jump("›", () => state.step + 1),
+                jump("End", () => positions.length - 1));
+  if (first < 0) {
+    const follow = element("input", { type: "checkbox", "data-follow": "" });
+    follow.checked = state.follow;
+    follow.addEventListener("change", () => { state.follow = follow.checked; });
+    controls.push(element("label", { title: "The camera moves along with the base while it drives in" },
+                          [follow, " camera follows"]));
+  }
+  stageControls.replaceChildren(element("div", { class: "controls" }, controls));
   stageControls.hidden = false;
   showStep(0);
 }

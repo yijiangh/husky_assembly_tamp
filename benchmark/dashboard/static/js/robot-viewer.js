@@ -160,6 +160,19 @@ export class RobotViewer {
     mesh.instanceColor.needsUpdate = true;
   }
 
+  // Stands the robot at a base pose (x, y in metres, yaw in radians) in the view's frame. The links, and what
+  // rides on them, move at the next pose(). With `follow` the camera moves along, so the view of the robot stays.
+  setBase(x = 0, y = 0, yaw = 0, follow = false) {
+    if (!this.robotRoot) return;
+    if (follow) {
+      const shift = new THREE.Vector3(x - this.robotRoot.position.x, y - this.robotRoot.position.y, 0);
+      this.camera.position.add(shift);
+      this.controls.target.add(shift);
+    }
+    this.robotRoot.position.set(x, y, 0);
+    this.robotRoot.rotation.set(0, 0, yaw);
+  }
+
   pose(angles) {
     if (!this.kinematics) return;
     this.kinematics.pose(angles);

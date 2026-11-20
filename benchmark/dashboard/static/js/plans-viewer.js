@@ -37,20 +37,22 @@ const PHASES = [
   ["search_s", "search: tracking edges (holding the bar) and their scene checks", "search"],
   ["walk_in_s", "fallback 1: walk the goal postures to loading poses of the three classes", "walk"],
   ["via_s", "fallback 2: waypoints grown from the goal out of the structure", "walk"],
+  ["drive_in_s", "drive-in check: a base path from the station with the arms as loaded", "drive"],
   ["goal_accept_s", "end posture: the insert and the retreat planned from it", "follow"],
   ["final_check_s", "final check of the route at the fine step", "final"],
   ["post_process_s", "after the route: smoothing and corner rounding", "post"],
+  ["dense_check_s", "dense check of the finished path between its waypoints", "final"],
 ];
-const GROUPS = ["setup", "ends", "search", "walk", "follow", "final", "post", "other"];
+const GROUPS = ["setup", "ends", "search", "walk", "drive", "follow", "final", "post", "other"];
 const GROUP_LABELS = {
   setup: "roadmap, workers, scene", ends: "start and end sets", search: "search (tracking + scene checks)",
-  walk: "fallbacks (loading poses, waypoints)",
-  follow: "insert and retreat check", final: "final fine check", post: "smoothing and rounding",
+  walk: "fallbacks (loading poses, waypoints)", drive: "drive-in check",
+  follow: "insert and retreat check", final: "final and dense checks", post: "smoothing and rounding",
   other: "rest of the call",
 };
 const GROUP_COLOURS = {
-  setup: "#b8bcc2", ends: "#8a6fb0", search: "#1f84bd", walk: "#17a2a2", follow: "#2e9e5b", final: "#d98324", post: "#b23a48",
-  other: "#5a5a6e",
+  setup: "#b8bcc2", ends: "#8a6fb0", search: "#1f84bd", walk: "#17a2a2", drive: "#e0b030", follow: "#2e9e5b",
+  final: "#d98324", post: "#b23a48", other: "#5a5a6e",
 };
 const BUILD_PHASES = {
   pool_startup_s: "start the workers", anchors_s: "anchors: goal and carry postures", sample_s: "sample nodes",
@@ -174,6 +176,17 @@ function loadingMark(row) {
            title: `${row.bar}, loading pose ${loadingPose(row)}` };
 }
 
+// The drive in with the loading posture, in a few words: what the check found for the plan's start.
+function driveText(row) {
+  const drive = row.drive_in;
+  if (!row.planned || row.backend !== "prm") return "—";
+  if (!drive) return "not checked";
+  const refused = row.starts_rejected ? `, ${row.starts_rejected} refused first` : "";
+  // ! No drive path on a failed plan says nothing about the postures: some may have passed the check.
+  if (!drive.found) return row.ok ? "passed, path not recorded" : `no plan; ${drive.refused} posture(s) refused`;
+  return `${drive.direct ? "straight in" : "path"}, ${number(drive.length_m, 1, " m")}${refused}`;
+}
+
 function resultText(row) {
   if (!row.planned) return "not planned";
   if (!row.ok) return `no path: ${row.failure_reason || "?"}`;
@@ -230,8 +243,8 @@ function renderOverview() {
       ]),
     ]),
     panel("Bars", [table(
-      ["#", "bar", "built before", "planner", "result", "loading pose", "plan", "search", "fallbacks", "ends",
-       "follow-on", "post", "roadmap nodes",
+      ["#", "bar", "built before", "planner", "result", "loading pose", "drive-in", "plan", "search", "fallbacks",
+       "ends", "follow-on", "post", "roadmap nodes",
        "build", "waypoints", "bar travel", "lowest above floor", "end posture"],
       bars.map((b) => {
         const groups = groupSeconds(b);
@@ -244,7 +257,7 @@ function renderOverview() {
           ? `${plannerName(b.backend)} (roadmap: ${b.first_try.failure_reason}`
             + `${b.first_try.best_gap_left_mm != null ? `, ${b.first_try.best_gap_left_mm.toFixed(0)} mm short` : ""})`
           : plannerName(b.backend);
-        return [b.order, b.bar, b.built_before, planner, resultText(b), loadingPose(b),
+        return [b.order, b.bar, b.built_before, planner, resultText(b), loadingPose(b), driveText(b),
                 b.planned ? seconds(b.plan_s) : "—", b.planned ? seconds(groups.search) : "—",
                 b.planned && groups.walk ? seconds(groups.walk) : "—", b.planned ? seconds(groups.ends) : "—",
                 b.planned ? seconds(groups.follow) : "—", b.planned ? seconds(groups.post) : "—",
@@ -289,6 +302,21 @@ async function showBarScene() {
   else viewer.clearStaticScene();
   state.held = measurePath(data.positions, problem);
   viewer.setTrajectoryLine(state.held.midpoints);
+  drawDrive((data.drive_in || {}).line);
+}
+
+// The base's way in from the station, on the floor: the path, and a short stroke the way the robot faces every
+// few poses. The points are (x, y, yaw) in the frame of the base pose the drive ends at, which is the view's frame.
+function drawDrive(line) {
+  viewer.clearOverlays();
+  if (!line || line.length < 2) return;
+  const z = 0.02;
+  const path = line.slice(1).map((point, i) => [[line[i][0], line[i][1], z], [point[0], point[1], z]]);
+  const every = Math.max(1, Math.round(line.length / 40));
+  const facing = line.filter((_, i) => i % every === 0).map(([x, y, yaw]) =>
+    [[x, y, z], [x + 0.25 * Math.cos(yaw), y + 0.25 * Math.sin(yaw), z]]);
+  viewer.addLines(path, { colour: 0x7a5c00, opacity: 1 });
+  viewer.addLines(facing, { colour: 0xe0b030, opacity: 0.9 });
 }
 
 // The right flange as seen from the left one, at the posed robot: fixed while both arms hold the bar.
@@ -368,8 +396,10 @@ function showStep(index) {
     : state.step === positions.length - 1 ? " (end: the authored tool poses, where the insert starts)" : "";
   viewerCaption.textContent = `Waypoint ${state.step + 1} of ${positions.length}${where}.`
     + (error != null ? ` Holding error here: ${(error * 1000).toFixed(2)} mm.` : "")
-    + " Yellow line: the bar's midpoint along the path. Drag to orbit, scroll to zoom; Space plays and pauses, "
-    + "the arrow keys step.";
+    + " Yellow line: the bar's midpoint along the path."
+    + ((state.data.drive_in || {}).line ? " Brown line on the floor: the base's way in from the station, with the "
+      + "arms in the loading posture (short strokes: the way the robot faces)." : "")
+    + " Drag to orbit, scroll to zoom; Space plays and pauses, the arrow keys step.";
 }
 
 function stopPlaying() {
@@ -429,23 +459,62 @@ function planPanel(row, data) {
     lines.push(`Route of ${row.route_nodes} nodes within ${number(prm.tolerance_mm, 0, " mm")} of holding the bar; `
       + `${prm.n_waypoints_1cm ?? "?"} waypoints at 1 cm, ${row.n_waypoints} after smoothing and rounding.`);
     lines.push(`Loading pose (where the carry starts): ${loadingPose(row, true)}.`);
+    const dense = prm.dense_check;
+    if (dense) lines.push(`Dense check between the waypoints (straight joint moves, ${dense.step_deg}° per joint, `
+      + `${dense.n_points} points): the ${dense.used} path is free`
+      + (dense.failed.length ? `; ${dense.failed.map((f) => f.path).join(" and ")} collided and was set aside.` : "."));
   } else {
     lines.push(`No path: ${row.failure_reason}.`
       + (prm.best_gap_left_mm != null ? ` The best route left breaks the holding by ${prm.best_gap_left_mm.toFixed(1)} mm.` : "")
       + ((prm.goals_rejected || []).length ? ` ${prm.goals_rejected.length} end posture(s) were refused.` : ""));
+    const strict = (data.plan || {}).strict_contacts || {};
+    const pairs = (list) => (list || []).map((pair) => pair.join(" and ")).join("; ");
+    if (strict.goal_hits) lines.push(`At the carry's end pose these parts overlap: ${pairs(strict.goal_hits)}. `
+      + "They belong to the mate the bar is about to be joined to, which a carry may not touch: the insert's offset "
+      + "in the export is too small for this bar.");
+    for (const failed of (prm.dense_check || {}).failed || []) {
+      lines.push(`Dense check, ${failed.path} path: collision after waypoint ${failed.segment + 1} `
+        + `(${pairs(failed.pairs)}).`);
+    }
   }
   const starts = prm.starts || {};
   if (row.backend === "prm") lines.push(`Carry poses free in this scene: ${starts.free_in_scene ?? "—"} of ${starts.carry_nodes ?? "—"}. `
     + `Edges looked at: ${prm.edges_looked_at ?? "—"} (${Object.entries(prm.edge_verdicts || {}).map(([k, v]) => `${v} ${k}`).join(", ") || "none"}); `
     + `blocked by the scene: ${prm.scene_blocked_edges ?? "—"}; taken from the precomputed tracking: ${prm.pretracked_edges ?? 0} on file.`);
+  const drive = data.drive_in;
+  if (row.backend === "prm" && !data.first_try) {
+    const deg = (v) => (v * 180 / Math.PI).toFixed(0);
+    lines.push(!drive ? "Drive-in: not checked for this plan (no station given)."
+      : !drive.points ? `Drive-in from the station at [${drive.station[0].toFixed(2)}, ${drive.station[1].toFixed(2)}] m, `
+        + `${deg(drive.station[2])}°: no drive path is shown, as no carry was planned. `
+        + (drive.accepted === undefined ? "" : `${drive.accepted} loading posture(s) can drive in; `)
+        + `${drive.refused.length} refused`
+        + (drive.refused.length ? ` (${drive.refused.filter((r) => r.timed_out).length} of them because the search `
+          + `ran out of time, which is not a proof)` : "")
+        + ` in ${seconds(drive.seconds)}.`
+        : `Drive-in: with the arms in this loading posture the base can drive from the station at `
+          + `[${drive.station[0].toFixed(2)}, ${drive.station[1].toFixed(2)}] m, ${deg(drive.station[2])}° to this bar's `
+          + `base pose: ${drive.direct ? "a straight line" : "a planned path"} of ${number(drive.length_m, 2, " m")}, `
+          + `kept ${number(drive.margin * 100, 0, " cm")} from everything except at its two ends `
+          + `(${drive.asks} posture(s) asked in ${seconds(drive.seconds)}).`);
+  }
+  const rejected = prm.starts_rejected || [];
+  const rejectedTable = !rejected.length ? [] : [
+    element("h3", {}, `Loading postures refused by the drive-in check: ${rejected.length}`),
+    table(["class", "pose", "from", "why", "other postures of the pose dropped with it"],
+          rejected.map((r) => [r.carry || "—", r.label || `node ${r.node}`, r.source || "—", r.reason,
+                               r.dropped_with_it || 0])),
+  ];
   const stages = (prm.walk_in || {}).stages || [];
   const stageTable = !stages.length ? [] : [
     element("p", { class: "muted" }, "The precomputed carry poses gave no route, so the fallbacks ran. Each walk "
       + "moves the bar on a straight line from a goal posture with both arms following, so what it reaches is on "
       + "that posture's own arm configuration."),
-    table(["stage", "poses tried", "walks", "arrive collision-free", "free all the way", "starts added", "waypoints kept"],
+    table(["stage", "poses tried", "walks", "arrive collision-free", "free all the way", "refused: cannot drive in",
+           "starts added", "waypoints kept"],
           stages.map((s) => [s.stage, s.poses ?? "—", s.walks ?? "—", s.arrived_free ?? "—",
-                             s.free_all_the_way ?? "—", s.starts ?? s.starts_reached ?? "—", s.waypoints ?? "—"])),
+                             s.free_all_the_way ?? "—", s.refused_drive ?? "—", s.starts ?? s.starts_reached ?? "—",
+                             s.waypoints ?? "—"])),
   ];
   return panel(`${row.bar}: bar ${row.order} of ${state.index.bars.length}, ${row.built_before} built before it`, [
     tiles([
@@ -458,6 +527,7 @@ function planPanel(row, data) {
         ? number(check.lowest_z_above_base_frame_m * 1000, 0, " mm") : "—"],
     ]),
     ...lines.map((line) => element("p", { class: "muted" }, line)),
+    ...rejectedTable,
     ...stageTable,
     element("p", {}, [element("a", { href: data.run_page }, "This bar's roadmap page"),
                       " (the roadmap's nodes and edges, and this plan's route on it)."]),
@@ -625,7 +695,13 @@ function checkPanel(data) {
   if (!check || check.reason === "file not found") return null;
   const rows = [
     ["verdict", check.ok ? "ok" : `FAILED: ${checkFailure(check)}`],
-    ["waypoints of the saved path in collision", check.saved_waypoints_colliding],
+    ["waypoints of the saved path in collision", check.saved_waypoints_colliding
+      + (check.saved_first_hit ? ` (first: waypoint ${check.saved_first_hit.waypoint + 1}, `
+        + `${(check.saved_first_hit.pairs || []).map((pair) => pair.join(" and ")).join("; ")})` : "")],
+    ["between the waypoints (straight joint moves, 0.1° per joint)", check.dense_ok == null ? "not checked"
+      : check.dense_ok ? `free at all ${check.dense_points} points`
+        : `collision after waypoint ${check.dense_first_hit.segment + 1}: `
+          + `${(check.dense_first_hit.pairs || []).map((pair) => pair.join(" and ")).join("; ")}`],
     ["largest joint step between waypoints", number(check.saved_max_step_deg, 2, "°")],
     ["holding error between waypoints", `${number(check.holding_between_pos_mm, 3, " mm")}, ${number(check.holding_between_rot_deg, 4, "°")}`],
     ["re-solved at 2 mm with the production repair", check.repair_success ? `ok (${seconds(check.repair_s)})` : `failed: ${check.repair_reason}`],
@@ -634,7 +710,9 @@ function checkPanel(data) {
     ["joint travel, reversals", `${number(check.joint_travel_deg, 0, "°")}, ${check.joint_reversals ?? "—"}`],
   ];
   return panel("The saved path, checked on its own", [
-    element("p", { class: "muted" }, "prm_check_solved.py reads the saved file back and measures it without the planner."),
+    element("p", { class: "muted" }, "prm_check_solved.py reads the saved file back and measures it without the "
+      + "planner. Its collision checks are strict: nothing the arms carry or wear may touch a standing body, also "
+      + "not the receiver the bar is about to be joined to."),
     table(["what", "found"], rows),
   ]);
 }

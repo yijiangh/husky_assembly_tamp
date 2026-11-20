@@ -19,7 +19,7 @@ import itertools
 import os
 from dataclasses import dataclass
 from time import time
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from scipy.spatial import cKDTree
@@ -72,6 +72,7 @@ class WalkSettings:
             coarser; what it finds is walked again at the steps above.
         per_class (int): loading poses made starts, per class and goal posture.
         targets_per_class (int): loading poses the waypoint rounds walk toward, per class and goal posture.
+        drive_tries (int): loading poses per class a ``start_accept`` may refuse before the class is given up.
         node_step_deg (float): a walk's configurations become chain nodes about this far apart (largest joint).
         k (int): roadmap nodes each chain node tries to join.
         radius_deg (float): largest joint move of such an edge.
@@ -88,6 +89,7 @@ class WalkSettings:
     screen_factor: float = 2.0
     per_class: int = 2
     targets_per_class: int = 8
+    drive_tries: int = 6
     node_step_deg: float = 8.0
     k: int = 10
     radius_deg: float = 90.0
@@ -133,7 +135,8 @@ def save_derived(roadmap_dir: str, found: Sequence[Dict[str, Any]]) -> int:
         new += 1
         saved.append({"label": f"derived_{pose['carry']}_{sum(p['carry'] == pose['carry'] for p in saved)}",
                       "carry": pose["carry"], "midpoint": [float(v) for v in pose["midpoint"]],
-                      "roll_deg": float(pose["roll_deg"]), "found": time(), "free_walk": bool(pose.get("free_walk"))})
+                      "roll_deg": float(pose["roll_deg"]), "found": time(), "free_walk": bool(pose.get("free_walk")),
+                      "drive_in": bool(pose.get("drive_in"))})
     if new:
         write_json_atomic(os.path.join(roadmap_dir, DERIVED_FILE), {"kind": "derived", "starts": saved})
     return new
@@ -270,7 +273,8 @@ def midpoint_of(model: HoldingModel, conf: Sequence[float]) -> np.ndarray:
 
 def walk_in_starts(tracker: Tracker, roadmap: Roadmap, model: HoldingModel, goal_ids: Sequence[int],
                    candidates: Sequence[Dict[str, Any]], settings: WalkSettings,
-                   counters: Dict[str, float]) -> Dict[str, Any]:
+                   counters: Dict[str, float],
+                   start_accept: Optional[Callable[[np.ndarray], str]] = None) -> Dict[str, Any]:
     """Walk every goal posture to loading poses; add the best of each class to the graph as starts.
 
     A pose counts when the walk arrives on it and the arrival is collision-free. Per goal posture and class the
@@ -287,6 +291,9 @@ def walk_in_starts(tracker: Tracker, roadmap: Roadmap, model: HoldingModel, goal
             roadmap's frame, and ``midpoint`` and ``roll_deg`` unless they are the roadmap's own).
         settings (WalkSettings): steps and how many to keep.
         counters (Dict[str, float]): tally.
+        start_accept (Optional[Callable[[np.ndarray], str]]): the caller's say on a loading posture, best ranked
+            first: "" to take it, or why not. A refused pose is dropped for every goal posture, and a class is
+            given up after ``settings.drive_tries`` refusals.
 
     Returns:
         Dict[str, Any]: ``starts`` (node -> what start it is: class, label, source, the goal it was walked from,
@@ -311,6 +318,9 @@ def walk_in_starts(tracker: Tracker, roadmap: Roadmap, model: HoldingModel, goal
     chains: List[Tuple[Optional[int], List[np.ndarray]]] = []
     notes: List[Dict[str, Any]] = []
     targets: Dict[int, List[Dict[str, Any]]] = {goal: [] for goal in goal_ids}
+    refused_poses: set = set()
+    refusals: Dict[str, int] = {}
+    wanted = max(settings.per_class, settings.targets_per_class)
     for goal_number, goal in enumerate(goal_ids):
         per_class: Dict[str, List[Tuple[Tuple, int, Dict[str, Any], Dict[str, Any]]]] = {}
         for index, full in zip(free, checked):
@@ -322,7 +332,18 @@ def walk_in_starts(tracker: Tracker, roadmap: Roadmap, model: HoldingModel, goal
                     -comfort["comfort"], -comfort["limit_margin_deg"])
             per_class.setdefault(candidate["carry"], []).append((rank, index, candidate, full))
         for carry, rows in per_class.items():
-            ranked = sorted(rows, key=lambda row: row[0])[: max(settings.per_class, settings.targets_per_class)]
+            ranked = []
+            for row in sorted(rows, key=lambda row: row[0]):
+                pose_number = row[1] % len(world_poses)
+                if len(ranked) >= wanted or (start_accept and refusals.get(carry, 0) >= settings.drive_tries):
+                    break
+                if pose_number in refused_poses:
+                    continue
+                if start_accept is not None and start_accept(np.asarray(arrivals[row[1]]["conf"], dtype=float)):
+                    refused_poses.add(pose_number)
+                    refusals[carry] = refusals.get(carry, 0) + 1
+                    continue
+                ranked.append(row)
             for place, (_rank, index, candidate, full) in enumerate(ranked):
                 note = {"goal": goal, "carry": carry, "label": candidate["label"], "source": candidate["source"],
                         "midpoint": candidate.get("midpoint"), "roll_deg": candidate.get("roll_deg"),
@@ -352,6 +373,8 @@ def walk_in_starts(tracker: Tracker, roadmap: Roadmap, model: HoldingModel, goal
             chain_ends[note["goal"]].append(nodes[-1])
     tally["starts"] = len(starts)
     tally["starts_free_walk"] = int(sum(note["free_walk"] for note in starts.values()))
+    if start_accept is not None:
+        tally["refused_drive"] = len(refused_poses)
     return {"starts": starts, "targets": targets, "chain_ends": chain_ends, "tally": tally}
 
 

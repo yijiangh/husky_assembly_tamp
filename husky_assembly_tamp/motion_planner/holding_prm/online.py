@@ -99,6 +99,9 @@ FINE_CHUNK = 12
 
 # * Configurations per node-check task.
 CHECK_CHUNK = 24
+# * A loading pose whose start was refused in this many arm postures is dropped with all its other postures: the
+# * bar is what gets in the way of a drive, and a refusal costs a base search that runs out of time.
+START_POSE_REFUSALS = 1
 
 # * How closely the numpy forward kinematics on the live arm bases must agree
 # * with PyBullet's own flange poses (metres). A larger gap means the base
@@ -529,6 +532,8 @@ def plan_on_roadmap(planner, start_state, joint_names_12: Sequence[str], active_
                     grasp_bar_from_right: Optional[np.ndarray] = None,
                     goal_accept: Optional[Callable[[np.ndarray], str]] = None,
                     goal_turn_reference: Optional[Sequence[float]] = None,
+                    keep_pool: Optional[List[WorkerPool]] = None,
+                    start_accept: Optional[Callable[[np.ndarray], str]] = None,
                     ) -> Tuple[Optional[List[np.ndarray]], Dict[str, Any]]:
     """Plan the bar carry on a precomputed roadmap, in the live scene.
 
@@ -556,6 +561,12 @@ def plan_on_roadmap(planner, start_state, joint_names_12: Sequence[str], active_
             first search finds nothing and ``settings.walk_in`` is on, every goal posture is offered a second time
             where they differ: on the whole turns nearest these instead of nearest home. The same arm posture a
             whole turn apart can decide whether the next movement stays inside the joint limits.
+        keep_pool (Optional[List[WorkerPool]]): a list that gets the plan's worker pool, still open, for more
+            checks in the same scene. ! The caller then closes it.
+        start_accept (Optional[Callable[[np.ndarray], str]]): asked about the loading posture a found route starts
+            from, like ``goal_accept`` about its end (can the robot drive in with the arms like this?). A refused
+            start leaves the start set (``info["starts_rejected"]``); a loading pose refused in
+            ``START_POSE_REFUSALS`` arm postures is dropped whole. The fallbacks ask it before they add a start.
 
     Returns:
         Tuple[Optional[List[np.ndarray]], Dict[str, Any]]: the path (twelve
@@ -683,7 +694,42 @@ def plan_on_roadmap(planner, start_state, joint_names_12: Sequence[str], active_
         goals_accepted: set = set()
         goals_rejected: List[Dict[str, Any]] = []
         info["goals_rejected"] = goals_rejected
+        starts_accepted: set = set()
+        starts_refused: set = set()
+        starts_rejected: List[Dict[str, Any]] = []
+        refusals_of_pose: Dict[Tuple, int] = {}
+        info["starts_rejected"] = starts_rejected
         tube_log: List[Dict[str, Any]] = []
+
+        def pose_of(node: int) -> Tuple:
+            """Which loading pose a start node is: the same one for all its arm postures."""
+            anchor = start_anchor.get(node, {})
+            return (anchor.get("carry"), anchor.get("label") or anchor.get("start_index"), anchor.get("source"))
+
+        def drive_verdict(conf: np.ndarray) -> str:
+            """The caller's say on a loading posture ("" = take it), timed apart."""
+            accept_phase = perf_counter()
+            why_not = start_accept(np.asarray(conf, dtype=float))
+            planner.set_robot_cell_state(start_state)
+            timings["drive_in_s"] = timings.get("drive_in_s", 0.0) + perf_counter() - accept_phase
+            return str(why_not or "")
+
+        def refuse_start(start: int, why_not: str) -> None:
+            """Take a refused start out of the start set, and its whole loading pose once that was refused enough."""
+            anchor = start_anchor.get(start, {})
+            pose = pose_of(start)
+            refusals_of_pose[pose] = refusals_of_pose.get(pose, 0) + 1
+            gone = [start]
+            if refusals_of_pose[pose] >= START_POSE_REFUSALS:
+                gone += [node for node in start_ids if node != start and pose_of(node) == pose]
+            for node in gone:
+                start_ids.remove(node)
+                starts_refused.add(node)
+            starts_rejected.append({"node": start, "carry": anchor.get("carry"), "label": anchor.get("label"),
+                                    "source": anchor.get("source", "roadmap"), "reason": why_not,
+                                    "dropped_with_it": len(gone) - 1})
+            say(f"  start {start} ({anchor.get('carry')}) refused: {why_not[:160]}; {len(gone) - 1} more postures "
+                f"of the pose dropped, {len(start_ids)} starts left")
 
         tolerances = sorted(settings.tolerances_mm)
 
@@ -709,6 +755,14 @@ def plan_on_roadmap(planner, start_state, joint_names_12: Sequence[str], active_
                             say(f"  goal posture {goal} refused: {why_not}; {len(goal_ids)} left")
                             continue
                         goals_accepted.add(goal)
+                    start = int(route[0])
+                    if start_accept is not None and start not in starts_accepted:
+                        # * The caller's say on this loading posture (can the robot drive in with it?).
+                        why_not = drive_verdict(tracker.confs[start])
+                        if why_not:
+                            refuse_start(start, why_not)
+                            continue
+                        starts_accepted.add(start)
                     fine_phase = perf_counter()
                     path, bad_row, reason = final_check(pool, waypoints, assembly["spans"], settings, counters["final"])
                     timings["final_check_s"] = timings.get("final_check_s", 0.0) + perf_counter() - fine_phase
@@ -753,15 +807,18 @@ def plan_on_roadmap(planner, start_state, joint_names_12: Sequence[str], active_
         def walk_to(candidates: List[Dict[str, Any]], name: str) -> None:
             """Walk the goal postures to these loading poses and make starts of the ones they reach."""
             walk_phase = perf_counter()
-            made = walk_in_starts(tracker, roadmap, model, goal_ids, candidates, walk_settings, counters["walk"])
+            drive_before = timings.get("drive_in_s", 0.0)
+            made = walk_in_starts(tracker, roadmap, model, goal_ids, candidates, walk_settings, counters["walk"],
+                                  start_accept=drive_verdict if start_accept is not None else None)
             for node, note in made["starts"].items():
-                if node not in start_ids:
+                if node not in start_ids and node not in starts_refused:
                     start_ids.append(node)
                 start_anchor.setdefault(node, note)
             for goal in made["targets"]:
                 walk_targets.setdefault(goal, []).extend(made["targets"][goal])
                 walk_ends.setdefault(goal, []).extend(made["chain_ends"][goal])
-            timings["walk_in_s"] = timings.get("walk_in_s", 0.0) + perf_counter() - walk_phase
+            timings["walk_in_s"] = (timings.get("walk_in_s", 0.0) + perf_counter() - walk_phase
+                                    - (timings.get("drive_in_s", 0.0) - drive_before))
             walk_log["stages"].append({"stage": name, "poses": len(candidates), **made["tally"]})
             say(f"  walk-in ({name}): {len(candidates)} poses x {len(goal_ids)} goal postures: "
                 f"{made['tally']['arrived_free']} arrive free, {made['tally']['free_all_the_way']} free all the way; "
@@ -790,7 +847,7 @@ def plan_on_roadmap(planner, start_state, joint_names_12: Sequence[str], active_
                 via_phase = perf_counter()
                 made = via_round(tracker, model, frontier, walk_targets, goal_middle, walk_settings, counters["walk"])
                 for node, note in made["starts"].items():
-                    if node not in start_ids:
+                    if node not in start_ids and node not in starts_refused:
                         start_ids.append(node)
                     start_anchor.setdefault(node, note)
                 frontier = made["frontier"]
@@ -827,7 +884,7 @@ def plan_on_roadmap(planner, start_state, joint_names_12: Sequence[str], active_
                 answer = search_with_tubes()
         timings["search_s"] = (perf_counter() - phase - timings.get("final_check_s", 0.0)
                                - timings.get("goal_accept_s", 0.0) - timings.get("walk_in_s", 0.0)
-                               - timings.get("via_s", 0.0))
+                               - timings.get("via_s", 0.0) - timings.get("drive_in_s", 0.0))
 
         reasons: Dict[str, int] = {}
         # Only edges a route asked about in this plan; the night's file holds thousands more.
@@ -842,7 +899,8 @@ def plan_on_roadmap(planner, start_state, joint_names_12: Sequence[str], active_
         if answer is None:
             gap, _parent = minimax_to_goals(len(tracker.confs), tracker.table, tracker.table.free, goal_ids)
             finite = [float(gap[node]) for node in start_ids if np.isfinite(gap[node])]
-            info["failure_reason"] = "prm_no_route" if goal_ids else "prm_goals_rejected"
+            info["failure_reason"] = ("prm_goals_rejected" if not goal_ids else
+                                      "prm_starts_rejected" if not start_ids else "prm_no_route")
             info["best_gap_left_mm"] = min(finite) if finite else None
             timings["total_s"] = perf_counter() - wall
             if settings.save_query:
@@ -865,7 +923,7 @@ def plan_on_roadmap(planner, start_state, joint_names_12: Sequence[str], active_
         })
         info["start"]["found_after"] = walk_log["stages"][-1]["stage"] if walk_log["stages"] else "carry poses"
         if settings.save_derived and anchor.get("source") == "grid":
-            walk_log["saved"] = save_derived(settings.roadmap_dir, [anchor])
+            walk_log["saved"] = save_derived(settings.roadmap_dir, [{**anchor, "drive_in": start_accept is not None}])
         timings["total_s"] = perf_counter() - wall
         if settings.save_query:
             info["query_file"] = save_online_query(settings, roadmap, model, tracker, goal_node_of, start_ids,
@@ -873,4 +931,7 @@ def plan_on_roadmap(planner, start_state, joint_names_12: Sequence[str], active_
                                                    world_from_bar_goal)
         return [np.asarray(conf, dtype=float) for conf in path], info
     finally:
-        pool.close()
+        if keep_pool is None:
+            pool.close()
+        else:
+            keep_pool.append(pool)

@@ -64,6 +64,7 @@ ensure_sibling_packages()
 
 import numpy as np  # noqa: E402
 
+from husky_assembly_tamp.benchmark.drive_in import DriveIn  # noqa: E402
 from husky_assembly_tamp.benchmark.follow_on import FollowOn  # noqa: E402
 from husky_assembly_tamp.benchmark.plot_motion import plot_planned_motion  # noqa: E402
 from husky_assembly_tamp.benchmark.process_export import (  # noqa: E402
@@ -166,7 +167,8 @@ def follow_on_summary(follow: Optional[FollowOn], names: Sequence[str], confs, i
 
 
 def save_plan_info(path: str, movement_id: str, backend: str, seconds: float, confs, info: Optional[dict],
-                   base_shift: str, goal: str, follow_on: Optional[Dict[str, Any]] = None) -> None:
+                   base_shift: str, goal: str, follow_on: Optional[Dict[str, Any]] = None,
+                   drive_in: Optional[Dict[str, Any]] = None) -> None:
     """Write a small summary of one bar-carry plan, next to the solved file.
 
     Args:
@@ -179,13 +181,15 @@ def save_plan_info(path: str, movement_id: str, backend: str, seconds: float, co
         base_shift (str): the ``--base-shift`` in force ("" for none).
         goal (str): "frames" (any posture at the goal pose) or "joints" (the authored posture).
         follow_on (Optional[Dict[str, Any]]): the follow-on check's result (``follow_on_summary``), when it ran.
+        drive_in (Optional[Dict[str, Any]]): the drive-in check's result (``DriveIn.summary``), when it ran.
     """
     info = info or {}
     profile = info.get("profile") or {}
     summary = {
         "movement": movement_id, "backend": backend, "ok": confs is not None, "plan_s": float(seconds),
         "n_waypoints": None if confs is None else len(confs), "failure_reason": info.get("failure_reason"),
-        "base_shift": base_shift, "goal": goal, "follow_on": follow_on,
+        "base_shift": base_shift, "goal": goal, "follow_on": follow_on, "drive_in": drive_in,
+        "strict_contacts": info.get("strict_contacts"),
         # The time after the roadmap's answer: repair, smoothing, corner rounding.
         "post": {"smooth": _plain(info.get("smooth_profile")), "round": _plain(info.get("round_profile")),
                  "repair": _plain(info.get("repair"))},
@@ -452,6 +456,16 @@ def plan_carry(args) -> int:
     if goal_frames is not None and not args.no_follow_on:
         follow = FollowOn(process, args.bar, names, base=base, log=print)
         print(f"[plan] end posture resolved by IK; it must let {follow.insert.id} and {follow.retreat.id} follow")
+    # * The start is a loading posture: keep only one the robot can drive in with from the station.
+    drive = None
+    if args.cdfm_backend == "prm" and args.station is not None and not args.no_drive_in:
+        station = [args.station[0], args.station[1], float(np.radians(args.station[2]))]
+        drive = DriveIn(process, args.bar, names, station, base=base, time_limit=args.drive_time_limit,
+                        log=lambda line: print(line[:200]))
+        print(f"[plan] the start must be a loading posture the base can drive in with from the station at "
+              f"({args.station[0]:.2f}, {args.station[1]:.2f}) m, {args.station[2]:.0f} deg")
+    elif args.cdfm_backend == "prm":
+        print("[plan] ! loading postures are NOT checked for the drive in (no --station, or --no-drive-in)")
     authored = goal_joints(movement, robot, names)
     if prm_options and goal_frames is not None:
         # * The same arm posture a whole turn apart may or may not let the insert stay inside the joint limits: the
@@ -477,12 +491,16 @@ def plan_carry(args) -> int:
             prm_options=prm_options,
             round_corners=round_options(args),
             goal_accept=follow if args.cdfm_backend == "prm" else None,
+            start_accept=drive,
         )
         plan_s = time.time() - plan_t0
         save_plan_info(plan_info_path(solved), movement.id, args.cdfm_backend, plan_s, confs, info,
-                       args.base_shift, args.goal, follow_on_summary(follow, names, confs, info, authored))
+                       args.base_shift, args.goal, follow_on_summary(follow, names, confs, info, authored),
+                       drive.summary(confs[0] if confs is not None else None) if drive is not None else None)
         if follow is not None:
             follow.close()
+        if drive is not None:
+            drive.close()
 
         if confs is None:
             reason = (info or {}).get("failure_reason", "<unknown>")
@@ -604,6 +622,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--round-max-rounds", type=int, default=40,
                         help="most re-solves of the whole path the corner rounding may try before it gives the "
                              "path back as planned")
+    parser.add_argument("--station", type=float, nargs=3, metavar=("X", "Y", "YAW_DEG"), default=None,
+                        help="the operator's station, the base pose in the process's world frame: the roadmap "
+                             "backend then starts only from loading postures the base can drive in with from there")
+    parser.add_argument("--no-drive-in", action="store_true", help="do not check the drive in from the station")
+    parser.add_argument("--drive-time-limit", type=float, default=8.0,
+                        help="time limit of one base search of the drive-in check, seconds (a refusal for lack of "
+                             "time takes up to about twice it)")
     parser.add_argument("--base-shift", default="",
                         help="park the base off its planned pose: 'dx,dy,dyaw_deg' in the base's own frame")
     parser.add_argument("--save-dir", default="",

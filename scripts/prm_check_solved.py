@@ -20,7 +20,13 @@ saved in the file. Then:
    grasps prescribe) at every saved waypoint, and along a dense joint-space
    interpolation between the waypoints (0.1 degree per joint, the step of
    ``path_validation.py``), which is what the robot shows while its controller
-   tracks the path; plus how often the joints reverse direction.
+   tracks the path; plus how often the joints reverse direction;
+6. the saved waypoints joined by straight joint moves (0.1 degree per joint) and
+   every point collision-checked: what a coarse path could hide between waypoints.
+
+Every collision check here is strict: nothing the arms carry or wear may touch a
+standing body, also not the receiver the bar is about to be joined to
+(``motion_planner/contacts.py``).
 
 Run from the repository root::
 
@@ -75,6 +81,8 @@ from husky_assembly_tamp.motion_planner.api import (  # noqa: E402
     _build_cfab_collision_fn,
     _pp_pose_from_frame,
 )
+from husky_assembly_tamp.motion_planner.contacts import strict_carry_state  # noqa: E402
+from husky_assembly_tamp.motion_planner.dense_check import dense_check  # noqa: E402
 from husky_assembly_tamp.motion_planner.holding_prm.holding import (  # noqa: E402
     HoldingModel,
     arm_limits,
@@ -261,8 +269,8 @@ def path_lengths(confs: Sequence[np.ndarray], bar_poses: Sequence[Any]) -> Dict[
 
 def check_path(planner, state, confs: Sequence[Sequence[float]], bar_name: str, record: Dict[str, Any],
                joint_names_12: Sequence[str], position_res: float, rotation_res: float,
-               holding_only: bool = False) -> Dict[str, Any]:
-    """Measure a saved carry path in the scene of its start state: items 1 to 5 of the module docstring.
+               holding_only: bool = False, dense_step_deg: float = 0.1) -> Dict[str, Any]:
+    """Measure a saved carry path in the scene of its start state: items 1 to 6 of the module docstring.
 
     Args:
         planner: the planner with the scene loaded.
@@ -274,6 +282,7 @@ def check_path(planner, state, confs: Sequence[Sequence[float]], bar_name: str, 
         position_res (float): fine step of the repair walk (m).
         rotation_res (float): fine step of the repair walk (rad).
         holding_only (bool): skip the repair, the collision checks and the lowest point.
+        dense_step_deg (float): largest joint move between the points of the dense check; 0 skips it.
 
     Returns:
         Dict[str, Any]: the verdict (``ok``) and what was measured.
@@ -341,8 +350,20 @@ def check_path(planner, state, confs: Sequence[Sequence[float]], bar_name: str, 
                 low_at_goal = min(low_at_goal, height)
     planner.set_robot_cell_state(state)
 
+    # * 6. Between the saved waypoints: straight joint moves, every point collision-checked.
+    dense = (dense_check(confs, lambda points: [collides(point) for point in points], float(np.radians(dense_step_deg)))
+             if dense_step_deg > 0 else None)
+    dense_hit = (dense or {}).get("first_hit")
+    planner.set_robot_cell_state(state)
+
     record.update({
-        "ok": bool(repair["success"]) and not hits,
+        "ok": bool(repair["success"]) and not hits and (dense is None or dense["ok"]),
+        "saved_first_hit": {"waypoint": hits[0], "pairs": collides.explain(confs[hits[0]])} if hits else None,
+        "dense_ok": None if dense is None else dense["ok"],
+        "dense_points": None if dense is None else dense["n_points"],
+        "dense_s": None if dense is None else dense["seconds"],
+        "dense_first_hit": None if not dense_hit else {"segment": dense_hit["segment"], "alpha": dense_hit["alpha"],
+                                                       "pairs": collides.explain(dense_hit["conf"])},
         "n_fine_poses": len(poses),
         "repair_success": bool(repair["success"]), "repair_reason": repair.get("reason"),
         "repair_direction": repair.get("direction"), "repair_s": round(repair_s, 1),
@@ -392,7 +413,7 @@ def load_solved_run(path: str):
 
 
 def check_file(mirror, process, action, path: str, position_res: float, rotation_res: float,
-               holding_only: bool = False) -> Dict[str, Any]:
+               holding_only: bool = False, dense_step_deg: float = 0.1) -> Dict[str, Any]:
     """Check one saved carry in the scene the core rebuilds for it.
 
     Args:
@@ -403,6 +424,7 @@ def check_file(mirror, process, action, path: str, position_res: float, rotation
         position_res (float): fine step of the repair walk (m).
         rotation_res (float): fine step of the repair walk (rad).
         holding_only (bool): skip the slow parts.
+        dense_step_deg (float): step of the dense check; 0 skips it.
 
     Returns:
         Dict[str, Any]: the verdict (``ok``) and what was measured.
@@ -420,9 +442,11 @@ def check_file(mirror, process, action, path: str, position_res: float, rotation
     joint_names_12 = list(left_names) + list(right_names)
     index = {name: position for position, name in enumerate(trajectory.joint_names)}
     confs = [[row[index[name]] for name in joint_names_12] for row in trajectory.positions]
+    # ! Strict: the scene's allowances for the pending mate do not hold along a carry.
+    state, _removed = strict_carry_state(mirror.state)
     with mirror.lend() as planner:
-        return check_path(planner, mirror.state, confs, action.bar, record, joint_names_12, position_res,
-                          rotation_res, holding_only=holding_only)
+        return check_path(planner, state, confs, action.bar, record, joint_names_12, position_res,
+                          rotation_res, holding_only=holding_only, dense_step_deg=dense_step_deg)
 
 
 # -----------------------------------------------------------------------------
@@ -443,6 +467,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--out", default="", help="append one line of JSON per file to this file")
     parser.add_argument("--holding-only", action="store_true",
                         help="only the path lengths and the holding error at and between waypoints (fast)")
+    parser.add_argument("--dense-step-deg", type=float, default=0.1,
+                        help="largest joint move between the points of the dense collision check; 0 skips it")
     args = parser.parse_args(argv)
 
     if not is_process_folder(args.problem_dir):
@@ -468,7 +494,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 record = {"file": os.path.basename(path), "ok": False, "reason": "file not found"}
             else:
                 record = check_file(mirror, process, action, path, args.position_res, args.rotation_res,
-                                    holding_only=args.holding_only)
+                                    holding_only=args.holding_only, dense_step_deg=args.dense_step_deg)
             record.update({"bar": args.bar, "tag": tag})
             all_ok = all_ok and record["ok"]
             print("[check] " + dumps(record))

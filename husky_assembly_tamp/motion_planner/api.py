@@ -51,6 +51,7 @@ from compas_robots.model import Joint
 
 # * This package — shared ssik helpers (backend switch, branch enumeration).
 from husky_assembly_tamp.motion_planner import ssik_ik
+from husky_assembly_tamp.motion_planner.contacts import strict_carry_state
 from husky_assembly_tamp.motion_planner.floor import floor_added
 
 
@@ -991,8 +992,17 @@ def plan_constrained_dual_arm(
     round_corners: Optional[Dict[str, Any]] = None,
     goal_accept: Optional[Callable[[np.ndarray], str]] = None,
     floor: bool = True,
+    strict_contacts: bool = True,
+    start_accept: Optional[Callable[[np.ndarray], str]] = None,
 ) -> Tuple[Optional[List[np.ndarray]], dict]:
     """Constrained dual-arm SE(3) RRT with a rigid bar grasp.
+
+    ``strict_contacts`` (default True) plans with nothing the arms carry or
+    wear allowed to touch a standing body: the contacts the scene allows
+    for the mate this transfer ends before (the tool and the receiver, the
+    two halves) would let the path cut through the receiver
+    (``contacts.py``). A goal that then collides only with such a body fails
+    as ``goal_touches_pending_mate``: the insert's offset is too small.
 
     ``floor`` (default True) plans with a slab under
     the robot, its top level with the robot's base frame: the arms, their
@@ -1003,6 +1013,11 @@ def plan_constrained_dual_arm(
     values: it returns "" to take it, or why not, and the search then goes on
     to another posture (``info["prm"]["goals_rejected"]``). A caller uses it
     to keep only postures the next movements can follow from.
+
+    ``start_accept`` (roadmap backend, with ``derive_start``) is asked the
+    same way about the loading posture a route starts from
+    (``info["prm"]["starts_rejected"]``): a caller uses it to keep only
+    postures the robot can drive in with (``benchmark/drive_in.py``).
 
     ``backend`` picks the planner: ``"birrt"`` (default) is the task-space
     search described below; ``"prm"`` plans on a roadmap precomputed for this
@@ -1112,8 +1127,29 @@ def plan_constrained_dual_arm(
         raise ValueError(f"backend must be one of {PLANNING_BACKENDS}; got {backend!r}")
     if backend == "prm" and stage != 3:
         raise ValueError("the roadmap backend always plans with IK and full collision (stage 3)")
-    if goal_accept is not None and backend != "prm":
-        raise ValueError("goal_accept is only asked by the roadmap backend")
+    if (goal_accept is not None or start_accept is not None) and backend != "prm":
+        raise ValueError("goal_accept and start_accept are only asked by the roadmap backend")
+    if strict_contacts:
+        # * Plan again with the strict state. Nothing but the arguments is local yet.
+        arguments = {name: value for name, value in locals().items()
+                     if name not in ("planner", "start_state", "strict_contacts")}
+        strict_state, removed = strict_carry_state(start_state)
+        path, info = plan_constrained_dual_arm(planner, strict_state, strict_contacts=False, **arguments)
+        info["strict_contacts"] = {"allowances_removed": len(removed)}
+        known_goal = goal_conf if goal_conf is not None else (prm_options or {}).get("goal_turn_reference")
+        if path is None and known_goal is not None and removed:
+            # Why the goal failed, when it did: is it only the mate's parts, which the state no longer lets touch?
+            left_names, right_names = _arm_joint_names(planner.client.robot_cell)
+            hits = _build_cfab_collision_fn(planner, strict_state, left_names + right_names).explain(known_goal)
+            planner.set_robot_cell_state(start_state)
+            lost = {frozenset(pair) for pair in removed}
+            if hits and all(frozenset(hit) in lost for hit in hits):
+                info["goal_failure_before_strict"] = info.get("failure_reason")
+                info["failure_reason"] = "goal_touches_pending_mate"
+                info["strict_contacts"].update(
+                    goal_hits=[list(hit) for hit in hits],
+                    note="at the goal these parts of the pending mate overlap: the insert's offset is too small")
+        return path, info
     if floor:
         # * Plan again with the slab in the cell and in the state. Nothing but the arguments is local yet.
         arguments = {name: value for name, value in locals().items()
@@ -1146,32 +1182,40 @@ def plan_constrained_dual_arm(
     obstacles = _collect_obstacle_puids(planner, exclude={active_bar_id})
 
     if backend == "prm":
-        # * The precomputed roadmap takes over from here; see the function below.
-        return _plan_constrained_dual_arm_on_roadmap(
-            planner, start_state,
-            active_bar_id=active_bar_id,
-            goal_conf=goal_conf,
-            goal_ee_frames=goal_ee_frames,
-            joint_names_12=joint_names_12,
-            robot_puid=robot_puid,
-            arm_joints=arm_joints,
-            tool_link_left=tool_link_left,
-            tool_link_right=tool_link_right,
-            derive_start=derive_start,
-            position_res=position_res,
-            rotation_res=rotation_res,
-            max_time=max_time,
-            enable_smoothing=enable_smoothing,
-            smooth_max_iterations=smooth_max_iterations,
-            smooth_max_time=smooth_max_time,
-            joint_continuity_threshold_rad=joint_continuity_threshold_rad,
-            random_seed=random_seed,
-            feature_points=feature_points,
-            repair=repair,
-            prm_options=prm_options,
-            round_corners=round_corners,
-            goal_accept=goal_accept,
-        )
+        # * The precomputed roadmap takes over from here; see the function below. Its workers stay open for the
+        # * dense check of the finished path, and are closed here.
+        pools: List[Any] = []
+        try:
+            return _plan_constrained_dual_arm_on_roadmap(
+                planner, start_state,
+                active_bar_id=active_bar_id,
+                goal_conf=goal_conf,
+                goal_ee_frames=goal_ee_frames,
+                joint_names_12=joint_names_12,
+                robot_puid=robot_puid,
+                arm_joints=arm_joints,
+                tool_link_left=tool_link_left,
+                tool_link_right=tool_link_right,
+                derive_start=derive_start,
+                position_res=position_res,
+                rotation_res=rotation_res,
+                max_time=max_time,
+                enable_smoothing=enable_smoothing,
+                smooth_max_iterations=smooth_max_iterations,
+                smooth_max_time=smooth_max_time,
+                joint_continuity_threshold_rad=joint_continuity_threshold_rad,
+                random_seed=random_seed,
+                feature_points=feature_points,
+                repair=repair,
+                prm_options=prm_options,
+                round_corners=round_corners,
+                goal_accept=goal_accept,
+                start_accept=start_accept,
+                pools=pools,
+            )
+        finally:
+            for pool in pools:
+                pool.close()
 
     if derive_start:
         # Goal-first procedure (mirrors dual_arm_task_space_rrt.run Stage 3):
@@ -1492,6 +1536,8 @@ def _plan_constrained_dual_arm_on_roadmap(
     prm_options: Optional[Dict[str, Any]],
     round_corners: Optional[Dict[str, Any]] = None,
     goal_accept: Optional[Callable[[np.ndarray], str]] = None,
+    start_accept: Optional[Callable[[np.ndarray], str]] = None,
+    pools: Optional[List[Any]] = None,
 ) -> Tuple[Optional[List[np.ndarray]], dict]:
     """The roadmap backend of :func:`plan_constrained_dual_arm`.
 
@@ -1524,6 +1570,9 @@ def _plan_constrained_dual_arm_on_roadmap(
         prm_options (Optional[Dict[str, Any]]): ``roadmap_dir`` and the optional settings.
         round_corners (Optional[Dict[str, Any]]): round the path's corners afterwards (see the caller).
         goal_accept (Optional[Callable[[np.ndarray], str]]): the caller's say on an end posture (see the caller).
+        start_accept (Optional[Callable[[np.ndarray], str]]): the caller's say on a loading posture (see the caller).
+        pools (Optional[List[Any]]): gets the plan's worker pool, which the caller closes; with it the finished
+            path is checked between its waypoints too (``prm_options["dense_check_step_deg"]``, 0.1; 0 skips it).
 
     Returns:
         Tuple[Optional[List[np.ndarray]], dict]: the path and ``info``, shaped
@@ -1542,7 +1591,8 @@ def _plan_constrained_dual_arm_on_roadmap(
     )
     from .dual_arm_task_space_rrt.smooth import smooth_dual_arm_pose_path
     from .holding_prm.holding import matrix_from_pose
-    from .holding_prm.online import OnlineSettings, plan_on_roadmap
+    from .dense_check import dense_check
+    from .holding_prm.online import OnlineSettings, check_confs, plan_on_roadmap
 
     options = dict(prm_options or {})
     if not options.get("roadmap_dir"):
@@ -1599,7 +1649,7 @@ def _plan_constrained_dual_arm_on_roadmap(
         planner, start_state, joint_names_12, active_bar_id, as_matrix(world_from_bar_goal), settings,
         robot_puid=robot_puid, arm_joints=arm_joints, start_conf=start_conf, goal_conf=goal_conf_arr,
         grasp_bar_from_right=as_matrix(grasp_bar_from_right), goal_accept=goal_accept,
-        goal_turn_reference=options.get("goal_turn_reference"),
+        goal_turn_reference=options.get("goal_turn_reference"), keep_pool=pools, start_accept=start_accept,
     )
     path_poses = prm_info.pop("path_poses", None)
     if path_poses is not None:
@@ -1626,6 +1676,8 @@ def _plan_constrained_dual_arm_on_roadmap(
         info["derived_start_conf"] = [float(v) for v in path_confs[0]]
 
     post_threshold = (repair or {}).get("joint_continuity_threshold_rad") or info["joint_continuity_threshold_rad"]
+    # * The path as each step leaves it: the dense check returns the latest one that passes.
+    stages = [("route", path_poses, path_confs)]
     if repair is not None or enable_smoothing or round_corners is not None:
         post_start = perf_counter()
         with pp.WorldSaver():
@@ -1652,6 +1704,7 @@ def _plan_constrained_dual_arm_on_roadmap(
                     planner.set_robot_cell_state(start_state)
                     return None, info
                 path_confs = repaired
+                stages = [("route", path_poses, path_confs)]
             if enable_smoothing:
                 smooth_profile: Dict[str, Any] = {}
                 path_poses, path_confs = smooth_dual_arm_pose_path(
@@ -1671,13 +1724,42 @@ def _plan_constrained_dual_arm_on_roadmap(
                 )
                 info["smooth_profile"] = smooth_profile
                 info["path_poses"] = path_poses
+                stages.append(("smoothed", path_poses, path_confs))
             if round_corners is not None and path_poses is not None:
                 path_poses, path_confs = _round_corners(
                     info, round_corners, path_poses, path_confs, post_scene, joint_collision_fn,
                     feature_points if feature_points is not None else get_bar_feature_points(),
                     position_res, rotation_res, post_threshold)
+                stages.append(("rounded", path_poses, path_confs))
         prm_info.setdefault("timings", {})["post_process_s"] = perf_counter() - post_start
         planner.set_robot_cell_state(start_state)
+
+    # * The dense check: straight joint moves between the waypoints, every point collision-checked in the workers.
+    step_deg = float(options.get("dense_check_step_deg", 0.1))
+    if pools and step_deg > 0.0:
+        check_start = perf_counter()
+        counters = prm_info.setdefault("counters", {}).setdefault("dense", {})
+        explain = _build_cfab_collision_fn(planner, start_state, joint_names_12).explain
+        report: Dict[str, Any] = {"step_deg": step_deg, "used": None, "failed": []}
+        for name, poses, confs in reversed(stages):
+            found = dense_check(confs, lambda dense: check_confs(pools[0], dense, "full", counters),
+                                float(np.radians(step_deg)))
+            report["n_points"] = found["n_points"]
+            if found["ok"]:
+                report["used"] = name
+                path_poses, path_confs = poses, confs
+                break
+            hit = found["first_hit"]
+            report["failed"].append({"path": name, "segment": hit["segment"], "alpha": hit["alpha"],
+                                     "pairs": explain(hit["conf"])})
+        planner.set_robot_cell_state(start_state)
+        report["ok"] = report["used"] is not None
+        prm_info["dense_check"] = report
+        prm_info.setdefault("timings", {})["dense_check_s"] = perf_counter() - check_start
+        if not report["ok"]:
+            info["failure_reason"] = "dense_check_collision"
+            return None, info
+        info["path_poses"] = path_poses
     return [np.asarray(q, dtype=float) for q in path_confs], info
 
 

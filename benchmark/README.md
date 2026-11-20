@@ -118,6 +118,18 @@ python -m http.server --directory "$HUSKY_BENCH_ROOT" 8000
   A loading pose that gave a path is saved as `derived_starts.json` in the roadmap folder and tried first next time.
 - With `--goal frames` the end postures are offered on the whole turns nearest home and nearest the authored end
   joints: the same arm posture a turn apart can decide whether the insert stays inside the joint limits.
+- A held transfer is planned strict (`plan_constrained_dual_arm(strict_contacts=True)`, `motion_planner/contacts.py`):
+  nothing the arms carry or wear may touch a standing body. The scene lets the parts of the mate a carry ends
+  before touch (the tool and the receiver, the two halves), and a path would cut through the receiver on its way.
+  A goal that then collides only with such a part fails as `goal_touches_pending_mate`: the insert's offset in the
+  export is too small.
+- The roadmap backend checks its finished path between the waypoints too (`motion_planner/dense_check.py`):
+  straight joint moves, 0.1 degree per joint, every point collision-checked in the workers. When the rounded path
+  fails it returns the smoothed one, then the raw route; `prm_check_solved.py` does the same check on a saved file.
+- `plan_process_carry.py --station X Y YAW_DEG` keeps only loading poses the robot can drive in with
+  (`benchmark/drive_in.py`, the `start_accept` of the roadmap backend): the arms frozen in the loading posture and
+  the bar held, a base path must exist from the station to the bar's base pose. The base planner is a copy of the
+  monitor's (`husky_assembly_tamp/base_planner/`, geometry only: no follower model).
 - `scripts/prm_plans_page.py <process folder> --plans-dir <folder> --tag prm` writes one page for a set of plans:
   every bar in build order, each plan in 3D in its scene, its loading pose and its time by phase; a bar's page
   also draws the joint values and the holding of the bar along the path, with a cursor at the waypoint on show.

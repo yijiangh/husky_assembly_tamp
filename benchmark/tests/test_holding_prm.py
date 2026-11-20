@@ -29,6 +29,8 @@ from pybullet_planning import tform_from_pose
 from husky_assembly_tamp.benchmark.asset_versions import stamp_module_imports, stamp_page_assets
 from husky_assembly_tamp.benchmark.scene import load_trimmed_problem, open_scene
 from husky_assembly_tamp.motion_planner.api import plan_constrained_dual_arm
+from husky_assembly_tamp.motion_planner.contacts import strict_carry_state
+from husky_assembly_tamp.motion_planner.dense_check import dense_check
 from husky_assembly_tamp.motion_planner.holding_prm.holding import (
     STEP_MAX_RAD,
     HoldingModel,
@@ -96,6 +98,7 @@ from husky_assembly_tamp.motion_planner.holding_prm.walk_in import (
     read_derived,
     save_derived,
     via_targets,
+    walk_in_starts,
 )
 
 
@@ -521,6 +524,37 @@ def test_a_walk_joins_the_graph_as_a_chain_from_its_first_node(synthetic):
     assert len(via_targets(model, qa, WalkSettings())) == 26 + 6
 
 
+def test_a_refused_loading_pose_is_not_made_a_start(synthetic):
+    """The walk-in asks the caller about each loading posture it would add, and drops the ones refused."""
+    model, tools, qa, qb = synthetic
+    pose = {"carry": "horizontal", "label": "a", "source": "grid", "midpoint": [0.5, 0.0, 1.0], "roll_deg": 0.0,
+            "pose": bar_from_arm(model, "left", qb[:6])}
+    edge_settings = {"collision_step_rad": np.radians(10.0), "viol_step_rad": np.radians(2.5), "rot_deg_per_mm": 0.4}
+
+    def starts_with(start_accept):
+        tracker = Tracker.__new__(Tracker)
+        tracker.confs = np.vstack([qa, qb + np.radians(4.0)])
+        tracker.table = _table([(0, 1, 1.0, 0.0, True, False)])
+        tracker.row_of = tracker.table.index_of()
+        tracker.kinds = ["roadmap"]
+        tracker.graph = SimpleNamespace(query={"rot_deg_per_mm": 0.4})
+        tracker.pool = WorkerPool.in_process(tools, edge_settings, verbose=False)
+        try:
+            return walk_in_starts(tracker, SimpleNamespace(model=model), model, [0], [pose], WalkSettings(k=2), {},
+                                  start_accept=start_accept)
+        finally:
+            tracker.pool.close()
+
+    taken = starts_with(None)
+    assert len(taken["starts"]) == 1 and "refused_drive" not in taken["tally"]
+    asked = []
+    refused = starts_with(lambda conf: asked.append(conf) or "the bar would hit the frame on the way in")
+    assert refused["starts"] == {} and refused["targets"] == {0: []} and refused["tally"]["refused_drive"] == 1
+    # It was asked about the posture the walk arrives in.
+    assert len(asked) == 1 and np.max(np.abs(asked[0] - qb)) < 1e-6
+    assert len(starts_with(lambda conf: "")["starts"]) == 1
+
+
 def test_loading_poses_found_for_a_bar_are_saved_once(tmp_path):
     pose = {"carry": "horizontal", "midpoint": [0.35, 0.3, 1.2], "roll_deg": 120.0, "free_walk": True}
     assert read_derived(str(tmp_path)) == []
@@ -609,6 +643,38 @@ def _carrying_state(grasp_shift: float = 0.0) -> RobotCellState:
     tools = {"gripper_left": ToolState(Frame.worldXY(), attached_to_group="left_arm",
                                        touch_links=["left_ur_arm_wrist_3_link"])}
     return RobotCellState(Frame.worldXY(), None, tools, bodies)
+
+
+def test_a_strict_carry_state_lets_nothing_carried_touch_what_stands():
+    state = _carrying_state()
+    # The built bar lets the carried bar, the arm's tool and a robot standing by touch it.
+    state.rigid_body_states["bar_B0"].touch_bodies = ["bar_B1", "gripper_left", "robots/alice"]
+    strict, removed = strict_carry_state(state)
+    assert removed == [("bar_B1", "bar_B0"), ("gripper_left", "bar_B0")]
+    # What rides together may still touch, and so may each body and the robot's links.
+    assert strict.rigid_body_states["bar_B1"].touch_bodies == ["joint_a"]
+    assert strict.rigid_body_states["bar_B1"].touch_links == ["left_ur_arm_wrist_3_link"]
+    assert strict.rigid_body_states["joint_a"].touch_bodies == ["bar_B1"]
+    assert strict.rigid_body_states["bar_B0"].touch_bodies == ["robots/alice"]
+    # The caller's state is not changed, and a roadmap built for this load still fits.
+    assert state.rigid_body_states["bar_B1"].touch_bodies == ["joint_a", "bar_B0"]
+    assert robot_side_signature(strict, "bar_B1") == robot_side_signature(state, "bar_B1")
+
+
+def test_the_dense_check_finds_a_collision_between_two_waypoints():
+    confs = [np.zeros(12), np.full(12, np.radians(2.0)), np.full(12, np.radians(4.0))]
+
+    def collides(points):
+        """Only where the first joint is near 3 degrees: no waypoint is."""
+        return [np.radians(2.9) < point[0] < np.radians(3.1) for point in points]
+
+    assert not any(collides(confs))
+    found = dense_check(confs, collides)
+    assert not found["ok"] and found["n_points"] == 41
+    assert found["first_hit"]["segment"] == 1 and 0.45 <= found["first_hit"]["alpha"] <= 0.55
+    assert dense_check(confs, lambda points: [False] * len(points))["ok"]
+    # A step coarser than the colliding stretch walks over it: the step is what the check is worth.
+    assert dense_check(confs, collides, step_rad=np.radians(2.0))["ok"]
 
 
 def test_a_roadmap_built_for_another_load_is_refused():

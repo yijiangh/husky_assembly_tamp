@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import shutil
 import sys
@@ -45,7 +46,8 @@ from husky_assembly_tamp.motion_planner.holding_prm.store import (  # noqa: E402
 # * The check's fields the page shows (the rest stay in checks.jsonl).
 CHECK_FIELDS = ("ok", "reason", "n_waypoints", "saved_max_step_deg", "bar_travel_m", "bar_turn_deg",
                 "joint_travel_deg", "holding_between_pos_mm", "holding_between_rot_deg", "joint_reversals",
-                "repair_success", "repair_reason", "repair_s", "saved_waypoints_colliding", "lowest_z_m",
+                "repair_success", "repair_reason", "repair_s", "saved_waypoints_colliding", "saved_first_hit",
+                "dense_ok", "dense_points", "dense_first_hit", "lowest_z_m",
                 "lowest_z_above_base_frame_m", "lowest_body", "lowest_at_waypoint", "lowest_z_at_goal_m")
 
 
@@ -67,6 +69,16 @@ def bar_order(process_dir: str) -> List[Dict[str, Any]]:
         carry = next(m for m in action["movements"] if m.get("coupled") and m.get("path") == "free")
         rows.append({"bar": name[:-2], "order": len(rows) + 1, "built_before": len(carry["start"].get("built") or [])})
     return rows
+
+
+def drive_line(drive: Optional[Dict[str, Any]]) -> Optional[List[List[float]]]:
+    """A drive-in path as the page draws it: (x, y, yaw) in the frame of the base pose the drive ends at."""
+    if not drive or not drive.get("points") or not drive.get("goal"):
+        return None
+    gx, gy, gyaw = drive["goal"]
+    cos, sin = math.cos(gyaw), math.sin(gyaw)
+    return [[round(cos * (x - gx) + sin * (y - gy), 4), round(-sin * (x - gx) + cos * (y - gy), 4),
+             round(yaw - gyaw, 4)] for x, y, yaw in drive["points"]]
 
 
 def checks_by_bar(plans_dir: str, tag: str) -> Dict[str, Dict[str, Any]]:
@@ -160,6 +172,7 @@ def export_plans(process_dir: str, plans_dir: str, tag: str, root: str, fallback
         check = {key: bar_checks[bar].get(key) for key in CHECK_FIELDS} if bar in bar_checks else None
         precompute = precompute_of(root, run_name, page)
         timings = dict(prm.get("timings") or {})
+        drive = info.get("drive_in")
         rows.append({
             **row, "planned": True, "ok": bool(info.get("ok")), "failure_reason": info.get("failure_reason"),
             "backend": info.get("backend"), "first_try": first_try,
@@ -170,6 +183,13 @@ def export_plans(process_dir: str, plans_dir: str, tag: str, root: str, fallback
             "start": {key: (prm.get("start") or {}).get(key)
                       for key in ("carry", "label", "source", "midpoint", "roll_deg", "found_after")},
             "fallback_stages": [stage.get("stage") for stage in (prm.get("walk_in") or {}).get("stages", [])],
+            # The drive in with the loading posture: None when it was not checked.
+            "drive_in": None if not drive else {"length_m": drive.get("length_m"), "direct": drive.get("direct"),
+                                                "asks": drive.get("asks"), "found": bool(drive.get("points")),
+                                                "refused": len(drive.get("refused") or [])},
+            "starts_rejected": len(prm.get("starts_rejected") or []),
+            "dense_check": {key: (prm.get("dense_check") or {}).get(key) for key in ("ok", "used", "n_points")}
+            if prm.get("dense_check") else None,
             "follow_on": {key: (info.get("follow_on") or {}).get(key)
                           for key in ("end_is_authored_posture", "end_off_authored_deg", "end_refused")}
             | {"rejected": len((info.get("follow_on") or {}).get("rejected") or [])} if info.get("follow_on") else None,
@@ -186,13 +206,16 @@ def export_plans(process_dir: str, plans_dir: str, tag: str, root: str, fallback
             # Seven decimals: the page measures the holding of the bar from these, to a thousandth of a millimetre.
             "positions": [[round(float(v), 7) for v in conf] for conf in trajectory.get("positions", [])],
             "plan": {key: info.get(key) for key in ("ok", "failure_reason", "plan_s", "n_waypoints", "goal",
-                                                    "base_shift", "follow_on", "post", "backend", "search")},
+                                                    "base_shift", "follow_on", "post", "backend", "search",
+                                                    "strict_contacts")},
+            "drive_in": None if not drive else {**drive, "line": drive_line(drive)},
             "first_try": first_try,
             "prm": {key: prm.get(key) for key in ("workers", "timings", "counters", "starts", "pretracked_edges",
                                                   "edges_looked_at", "edge_verdicts", "scene_blocked_edges",
                                                   "dropped_in_final_check", "tube", "retracks", "tolerance_mm",
                                                   "route", "route_scores_mm", "start", "n_waypoints_1cm",
-                                                  "goals_rejected", "best_gap_left_mm", "scene", "walk_in")},
+                                                  "goals_rejected", "best_gap_left_mm", "scene", "walk_in",
+                                                  "starts_rejected", "dense_check")},
             "check": bar_checks.get(bar), "precompute": precompute,
         })
         print(f"  {bar}: {'ok' if info.get('ok') else info.get('failure_reason')}")

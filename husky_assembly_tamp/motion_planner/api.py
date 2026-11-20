@@ -32,7 +32,7 @@ from __future__ import annotations
 import logging
 import time
 from time import perf_counter
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pybullet_planning as pp
@@ -51,6 +51,7 @@ from compas_robots.model import Joint
 
 # * This package — shared ssik helpers (backend switch, branch enumeration).
 from husky_assembly_tamp.motion_planner import ssik_ik
+from husky_assembly_tamp.motion_planner.floor import floor_added
 
 
 logger = logging.getLogger(__name__)
@@ -988,8 +989,20 @@ def plan_constrained_dual_arm(
     backend: str = "birrt",
     prm_options: Optional[Dict[str, Any]] = None,
     round_corners: Optional[Dict[str, Any]] = None,
+    goal_accept: Optional[Callable[[np.ndarray], str]] = None,
+    floor: bool = True,
 ) -> Tuple[Optional[List[np.ndarray]], dict]:
     """Constrained dual-arm SE(3) RRT with a rigid bar grasp.
+
+    ``floor`` (default True) plans with a slab under
+    the robot, its top level with the robot's base frame: the arms, their
+    tools and everything they carry must stay above it (``floor.py``).
+
+    ``goal_accept`` (roadmap backend, with ``goal_ee_frames``) is asked about
+    the end posture the roadmap resolved at the goal poses, as twelve joint
+    values: it returns "" to take it, or why not, and the search then goes on
+    to another posture (``info["prm"]["goals_rejected"]``). A caller uses it
+    to keep only postures the next movements can follow from.
 
     ``backend`` picks the planner: ``"birrt"`` (default) is the task-space
     search described below; ``"prm"`` plans on a roadmap precomputed for this
@@ -997,7 +1010,11 @@ def plan_constrained_dual_arm(
     real scene at plan time (``holding_prm.online.plan_on_roadmap``).
     ``prm_options`` then needs ``roadmap_dir`` (the roadmap's folder) and may
     give ``workers``, ``tolerances_mm``, ``tube_rounds``, ``tube_draws``,
-    ``scene_cache_dir`` and ``verbose``. With the roadmap, ``derive_start=True``
+    ``scene_cache_dir``, ``verbose`` and the fallbacks for a goal no carry pose
+    connects to (``walk_in``, ``via_rounds``, ``walk_grid_step_m``,
+    ``save_derived``: see ``OnlineSettings``) and ``goal_turn_reference``
+    (twelve joints, e.g. the authored end joints: end postures are also
+    offered on the whole turns nearest them). With the roadmap, ``derive_start=True``
     lets the search pick the start among the roadmap's carry poses (returned as
     ``info['derived_start_conf']``), ``goal_ee_frames`` accepts any
     collision-free posture at the goal pose and ``goal_conf`` asks for exactly
@@ -1095,6 +1112,14 @@ def plan_constrained_dual_arm(
         raise ValueError(f"backend must be one of {PLANNING_BACKENDS}; got {backend!r}")
     if backend == "prm" and stage != 3:
         raise ValueError("the roadmap backend always plans with IK and full collision (stage 3)")
+    if goal_accept is not None and backend != "prm":
+        raise ValueError("goal_accept is only asked by the roadmap backend")
+    if floor:
+        # * Plan again with the slab in the cell and in the state. Nothing but the arguments is local yet.
+        arguments = {name: value for name, value in locals().items()
+                     if name not in ("planner", "start_state", "floor")}
+        with floor_added(planner, start_state) as with_floor:
+            return plan_constrained_dual_arm(planner, with_floor, floor=False, **arguments)
 
     from .dual_arm_task_space_rrt.core import (
         DEFAULT_JOINT_CONTINUITY_THRESHOLD_RAD,
@@ -1145,6 +1170,7 @@ def plan_constrained_dual_arm(
             repair=repair,
             prm_options=prm_options,
             round_corners=round_corners,
+            goal_accept=goal_accept,
         )
 
     if derive_start:
@@ -1465,6 +1491,7 @@ def _plan_constrained_dual_arm_on_roadmap(
     repair: Optional[Dict[str, Any]],
     prm_options: Optional[Dict[str, Any]],
     round_corners: Optional[Dict[str, Any]] = None,
+    goal_accept: Optional[Callable[[np.ndarray], str]] = None,
 ) -> Tuple[Optional[List[np.ndarray]], dict]:
     """The roadmap backend of :func:`plan_constrained_dual_arm`.
 
@@ -1496,6 +1523,7 @@ def _plan_constrained_dual_arm_on_roadmap(
         repair (Optional[Dict[str, Any]]): re-solve the path with the production repair.
         prm_options (Optional[Dict[str, Any]]): ``roadmap_dir`` and the optional settings.
         round_corners (Optional[Dict[str, Any]]): round the path's corners afterwards (see the caller).
+        goal_accept (Optional[Callable[[np.ndarray], str]]): the caller's say on an end posture (see the caller).
 
     Returns:
         Tuple[Optional[List[np.ndarray]], dict]: the path and ``info``, shaped
@@ -1559,13 +1587,19 @@ def _plan_constrained_dual_arm_on_roadmap(
         use_pretracked=bool(options.get("use_pretracked", True)),
         save_query=bool(options.get("save_query", True)),
         query_tag=str(options.get("query_tag", "online")),
+        walk_in=bool(options.get("walk_in", False)),
+        via_rounds=int(options.get("via_rounds", 0)),
+        walk_grid_step_m=float(options.get("walk_grid_step_m", 0.3)),
+        last_tolerances_mm=[float(t) for t in options.get("last_tolerances_mm", (45.0, 60.0))],
+        save_derived=bool(options.get("save_derived", False)),
         verbose=bool(options.get("verbose", True)),
     )
     start_conf = None if derive_start else _conf12_from_state(start_state, joint_names_12)
     path_confs, prm_info = plan_on_roadmap(
         planner, start_state, joint_names_12, active_bar_id, as_matrix(world_from_bar_goal), settings,
         robot_puid=robot_puid, arm_joints=arm_joints, start_conf=start_conf, goal_conf=goal_conf_arr,
-        grasp_bar_from_right=as_matrix(grasp_bar_from_right),
+        grasp_bar_from_right=as_matrix(grasp_bar_from_right), goal_accept=goal_accept,
+        goal_turn_reference=options.get("goal_turn_reference"),
     )
     path_poses = prm_info.pop("path_poses", None)
     if path_poses is not None:

@@ -32,7 +32,7 @@ import os
 import re
 from dataclasses import asdict, dataclass, field
 from time import perf_counter, time
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from pybullet_planning import get_joint_positions, get_link_pose, link_from_name, tform_from_pose
@@ -69,6 +69,18 @@ from husky_assembly_tamp.motion_planner.holding_prm.sampling import (
 )
 from husky_assembly_tamp.motion_planner.holding_prm.scenes import build_scene_cell, save_scene
 from husky_assembly_tamp.motion_planner.holding_prm.search import EdgeTable, minimax_to_goals, route_from
+from husky_assembly_tamp.motion_planner.holding_prm.walk_in import (
+    WalkSettings,
+    add_chains,
+    class_poses,
+    grid_candidates,
+    midpoint_of,
+    read_derived,
+    roadmap_carry_poses,
+    save_derived,
+    via_round,
+    walk_in_starts,
+)
 from husky_assembly_tamp.motion_planner.holding_prm.store import (
     EDGE_DECIMALS,
     NODE_DECIMALS,
@@ -122,6 +134,14 @@ class OnlineSettings:
             (``<roadmap_dir>/queries/<query_tag>.json.gz``, with the scene
             files it needs), so the roadmap page can show it in 3D.
         query_tag (str): the query's name; an existing one is replaced.
+        walk_in (bool): when no carry pose of the roadmap connects, walk the goal postures to loading poses of the
+            same three classes and use those they reach as starts (``walk_in.walk_in_starts``). Poses saved by an
+            earlier plan (``save_derived``) are then used from the start.
+        via_rounds (int): after that, rounds of waypoints grown from the goal out of the structure
+            (``walk_in.via_round``), each followed by a search; needs ``walk_in``.
+        walk_grid_step_m (float): spacing of the grid of loading poses ``walk_in`` tries in each class.
+        last_tolerances_mm (List[float]): wider tolerances tried only after the fallbacks found nothing.
+        save_derived (bool): save a loading pose that gave a path next to the roadmap, for the next plan.
         verbose (bool): print progress.
     """
 
@@ -138,6 +158,11 @@ class OnlineSettings:
     use_pretracked: bool = True
     save_query: bool = True
     query_tag: str = "online"
+    walk_in: bool = False
+    via_rounds: int = 0
+    walk_grid_step_m: float = 0.3
+    last_tolerances_mm: List[float] = field(default_factory=lambda: [45.0, 60.0])
+    save_derived: bool = False
     verbose: bool = True
 
 
@@ -502,6 +527,8 @@ def plan_on_roadmap(planner, start_state, joint_names_12: Sequence[str], active_
                     robot_puid: int, arm_joints: Sequence[int],
                     start_conf: Optional[Sequence[float]] = None, goal_conf: Optional[Sequence[float]] = None,
                     grasp_bar_from_right: Optional[np.ndarray] = None,
+                    goal_accept: Optional[Callable[[np.ndarray], str]] = None,
+                    goal_turn_reference: Optional[Sequence[float]] = None,
                     ) -> Tuple[Optional[List[np.ndarray]], Dict[str, Any]]:
     """Plan the bar carry on a precomputed roadmap, in the live scene.
 
@@ -520,6 +547,15 @@ def plan_on_roadmap(planner, start_state, joint_names_12: Sequence[str], active_
         goal_conf (Optional[Sequence[float]]): end on exactly this
             configuration; None = any collision-free posture at the goal pose.
         grasp_bar_from_right (Optional[np.ndarray]): the caller's right grasp, to compare.
+        goal_accept (Optional[Callable[[np.ndarray], str]]): asked about the
+            goal posture of every route found, before its fine check: it
+            returns "" to take the posture, or why not (the posture is then
+            dropped and the search goes on; ``info["goals_rejected"]`` lists
+            them). It may use the caller's planner; the state is put back after.
+        goal_turn_reference (Optional[Sequence[float]]): twelve joints (e.g. the authored end joints). When the
+            first search finds nothing and ``settings.walk_in`` is on, every goal posture is offered a second time
+            where they differ: on the whole turns nearest these instead of nearest home. The same arm posture a
+            whole turn apart can decide whether the next movement stays inside the joint limits.
 
     Returns:
         Tuple[Optional[List[np.ndarray]], Dict[str, Any]]: the path (twelve
@@ -563,14 +599,21 @@ def plan_on_roadmap(planner, start_state, joint_names_12: Sequence[str], active_
         if goal_conf is not None:
             hit = check_confs(pool, [goal_conf], "full", counters["endpoints"])[0]
             goal_found = [] if hit else [{"conf": [float(v) for v in goal_conf], "pair": -1, "turns": ["given"]}]
+            goal_twins = []
         else:
+            turn_references = [["home", home]]
+            if goal_turn_reference is not None:
+                turn_references.append(["given", [float(v) for v in goal_turn_reference]])
             result = pool.run(task_expand, [{"chunk": 0, "world_from_bar": pose_from_matrix(world_from_bar_goal),
-                                             "turn_references": [["home", home]]}], "goal")[0]
+                                             "turn_references": turn_references}], "goal")[0]
             add_counters(counters["endpoints"], result["counters"])
-            goal_found = list(result["confs"])
+            # * The postures on the given turns only wait for the fallbacks: the first search is the one a caller
+            # * without a reference gets.
+            goal_found = [found for found in result["confs"] if "home" in found["turns"]]
+            goal_twins = [found for found in result["confs"] if "home" not in found["turns"]]
         goal_confs = [np.asarray(found["conf"], dtype=float) for found in goal_found]
         timings["goal_s"] = perf_counter() - phase
-        if not goal_confs:
+        if not goal_confs and not goal_twins:
             info["failure_reason"] = "prm_goal_unholdable"
             return None, info
 
@@ -637,16 +680,35 @@ def plan_on_roadmap(planner, start_state, joint_names_12: Sequence[str], active_
         # * 4-6. Lazy search, tolerance by tolerance; the winner gets the fine check.
         phase = perf_counter()
         dropped_final: List[Dict[str, Any]] = []
-        answer = None
-        rounds_left = int(settings.tube_rounds)
+        goals_accepted: set = set()
+        goals_rejected: List[Dict[str, Any]] = []
+        info["goals_rejected"] = goals_rejected
         tube_log: List[Dict[str, Any]] = []
-        while answer is None:
-            for tolerance in sorted(settings.tolerances_mm):
-                while answer is None:
+
+        tolerances = sorted(settings.tolerances_mm)
+
+        def search() -> Optional[tuple]:
+            """The first route, smallest tolerance first, whose end posture is taken and that passes the fine check."""
+            for tolerance in tolerances:
+                while True:
                     found = tracker.shortest_exact(start_ids, goal_ids, tolerance)
                     if not found:
                         break
                     route, waypoints, assembly = found
+                    goal = int(route[-1])
+                    if goal_accept is not None and goal not in goals_accepted:
+                        # * The caller's say on this end posture (can the insert and the retreat follow from it?).
+                        accept_phase = perf_counter()
+                        why_not = goal_accept(np.asarray(tracker.confs[goal], dtype=float))
+                        planner.set_robot_cell_state(start_state)
+                        timings["goal_accept_s"] = timings.get("goal_accept_s", 0.0) + perf_counter() - accept_phase
+                        if why_not:
+                            goals_rejected.append({"node": goal, "reason": str(why_not)})
+                            goal_ids.remove(goal)
+                            goal_node_of.pop(goal, None)
+                            say(f"  goal posture {goal} refused: {why_not}; {len(goal_ids)} left")
+                            continue
+                        goals_accepted.add(goal)
                     fine_phase = perf_counter()
                     path, bad_row, reason = final_check(pool, waypoints, assembly["spans"], settings, counters["final"])
                     timings["final_check_s"] = timings.get("final_check_s", 0.0) + perf_counter() - fine_phase
@@ -655,25 +717,117 @@ def plan_on_roadmap(planner, start_state, joint_names_12: Sequence[str], active_
                         tracker.table.free[bad_row] = False
                         dropped_final.append({"row": bad_row, "reason": reason})
                         continue
-                    answer = (route, waypoints, assembly, path, tolerance)
-                if answer is not None:
+                    return route, waypoints, assembly, path, tolerance
+            return None
+
+        def search_with_tubes() -> Optional[tuple]:
+            """Search; while nothing survives, draw new nodes around the best route that is left and search again."""
+            found = search()
+            for _round in range(int(settings.tube_rounds)):
+                if found is not None:
                     break
-            if answer is not None or rounds_left <= 0:
-                break
-            # * Nothing survived: draw new nodes around the best route that is left, then try again.
-            rounds_left -= 1
-            gap, parent = minimax_to_goals(len(tracker.confs), tracker.table, tracker.table.free, goal_ids)
-            reachable = [node for node in start_ids if np.isfinite(gap[node])]
-            if not reachable:
-                break
-            best = min(reachable, key=lambda node: gap[node])
-            made = tube_round(tracker, [route_from(best, parent)], len(tube_log) + 1, settings.tube_draws, counters)
-            made.pop("confs", None)
-            made["gap_before_mm"] = float(gap[best])
-            tube_log.append(made)
-            say(f"  no route yet; tube round {len(tube_log)} around the best one ({gap[best]:.1f} mm): "
-                f"{made['nodes']} nodes, {made['edges']} edges")
-        timings["search_s"] = perf_counter() - phase - timings.get("final_check_s", 0.0)
+                gap, parent = minimax_to_goals(len(tracker.confs), tracker.table, tracker.table.free, goal_ids)
+                reachable = [node for node in start_ids if np.isfinite(gap[node])]
+                if not reachable:
+                    break
+                best = min(reachable, key=lambda node: gap[node])
+                made = tube_round(tracker, [route_from(best, parent)], len(tube_log) + 1, settings.tube_draws,
+                                  counters)
+                made.pop("confs", None)
+                made["gap_before_mm"] = float(gap[best])
+                tube_log.append(made)
+                say(f"  no route yet; tube round {len(tube_log)} around the best one ({gap[best]:.1f} mm): "
+                    f"{made['nodes']} nodes, {made['edges']} edges")
+                found = search()
+            return found
+
+        # * The fallbacks' bookkeeping: loading poses walked to from the goal, and waypoints on the way out.
+        walk_settings = WalkSettings(grid_step_m=settings.walk_grid_step_m, k=settings.k_endpoint,
+                                     radius_deg=settings.radius_endpoint_deg)
+        counters["walk"] = {}
+        walk_log: Dict[str, Any] = {"stages": []}
+        info["walk_in"] = walk_log
+        walk_targets: Dict[int, List[np.ndarray]] = {}
+        walk_ends: Dict[int, List[int]] = {}
+
+        def walk_to(candidates: List[Dict[str, Any]], name: str) -> None:
+            """Walk the goal postures to these loading poses and make starts of the ones they reach."""
+            walk_phase = perf_counter()
+            made = walk_in_starts(tracker, roadmap, model, goal_ids, candidates, walk_settings, counters["walk"])
+            for node, note in made["starts"].items():
+                if node not in start_ids:
+                    start_ids.append(node)
+                start_anchor.setdefault(node, note)
+            for goal in made["targets"]:
+                walk_targets.setdefault(goal, []).extend(made["targets"][goal])
+                walk_ends.setdefault(goal, []).extend(made["chain_ends"][goal])
+            timings["walk_in_s"] = timings.get("walk_in_s", 0.0) + perf_counter() - walk_phase
+            walk_log["stages"].append({"stage": name, "poses": len(candidates), **made["tally"]})
+            say(f"  walk-in ({name}): {len(candidates)} poses x {len(goal_ids)} goal postures: "
+                f"{made['tally']['arrived_free']} arrive free, {made['tally']['free_all_the_way']} free all the way; "
+                f"{made['tally']['starts']} starts added")
+
+        def add_goal_twins() -> None:
+            """Offer the goal postures on the caller's whole turns too, as goal nodes joined to the roadmap (once)."""
+            lone = [(None, [np.asarray(found["conf"], dtype=float)]) for found in goal_twins]
+            for found, nodes in zip(goal_twins, add_chains(tracker, lone, walk_settings, counters["endpoint_edges"],
+                                                           "goal turns")):
+                if nodes[0] not in goal_node_of:
+                    goal_node_of[nodes[0]] = found
+                    goal_ids.append(nodes[0])
+            if goal_twins:
+                say(f"  {len(goal_twins)} goal postures also offered on the given whole turns; {len(goal_ids)} in all")
+            goal_twins.clear()
+
+        def grow_waypoints() -> Optional[tuple]:
+            """Rounds of waypoints from the goal postures out of the structure, a search after each."""
+            if not goal_ids:
+                return None
+            goal_middle = midpoint_of(model, tracker.confs[goal_ids[0]])
+            frontier = [(goal, goal) for goal in goal_ids]
+            frontier += [(node, goal) for goal in goal_ids for node in walk_ends.get(goal, [])]
+            for round_number in range(1, int(settings.via_rounds) + 1):
+                via_phase = perf_counter()
+                made = via_round(tracker, model, frontier, walk_targets, goal_middle, walk_settings, counters["walk"])
+                for node, note in made["starts"].items():
+                    if node not in start_ids:
+                        start_ids.append(node)
+                    start_anchor.setdefault(node, note)
+                frontier = made["frontier"]
+                timings["via_s"] = timings.get("via_s", 0.0) + perf_counter() - via_phase
+                walk_log["stages"].append({"stage": f"waypoints {round_number}", **made["tally"]})
+                say(f"  waypoint round {round_number}: {made['tally']['waypoints']} waypoints, "
+                    f"{made['tally']['starts_reached']} loading poses reached")
+                found = search()
+                if found is not None or not frontier:
+                    return found
+            return None
+
+        # A caller that fixed the start gets no other one.
+        walk_in = settings.walk_in and start_conf is None
+        derived = class_poses(roadmap, read_derived(settings.roadmap_dir), "derived") if walk_in else []
+        if derived:
+            # * This bar needed other loading poses before: they are part of its carry poses now.
+            add_goal_twins()
+            walk_to(derived, "saved poses")
+            answer = search() or grow_waypoints()
+        else:
+            answer = search_with_tubes()
+        if answer is None and walk_in and (goal_ids or goal_twins):
+            add_goal_twins()
+            walk_to(roadmap_carry_poses(roadmap), "roadmap poses")
+            answer = search()
+            if answer is None:
+                walk_to(grid_candidates(roadmap, walk_settings), "class grid")
+                answer = search() or grow_waypoints()
+            if answer is None:
+                # * Last resort: routes whose roadmap edges stray further from holding (the tracker still makes
+                # * every waypoint exact), and new nodes around the best of them.
+                tolerances.extend(sorted(t for t in settings.last_tolerances_mm if t > tolerances[-1]))
+                answer = search_with_tubes()
+        timings["search_s"] = (perf_counter() - phase - timings.get("final_check_s", 0.0)
+                               - timings.get("goal_accept_s", 0.0) - timings.get("walk_in_s", 0.0)
+                               - timings.get("via_s", 0.0))
 
         reasons: Dict[str, int] = {}
         # Only edges a route asked about in this plan; the night's file holds thousands more.
@@ -688,7 +842,7 @@ def plan_on_roadmap(planner, start_state, joint_names_12: Sequence[str], active_
         if answer is None:
             gap, _parent = minimax_to_goals(len(tracker.confs), tracker.table, tracker.table.free, goal_ids)
             finite = [float(gap[node]) for node in start_ids if np.isfinite(gap[node])]
-            info["failure_reason"] = "prm_no_route"
+            info["failure_reason"] = "prm_no_route" if goal_ids else "prm_goals_rejected"
             info["best_gap_left_mm"] = min(finite) if finite else None
             timings["total_s"] = perf_counter() - wall
             if settings.save_query:
@@ -702,11 +856,16 @@ def plan_on_roadmap(planner, start_state, joint_names_12: Sequence[str], active_
             "tolerance_mm": tolerance, "route": [int(n) for n in route],
             "route_scores_mm": [float(tracker.table.score[tracker.row_of[(min(a, b), max(a, b))]])
                                 for a, b in zip(route[:-1], route[1:])],
-            "start": {"node": int(route[0]), "carry": anchor.get("carry"), "label": anchor.get("label")},
+            "start": {"node": int(route[0]), "carry": anchor.get("carry"), "label": anchor.get("label"),
+                      "source": anchor.get("source", "roadmap"), "midpoint": anchor.get("midpoint"),
+                      "roll_deg": anchor.get("roll_deg"), "free_walk": anchor.get("free_walk")},
             "n_waypoints_1cm": len(waypoints), "n_waypoints": len(path), "joins": assembly["joins"],
             "path_poses": continuous_poses(
                 [pose_from_matrix(bar_from_arm(model, "left", np.asarray(conf)[:6])) for conf in path]),
         })
+        info["start"]["found_after"] = walk_log["stages"][-1]["stage"] if walk_log["stages"] else "carry poses"
+        if settings.save_derived and anchor.get("source") == "grid":
+            walk_log["saved"] = save_derived(settings.roadmap_dir, [anchor])
         timings["total_s"] = perf_counter() - wall
         if settings.save_query:
             info["query_file"] = save_online_query(settings, roadmap, model, tracker, goal_node_of, start_ids,

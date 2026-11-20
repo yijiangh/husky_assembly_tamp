@@ -279,6 +279,78 @@ def fine_segment(tools: WorkerTools, conf_a: np.ndarray, conf_b: np.ndarray, pos
 
 
 # -----------------------------------------------------------------------------
+# * Walking the bar straight to a pose
+# -----------------------------------------------------------------------------
+
+
+def walk_to_pose(tools: WorkerTools, from_conf: Sequence[float], to_pose: np.ndarray, position_res_m: float,
+                 rotation_res_rad: float, check: str, counters: Dict[str, float],
+                 keep_confs: bool = False) -> Dict[str, Any]:
+    """Walk the bar on a straight line from where a configuration holds it to another pose, both arms following.
+
+    Every step is solved nearest the step before it and must pass the continuity gate, so the configuration it
+    arrives on can be reached from ``from_conf`` without changing arm posture or winding a joint the other way.
+
+    Args:
+        tools (WorkerTools): model and collision check.
+        from_conf (Sequence[float]): the configuration to start from (holds the bar exactly).
+        to_pose (np.ndarray): the bar's 4x4 pose to walk to.
+        position_res_m (float): longest bar move per step.
+        rotation_res_rad (float): largest bar turn per step.
+        check (str): "none" = no collision check; "arrival" = only the configuration arrived on; "all" = every
+            step, stopping at the first one that collides.
+        counters (Dict[str, float]): tally.
+        keep_confs (bool): also return every configuration walked through.
+
+    Returns:
+        Dict[str, Any]: ``reached`` (the walk arrived at ``to_pose``), ``reason`` ("ok", "ik_failure",
+        "continuity" or "collision"), ``steps`` and ``of`` (steps walked, steps of the whole line),
+        ``distance_m`` and ``angle_rad`` (the whole line's length and turn), ``conf`` (the last configuration
+        walked onto; with "all", the last free one), ``free`` (with "arrival": the arrival is collision-free;
+        with "all": the whole walk is) and, when asked, ``confs``.
+    """
+    model = tools.model
+    current = np.asarray(from_conf, dtype=float)
+    # * The point halfway between the grasps walks the straight line, so both arms share the turn.
+    offset = grasp_midpoint_offset(model)
+    from_mid = bar_from_arm(model, "left", current[:6]) @ offset
+    to_mid = np.asarray(to_pose, dtype=float) @ offset
+    distance, angle = pose_gap(from_mid, to_mid)
+    pieces = max(1, int(ceil(max(distance / position_res_m, angle / rotation_res_rad) - 1e-12)))
+    result: Dict[str, Any] = {"reached": False, "reason": "ok", "steps": 0, "of": pieces, "free": False,
+                              "distance_m": float(distance), "angle_rad": float(angle)}
+    confs: List[List[float]] = []
+    for piece in range(1, pieces + 1):
+        pose = interpolate_pose(from_mid, to_mid, piece / pieces) @ invert_transform(offset)
+        conf = np.empty(12)
+        for arm in ARMS:
+            part = ARM_SLICE[arm]
+            branches = arm_branches(model, arm, tool_target_from_bar(model, arm, pose), current[part],
+                                    allow_rescue=False, counters=counters)
+            if not branches:
+                result["reason"] = "ik_failure"
+                break
+            conf[part] = branches[0]
+        if result["reason"] == "ok" and linf(conf, current) > STEP_MAX_RAD:
+            result["reason"] = "continuity"
+        if result["reason"] == "ok" and check == "all" and tools.timed_collides(conf, counters):
+            result["reason"] = "collision"
+        if result["reason"] != "ok":
+            break
+        current = conf
+        result["steps"] = piece
+        if keep_confs:
+            confs.append(conf.tolist())
+    result["reached"] = result["steps"] == pieces
+    result["conf"] = current.tolist()
+    if result["reached"]:
+        result["free"] = check == "all" or (check == "arrival" and not tools.timed_collides(current, counters))
+    if keep_confs:
+        result["confs"] = confs
+    return result
+
+
+# -----------------------------------------------------------------------------
 # * Tracking one edge
 # -----------------------------------------------------------------------------
 

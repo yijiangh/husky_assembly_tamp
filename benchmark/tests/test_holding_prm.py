@@ -87,7 +87,16 @@ from husky_assembly_tamp.motion_planner.holding_prm.search import (
 )
 from husky_assembly_tamp.motion_planner.holding_prm.refine import Tracker, spread_size
 from husky_assembly_tamp.motion_planner.holding_prm.store import read_json, write_json_atomic
-from husky_assembly_tamp.motion_planner.holding_prm.tracking import TrackSettings, track_edge
+from husky_assembly_tamp.motion_planner.holding_prm.tracking import TrackSettings, track_edge, walk_to_pose
+from husky_assembly_tamp.motion_planner.holding_prm.parallel import WorkerPool
+from husky_assembly_tamp.motion_planner.holding_prm.walk_in import (
+    WalkSettings,
+    add_chains,
+    chain_of,
+    read_derived,
+    save_derived,
+    via_targets,
+)
 
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -461,6 +470,65 @@ def test_assembly_reads_reversed_edges_and_skips_the_shared_node():
 
 
 # * ---- Planning in a changing scene, without a scene ------------------------
+def test_a_walk_to_a_pose_holds_the_bar_and_stops_where_it_collides(synthetic):
+    """The walk arrives on the pose with every step holding the bar; a collision stops it on the last free step."""
+    model, tools, qa, qb = synthetic
+    target = bar_from_arm(model, "left", qb[:6])
+    walk = walk_to_pose(tools, qa, target, 0.01, 0.025, "all", {}, keep_confs=True)
+    assert walk["reached"] and walk["free"] and walk["steps"] == walk["of"] == len(walk["confs"])
+    confs = np.asarray(walk["confs"])
+    for conf in confs:
+        pos, rot = holding_violation(model, conf)
+        assert pos < 1e-6 and rot < 1e-6
+    assert np.max(np.abs(np.diff(np.vstack([qa, confs]), axis=0))) <= STEP_MAX_RAD
+    assert np.max(np.abs(confs[-1] - qb)) < 1e-6
+    # Only the arrival is asked about: the walk arrives, on a configuration that collides.
+    always = WorkerTools(model, lambda conf: True)
+    assert walk_to_pose(always, qa, target, 0.01, 0.025, "arrival", {})["free"] is False
+    # Every step is asked about: the third one collides, so two are walked and the walk stops there.
+    asked = []
+    third = WorkerTools(model, lambda conf: asked.append(1) or len(asked) >= 3)
+    blocked = walk_to_pose(third, qa, target, 0.01, 0.025, "all", {}, keep_confs=True)
+    assert not blocked["reached"] and blocked["reason"] == "collision" and blocked["steps"] == 2
+    assert np.allclose(blocked["conf"], confs[1])
+
+
+def test_a_walk_joins_the_graph_as_a_chain_from_its_first_node(synthetic):
+    """A walk thinned to chain nodes: joined in a row from the node it left, and to the nodes the graph had."""
+    model, tools, qa, qb = synthetic
+    walk = walk_to_pose(tools, qa, bar_from_arm(model, "left", qb[:6]), 0.01, 0.025, "all", {}, keep_confs=True)
+    chain = chain_of(walk["confs"], np.radians(3.0))
+    assert 2 <= len(chain) < len(walk["confs"]) and np.allclose(chain[-1], walk["confs"][-1])
+    tracker = Tracker.__new__(Tracker)
+    tracker.confs = np.vstack([qa, qb + np.radians(4.0)])
+    tracker.table = _table([(0, 1, 1.0, 0.0, True, False)])
+    tracker.row_of = tracker.table.index_of()
+    tracker.kinds = ["roadmap"]
+    tracker.graph = SimpleNamespace(query={"rot_deg_per_mm": 0.4})
+    edge_settings = {"collision_step_rad": np.radians(10.0), "viol_step_rad": np.radians(2.5), "rot_deg_per_mm": 0.4}
+    tracker.pool = WorkerPool.in_process(tools, edge_settings, verbose=False)
+    try:
+        ids = add_chains(tracker, [(0, chain), (None, [qb])], WalkSettings(k=2), {}, "test")
+    finally:
+        tracker.pool.close()
+    # The walk ends on qb, so the lone configuration is the chain's last node, not a second one.
+    assert ids[0] == list(range(2, 2 + len(chain))) and ids[1] == [ids[0][-1]]
+    assert len(tracker.confs) == 2 + len(chain)
+    for a, b in zip([0] + ids[0][:-1], ids[0]):
+        assert (a, b) in tracker.row_of
+    # Every new node tried the two nodes the graph had.
+    assert all((0, node) in tracker.row_of and (1, node) in tracker.row_of for node in ids[0])
+    assert len(via_targets(model, qa, WalkSettings())) == 26 + 6
+
+
+def test_loading_poses_found_for_a_bar_are_saved_once(tmp_path):
+    pose = {"carry": "horizontal", "midpoint": [0.35, 0.3, 1.2], "roll_deg": 120.0, "free_walk": True}
+    assert read_derived(str(tmp_path)) == []
+    assert save_derived(str(tmp_path), [pose, dict(pose)]) == 1
+    assert save_derived(str(tmp_path), [pose, {**pose, "carry": "vertical"}]) == 1
+    assert [p["label"] for p in read_derived(str(tmp_path))] == ["derived_horizontal_0", "derived_vertical_0"]
+
+
 # The roadmap's verdicts cover only the robot, its tools and the carried bar.
 # These tests use made-up waypoints and a stand-in for the worker processes.
 

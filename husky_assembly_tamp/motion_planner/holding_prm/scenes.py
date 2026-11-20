@@ -31,6 +31,7 @@ from husky_assembly_tamp.benchmark.build_cells import source_key_for
 from husky_assembly_tamp.benchmark.glb import GlbBuilder, frame_to_translation_rotation, mesh_arrays, mesh_scale
 from husky_assembly_tamp.benchmark.process_export import carry_goal_frames, read_process
 from husky_assembly_tamp.benchmark.scene import BarProblem
+from husky_assembly_tamp.motion_planner.floor import FLOOR
 from husky_assembly_tamp.motion_planner.holding_prm.holding import invert_transform, matrix_from_pose
 from husky_assembly_tamp.motion_planner.holding_prm.sampling import is_carried
 
@@ -340,7 +341,8 @@ def export_scene_glb(cell: RobotCell, state: RobotCellState, bar_rb_name: str, o
     # * Rigid bodies: standing ones at their frame, carried ones at their attachment frame.
     for name, body in cell.rigid_body_models.items():
         body_state = state.rigid_body_states[name]
-        if body_state.is_hidden or name == bar_rb_name:
+        # The planning floor is left out too: the page draws its own ground grid at the base's height.
+        if body_state.is_hidden or name in (bar_rb_name, FLOOR):
             continue
         meshes = list(body.visual_meshes or body.collision_meshes or [])
         if is_carried(body_state):

@@ -107,6 +107,17 @@ python -m http.server --directory "$HUSKY_BENCH_ROOT" 8000
   monitor's own calls pass `save_query=False` and one worker, so they write nothing there). On this machine the
   B21 carry took 150 s with the BiRRT and 350 s on a 600-node untracked roadmap with one worker, both while
   other jobs ran.
+- When no carry pose of the roadmap connects to the goal, `plan_process_carry.py --cdfm-backend prm` falls back
+  (`holding_prm/walk_in.py`; `--prm-no-walk-in` turns it off, the monitor's calls leave it off unless they pass
+  `walk_in`):
+  1. it walks each goal posture straight to the roadmap's carry poses and to a grid of other loading poses of the
+     same three classes (horizontal, vertical, back), and takes the ones it arrives on collision-free as starts;
+  2. when the structure blocks those walks, it grows waypoints from the goal outward (`--prm-via-rounds`), a search
+     after each round;
+  3. last, it allows roadmap edges that stray further from holding (45 and 60 mm) and draws new nodes.
+  A loading pose that gave a path is saved as `derived_starts.json` in the roadmap folder and tried first next time.
+- With `--goal frames` the end postures are offered on the whole turns nearest home and nearest the authored end
+  joints: the same arm posture a turn apart can decide whether the insert stays inside the joint limits.
 - For a trial run, point `HUSKY_BENCH_ROOT` at a local copy holding only `cells/`, `library/smoke`, `assets/`,
   `prm/carry/carry_v1/starts.json` and the roadmaps you need (about 300 MB), so nothing lands on the shared
   Drive; copy the results over by hand when they should last.

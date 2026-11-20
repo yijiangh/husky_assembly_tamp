@@ -668,7 +668,7 @@ class Tracker:
                 found = shortest_between_sets(build_graph(self.table, within, self.table.len_l2, start_ids, goal_ids))
                 return found[0] if found else None
 
-            path, _tally = lazy_search(find_path, self.table, self.track_rows)
+            path, _tally = lazy_search(find_path, self.table, self.track_rows, fill=int(self.pool.workers))
             if path is None:
                 return None
             confs, info = self.assemble(path)

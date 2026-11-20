@@ -32,6 +32,7 @@ import numpy as np
 from compas.data import json_load
 
 from husky_assembly_tamp.benchmark.scene import BarProblem, load_trimmed_problem, open_scene, quiet_planner_logging
+from husky_assembly_tamp.motion_planner.floor import cell_with_floor
 from husky_assembly_tamp.motion_planner.holding_prm.carry import carry_bar_pose, score_carry_pose
 from husky_assembly_tamp.motion_planner.holding_prm.holding import (
     HoldingModel,
@@ -51,12 +52,22 @@ from husky_assembly_tamp.motion_planner.holding_prm.sampling import (
     new_counters,
     sample_chunk,
 )
-from husky_assembly_tamp.motion_planner.holding_prm.tracking import TrackSettings, fine_segment, track_edge_landing
+from husky_assembly_tamp.motion_planner.holding_prm.tracking import (
+    TrackSettings,
+    fine_segment,
+    track_edge_landing,
+    walk_to_pose,
+)
 from husky_assembly_tamp.motion_planner.ssik_ik import verify_ssik_joint_order
 
 
 # * The one scene this process owns, set up by init_worker.
 _WORKER: Dict[str, Any] = {}
+
+# * The maths libraries' thread counts. A worker reads them when it imports numpy, before `init_worker` runs, so the
+# * pool sets them in this process's environment while it lives: left alone, every worker starts a thread per core
+# * (twice, numpy's and scipy's) and the workers fight over the cores.
+THREAD_VARIABLES = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
 
 
 def init_worker(root: str, source_key: str, bar_id: str, sampler: Optional[Dict[str, Any]],
@@ -77,6 +88,8 @@ def init_worker(root: str, source_key: str, bar_id: str, sampler: Optional[Dict[
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     quiet_planner_logging()
     problem, cell, template = load_trimmed_problem(root, source_key, bar_id)
+    # The roadmap is built over the floor the held transfer is planned on.
+    cell, template = cell_with_floor(cell, template)
     scene = open_scene(cell, template, problem)
     # The artifact joint order must match the robot's; checked once here.
     verify_ssik_joint_order(scene.robot_puid)
@@ -307,6 +320,26 @@ def task_fine(task: Dict[str, Any]) -> Dict[str, Any]:
     return {"chunk": task["chunk"], "first_index": task["first_index"], "steps": steps, "counters": counters}
 
 
+def task_walk(task: Dict[str, Any]) -> Dict[str, Any]:
+    """Walk the bar straight from a configuration to a pose, for each of some such pairs (``tracking.walk_to_pose``).
+
+    Args:
+        task (Dict[str, Any]): ``chunk``, ``jobs`` ([[configuration, bar pose as lists], ...]), ``position_res_m``,
+            ``rotation_res_rad``, ``check`` ("none", "arrival" or "all") and optionally ``keep_confs``.
+
+    Returns:
+        Dict[str, Any]: ``chunk``, ``walks`` (one record per job, in order) and ``counters``.
+    """
+    start = perf_counter()
+    tools: WorkerTools = _WORKER["tools"]
+    counters = new_counters()
+    walks = [walk_to_pose(tools, conf, matrix_from_pose(pose), task["position_res_m"], task["rotation_res_rad"],
+                          task["check"], counters, bool(task.get("keep_confs")))
+             for conf, pose in task["jobs"]]
+    counters["seconds_worker"] = perf_counter() - start
+    return {"chunk": task["chunk"], "walks": walks, "counters": counters}
+
+
 def task_carry(task: Dict[str, Any]) -> Dict[str, Any]:
     """Score one chunk of carry-pose candidates (see ``carry.score_carry_pose``).
 
@@ -390,10 +423,14 @@ class WorkerPool:
     def _start(self, initializer: Callable[..., None], init_args: tuple) -> None:
         """Start the processes, or open the scene in this process when there is one worker."""
         start = perf_counter()
+        self._thread_variables: Dict[str, Optional[str]] = {}
         if self.workers == 1:
             initializer(*init_args)
             self.executor = None
         else:
+            for name in THREAD_VARIABLES:
+                self._thread_variables[name] = os.environ.get(name)
+                os.environ[name] = "1"
             self.executor = ProcessPoolExecutor(
                 max_workers=self.workers, mp_context=get_context("spawn"),
                 initializer=initializer, initargs=init_args,
@@ -502,6 +539,12 @@ class WorkerPool:
         """Stop the processes (or close the in-process scene)."""
         if self.executor is not None:
             self.executor.shutdown(wait=True, cancel_futures=True)
+            for name, value in getattr(self, "_thread_variables", {}).items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+            self._thread_variables = {}
         elif "scene" in _WORKER:
             # A scene the caller lent us stays open; one this pool opened is closed.
             if self.owns_scene and _WORKER["scene"] is not None:

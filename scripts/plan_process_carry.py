@@ -64,6 +64,7 @@ ensure_sibling_packages()
 
 import numpy as np  # noqa: E402
 
+from husky_assembly_tamp.benchmark.follow_on import FollowOn  # noqa: E402
 from husky_assembly_tamp.benchmark.plot_motion import plot_planned_motion  # noqa: E402
 from husky_assembly_tamp.benchmark.process_export import (  # noqa: E402
     carry_movement,
@@ -118,8 +119,54 @@ def plot_path(save_dir: str, action_id: str, tag: str) -> str:
     return os.path.join(save_dir, f"{action_id}_planned_motion{suffix}.png")
 
 
+def _plain(report: Optional[dict]) -> Optional[Dict[str, Any]]:
+    """A planner report cut down to its plain numbers, texts and short lists."""
+    if not report:
+        return None
+    return {key: value for key, value in report.items()
+            if isinstance(value, (int, float, str, bool)) or (isinstance(value, (list, tuple)) and len(value) <= 40
+                                                              and all(isinstance(v, (int, float)) for v in value))}
+
+
+def follow_on_summary(follow: Optional[FollowOn], names: Sequence[str], confs, info: Optional[dict],
+                      authored: Sequence[float]) -> Optional[Dict[str, Any]]:
+    """What the follow-on check found for a plan: the end posture, the joints after it, the postures refused.
+
+    Args:
+        follow (Optional[FollowOn]): the check, or None when it did not run.
+        names (Sequence[str]): the twelve arm joints.
+        confs: the planned path, or None.
+        info (Optional[dict]): the planner's info.
+        authored (Sequence[float]): the authored end posture.
+
+    Returns:
+        Optional[Dict[str, Any]]: None when the check did not run.
+    """
+    if follow is None:
+        return None
+    summary: Dict[str, Any] = {"insert": follow.insert.id, "retreat": follow.retreat.id,
+                               "rejected": ((info or {}).get("prm") or {}).get("goals_rejected", [])}
+    if confs is not None:
+        end = np.asarray(confs[-1], dtype=float)
+        off = end - np.asarray(authored, dtype=float)
+        turns = np.round(off / (2.0 * np.pi))
+        # The returned path's own last row is asked too, when the later steps moved it off the accepted posture.
+        summary["end_refused"] = "" if follow.keyframes_at(end) is not None else follow(end)
+        keyframes = follow.keyframes_at(end) or {}
+        summary.update({
+            "end_joints": dict(zip(names, end.tolist())),
+            "end_off_authored_deg": float(np.degrees(np.abs(off).max())),
+            # Whole turns apart and nothing else: the same arm posture as authored.
+            "end_is_authored_posture": bool(np.abs(off - turns * 2.0 * np.pi).max() < 1e-3),
+            "insert_joints": dict(zip(names, keyframes["insert"])) if keyframes else None,
+            "retreat_joints": dict(zip(names, keyframes["retreat"])) if keyframes else None,
+        })
+    summary["seconds"] = follow.seconds
+    return summary
+
+
 def save_plan_info(path: str, movement_id: str, backend: str, seconds: float, confs, info: Optional[dict],
-                   base_shift: str, goal: str) -> None:
+                   base_shift: str, goal: str, follow_on: Optional[Dict[str, Any]] = None) -> None:
     """Write a small summary of one bar-carry plan, next to the solved file.
 
     Args:
@@ -131,13 +178,17 @@ def save_plan_info(path: str, movement_id: str, backend: str, seconds: float, co
         info (Optional[dict]): the planner's info.
         base_shift (str): the ``--base-shift`` in force ("" for none).
         goal (str): "frames" (any posture at the goal pose) or "joints" (the authored posture).
+        follow_on (Optional[Dict[str, Any]]): the follow-on check's result (``follow_on_summary``), when it ran.
     """
     info = info or {}
     profile = info.get("profile") or {}
     summary = {
         "movement": movement_id, "backend": backend, "ok": confs is not None, "plan_s": float(seconds),
         "n_waypoints": None if confs is None else len(confs), "failure_reason": info.get("failure_reason"),
-        "base_shift": base_shift, "goal": goal,
+        "base_shift": base_shift, "goal": goal, "follow_on": follow_on,
+        # The time after the roadmap's answer: repair, smoothing, corner rounding.
+        "post": {"smooth": _plain(info.get("smooth_profile")), "round": _plain(info.get("round_profile")),
+                 "repair": _plain(info.get("repair"))},
         # The search backend: how hard it worked. Only plain numbers and the stop reasons are kept.
         "search": {key: value for key, value in profile.items()
                    if isinstance(value, (int, float, str, bool)) or key == "extend_stop_reasons"},
@@ -251,7 +302,7 @@ def prm_options_for(args, bar_id: str, problem_name: str) -> Dict[str, Any]:
 
     Returns:
         Dict[str, Any]: ``roadmap_dir``, ``workers``, ``tolerances_mm``, ``tube_rounds``,
-        ``use_pretracked`` and ``query_tag``.
+        ``use_pretracked``, the fallbacks' settings and ``query_tag``.
 
     Raises:
         SystemExit: when no data root is known.
@@ -263,6 +314,9 @@ def prm_options_for(args, bar_id: str, problem_name: str) -> Dict[str, Any]:
     return {"roadmap_dir": os.path.join(root, "prm", run), "workers": args.prm_workers,
             "tolerances_mm": [float(t) for t in args.prm_tolerances_mm.split(",") if t.strip()],
             "tube_rounds": args.prm_tube_rounds, "use_pretracked": not args.prm_no_pretracked,
+            # When no carry pose connects: loading poses walked to from the goal, then waypoints out of the structure.
+            "walk_in": not args.prm_no_walk_in, "via_rounds": args.prm_via_rounds,
+            "walk_grid_step_m": args.prm_walk_grid_step, "save_derived": not args.prm_no_walk_in,
             # The plan is saved as a query of the roadmap, for its dashboard page.
             "query_tag": f"{bar_id}_{args.save_tag or 'online'}"}
 
@@ -296,7 +350,7 @@ def round_options(args) -> Optional[Dict[str, Any]]:
     """``plan_constrained_dual_arm``'s ``round_corners`` from the command line; None with ``--round-radius 0``."""
     if args.round_radius <= 0.0:
         return None
-    return {"radius": args.round_radius, "tolerance": args.round_tolerance}
+    return {"radius": args.round_radius, "tolerance": args.round_tolerance, "max_rounds": args.round_max_rounds}
 
 
 def print_round_summary(profile: Optional[dict]) -> None:
@@ -391,6 +445,18 @@ def plan_carry(args) -> int:
 
     print(f"[plan] plan_constrained_dual_arm (active_bar_id={action.bar}, derive_start=True, "
           f"backend={args.cdfm_backend})")
+    # * With the goal as flange poses the roadmap picks the end posture: keep only one the insert and the retreat
+    # * can follow from.
+    # * The search cannot be asked while it plans: its end posture is checked once, afterwards.
+    follow = None
+    if goal_frames is not None and not args.no_follow_on:
+        follow = FollowOn(process, args.bar, names, base=base, log=print)
+        print(f"[plan] end posture resolved by IK; it must let {follow.insert.id} and {follow.retreat.id} follow")
+    authored = goal_joints(movement, robot, names)
+    if prm_options and goal_frames is not None:
+        # * The same arm posture a whole turn apart may or may not let the insert stay inside the joint limits: the
+        # * end postures are offered on the turns nearest home and nearest the authored joints.
+        prm_options["goal_turn_reference"] = [float(v) for v in authored]
     plan_t0 = time.time()
     with mirror.lend() as planner:
         state = mirror.state
@@ -410,10 +476,13 @@ def plan_carry(args) -> int:
             backend=args.cdfm_backend,
             prm_options=prm_options,
             round_corners=round_options(args),
+            goal_accept=follow if args.cdfm_backend == "prm" else None,
         )
         plan_s = time.time() - plan_t0
         save_plan_info(plan_info_path(solved), movement.id, args.cdfm_backend, plan_s, confs, info,
-                       args.base_shift, args.goal)
+                       args.base_shift, args.goal, follow_on_summary(follow, names, confs, info, authored))
+        if follow is not None:
+            follow.close()
 
         if confs is None:
             reason = (info or {}).get("failure_reason", "<unknown>")
@@ -437,9 +506,12 @@ def plan_carry(args) -> int:
         print_round_summary((info or {}).get("round_profile"))
 
         # How far the path ends from the authored posture (the insert starts there).
-        authored = goal_joints(movement, robot, names)
         off = float(np.abs(np.asarray(confs[-1], dtype=float) - np.asarray(authored)).max())
-        if off > 1e-3:
+        if off > 1e-3 and follow is not None:
+            print(f"[plan] {movement.id}: the path ends {np.degrees(off):.1f} deg (largest joint) from the authored "
+                  f"target joints; {follow.insert.id} and {follow.retreat.id} were planned from where it ends "
+                  "(their joints are in the plan summary).")
+        elif off > 1e-3:
             print(f"[!] {movement.id}: the path ends {np.degrees(off):.1f} deg (largest joint) from the authored "
                   "target joints, on another arm posture at the same goal pose. The movements after it start "
                   "from the authored posture; plan with --goal joints to end exactly there.")
@@ -495,6 +567,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--goal", choices=("frames", "joints"), default="frames",
                         help="end at the authored flange poses in any posture (frames, as the report's runs) "
                              "or exactly at the authored posture (joints)")
+    parser.add_argument("--no-follow-on", action="store_true",
+                        help="with --goal frames on the roadmap: take any end posture, without checking that the "
+                             "insert and the retreat can be planned from it")
     parser.add_argument("--max-time", type=float, default=DEFAULT_MAX_TIME_S, help="BiRRT time budget (s)")
     parser.add_argument("--max-iterations", type=int, default=DEFAULT_MAX_ITERATIONS, help="BiRRT iteration cap")
     parser.add_argument("--max-attempts", type=int, default=DEFAULT_MAX_ATTEMPTS, help="BiRRT restarts")
@@ -513,12 +588,22 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--prm-tube-rounds", type=int, default=1, help="tube rounds of the roadmap backend")
     parser.add_argument("--prm-no-pretracked", action="store_true",
                         help="ignore the roadmap's tracking file (track every route edge now)")
+    parser.add_argument("--prm-no-walk-in", action="store_true",
+                        help="when no carry pose of the roadmap connects, give up instead of walking the goal to "
+                             "other loading poses of the three classes")
+    parser.add_argument("--prm-via-rounds", type=int, default=8,
+                        help="rounds of waypoints grown from the goal out of the structure after that (0: none)")
+    parser.add_argument("--prm-walk-grid-step", type=float, default=0.3,
+                        help="spacing of the grid of loading poses tried in each class (m)")
     parser.add_argument("--round-radius", type=float, default=DEFAULT_ROUND_RADIUS,
                         help="round the path's corners in bar pose space with this radius (m, largest bar "
                              "feature-point move from the corner; 0: keep the corners)")
     parser.add_argument("--round-tolerance", type=float, default=DEFAULT_ROUND_TOLERANCE,
                         help="bar path samples within this of a straight piece belong to it when the corners are "
                              "looked for (m)")
+    parser.add_argument("--round-max-rounds", type=int, default=40,
+                        help="most re-solves of the whole path the corner rounding may try before it gives the "
+                             "path back as planned")
     parser.add_argument("--base-shift", default="",
                         help="park the base off its planned pose: 'dx,dy,dyaw_deg' in the base's own frame")
     parser.add_argument("--save-dir", default="",

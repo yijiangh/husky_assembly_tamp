@@ -289,9 +289,13 @@ def route_from(node: int, parent: np.ndarray, limit: int = 100000) -> List[int]:
     return route
 
 
+# * With idle workers, how many next-best routes one round may look ahead to.
+LOOK_AHEAD_ROUTES = 8
+
+
 def lazy_search(find_path: Callable[[np.ndarray], Optional[List[int]]], table: EdgeTable,
                 check_rows: Callable[[List[int]], List[Dict[str, Any]]],
-                max_rounds: int = 200) -> Tuple[Optional[List[int]], Dict[str, int]]:
+                max_rounds: int = 200, fill: int = 0) -> Tuple[Optional[List[int]], Dict[str, int]]:
     """Search first, collision-check only the edges the answer uses, repeat.
 
     This is the lazy roadmap idea: assume every unchecked edge is free, find
@@ -306,6 +310,11 @@ def lazy_search(find_path: Callable[[np.ndarray], Optional[List[int]]], table: E
         check_rows (Callable[[List[int]], List[Dict[str, Any]]]): collision
             checks the given rows, returning one edge record per row.
         max_rounds (int): give up after this many searches.
+        fill (int): how many edges one round may check at once (the number
+            of workers). A route has few unchecked edges, so the round also
+            checks those of the routes that come next if this one fails,
+            until the batch is this full. The answer is the same; it only
+            arrives in fewer rounds.
 
     Returns:
         Tuple[Optional[List[int]], Dict[str, int]]: the path (or None) and a
@@ -322,6 +331,23 @@ def lazy_search(find_path: Callable[[np.ndarray], Optional[List[int]]], table: E
         unchecked = [row for row in rows if not table.checked[row]]
         if not unchecked:
             return path, tally
+        if fill > len(unchecked):
+            # * Look ahead: the next-best routes if the edges asked about so far all fail.
+            guess = table.usable(optimistic=True)
+            asked, latest = set(unchecked), unchecked
+            for _ in range(LOOK_AHEAD_ROUTES):
+                guess[latest] = False
+                ahead = find_path(guess)
+                if ahead is None:
+                    break
+                latest = [row for row in (index[(min(a, b), max(a, b))] for a, b in zip(ahead[:-1], ahead[1:]))
+                          if not table.checked[row] and row not in asked]
+                if not latest:
+                    break
+                unchecked = unchecked + latest
+                asked.update(latest)
+                if len(unchecked) >= fill:
+                    break
         for row, record in zip(unchecked, check_rows(unchecked)):
             table.checked[row] = True
             table.free[row] = bool(record["free"])

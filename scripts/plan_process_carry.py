@@ -28,6 +28,12 @@ The found path's corners are rounded in bar pose space (``--round-radius``,
 through them instead of stopping at each. ``round_process_carry.py`` rounds a
 carry saved before.
 
+``--save-carry`` also keeps the plan next to the roadmap as ``carry.json``
+(``benchmark/saved_carry.py``): the carry the monitor loads the bar for.
+``--start-from`` plans like the monitor then does: from such a carry's first
+row as a fixed start, with its path as a seed (``--start-from auto`` reads the
+roadmap's own), e.g. with ``--base-shift`` for a base parked off.
+
 ``scripts/prm_check_solved.py`` checks the saved path on its own, in the same
 scene. The roadmap backend needs the bar's roadmap under
 ``<--prm-root>/prm/<--prm-run>`` (default run name ``<process folder>__<bar>``),
@@ -67,6 +73,7 @@ import numpy as np  # noqa: E402
 from husky_assembly_tamp.benchmark.drive_in import DriveIn  # noqa: E402
 from husky_assembly_tamp.benchmark.follow_on import FollowOn  # noqa: E402
 from husky_assembly_tamp.benchmark.plot_motion import plot_planned_motion  # noqa: E402
+from husky_assembly_tamp.benchmark.saved_carry import carry_from_plan, carry_path, read_carry, write_carry  # noqa: E402
 from husky_assembly_tamp.benchmark.process_export import (  # noqa: E402
     carry_movement,
     default_plans_dir,
@@ -168,7 +175,7 @@ def follow_on_summary(follow: Optional[FollowOn], names: Sequence[str], confs, i
 
 def save_plan_info(path: str, movement_id: str, backend: str, seconds: float, confs, info: Optional[dict],
                    base_shift: str, goal: str, follow_on: Optional[Dict[str, Any]] = None,
-                   drive_in: Optional[Dict[str, Any]] = None) -> None:
+                   drive_in: Optional[Dict[str, Any]] = None, start_from: str = "") -> Dict[str, Any]:
     """Write a small summary of one bar-carry plan, next to the solved file.
 
     Args:
@@ -182,6 +189,10 @@ def save_plan_info(path: str, movement_id: str, backend: str, seconds: float, co
         goal (str): "frames" (any posture at the goal pose) or "joints" (the authored posture).
         follow_on (Optional[Dict[str, Any]]): the follow-on check's result (``follow_on_summary``), when it ran.
         drive_in (Optional[Dict[str, Any]]): the drive-in check's result (``DriveIn.summary``), when it ran.
+        start_from (str): the carry file the plan started from (``--start-from``), "" for a derived start.
+
+    Returns:
+        Dict[str, Any]: the summary written.
     """
     info = info or {}
     profile = info.get("profile") or {}
@@ -189,7 +200,7 @@ def save_plan_info(path: str, movement_id: str, backend: str, seconds: float, co
         "movement": movement_id, "backend": backend, "ok": confs is not None, "plan_s": float(seconds),
         "n_waypoints": None if confs is None else len(confs), "failure_reason": info.get("failure_reason"),
         "base_shift": base_shift, "goal": goal, "follow_on": follow_on, "drive_in": drive_in,
-        "strict_contacts": info.get("strict_contacts"),
+        "start_from": start_from, "strict_contacts": info.get("strict_contacts"),
         # The time after the roadmap's answer: repair, smoothing, corner rounding.
         "post": {"smooth": _plain(info.get("smooth_profile")), "round": _plain(info.get("round_profile")),
                  "repair": _plain(info.get("repair"))},
@@ -201,6 +212,7 @@ def save_plan_info(path: str, movement_id: str, backend: str, seconds: float, co
     }
     write_json_atomic(path, summary)
     print(f"[save] plan summary -> {path}")
+    return summary
 
 
 def solution_record(process, action, movement, robot: str, names: Sequence[str], confs, info: dict,
@@ -321,6 +333,8 @@ def prm_options_for(args, bar_id: str, problem_name: str) -> Dict[str, Any]:
             # When no carry pose connects: loading poses walked to from the goal, then waypoints out of the structure.
             "walk_in": not args.prm_no_walk_in, "via_rounds": args.prm_via_rounds,
             "walk_grid_step_m": args.prm_walk_grid_step, "save_derived": not args.prm_no_walk_in,
+            # The class of loading pose the operator asked for; any class when not.
+            "start_carry": "" if args.cdfm_home_anchor == "all" else args.cdfm_home_anchor,
             # The plan is saved as a query of the roadmap, for its dashboard page.
             "query_tag": f"{bar_id}_{args.save_tag or 'online'}"}
 
@@ -417,6 +431,20 @@ def plan_carry(args) -> int:
         base = shifted_pose(planned, shift[0], shift[1], float(np.radians(shift[2])))
         print(f"[plan] base shifted by {shift[0] * 100:.1f} cm, {shift[1] * 100:.1f} cm, {shift[2]:.1f} deg "
               "from its planned pose (--base-shift)")
+    # * --start-from: the start is fixed, the first row of a carry planned before, and its path seeds the plan.
+    seed, seed_file = None, ""
+    if args.start_from:
+        if args.cdfm_backend != "prm":
+            raise SystemExit("--start-from needs --cdfm-backend prm.")
+        seed_file = args.start_from
+        if seed_file == "auto":
+            seed_file = carry_path(prm_options_for(args, args.bar, problem_name)["roadmap_dir"])
+        seed = read_carry(seed_file)
+        if seed["action"] != action.id:
+            raise SystemExit(f"{seed_file} is the carry of {seed['action']}, not of {action.id}.")
+        assumed = dict(zip(seed["joint_names"], seed["path"][0]))
+        print(f"[plan] start fixed at the first row of {seed_file} ({len(seed['path'])} rows, planned at base "
+              f"({seed['base'][0]:.3f}, {seed['base'][1]:.3f})); its path seeds the plan")
     scene, _action, _movement = carry_scene(process, args.bar, joints=assumed, base=base)
     base_used = scene.robots[robot].base
 
@@ -431,6 +459,8 @@ def plan_carry(args) -> int:
         print(f"[pb] parked (base or joints not given by the process): {', '.join(mirror.parked)}")
     left_names, right_names = api._arm_joint_names(mirror.cell)
     names = list(left_names) + list(right_names)
+    if seed is not None and list(seed["joint_names"]) != names:
+        raise SystemExit(f"{seed_file}: its joints are not this robot's twelve arm joints in the planner's order.")
 
     # * The goal: the authored flange poses (any posture there), or the authored posture itself.
     goal_poses = goal_link_poses(movement, robot)
@@ -447,7 +477,7 @@ def plan_carry(args) -> int:
     os.makedirs(save_dir, exist_ok=True)
     solved = solved_path(save_dir, action.id, args.save_tag)
 
-    print(f"[plan] plan_constrained_dual_arm (active_bar_id={action.bar}, derive_start=True, "
+    print(f"[plan] plan_constrained_dual_arm (active_bar_id={action.bar}, derive_start={seed is None}, "
           f"backend={args.cdfm_backend})")
     # * With the goal as flange poses the roadmap picks the end posture: keep only one the insert and the retreat
     # * can follow from.
@@ -458,7 +488,9 @@ def plan_carry(args) -> int:
         print(f"[plan] end posture resolved by IK; it must let {follow.insert.id} and {follow.retreat.id} follow")
     # * The start is a loading posture: keep only one the robot can drive in with from the station.
     drive = None
-    if args.cdfm_backend == "prm" and args.station is not None and not args.no_drive_in:
+    if seed is not None:
+        print("[plan] the start is fixed: no drive-in check (it was made when the carry was planned)")
+    elif args.cdfm_backend == "prm" and args.station is not None and not args.no_drive_in:
         station = [args.station[0], args.station[1], float(np.radians(args.station[2]))]
         drive = DriveIn(process, args.bar, names, station, base=base, time_limit=args.drive_time_limit,
                         log=lambda line: print(line[:200]))
@@ -471,6 +503,13 @@ def plan_carry(args) -> int:
         # * The same arm posture a whole turn apart may or may not let the insert stay inside the joint limits: the
         # * end postures are offered on the turns nearest home and nearest the authored joints.
         prm_options["goal_turn_reference"] = [float(v) for v in authored]
+    if seed is not None:
+        # * End on the seed's arm posture (the one its insert was checked from), on its whole turns.
+        prm_options["seed_path"] = seed["path"]
+        # * Where the robot stood when the carry was planned, and where it stands now: the seed is solved again.
+        prm_options["seed_base_planned"] = [float(v) for v in seed["base"]]
+        prm_options["seed_base_live"] = [float(v) for v in (*base_used.position, *base_used.orientation)]
+        prm_options["goal_turn_reference"] = [float(v) for v in seed["path"][-1]]
     plan_t0 = time.time()
     with mirror.lend() as planner:
         state = mirror.state
@@ -485,7 +524,7 @@ def plan_carry(args) -> int:
             max_iterations=args.max_iterations,
             max_attempts=args.max_attempts,
             use_birrt=True,
-            derive_start=True,
+            derive_start=seed is None,
             start_home_anchor=None if args.cdfm_home_anchor == "all" else args.cdfm_home_anchor,
             backend=args.cdfm_backend,
             prm_options=prm_options,
@@ -494,9 +533,10 @@ def plan_carry(args) -> int:
             start_accept=drive,
         )
         plan_s = time.time() - plan_t0
-        save_plan_info(plan_info_path(solved), movement.id, args.cdfm_backend, plan_s, confs, info,
-                       args.base_shift, args.goal, follow_on_summary(follow, names, confs, info, authored),
-                       drive.summary(confs[0] if confs is not None else None) if drive is not None else None)
+        summary = save_plan_info(
+            plan_info_path(solved), movement.id, args.cdfm_backend, plan_s, confs, info, args.base_shift, args.goal,
+            follow_on_summary(follow, names, confs, info, authored),
+            drive.summary(confs[0] if confs is not None else None) if drive is not None else None, seed_file)
         if follow is not None:
             follow.close()
         if drive is not None:
@@ -546,6 +586,9 @@ def plan_carry(args) -> int:
         print(f"[save] solved carry -> {solved}")
         if args.write_solution:
             print(f"[save] process solution -> {write_process_solution(process, action, record)}")
+        if args.save_carry:
+            kept = write_carry(prm_options["roadmap_dir"], carry_from_plan(record, summary, problem_name))
+            print(f"[save] the roadmap's carry -> {kept}")
 
         if not args.no_plot:
             save_plot(planner, mirror, names, confs, action, plot_path(save_dir, action.id, args.save_tag))
@@ -596,7 +639,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--cdfm-rotation-res", type=float, default=DEFAULT_CDFM_ROTATION_RES,
                         help="bar rotation step of the path (rad)")
     parser.add_argument("--cdfm-home-anchor", choices=("all", "horizontal", "vertical", "back"), default="all",
-                        help="which carry pose the derived start may use")
+                        help="the class of loading pose the carry may start from: the bar across the front "
+                             "(horizontal), upright in front (vertical) or along the robot over its back (back)")
     parser.add_argument("--prm-root", default="",
                         help="the benchmark data root holding prm/<run> (default: HUSKY_BENCH_ROOT)")
     parser.add_argument("--prm-run", default="", help="the roadmap's run name (default: <process folder>__<bar>)")
@@ -629,6 +673,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--drive-time-limit", type=float, default=8.0,
                         help="time limit of one base search of the drive-in check, seconds (a refusal for lack of "
                              "time takes up to about twice it)")
+    parser.add_argument("--save-carry", action="store_true",
+                        help="with the roadmap backend: also keep the plan next to the roadmap as carry.json, the "
+                             "carry the monitor loads the bar for (not with --start-from or --base-shift)")
+    parser.add_argument("--start-from", default="",
+                        help="a carry.json ('auto': the roadmap's own): plan from its first row as a fixed start, "
+                             "with its path as a seed, as the monitor does at the live base")
     parser.add_argument("--base-shift", default="",
                         help="park the base off its planned pose: 'dx,dy,dyaw_deg' in the base's own frame")
     parser.add_argument("--save-dir", default="",
@@ -651,6 +701,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
     if not args.save_dir:
         args.save_dir = default_plans_dir(args.process_dir, args.prm_root or os.environ.get("HUSKY_BENCH_ROOT"))
+    if args.save_carry and (args.cdfm_backend != "prm" or args.start_from or args.base_shift):
+        print("[X] --save-carry keeps a roadmap plan made at the planned base with a derived start.")
+        return 1
     try:
         parse_base_shift(args.base_shift)
     except ValueError as exc:

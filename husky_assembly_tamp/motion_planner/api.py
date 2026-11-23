@@ -1027,9 +1027,17 @@ def plan_constrained_dual_arm(
     give ``workers``, ``tolerances_mm``, ``tube_rounds``, ``tube_draws``,
     ``scene_cache_dir``, ``verbose`` and the fallbacks for a goal no carry pose
     connects to (``walk_in``, ``via_rounds``, ``walk_grid_step_m``,
-    ``save_derived``: see ``OnlineSettings``) and ``goal_turn_reference``
+    ``save_derived``: see ``OnlineSettings``), ``start_carry`` (start only
+    from loading poses of this class) and ``goal_turn_reference``
     (twelve joints, e.g. the authored end joints: end postures are also
-    offered on the whole turns nearest them). With the roadmap, ``derive_start=True``
+    offered on the whole turns nearest them) and ``seed_path`` (a carry of
+    this bar planned earlier, twelve joints a row: with ``derive_start=False``
+    it joins the graph as a chain from the start, so a carry planned for one
+    base pose is found again from another; ``seed_goal_within_deg`` keeps the
+    end posture near its last row; with ``seed_base_planned`` and
+    ``seed_base_live``, the robot's base pose then and now as [x, y, z, qx, qy,
+    qz, qw], the seed is first solved again so that the bar keeps its planned
+    path in the world). With the roadmap, ``derive_start=True``
     lets the search pick the start among the roadmap's carry poses (returned as
     ``info['derived_start_conf']``), ``goal_ee_frames`` accepts any
     collision-free posture at the goal pose and ``goal_conf`` asks for exactly
@@ -1137,7 +1145,10 @@ def plan_constrained_dual_arm(
         path, info = plan_constrained_dual_arm(planner, strict_state, strict_contacts=False, **arguments)
         info["strict_contacts"] = {"allowances_removed": len(removed)}
         known_goal = goal_conf if goal_conf is not None else (prm_options or {}).get("goal_turn_reference")
-        if path is None and known_goal is not None and removed:
+        # * The roadmap says itself when the goal was the problem; any other failure of it is not about the goal.
+        reason = str(info.get("failure_reason") or "")
+        at_goal = not reason.startswith(("prm_", "dense_check")) or reason == "prm_goal_unholdable"
+        if path is None and known_goal is not None and removed and at_goal:
             # Why the goal failed, when it did: is it only the mate's parts, which the state no longer lets touch?
             left_names, right_names = _arm_joint_names(planner.client.robot_cell)
             hits = _build_cfab_collision_fn(planner, strict_state, left_names + right_names).explain(known_goal)
@@ -1642,14 +1653,23 @@ def _plan_constrained_dual_arm_on_roadmap(
         walk_grid_step_m=float(options.get("walk_grid_step_m", 0.3)),
         last_tolerances_mm=[float(t) for t in options.get("last_tolerances_mm", (45.0, 60.0))],
         save_derived=bool(options.get("save_derived", False)),
+        start_carry=str(options.get("start_carry") or ""),
+        seed_goal_within_deg=float(options.get("seed_goal_within_deg", 30.0)),
         verbose=bool(options.get("verbose", True)),
     )
+    # * A seed planned at another base pose: how the robot moved in the world since, for the seed to be solved again.
+    seed_moved = None
+    if options.get("seed_base_planned") is not None and options.get("seed_base_live") is not None:
+        planned, live = (matrix_from_pose([list(pose[:3]), list(pose[3:])])
+                         for pose in (options["seed_base_planned"], options["seed_base_live"]))
+        seed_moved = live @ np.linalg.inv(planned)
     start_conf = None if derive_start else _conf12_from_state(start_state, joint_names_12)
     path_confs, prm_info = plan_on_roadmap(
         planner, start_state, joint_names_12, active_bar_id, as_matrix(world_from_bar_goal), settings,
         robot_puid=robot_puid, arm_joints=arm_joints, start_conf=start_conf, goal_conf=goal_conf_arr,
         grasp_bar_from_right=as_matrix(grasp_bar_from_right), goal_accept=goal_accept,
         goal_turn_reference=options.get("goal_turn_reference"), keep_pool=pools, start_accept=start_accept,
+        seed_path=options.get("seed_path"), seed_moved=seed_moved,
     )
     path_poses = prm_info.pop("path_poses", None)
     if path_poses is not None:

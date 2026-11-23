@@ -69,9 +69,11 @@ from husky_assembly_tamp.motion_planner.holding_prm.sampling import (
 )
 from husky_assembly_tamp.motion_planner.holding_prm.scenes import build_scene_cell, save_scene
 from husky_assembly_tamp.motion_planner.holding_prm.search import EdgeTable, minimax_to_goals, route_from
+from husky_assembly_tamp.motion_planner.holding_prm.seed import adapt_seed, near_seed_end, seed_chains
 from husky_assembly_tamp.motion_planner.holding_prm.walk_in import (
     WalkSettings,
     add_chains,
+    chain_of,
     class_poses,
     grid_candidates,
     midpoint_of,
@@ -102,6 +104,10 @@ CHECK_CHUNK = 24
 # * A loading pose whose start was refused in this many arm postures is dropped with all its other postures: the
 # * bar is what gets in the way of a drive, and a refusal costs a base search that runs out of time.
 START_POSE_REFUSALS = 1
+
+# * A seed path's configurations become chain nodes about this far apart (largest joint, degrees): finer than a
+# * walk's, so the route stays near a path that was already smoothed and found free.
+SEED_STEP_DEG = 4.0
 
 # * How closely the numpy forward kinematics on the live arm bases must agree
 # * with PyBullet's own flange poses (metres). A larger gap means the base
@@ -145,6 +151,10 @@ class OnlineSettings:
         walk_grid_step_m (float): spacing of the grid of loading poses ``walk_in`` tries in each class.
         last_tolerances_mm (List[float]): wider tolerances tried only after the fallbacks found nothing.
         save_derived (bool): save a loading pose that gave a path next to the roadmap, for the next plan.
+        start_carry (str): start only from loading poses of this class (a key of ``carry.CARRY_CLASSES``), on the
+            roadmap and in the fallbacks; "" for any class.
+        seed_goal_within_deg (float): with a seed path, only goal postures within this of its last row (largest
+            joint) are goals.
         verbose (bool): print progress.
     """
 
@@ -166,6 +176,8 @@ class OnlineSettings:
     walk_grid_step_m: float = 0.3
     last_tolerances_mm: List[float] = field(default_factory=lambda: [45.0, 60.0])
     save_derived: bool = False
+    start_carry: str = ""
+    seed_goal_within_deg: float = 30.0
     verbose: bool = True
 
 
@@ -297,7 +309,7 @@ def live_model(roadmap: Roadmap, robot_puid: int, arm_joints: Sequence[int]) -> 
 
 
 def open_pool(planner, start_state, joint_names_12: Sequence[str], model: HoldingModel, roadmap: Roadmap,
-              settings: OnlineSettings) -> Tuple[WorkerPool, Dict[str, Any]]:
+              settings: OnlineSettings, active_bar_id: Optional[str] = None) -> Tuple[WorkerPool, Dict[str, Any]]:
     """Workers that hold the real scene: this process alone, or several processes opening it from files.
 
     Args:
@@ -307,27 +319,32 @@ def open_pool(planner, start_state, joint_names_12: Sequence[str], model: Holdin
         model (HoldingModel): the live holding model.
         roadmap (Roadmap): the roadmap (edge settings, problem).
         settings (OnlineSettings): how many workers, where scene files go.
+        active_bar_id (Optional[str]): the carried bar's name in the live scene, when it differs from the
+            roadmap's (a monitor names it under a prefix, ``process/bars/B20``); None: the roadmap's.
 
     Returns:
         Tuple[WorkerPool, Dict[str, Any]]: the pool, and what the scene holds
         (counts, and the scene key when files were written).
     """
     edge_settings = roadmap.config["edge_settings"]
+    # * The workers open the live scene from files: they look the bar up under the live scene's name for it.
+    problem = dict(roadmap.meta["problem"])
+    if active_bar_id is not None:
+        problem["bar_rb_name"] = active_bar_id
     cell, small = build_scene_cell(planner.client.robot_cell, start_state)
     facts = {"bodies": len(small.rigid_body_states), "tools": len(small.tool_states)}
     # The scene files: what worker processes open, and what the roadmap page
     # draws later (so they are also written when the plan is to be saved).
     if settings.workers > 1 or settings.save_query:
         cache_dir = settings.scene_cache_dir or os.path.join(settings.roadmap_dir, "scenes")
-        cell_path, state_path, facts["scene_key"] = save_scene(cache_dir, cell, small,
-                                                               roadmap.meta["problem"]["bar_rb_name"])
+        cell_path, state_path, facts["scene_key"] = save_scene(cache_dir, cell, small, problem["bar_rb_name"])
         facts["scene_files"] = {"cell": cell_path, "state": state_path}
     if settings.workers <= 1:
         checks = make_collision_fns(planner, start_state, joint_names_12)
         tools = WorkerTools(model, checks["full"], checks["scene_only"])
         return WorkerPool.in_process(tools, edge_settings, settings.verbose), facts
     pool = WorkerPool.from_scene_files(facts["scene_files"]["cell"], facts["scene_files"]["state"],
-                                       roadmap.meta["problem"], settings.workers, edge_settings, settings.verbose)
+                                       problem, settings.workers, edge_settings, settings.verbose)
     return pool, facts
 
 
@@ -534,6 +551,8 @@ def plan_on_roadmap(planner, start_state, joint_names_12: Sequence[str], active_
                     goal_turn_reference: Optional[Sequence[float]] = None,
                     keep_pool: Optional[List[WorkerPool]] = None,
                     start_accept: Optional[Callable[[np.ndarray], str]] = None,
+                    seed_path: Optional[Sequence[Sequence[float]]] = None,
+                    seed_moved: Optional[np.ndarray] = None,
                     ) -> Tuple[Optional[List[np.ndarray]], Dict[str, Any]]:
     """Plan the bar carry on a precomputed roadmap, in the live scene.
 
@@ -567,6 +586,14 @@ def plan_on_roadmap(planner, start_state, joint_names_12: Sequence[str], active_
             from, like ``goal_accept`` about its end (can the robot drive in with the arms like this?). A refused
             start leaves the start set (``info["starts_rejected"]``); a loading pose refused in
             ``START_POSE_REFUSALS`` arm postures is dropped whole. The fallbacks ask it before they add a start.
+        seed_path (Optional[Sequence[Sequence[float]]]): a carry of this bar planned earlier, e.g. with the base
+            somewhere else (twelve joints a row). Its rows hold the bar wherever the robot stands, so they join the
+            graph as a chain from the start to the goal postures near its last row
+            (``settings.seed_goal_within_deg``; ``prm_goal_far_from_seed`` when none is). Every edge is still
+            tracked and checked in this scene. ! Needs ``start_conf``.
+        seed_moved (Optional[np.ndarray]): 4x4, the robot's base pose now times the inverse of the base pose the
+            seed was planned at. With it the seed is solved again first, so that the bar keeps its planned path in
+            the world (``seed.adapt_seed``); a seed that cannot be is used as it is.
 
     Returns:
         Tuple[Optional[List[np.ndarray]], Dict[str, Any]]: the path (twelve
@@ -577,7 +604,11 @@ def plan_on_roadmap(planner, start_state, joint_names_12: Sequence[str], active_
     Raises:
         FileNotFoundError: no roadmap at ``settings.roadmap_dir``.
         RoadmapMismatch: the roadmap was built for another bar, grasp or load.
+        ValueError: a seed path without a fixed start.
     """
+    seed = None if seed_path is None else [np.asarray(row, dtype=float) for row in seed_path]
+    if seed is not None and (start_conf is None or not seed):
+        raise ValueError("seed_path needs a fixed start (start_conf) and at least one row")
     wall = perf_counter()
     say = print if settings.verbose else (lambda *args, **kwargs: None)
     timings: Dict[str, float] = {}
@@ -592,13 +623,22 @@ def plan_on_roadmap(planner, start_state, joint_names_12: Sequence[str], active_
     check_roadmap_fits(roadmap, start_state, active_bar_id, grasp_bar_from_right)
     model = live_model(roadmap, robot_puid, arm_joints)
     home = model.home_conf12.tolist()
+    if seed is not None:
+        info["seed_path"] = {"rows": len(seed), "adapted": False}
+        if seed_moved is not None:
+            adapted, why = adapt_seed(model, seed, np.asarray(seed_moved, dtype=float))
+            if adapted is not None:
+                seed, info["seed_path"]["adapted"] = adapted, True
+            else:
+                info["seed_path"]["not_adapted"] = why
+            say(f"  seed path: {'solved again for this base' if adapted is not None else 'used as planned: ' + why}")
     ratio = float(roadmap.config["rot_deg_per_mm"])
     timings["load_s"] = perf_counter() - phase
     say(f"[prm online] roadmap {os.path.basename(os.path.normpath(settings.roadmap_dir))}: {roadmap.n_nodes} nodes, "
         f"{roadmap.n_edges} edges; {settings.workers} worker(s)")
 
     phase = perf_counter()
-    pool, scene_facts = open_pool(planner, start_state, joint_names_12, model, roadmap, settings)
+    pool, scene_facts = open_pool(planner, start_state, joint_names_12, model, roadmap, settings, active_bar_id)
     info["scene"] = scene_facts
     try:
         # Start every worker now, so the phases below are timed without it.
@@ -613,8 +653,10 @@ def plan_on_roadmap(planner, start_state, joint_names_12: Sequence[str], active_
             goal_twins = []
         else:
             turn_references = [["home", home]]
-            if goal_turn_reference is not None:
-                turn_references.append(["given", [float(v) for v in goal_turn_reference]])
+            if goal_turn_reference is not None or seed is not None:
+                # * With a seed and no reference, the postures are offered on the whole turns of the seed's end.
+                reference = goal_turn_reference if goal_turn_reference is not None else seed[-1]
+                turn_references.append(["given", [float(v) for v in reference]])
             result = pool.run(task_expand, [{"chunk": 0, "world_from_bar": pose_from_matrix(world_from_bar_goal),
                                              "turn_references": turn_references}], "goal")[0]
             add_counters(counters["endpoints"], result["counters"])
@@ -622,6 +664,19 @@ def plan_on_roadmap(planner, start_state, joint_names_12: Sequence[str], active_
             # * without a reference gets.
             goal_found = [found for found in result["confs"] if "home" in found["turns"]]
             goal_twins = [found for found in result["confs"] if "home" not in found["turns"]]
+            if seed is not None:
+                # * The seed's carry ends on one arm posture, the one its insert was checked from: only the goal
+                # * postures near it are goals, and none of them waits for a fallback.
+                near, nearest = near_seed_end(result["confs"], seed[-1],
+                                              float(np.radians(settings.seed_goal_within_deg)))
+                info["seed_path"].update({
+                    "goal_postures": len(result["confs"]), "goal_postures_near_its_end": len(near),
+                    "nearest_goal_posture_deg": None if nearest is None else float(np.degrees(nearest))})
+                if result["confs"] and not near:
+                    timings["goal_s"] = perf_counter() - phase
+                    info["failure_reason"] = "prm_goal_far_from_seed"
+                    return None, info
+                goal_found, goal_twins = near, []
         goal_confs = [np.asarray(found["conf"], dtype=float) for found in goal_found]
         timings["goal_s"] = perf_counter() - phase
         if not goal_confs and not goal_twins:
@@ -652,14 +707,16 @@ def plan_on_roadmap(planner, start_state, joint_names_12: Sequence[str], active_
         if start_conf is not None:
             start_ids = [node_for(np.asarray(start_conf, dtype=float), "start")]
         else:
-            candidates = {int(a["node"]): a for a in roadmap.anchors if a.get("role") == "start" and a.get("node", -1) >= 0}
+            candidates = {int(a["node"]): a for a in roadmap.anchors if a.get("role") == "start"
+                          and a.get("node", -1) >= 0 and settings.start_carry in ("", a.get("carry"))}
             ids = sorted(candidates)
             blocked = check_confs(pool, roadmap_confs[ids], "scene", counters["nodes"]) if ids else []
             start_ids = [node for node, hit in zip(ids, blocked) if not hit]
             start_anchor = candidates
             info["starts"] = {"carry_nodes": len(ids), "free_in_scene": len(start_ids)}
         timings["starts_s"] = perf_counter() - phase
-        if not start_ids:
+        # With a class asked for, the fallbacks may still make a start of it.
+        if not start_ids and not (settings.start_carry and settings.walk_in and start_conf is None):
             info["failure_reason"] = "prm_no_start_free"
             return None, info
 
@@ -805,7 +862,9 @@ def plan_on_roadmap(planner, start_state, joint_names_12: Sequence[str], active_
         walk_ends: Dict[int, List[int]] = {}
 
         def walk_to(candidates: List[Dict[str, Any]], name: str) -> None:
-            """Walk the goal postures to these loading poses and make starts of the ones they reach."""
+            """Walk the goal postures to these loading poses (of the class asked for) and make starts of the ones
+            they reach."""
+            candidates = [pose for pose in candidates if settings.start_carry in ("", pose["carry"])]
             walk_phase = perf_counter()
             drive_before = timings.get("drive_in_s", 0.0)
             made = walk_in_starts(tracker, roadmap, model, goal_ids, candidates, walk_settings, counters["walk"],
@@ -860,6 +919,15 @@ def plan_on_roadmap(planner, start_state, joint_names_12: Sequence[str], active_
                     return found
             return None
 
+        if seed is not None:
+            # * The seed's rows as a chain from the start, ending on every goal posture near its last row.
+            chains = seed_chains(start_ids[0], chain_of(seed, float(np.radians(SEED_STEP_DEG))),
+                                 [tracker.confs[goal] for goal in goal_ids])
+            seed_nodes = add_chains(tracker, chains, walk_settings, counters["endpoint_edges"], "seed path")[0]
+            info["seed_path"]["chain_nodes"] = len(set(seed_nodes))
+            say(f"  seed path: {len(seed)} rows as a chain of {len(set(seed_nodes))} nodes from the start to "
+                f"{len(goal_ids)} goal posture(s)")
+
         # A caller that fixed the start gets no other one.
         walk_in = settings.walk_in and start_conf is None
         derived = class_poses(roadmap, read_derived(settings.roadmap_dir), "derived") if walk_in else []
@@ -899,8 +967,11 @@ def plan_on_roadmap(planner, start_state, joint_names_12: Sequence[str], active_
         if answer is None:
             gap, _parent = minimax_to_goals(len(tracker.confs), tracker.table, tracker.table.free, goal_ids)
             finite = [float(gap[node]) for node in start_ids if np.isfinite(gap[node])]
+            # No start of the class asked for: nothing was refused, the class has no loading pose that is reached.
+            no_starts = ("prm_no_start_of_class" if settings.start_carry and not starts_rejected
+                         else "prm_starts_rejected")
             info["failure_reason"] = ("prm_goals_rejected" if not goal_ids else
-                                      "prm_starts_rejected" if not start_ids else "prm_no_route")
+                                      no_starts if not start_ids else "prm_no_route")
             info["best_gap_left_mm"] = min(finite) if finite else None
             timings["total_s"] = perf_counter() - wall
             if settings.save_query:

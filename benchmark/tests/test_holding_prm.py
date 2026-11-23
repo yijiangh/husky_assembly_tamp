@@ -28,6 +28,7 @@ from pybullet_planning import tform_from_pose
 
 from husky_assembly_tamp.benchmark.asset_versions import stamp_module_imports, stamp_page_assets
 from husky_assembly_tamp.benchmark.scene import load_trimmed_problem, open_scene
+from husky_assembly_tamp.benchmark.saved_carry import carry_from_plan, carry_path, read_carry, write_carry
 from husky_assembly_tamp.motion_planner.api import plan_constrained_dual_arm
 from husky_assembly_tamp.motion_planner.contacts import strict_carry_state
 from husky_assembly_tamp.motion_planner.dense_check import dense_check
@@ -88,6 +89,7 @@ from husky_assembly_tamp.motion_planner.holding_prm.search import (
     shortest_between_sets,
 )
 from husky_assembly_tamp.motion_planner.holding_prm.refine import Tracker, spread_size
+from husky_assembly_tamp.motion_planner.holding_prm.seed import adapt_seed, near_seed_end, seed_chains
 from husky_assembly_tamp.motion_planner.holding_prm.store import read_json, write_json_atomic
 from husky_assembly_tamp.motion_planner.holding_prm.tracking import TrackSettings, track_edge, walk_to_pose
 from husky_assembly_tamp.motion_planner.holding_prm.parallel import WorkerPool
@@ -522,6 +524,71 @@ def test_a_walk_joins_the_graph_as_a_chain_from_its_first_node(synthetic):
     # Every new node tried the two nodes the graph had.
     assert all((0, node) in tracker.row_of and (1, node) in tracker.row_of for node in ids[0])
     assert len(via_targets(model, qa, WalkSettings())) == 26 + 6
+
+
+def _moved(model: HoldingModel, shift: np.ndarray) -> HoldingModel:
+    """The synthetic model with the whole robot moved by ``shift`` (4x4) in the world."""
+    return HoldingModel(world_from_base={arm: shift @ base for arm, base in model.world_from_base.items()},
+                        grasp=model.grasp, grasp_inv=model.grasp_inv, limits=model.limits,
+                        home_conf12=model.home_conf12, joint_names_12=model.joint_names_12)
+
+
+def test_a_seed_solved_again_for_a_moved_base_keeps_the_bars_planned_world_path(synthetic):
+    """The first row stays; from the settle fraction on the bar is where it was planned, and every row holds."""
+    model, tools, qa, qb = synthetic
+    walk = walk_to_pose(tools, qa, bar_from_arm(model, "left", qb[:6]), 0.01, 0.025, "all", {}, keep_confs=True)
+    seed = [np.asarray(conf, dtype=float) for conf in walk["confs"]]
+    shift = matrix_from_pose([[0.02, -0.01, 0.0], [0.0, 0.0, np.sin(np.radians(1.0)), np.cos(np.radians(1.0))]])
+    live = _moved(model, shift)
+    adapted, why = adapt_seed(live, seed, shift)
+    assert why == "" and len(adapted) == len(seed) and np.array_equal(adapted[0], seed[0])
+    # The carry ends where it was planned to end in the world, with the arms a little elsewhere.
+    planned_end, live_end = bar_from_arm(model, "left", seed[-1][:6]), bar_from_arm(live, "left", adapted[-1][:6])
+    assert np.allclose(live_end, planned_end, atol=1e-6) and not np.allclose(adapted[-1], seed[-1], atol=1e-4)
+    assert max(max(holding_violation(live, row)) for row in adapted) < 1e-6
+    # A base that did not move changes nothing; one moved too far for the arms says at which row.
+    same, _why = adapt_seed(model, seed, np.eye(4))
+    assert np.allclose(same, seed, atol=1e-6)
+    far = matrix_from_pose([[3.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
+    nothing, why = adapt_seed(_moved(model, far), seed, far)
+    assert nothing is None and why.startswith("row ")
+
+
+def test_only_goal_postures_near_a_seeds_end_are_its_goals_and_its_chains_end_on_them():
+    """Postures within the given angle of the seed's last row, the nearest one's distance, one chain per posture."""
+    end = np.zeros(12)
+    found = [{"conf": (end + 0.1).tolist()}, {"conf": (end + 1.0).tolist()}]
+    near, nearest = near_seed_end(found, end, 0.5)
+    assert near == found[:1] and nearest == pytest.approx(0.1)
+    assert near_seed_end([], end, 0.5) == ([], None)
+    rows = [end - 0.2, end - 0.1]
+    chains = seed_chains(7, rows, [end + 0.1, end + 0.2])
+    assert [first for first, _confs in chains] == [7, 7] and [len(confs) for _first, confs in chains] == [3, 3]
+    assert np.array_equal(chains[1][1][-1], end + 0.2)
+    assert seed_chains(7, rows, []) == [(7, rows)]
+
+
+def test_a_plans_carry_is_kept_beside_its_roadmap(tmp_path):
+    """The solved file and its summary give the carry file: the path, the base, the station in degrees, the class."""
+    record = {"action": "B21_J", "solved_against": {"process": "p", "action": "a"}, "movements": {
+        "B21_J_transfer": {"status": "solved", "bases": {"robots/cindy": [1.0, 2.0, 0.0, 0.0, 0.0, 0.0, 1.0]},
+                           "trajectory": {"robot": "robots/cindy", "joint_names": [f"j{n}" for n in range(12)],
+                                          "positions": [[0.0] * 12, [0.5] * 12]}},
+        "B21_J_load": {"status": "not_planned"}}}
+    summary = {"drive_in": {"station": [3.0, 0.5, -np.pi / 2], "points": [[3.0, 0.5, -1.57]]},
+               "follow_on": {"insert_joints": {"j0": 0.6}, "retreat_joints": {"j0": 0.7}},
+               "prm": {"start": {"carry": "back"}}}
+    carry = carry_from_plan(record, summary, "demo")
+    assert carry["loading_class"] == "back" and carry_from_plan(record, None, "demo")["loading_class"] is None
+    assert (carry["action"], carry["movement"], carry["process"]) == ("B21_J", "B21_J_transfer", "demo")
+    assert carry["station"] == pytest.approx([3.0, 0.5, 270.0]) and carry["path"][-1] == [0.5] * 12
+    assert carry["base"][:2] == [1.0, 2.0] and carry["insert_joints"] == {"j0": 0.6}
+    assert carry_from_plan(record, None, "demo")["station"] is None
+    file = write_carry(str(tmp_path), carry)
+    assert file == carry_path(str(tmp_path)) and read_carry(file)["path"] == carry["path"]
+    write_json_atomic(file, {"format": "other"})
+    with pytest.raises(ValueError, match="not a carry file"):
+        read_carry(file)
 
 
 def test_a_refused_loading_pose_is_not_made_a_start(synthetic):
